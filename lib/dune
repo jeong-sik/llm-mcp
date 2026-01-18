@@ -1,6 +1,27 @@
 (library
  (name llm_mcp)
  (public_name llm_mcp)
- (libraries lwt lwt.unix yojson cohttp-lwt-unix str unix mcp_protocol msgpck grpc-direct-core zstd compact-protocol domainslib)
+ (libraries
+   ; Lwt (for existing mcp_server.ml, mcp_client.ml, tools.ml)
+   lwt
+   lwt.unix
+   cohttp-lwt-unix
+   domainslib
+   ; Eio (for new http_server_eio.ml)
+   eio
+   eio_main
+   httpun
+   httpun-eio
+   gluten
+   gluten-eio
+   ; Common
+   yojson
+   str
+   unix
+   mcp_protocol
+   msgpck
+   grpc-direct-core
+   zstd
+   compact-protocol)
  (ocamlopt_flags (:standard -O3))
  (preprocess (pps lwt_ppx ppx_deriving_yojson)))
