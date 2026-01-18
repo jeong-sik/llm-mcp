@@ -1,5 +1,11 @@
 # llm-mcp 🐫
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/jeong-sik/llm-mcp)
+[![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
+[![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
+[![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Multi-LLM MCP Server written in OCaml (native binary).
 
 > **Note**: Python 버전은 `features/_archived/llm-mcp-python/`에 아카이브됨
