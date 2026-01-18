@@ -25,3 +25,7 @@ Thumbs.db
 *.merlin
 .merlin
 _opam/
+
+# Downloaded release binary
+llm-mcp-macos-arm64
+llm-mcp-linux-x64

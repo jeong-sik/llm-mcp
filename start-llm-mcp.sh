@@ -91,38 +91,50 @@ stop_existing_on_port() {
     fi
 }
 
-# Resolve executable path (prefer workspace build dir)
+# Resolve executable path
+# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
+RELEASE_BINARY="$SCRIPT_DIR/llm-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/llm-mcp/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
 INSTALLED_EXE="$(command -v llm-mcp || true)"
 LLM_EXE=""
 
-if [ -x "$WORKSPACE_EXE" ]; then
+# 1. Pre-downloaded release binary (fastest, no build needed)
+if [ -x "$RELEASE_BINARY" ]; then
+    LLM_EXE="$RELEASE_BINARY"
+# 2. Workspace build
+elif [ -x "$WORKSPACE_EXE" ]; then
     LLM_EXE="$WORKSPACE_EXE"
+# 3. Local build
 elif [ -x "$LOCAL_EXE" ]; then
     LLM_EXE="$LOCAL_EXE"
+# 4. System-installed
 elif [ -n "$INSTALLED_EXE" ]; then
     LLM_EXE="$INSTALLED_EXE"
 fi
 
-# Build if needed (requires dune on PATH)
+# 5. Auto-download from GitHub releases if nothing found
 if [ -z "$LLM_EXE" ]; then
-    echo "Building LLM-MCP (bin/main.exe only)..." >&2
-    if ! command -v dune >/dev/null 2>&1; then
-        echo "Error: dune not found. Install dune or build llm-mcp binary first." >&2
-        exit 1
-    fi
-    dune build ./bin/main.exe >&2
-
-    if [ -x "$WORKSPACE_EXE" ]; then
-        LLM_EXE="$WORKSPACE_EXE"
-    elif [ -x "$LOCAL_EXE" ]; then
-        LLM_EXE="$LOCAL_EXE"
-    elif command -v llm-mcp >/dev/null 2>&1; then
-        LLM_EXE="$(command -v llm-mcp)"
+    echo "No binary found. Downloading from GitHub releases..." >&2
+    RELEASE_URL="https://github.com/jeong-sik/llm-mcp/releases/latest/download/llm-mcp-macos-arm64"
+    if curl -fsSL -o "$RELEASE_BINARY" "$RELEASE_URL" 2>/dev/null; then
+        chmod +x "$RELEASE_BINARY"
+        LLM_EXE="$RELEASE_BINARY"
+        echo "Downloaded: $RELEASE_BINARY" >&2
     else
-        echo "Error: build succeeded but llm-mcp executable not found." >&2
-        exit 1
+        # Fallback: build from source
+        echo "Download failed. Building from source..." >&2
+        if ! command -v dune >/dev/null 2>&1; then
+            echo "Error: dune not found. Install dune or download binary manually." >&2
+            exit 1
+        fi
+        dune build ./bin/main.exe >&2
+        if [ -x "$LOCAL_EXE" ]; then
+            LLM_EXE="$LOCAL_EXE"
+        else
+            echo "Error: build failed." >&2
+            exit 1
+        fi
     fi
 fi
 
