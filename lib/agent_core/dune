@@ -1,0 +1,9 @@
+(library
+ (name agent_core)
+ (public_name llm_mcp.agent_core)
+ (libraries
+   lwt
+   lwt.unix
+   yojson
+   ppx_deriving.runtime)
+ (preprocess (pps lwt_ppx ppx_deriving.show ppx_deriving.eq)))
