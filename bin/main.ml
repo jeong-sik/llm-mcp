@@ -189,7 +189,43 @@ let run_http ~host ~port () =
   Printf.eprintf "🐫 llm-mcp (OCaml) MCP 2025-11-25 server\n";
   Printf.eprintf "   HTTP: http://%s:%d\n" host port;
   Printf.eprintf "   MCP:  http://%s:%d/mcp\n" host port;
-  Printf.eprintf "   SSE:  GET /mcp (notifications), POST /mcp (optional)\n%!";
+  Printf.eprintf "   SSE:  GET /mcp (notifications), POST /mcp (optional)\n";
+  Printf.eprintf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
+
+  (* Graceful shutdown setup *)
+  let stop, wake_stop = Lwt.wait () in
+  let shutdown_initiated = ref false in
+  let initiate_shutdown signal_name =
+    if not !shutdown_initiated then begin
+      shutdown_initiated := true;
+      Printf.eprintf "\n🐫 llm-mcp: Received %s, shutting down gracefully...\n%!" signal_name;
+
+      (* Broadcast shutdown notification to all SSE clients *)
+      let shutdown_event = `Assoc [
+        ("jsonrpc", `String "2.0");
+        ("method", `String "notifications/shutdown");
+        ("params", `Assoc [
+          ("reason", `String signal_name);
+          ("message", `String "Server is shutting down, please reconnect")
+        ])
+      ] in
+      Notification_sse.broadcast shutdown_event;
+      Printf.eprintf "🐫 llm-mcp: Sent shutdown notification to SSE clients\n%!";
+
+      (* Give SSE clients time to receive and process the notification *)
+      Lwt.async (fun () ->
+        let* () = Lwt_unix.sleep 1.0 in
+        Lwt.wakeup wake_stop ();
+        Lwt.return_unit
+      )
+    end
+  in
+  let _sigterm_handler = Lwt_unix.on_signal Sys.sigterm (fun _ ->
+    initiate_shutdown "SIGTERM"
+  ) in
+  let _sigint_handler = Lwt_unix.on_signal Sys.sigint (fun _ ->
+    initiate_shutdown "SIGINT"
+  ) in
 
   let handle_get_mcp req =
     let open Lwt.Syntax in
@@ -376,7 +412,7 @@ let run_http ~host ~port () =
   in
 
   let server = Server.make ~callback () in
-  Lwt_main.run (Server.create ~mode:(`TCP (`Port port)) server)
+  Lwt_main.run (Server.create ~stop ~mode:(`TCP (`Port port)) server)
 
 (** CLI argument parsing *)
 let host_arg =
@@ -413,7 +449,7 @@ let run_agent ~agent ~prompt ~model_opt ~timeout =
   let args = match String.lowercase_ascii agent with
     | "ollama" ->
         let model = Option.value model_opt ~default:"devstral" in
-        Ollama { prompt; model; system_prompt = None; temperature = 0.7; timeout; stream = false; tools = None }
+        Ollama { prompt; model; system_prompt = None; temperature = 0.7; timeout; stream = false; tools = None; max_turns = 10; chain = None; parallel = None }
     | "gemini" ->
         let model = Option.value model_opt ~default:"gemini-3-pro-preview" in
         Gemini { prompt; model; thinking_level = High; yolo = false; timeout; stream = false }
