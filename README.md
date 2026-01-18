@@ -19,7 +19,6 @@ Multi-LLM MCP Server written in OCaml (native binary).
 | 3 | 🎯 **CASPER** | 전략가 | `gemini` | Gemini 3 Pro |
 
 + `ollama` - 범용 로컬 LLM (devstral, deepseek-r1, qwen3 등)
-+ 💡 **페르소나**: `system_prompt` 파라미터로 커스텀 역할 설정 가능
 
 ## Why OCaml?
 
