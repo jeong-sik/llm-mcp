@@ -4,6 +4,10 @@ open Alcotest
 open Llm_mcp.Types
 open Llm_mcp.Tools
 
+let unwrap_cmd label = function
+  | Ok cmd -> cmd
+  | Error e -> failf "%s failed: %s" label e
+
 (** Test Gemini argument parsing *)
 let test_parse_gemini_args () =
   let json = `Assoc [
@@ -168,7 +172,7 @@ let test_build_gemini_cmd () =
     timeout = 300;
     stream = false;
   } in
-  let cmd = build_gemini_cmd args in
+  let cmd = unwrap_cmd "build_gemini_cmd" (build_gemini_cmd args) in
   (* Check essential parts - prompt may be enhanced with thinking instructions *)
   check bool "contains gemini" true (List.mem "gemini" cmd);
   check bool "contains -m" true (List.mem "-m" cmd);
@@ -184,7 +188,7 @@ let test_build_gemini_cmd_yolo () =
     timeout = 300;
     stream = false;
   } in
-  let cmd = build_gemini_cmd args in
+  let cmd = unwrap_cmd "build_gemini_cmd" (build_gemini_cmd args) in
   check bool "contains gemini" true (List.mem "gemini" cmd);
   check bool "contains -m" true (List.mem "-m" cmd);
   check bool "contains model" true (List.mem "gemini-3-pro" cmd);
@@ -203,7 +207,7 @@ let test_build_claude_cmd () =
     timeout = 300;
     stream = false;
   } in
-  let cmd = build_claude_cmd args in
+  let cmd = unwrap_cmd "build_claude_cmd" (build_claude_cmd args) in
   (* First element is the wrapper script path, second is -p, etc. *)
   check bool "is non-empty" true (List.length cmd > 0);
   check bool "contains -p" true (List.mem "-p" cmd);
@@ -223,7 +227,7 @@ let test_build_claude_cmd_ultrathink () =
     timeout = 300;
     stream = false;
   } in
-  let cmd = build_claude_cmd args in
+  let cmd = unwrap_cmd "build_claude_cmd" (build_claude_cmd args) in
   check bool "contains --betas (ultrathink)" true (List.mem "--betas" cmd);
   check bool "contains --system-prompt" true (List.mem "--system-prompt" cmd);
   check bool "contains --output-format" true (List.mem "--output-format" cmd);
@@ -242,7 +246,7 @@ let test_build_codex_cmd () =
     timeout = 300;
     stream = false;
   } in
-  let cmd = build_codex_cmd args in
+  let cmd = unwrap_cmd "build_codex_cmd" (build_codex_cmd args) in
   check bool "contains codex" true (List.mem "codex" cmd);
   check bool "contains exec" true (List.mem "exec" cmd);
   check bool "contains -m" true (List.mem "-m" cmd);
@@ -261,7 +265,7 @@ let test_build_codex_cmd_with_cwd () =
     timeout = 300;
     stream = false;
   } in
-  let cmd = build_codex_cmd args in
+  let cmd = unwrap_cmd "build_codex_cmd" (build_codex_cmd args) in
   check bool "contains -C" true (List.mem "-C" cmd);
   check bool "contains /workspace" true (List.mem "/workspace" cmd)
 
