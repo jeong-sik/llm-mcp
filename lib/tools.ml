@@ -197,7 +197,21 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
   (* Default stream=true for SSE keepalive - consistent with other tools *)
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  Ollama { prompt; model; system_prompt; temperature; timeout; stream }
+  (* Parse tools array for function calling *)
+  let tools = match json |> member "tools" with
+    | `Null -> None
+    | `List tool_list ->
+        Some (List.filter_map (fun tool_json ->
+          try
+            let name = tool_json |> member "name" |> to_string in
+            let description = tool_json |> member "description" |> to_string_option |> Option.value ~default:"" in
+            let input_schema = tool_json |> member "input_schema" in
+            Some { Types.name; description; input_schema }
+          with _ -> None
+        ) tool_list)
+    | _ -> None
+  in
+  Ollama { prompt; model; system_prompt; temperature; timeout; stream; tools }
 
 let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
   OllamaList
@@ -281,33 +295,72 @@ let build_codex_cmd args =
       Ok (cmd @ [prompt])
   | _ -> Error "Invalid args for Codex"
 
+(** Convert MCP tool_schema to Ollama tool format.
+    Ollama expects: {"type": "function", "function": {"name": ..., "description": ..., "parameters": ...}}
+*)
+let tool_schema_to_ollama_tool (t : Types.tool_schema) : Yojson.Safe.t =
+  `Assoc [
+    ("type", `String "function");
+    ("function", `Assoc [
+      ("name", `String t.name);
+      ("description", `String t.description);
+      ("parameters", t.input_schema);
+    ]);
+  ]
+
 (** Build Ollama API request using curl.
 
     Uses REST API instead of CLI for reliability.
-    API supports native system prompt via "system" field.
+    - /api/generate: Simple completion (no tools)
+    - /api/chat: Chat with tool support (when tools provided)
 *)
 let build_ollama_curl_cmd ?(force_stream=None) args =
   match args with
-  | Ollama { prompt; model; system_prompt; temperature; stream; _ } ->
-      (* Build JSON payload for ollama API *)
-      let system_field = match system_prompt with
-        | Some sp -> Printf.sprintf {|, "system": %s|} (Yojson.Safe.to_string (`String sp))
-        | None -> ""
-      in
+  | Ollama { prompt; model; system_prompt; temperature; stream; tools; _ } ->
       let stream_val = match force_stream with Some s -> s | None -> stream in
-      let json_payload = Printf.sprintf
-        {|{"model": %s, "prompt": %s, "stream": %b, "options": {"temperature": %.1f}%s}|}
-        (Yojson.Safe.to_string (`String model))
-        (Yojson.Safe.to_string (`String prompt))
-        stream_val
-        temperature
-        system_field
+      let (endpoint, json_payload) = match tools with
+        | Some tool_list when List.length tool_list > 0 ->
+            (* Use /api/chat with tools *)
+            let messages = match system_prompt with
+              | Some sp -> [
+                  `Assoc [("role", `String "system"); ("content", `String sp)];
+                  `Assoc [("role", `String "user"); ("content", `String prompt)];
+                ]
+              | None -> [
+                  `Assoc [("role", `String "user"); ("content", `String prompt)];
+                ]
+            in
+            let tools_json = `List (List.map tool_schema_to_ollama_tool tool_list) in
+            let payload = `Assoc [
+              ("model", `String model);
+              ("messages", `List messages);
+              ("tools", tools_json);
+              ("stream", `Bool stream_val);
+              ("options", `Assoc [("temperature", `Float temperature)]);
+            ] in
+            ("/api/chat", Yojson.Safe.to_string payload)
+        | _ ->
+            (* Use /api/generate without tools *)
+            let system_field = match system_prompt with
+              | Some sp -> Printf.sprintf {|, "system": %s|} (Yojson.Safe.to_string (`String sp))
+              | None -> ""
+            in
+            let payload = Printf.sprintf
+              {|{"model": %s, "prompt": %s, "stream": %b, "options": {"temperature": %.1f}%s}|}
+              (Yojson.Safe.to_string (`String model))
+              (Yojson.Safe.to_string (`String prompt))
+              stream_val
+              temperature
+              system_field
+            in
+            ("/api/generate", payload)
       in
+      let url = "http://localhost:11434" ^ endpoint in
       (* Use --no-buffer for streaming to get real-time output *)
       if stream_val then
-        Ok ["curl"; "-sN"; "http://localhost:11434/api/generate"; "-d"; json_payload]
+        Ok ["curl"; "-sN"; url; "-d"; json_payload]
       else
-        Ok ["curl"; "-s"; "http://localhost:11434/api/generate"; "-d"; json_payload]
+        Ok ["curl"; "-s"; url; "-d"; json_payload]
   | _ -> Error "Invalid args for Ollama"
 
 (** Parse ollama API JSON response.
@@ -323,17 +376,29 @@ let parse_ollama_chunk = Ollama_parser.parse_chunk
 
 (** Execute ollama with streaming, calling on_token for each token.
     Returns full response when done. *)
+(** Serialize tool_calls to JSON for response extra field *)
+let tool_calls_to_json (calls : Ollama_parser.tool_call list) : string =
+  let call_to_json (c : Ollama_parser.tool_call) =
+    `Assoc [
+      ("name", `String c.name);
+      ("arguments", `String c.arguments);
+    ]
+  in
+  `List (List.map call_to_json calls) |> Yojson.Safe.to_string
+
 let execute_ollama_streaming ~on_token args =
   let open Lwt.Syntax in
   let open Cli_runner in
   (* Build command and get model info based on tool type *)
-  let (cmd_list, model_name, extra_base, err_msg) = match args with
-    | Ollama { model; temperature; timeout = _; _ } ->
+  let (cmd_list, model_name, extra_base, has_tools, err_msg) = match args with
+    | Ollama { model; temperature; tools; timeout = _; _ } ->
+        let has_tools = match tools with Some l when List.length l > 0 -> true | _ -> false in
         (build_ollama_curl_cmd ~force_stream:(Some true) args,
          Printf.sprintf "ollama (%s)" model,
          [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")],
+         has_tools,
          None)
-    | _ -> (Error "Invalid args for Ollama", "unknown", [], Some "Invalid args for Ollama")
+    | _ -> (Error "Invalid args for Ollama", "unknown", [], false, Some "Invalid args for Ollama")
   in
   let timeout = match args with
     | Ollama { timeout; _ } -> timeout
@@ -350,20 +415,35 @@ let execute_ollama_streaming ~on_token args =
         let cmd = List.hd cmd_list in
         let cmd_args = List.tl cmd_list in
         let full_response = Buffer.create 1024 in
+        let accumulated_tool_calls = ref [] in
         let on_line line =
-          match parse_ollama_chunk line with
-          | Ok (token, _done) ->
-              Buffer.add_string full_response token;
-              on_token token
-          | Error _ -> Lwt.return_unit
+          if has_tools then
+            (* Parse chat API response (with tools support) *)
+            match Ollama_parser.parse_chat_chunk line with
+            | Ok (token, tool_calls, _done) ->
+                Buffer.add_string full_response token;
+                if tool_calls <> [] then accumulated_tool_calls := tool_calls;
+                on_token token
+            | Error _ -> Lwt.return_unit
+          else
+            (* Parse generate API response (no tools) *)
+            match parse_ollama_chunk line with
+            | Ok (token, _done) ->
+                Buffer.add_string full_response token;
+                on_token token
+            | Error _ -> Lwt.return_unit
         in
         let* result = run_streaming_command ~timeout ~on_line cmd cmd_args in
         match result with
         | Ok _ ->
+            let extra = extra_base @ [("streamed", "true")] in
+            let extra = if !accumulated_tool_calls <> [] then
+              extra @ [("tool_calls", tool_calls_to_json !accumulated_tool_calls)]
+            else extra in
             Lwt.return { model = model_name;
               returncode = 0;
               response = Buffer.contents full_response;
-              extra = extra_base @ [("streamed", "true")]; }
+              extra; }
         | Error (Timeout t) ->
             Lwt.return { model = model_name;
               returncode = -1;
@@ -375,7 +455,6 @@ let execute_ollama_streaming ~on_token args =
               response = Printf.sprintf "Error: %s" msg;
               extra = extra_base; }
       end
-
 (* Use Ollama_parser for response parsing *)
 let parse_ollama_response = Ollama_parser.parse_response
 
@@ -724,3 +803,70 @@ let execute_verbose args : string Lwt.t =
 (** Execute with Compact format (for MAGI inter-agent communication) *)
 let execute_compact args : string Lwt.t =
   execute_formatted ~format:Compact args
+
+(** Execute Ollama with agentic tool calling loop.
+
+    When tools are provided, this uses Agent_loop to:
+    1. Send prompt to Ollama with tool definitions
+    2. Execute any tool_calls from Ollama's response
+    3. Send tool results back to Ollama
+    4. Repeat until no more tool_calls or max_turns reached
+
+    This enables tool-capable models (devstral, qwen3, llama3.3)
+    to use MCP tools natively through llm-mcp.
+
+    @param tools MCP tool schemas for function calling
+    @param external_mcp_url URL of external MCP server for tool execution
+    @param on_turn Callback for each turn (turn number, prompt)
+*)
+let execute_ollama_agentic
+    ~(tools : Types.tool_schema list)
+    ?(external_mcp_url : string option = None)
+    ?(on_turn : int -> string -> unit Lwt.t = fun _ _ -> Lwt.return_unit)
+    args : tool_result Lwt.t =
+  let open Lwt.Syntax in
+  match args with
+  | Ollama { model; prompt; system_prompt; temperature; timeout = _; stream = _; tools = _ } ->
+      let system = match system_prompt with
+        | Some s -> s
+        | None -> "You are a helpful assistant with access to tools."
+      in
+      let* result = Agent_loop.run
+        ~model
+        ~prompt
+        ~system_prompt:system
+        ~temperature
+        ~max_turns:10
+        ~external_mcp_url
+        ~tools
+        ~on_turn
+        ()
+      in
+      (match result with
+      | Ok response ->
+          Lwt.return {
+            model = Printf.sprintf "ollama (%s) [agentic]" model;
+            returncode = 0;
+            response;
+            extra = [
+              ("temperature", Printf.sprintf "%.1f" temperature);
+              ("local", "true");
+              ("agentic", "true");
+              ("tools_count", string_of_int (List.length tools));
+            ];
+          }
+      | Error err ->
+          Lwt.return {
+            model = Printf.sprintf "ollama (%s) [agentic]" model;
+            returncode = -1;
+            response = Printf.sprintf "Agent loop error: %s" err;
+            extra = [
+              ("temperature", Printf.sprintf "%.1f" temperature);
+              ("local", "true");
+              ("agentic", "true");
+              ("error", "true");
+            ];
+          })
+  | _ ->
+      (* Non-Ollama args: fall back to regular execute *)
+      execute args
