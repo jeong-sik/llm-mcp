@@ -6,19 +6,15 @@
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Multi-LLM MCP Server written in OCaml (native binary).
+Multi-LLM MCP Server written in OCaml.
 
-> **Note**: Python 버전은 별도 아카이브로 이동됨 (이 저장소에는 OCaml 버전만 유지)
+내 편의를 위해 만든 CLI 래퍼. Claude Code 안에서 다른 LLM 호출할 때 씀.
 
-**MAGI Trinity (삼두정치)**: Unified MCP wrapper for multiple LLM CLIs:
-
-| # | 멤버 | 역할 | 도구 | 모델 |
-|---|------|------|------|------|
-| 1 | 🔬 **MELCHIOR** | 과학자 | `codex` | GPT-5.2 |
-| 2 | 🪞 **BALTHASAR** | 거울 | `claude-cli` | Opus 4.5 |
-| 3 | 🎯 **CASPER** | 전략가 | `gemini` | Gemini 3 Pro |
-
-+ `ollama` - 범용 로컬 LLM (devstral, deepseek-r1, qwen3 등)
+**도구**:
+- `gemini` - Gemini CLI
+- `claude-cli` - Claude Code CLI
+- `codex` - Codex CLI (GPT)
+- `ollama` - 로컬 LLM (에이전틱 모드 지원)
 
 ## Why OCaml?
 
