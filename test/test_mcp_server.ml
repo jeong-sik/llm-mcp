@@ -25,7 +25,7 @@ let test_handle_initialize () =
       let protocol_version = result |> member "protocolVersion" |> to_string in
       let server_name = result |> member "serverInfo" |> member "name" |> to_string in
       Alcotest.(check int) "id matches" 1 id;
-      Alcotest.(check string) "protocol version" "2025-03-26" protocol_version;
+      Alcotest.(check string) "protocol version" "2025-11-25" protocol_version;
       Alcotest.(check string) "server name" "llm-mcp" server_name
   | _ -> Alcotest.fail "Expected JsonResponse"
 

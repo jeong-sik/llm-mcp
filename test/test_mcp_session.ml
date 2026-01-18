@@ -35,7 +35,7 @@ let test_create_session () =
   let session = Llm_mcp.Mcp_session.create_session () in
   check int "session id length" 32 (String.length session.id);
   check bool "not initialized" false session.initialized;
-  check string "default protocol" "2025-03-26" session.negotiated_protocol
+  check string "default protocol" "2025-11-25" session.negotiated_protocol
 
 (** Test session creation with custom ID *)
 let test_create_session_with_id () =
@@ -97,7 +97,7 @@ let test_is_valid_session () =
 
 (** Test protocol version constant *)
 let test_protocol_version () =
-  check string "protocol version format" "2025-03-26"
+  check string "protocol version format" "2025-11-25"
     Llm_mcp.Mcp_session.protocol_version
 
 let () =
