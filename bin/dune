@@ -1,10 +1,19 @@
 (executable
  (name main)
- (public_name llm-mcp)
+ (public_name llm-mcp-lwt)
  (package llm_mcp)
  (modules main)
  (libraries llm_mcp lwt.unix cmdliner cohttp-lwt-unix mcp_protocol)
  (preprocess (pps lwt_ppx)))
+
+(executable
+ (name main_eio)
+ (public_name llm-mcp)
+ (package llm_mcp)
+ (modules main_eio)
+ (libraries llm_mcp eio eio_main httpun httpun-eio gluten gluten-eio
+            cmdliner ipaddr mcp_protocol)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name save_prompt)
