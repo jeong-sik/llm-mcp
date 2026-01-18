@@ -8,7 +8,7 @@
 
 Multi-LLM MCP Server written in OCaml (native binary).
 
-> **Note**: Python 버전은 `features/_archived/llm-mcp-python/`에 아카이브됨
+> **Note**: Python 버전은 별도 아카이브로 이동됨 (이 저장소에는 OCaml 버전만 유지)
 
 **MAGI Pentarchy (오두정치)**: Unified MCP wrapper for multiple LLM CLIs:
 
