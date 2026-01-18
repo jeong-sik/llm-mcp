@@ -10,17 +10,16 @@ Multi-LLM MCP Server written in OCaml (native binary).
 
 > **Note**: Python 버전은 별도 아카이브로 이동됨 (이 저장소에는 OCaml 버전만 유지)
 
-**MAGI Pentarchy (오두정치)**: Unified MCP wrapper for multiple LLM CLIs:
+**MAGI Trinity (삼두정치)**: Unified MCP wrapper for multiple LLM CLIs:
 
 | # | 멤버 | 역할 | 도구 | 모델 |
 |---|------|------|------|------|
 | 1 | 🔬 **MELCHIOR** | 과학자 | `codex` | GPT-5.2 |
 | 2 | 🪞 **BALTHASAR** | 거울 | `claude-cli` | Opus 4.5 |
 | 3 | 🎯 **CASPER** | 전략가 | `gemini` | Gemini 3 Pro |
-| 4 | 🧮 **ADAM** | FP 철학자 | `adam` | Mistral-Nemo (local) |
-| 5 | ⚔️ **SEELE** | 극단 리뷰어 | `seele` | Devstral (local) |
 
 + `ollama` - 범용 로컬 LLM (devstral, deepseek-r1, qwen3 등)
++ 💡 **페르소나**: `system_prompt` 파라미터로 커스텀 역할 설정 가능
 
 ## Why OCaml?
 
@@ -358,137 +357,6 @@ curl http://localhost:11434/api/generate -d '{"model": "glm4-32k:latest", "promp
 
 # Check loaded models
 curl http://localhost:11434/api/ps | jq '.models[].name'
-```
-
-### adam
-ADAM - Functional Programming Philosopher (Mistral-Nemo local)
-
-> ✅ **Tier 1-2 Model**: 7.1GB VRAM, MCP compatible (~10s cold start)
-
-4th member of MAGI Pentarchy. Pure functional advocate, algebraic effects expert.
-
-```json
-{
-  "prompt": "How should I design Effect Handlers in OCaml 5?",
-  "timeout": 300
-}
-```
-
-Use cases: OCaml 5.x effects, type system design, GADT discussions.
-
-### seele
-SEELE - Extreme Production Code Reviewer (Devstral local)
-
-> ℹ️ **Tier 2 Model**: Uses `devstral` (~14GB VRAM). Usually OK if already loaded.
-
-5th member of MAGI Pentarchy. Harsh code quality gatekeeper.
-
-```json
-{
-  "prompt": "Review this code for production readiness",
-  "code_context": "function fetchData() { return fetch('/api').then(r => r.json()) }",
-  "timeout": 300
-}
-```
-
-Zero tolerance for: `any` types, missing error handling, no tests.
-
-### local_agent
-**Local Agent** - Autonomous coding agent using Ollama with function calling 🤖
-
-> 🚀 **NEW**: Run local LLMs as autonomous agents with tool access!
-
-Runs a local Ollama model in an agentic loop. The agent can:
-- **bash**: Execute shell commands
-- **read**: Read file contents
-- **write**: Write files
-- **web_search**: Search the web (via Gemini)
-- **code_generate**: Generate code (via Codex)
-- **analyze**: Deep analysis (via Claude)
-- **masc_broadcast**: Multi-agent communication
-- **mcp_call**: Call external MCP servers (HTTP & stdio)
-
-#### External MCP Support
-
-`local_agent` can call tools on other MCP servers configured in `~/.mcp.json` or `~/me/.mcp.json`:
-
-**HTTP MCP servers** (context7, MASC, etc.):
-```json
-{
-  "mcpServers": {
-    "context7": {
-      "type": "http",
-      "url": "https://mcp.context7.com/mcp"
-    }
-  }
-}
-```
-
-**stdio MCP servers** (maestro, playwright, etc.):
-```json
-{
-  "mcpServers": {
-    "maestro": {
-      "command": "maestro",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-**Usage in prompts**:
-```
-Call mcp_call with server="context7", tool="resolve-library-id", arguments={"libraryName": "react"}
-```
-
-Or use the `mcp__server__tool` pattern:
-```
-Call mcp__maestro__list_devices with arguments={}
-```
-
-```json
-{
-  "prompt": "List all Python files and count their lines",
-  "model": "llama3.2:latest",
-  "max_turns": 5,
-  "timeout": 60,
-  "working_directory": "/path/to/project"
-}
-```
-
-#### Function Calling 지원 모델
-
-> 🏆 **추천**: `mistral-nemo` 또는 `qwen2.5:7b` (가장 안정적)
-
-**✅ FC 지원 확인 (21개 모델)** - 2026-01-13 배치 테스트:
-
-| Family | Models | Size Range | Notes |
-|--------|--------|------------|-------|
-| **Qwen 2.5** | `qwen2.5:1.5b`, `qwen2.5:7b`, `qwen2.5-coder:7b/14b/32b` | 1.5B-32B | 🏆 가장 안정적 |
-| **Qwen 3** | `qwen3:0.6b`, `qwen3:1.7b`, `qwen3-coder:30b` | 0.6B-30B | FC 안정 |
-| **Mistral** | `mistral-nemo:latest/12b`, `ministral-3:3b/14b` | 3B-14B | 🏆 빠르고 안정적 |
-| **Devstral** | `devstral:latest`, `devstral-small-2:24b` | 14B-24B | 코딩 특화 |
-| **Others** | `llama3.2`, `phi4-mini`, `smollm2:1.7b`, `Falcon-H1R-7B` | 1.7B-7B | 개별 확인 |
-| **Abliterated** | `huihui_ai/qwen2.5-coder-abliterate:32b`, `huihui_ai/qwen3-abliterated:32b` | 32B | FC 지원 |
-| **Fine-tuned** | `goekdenizguelmez/JOSIEFIED-Qwen3:8b` | 8B | FC 지원 |
-
-**❌ FC 미지원 (확인됨)**:
-- Gemma 계열 (gemma3:1b/12b/27b, gemma3n, codegemma)
-- Phi 계열 (phi3, phi4:14b - phi4-mini만 지원!)
-- CodeLlama, Codestral, DeepCoder, OpenCoder
-- GLM4, Yi, StableLM2, Vicuna, Solar
-- DeepSeek-R1, OLMo, TinyLlama
-- 파인튜닝 변형 (dolphin-*, samantha-*, yarn-*)
-
-**Example workflow**:
-```
-User: "Count files in current directory"
-  ↓
-Agent → bash(ls | wc -l)
-  ↓
-Result: "42"
-  ↓
-Agent: "There are 42 files in the current directory."
 ```
 
 ## Development
