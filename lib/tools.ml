@@ -231,8 +231,8 @@ let build_gemini_cmd args =
       let enhanced_prompt = if String.length prefix > 0 then prefix ^ prompt else prompt in
       let cmd = ["gemini"; "-m"; model] in
       let cmd = if yolo then cmd @ ["--yolo"] else cmd in
-      cmd @ [enhanced_prompt]
-  | _ -> failwith "Invalid args for Gemini"
+      Ok (cmd @ [enhanced_prompt])
+  | _ -> Error "Invalid args for Gemini"
 
 (** Build Claude CLI command *)
 let build_claude_cmd args =
@@ -258,8 +258,8 @@ let build_claude_cmd args =
         | [] -> cmd
         | tools -> cmd @ ["--allowed-tools"] @ tools
       in
-      cmd @ [prompt]
-  | _ -> failwith "Invalid args for Claude"
+      Ok (cmd @ [prompt])
+  | _ -> Error "Invalid args for Claude"
 
 (** Build Codex CLI command *)
 let build_codex_cmd args =
@@ -278,8 +278,8 @@ let build_codex_cmd args =
         | Some dir -> cmd @ ["-C"; dir]
         | None -> cmd
       in
-      cmd @ [prompt]
-  | _ -> failwith "Invalid args for Codex"
+      Ok (cmd @ [prompt])
+  | _ -> Error "Invalid args for Codex"
 
 (** Build Ollama API request using curl.
 
@@ -305,10 +305,10 @@ let build_ollama_curl_cmd ?(force_stream=None) args =
       in
       (* Use --no-buffer for streaming to get real-time output *)
       if stream_val then
-        ["curl"; "-sN"; "http://localhost:11434/api/generate"; "-d"; json_payload]
+        Ok ["curl"; "-sN"; "http://localhost:11434/api/generate"; "-d"; json_payload]
       else
-        ["curl"; "-s"; "http://localhost:11434/api/generate"; "-d"; json_payload]
-  | _ -> failwith "Invalid args for Ollama"
+        Ok ["curl"; "-s"; "http://localhost:11434/api/generate"; "-d"; json_payload]
+  | _ -> Error "Invalid args for Ollama"
 
 (** Parse ollama API JSON response.
     API returns: {"model": "...", "response": "...", "done": true, ...}
@@ -327,48 +327,54 @@ let execute_ollama_streaming ~on_token args =
   let open Lwt.Syntax in
   let open Cli_runner in
   (* Build command and get model info based on tool type *)
-  let (cmd_list, model_name, extra_base) = match args with
+  let (cmd_list, model_name, extra_base, err_msg) = match args with
     | Ollama { model; temperature; timeout = _; _ } ->
         (build_ollama_curl_cmd ~force_stream:(Some true) args,
          Printf.sprintf "ollama (%s)" model,
-         [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")])
-    | _ -> ([], "unknown", [])
+         [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")],
+         None)
+    | _ -> (Error "Invalid args for Ollama", "unknown", [], Some "Invalid args for Ollama")
   in
   let timeout = match args with
     | Ollama { timeout; _ } -> timeout
     | _ -> 300
   in
-  if cmd_list = [] then
-    Lwt.return { model = "unknown"; returncode = -1; response = "Invalid args"; extra = [] }
-  else begin
-    let cmd = List.hd cmd_list in
-    let cmd_args = List.tl cmd_list in
-    let full_response = Buffer.create 1024 in
-    let on_line line =
-      match parse_ollama_chunk line with
-      | Ok (token, _done) ->
-          Buffer.add_string full_response token;
-          on_token token
-      | Error _ -> Lwt.return_unit
-    in
-    let* result = run_streaming_command ~timeout ~on_line cmd cmd_args in
-    match result with
-    | Ok _ ->
-        Lwt.return { model = model_name;
-          returncode = 0;
-          response = Buffer.contents full_response;
-          extra = extra_base @ [("streamed", "true")]; }
-    | Error (Timeout t) ->
-        Lwt.return { model = model_name;
-          returncode = -1;
-          response = Printf.sprintf "Timeout after %ds" t;
-          extra = extra_base; }
-    | Error (ProcessError msg) ->
-        Lwt.return { model = model_name;
-          returncode = -1;
-          response = Printf.sprintf "Error: %s" msg;
-          extra = extra_base; }
-  end
+  match cmd_list with
+  | Error err ->
+      let response = Option.value err_msg ~default:err in
+      Lwt.return { model = model_name; returncode = -1; response; extra = extra_base }
+  | Ok cmd_list ->
+      if cmd_list = [] then
+        Lwt.return { model = model_name; returncode = -1; response = "Invalid args"; extra = extra_base }
+      else begin
+        let cmd = List.hd cmd_list in
+        let cmd_args = List.tl cmd_list in
+        let full_response = Buffer.create 1024 in
+        let on_line line =
+          match parse_ollama_chunk line with
+          | Ok (token, _done) ->
+              Buffer.add_string full_response token;
+              on_token token
+          | Error _ -> Lwt.return_unit
+        in
+        let* result = run_streaming_command ~timeout ~on_line cmd cmd_args in
+        match result with
+        | Ok _ ->
+            Lwt.return { model = model_name;
+              returncode = 0;
+              response = Buffer.contents full_response;
+              extra = extra_base @ [("streamed", "true")]; }
+        | Error (Timeout t) ->
+            Lwt.return { model = model_name;
+              returncode = -1;
+              response = Printf.sprintf "Timeout after %ds" t;
+              extra = extra_base; }
+        | Error (ProcessError msg) ->
+            Lwt.return { model = model_name;
+              returncode = -1;
+              response = Printf.sprintf "Error: %s" msg;
+              extra = extra_base; }
+      end
 
 (* Use Ollama_parser for response parsing *)
 let parse_ollama_response = Ollama_parser.parse_response
@@ -465,15 +471,26 @@ let execute_gemini_with_retry
   let open Lwt.Syntax in
   let open Cli_runner in
 
-  let cmd_list = build_gemini_cmd args in
-  let cmd = List.hd cmd_list in
-  let cmd_args = List.tl cmd_list in
   let thinking_applied = thinking_level = High in
 
-  let rec attempt n =
-    let* result = run_command ~timeout cmd cmd_args in
-    match result with
-    | Ok r ->
+  match build_gemini_cmd args with
+  | Error err ->
+      let extra = [
+        ("thinking_level", string_of_thinking_level thinking_level);
+        ("thinking_prompt_applied", string_of_bool thinking_applied);
+        ("invalid_args", "true");
+      ] in
+      Lwt.return { model = Printf.sprintf "gemini (%s)" model;
+        returncode = -1;
+        response = err;
+        extra; }
+  | Ok cmd_list ->
+      let cmd = List.hd cmd_list in
+      let cmd_args = List.tl cmd_list in
+      let rec attempt n =
+        let* result = run_command ~timeout cmd cmd_args in
+        match result with
+        | Ok r ->
         let response = get_output r in
         (* Check for Gemini-specific errors in response *)
         (match classify_gemini_error response with
@@ -509,28 +526,28 @@ let execute_gemini_with_retry
               returncode = r.exit_code;
               response;
               extra; })
-    | Error (Timeout t) ->
-        let extra = [
-          ("thinking_level", string_of_thinking_level thinking_level);
-          ("thinking_prompt_applied", string_of_bool thinking_applied);
-          ("retry_attempts", string_of_int n);
-        ] in
-        Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-          returncode = -1;
-          response = Printf.sprintf "Timeout after %ds" t;
-          extra; }
-    | Error (ProcessError msg) ->
-        let extra = [
-          ("thinking_level", string_of_thinking_level thinking_level);
-          ("thinking_prompt_applied", string_of_bool thinking_applied);
-          ("retry_attempts", string_of_int n);
-        ] in
-        Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-          returncode = -1;
-          response = Printf.sprintf "Error: %s" msg;
-          extra; }
-  in
-  attempt 0
+        | Error (Timeout t) ->
+            let extra = [
+              ("thinking_level", string_of_thinking_level thinking_level);
+              ("thinking_prompt_applied", string_of_bool thinking_applied);
+              ("retry_attempts", string_of_int n);
+            ] in
+            Lwt.return { model = Printf.sprintf "gemini (%s)" model;
+              returncode = -1;
+              response = Printf.sprintf "Timeout after %ds" t;
+              extra; }
+        | Error (ProcessError msg) ->
+            let extra = [
+              ("thinking_level", string_of_thinking_level thinking_level);
+              ("thinking_prompt_applied", string_of_bool thinking_applied);
+              ("retry_attempts", string_of_int n);
+            ] in
+            Lwt.return { model = Printf.sprintf "gemini (%s)" model;
+              returncode = -1;
+              response = Printf.sprintf "Error: %s" msg;
+              extra; }
+      in
+      attempt 0
 
 (** Execute a tool and return result *)
 let execute args : tool_result Lwt.t =
@@ -543,76 +560,97 @@ let execute args : tool_result Lwt.t =
       execute_gemini_with_retry ~model ~thinking_level ~timeout ~args ()
 
   | Claude { model; ultrathink; working_directory; timeout; _ } ->
-      let cmd_list = build_claude_cmd args in
-      let cmd = List.hd cmd_list in
-      let cmd_args = List.tl cmd_list in
-      let* result = run_command ~cwd:working_directory ~safe_tmpdir:true ~timeout cmd cmd_args in
-      (match result with
-      | Ok r ->
-          Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
-            returncode = r.exit_code;
-            response = get_output r;
-            extra = [("ultrathink", string_of_bool ultrathink)]; }
-      | Error (Timeout t) ->
+      (match build_claude_cmd args with
+      | Error err ->
           Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
             returncode = -1;
-            response = Printf.sprintf "Timeout after %ds" t;
-            extra = [("ultrathink", string_of_bool ultrathink)]; }
-      | Error (ProcessError msg) ->
-          Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
-            returncode = -1;
-            response = Printf.sprintf "Error: %s" msg;
-            extra = [("ultrathink", string_of_bool ultrathink)]; })
+            response = err;
+            extra = [("ultrathink", string_of_bool ultrathink); ("invalid_args", "true")]; }
+      | Ok cmd_list ->
+          let cmd = List.hd cmd_list in
+          let cmd_args = List.tl cmd_list in
+          let* result = run_command ~cwd:working_directory ~safe_tmpdir:true ~timeout cmd cmd_args in
+          (match result with
+          | Ok r ->
+              Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
+                returncode = r.exit_code;
+                response = get_output r;
+                extra = [("ultrathink", string_of_bool ultrathink)]; }
+          | Error (Timeout t) ->
+              Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
+                returncode = -1;
+                response = Printf.sprintf "Timeout after %ds" t;
+                extra = [("ultrathink", string_of_bool ultrathink)]; }
+          | Error (ProcessError msg) ->
+              Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
+                returncode = -1;
+                response = Printf.sprintf "Error: %s" msg;
+                extra = [("ultrathink", string_of_bool ultrathink)]; }))
 
   | Codex { model; reasoning_effort; timeout; _ } ->
-      let cmd_list = build_codex_cmd args in
-      let cmd = List.hd cmd_list in
-      let cmd_args = List.tl cmd_list in
-      let* result = run_command ~timeout cmd cmd_args in
-      (match result with
-      | Ok r ->
-          Lwt.return { model = Printf.sprintf "codex (%s)" model;
-            returncode = r.exit_code;
-            response = clean_codex_output (get_output r);
-            extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
-      | Error (Timeout t) ->
+      (match build_codex_cmd args with
+      | Error err ->
           Lwt.return { model = Printf.sprintf "codex (%s)" model;
             returncode = -1;
-            response = Printf.sprintf "Timeout after %ds" t;
-            extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
-      | Error (ProcessError msg) ->
-          Lwt.return { model = Printf.sprintf "codex (%s)" model;
-            returncode = -1;
-            response = Printf.sprintf "Error: %s" msg;
-            extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; })
+            response = err;
+            extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort); ("invalid_args", "true")]; }
+      | Ok cmd_list ->
+          let cmd = List.hd cmd_list in
+          let cmd_args = List.tl cmd_list in
+          let* result = run_command ~timeout cmd cmd_args in
+          (match result with
+          | Ok r ->
+              Lwt.return { model = Printf.sprintf "codex (%s)" model;
+                returncode = r.exit_code;
+                response = clean_codex_output (get_output r);
+                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
+          | Error (Timeout t) ->
+              Lwt.return { model = Printf.sprintf "codex (%s)" model;
+                returncode = -1;
+                response = Printf.sprintf "Timeout after %ds" t;
+                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
+          | Error (ProcessError msg) ->
+              Lwt.return { model = Printf.sprintf "codex (%s)" model;
+                returncode = -1;
+                response = Printf.sprintf "Error: %s" msg;
+                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }))
 
   | Ollama { model; temperature; timeout; _ } ->
       (* Use REST API via curl for reliability *)
-      let cmd_list = build_ollama_curl_cmd args in
-      let cmd = List.hd cmd_list in
-      let cmd_args = List.tl cmd_list in
-      let* result = run_command ~timeout cmd cmd_args in
-      (match result with
-      | Ok r ->
-          let response = match parse_ollama_response r.stdout with
-            | Ok resp -> resp
-            | Error err -> Printf.sprintf "Error: %s" err
-          in
-          let returncode = if String.length response > 0 && not (String.sub response 0 (min 6 (String.length response)) = "Error:") then 0 else -1 in
-          Lwt.return { model = Printf.sprintf "ollama (%s)" model;
-            returncode;
-            response;
-            extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }
-      | Error (Timeout t) ->
+      (match build_ollama_curl_cmd args with
+      | Error err ->
           Lwt.return { model = Printf.sprintf "ollama (%s)" model;
             returncode = -1;
-            response = Printf.sprintf "Timeout after %ds" t;
-            extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }
-      | Error (ProcessError msg) ->
-          Lwt.return { model = Printf.sprintf "ollama (%s)" model;
-            returncode = -1;
-            response = Printf.sprintf "Error: %s" msg;
-            extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; })
+            response = err;
+            extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true"); ("invalid_args", "true")]; }
+      | Ok cmd_list ->
+          let cmd = List.hd cmd_list in
+          let cmd_args = List.tl cmd_list in
+          let* result = run_command ~timeout cmd cmd_args in
+          (match result with
+          | Ok r ->
+              let response = match parse_ollama_response r.stdout with
+                | Ok resp -> resp
+                | Error err -> Printf.sprintf "Error: %s" err
+              in
+              let returncode =
+                if String.length response > 0 && not (String.sub response 0 (min 6 (String.length response)) = "Error:")
+                then 0 else -1
+              in
+              Lwt.return { model = Printf.sprintf "ollama (%s)" model;
+                returncode;
+                response;
+                extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }
+          | Error (Timeout t) ->
+              Lwt.return { model = Printf.sprintf "ollama (%s)" model;
+                returncode = -1;
+                response = Printf.sprintf "Timeout after %ds" t;
+                extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }
+          | Error (ProcessError msg) ->
+              Lwt.return { model = Printf.sprintf "ollama (%s)" model;
+                returncode = -1;
+                response = Printf.sprintf "Error: %s" msg;
+                extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }))
 
   | OllamaList ->
       (* Run ollama list and parse output to JSON *)
@@ -622,10 +660,19 @@ let execute args : tool_result Lwt.t =
       (match result with
       | Ok r ->
           (* Parse ollama list output into JSON array *)
-          let lines = String.split_on_char '\n' r.stdout in
-          let models = lines
-            |> List.filter (fun line -> String.length line > 0)
-            |> List.tl  (* Skip header line: "NAME ID SIZE MODIFIED" *)
+          let lines =
+            String.split_on_char '\n' r.stdout
+            |> List.filter (fun line -> String.length (String.trim line) > 0)
+          in
+          let is_header line =
+            let upper = String.uppercase_ascii (String.trim line) in
+            String.length upper >= 4 && String.sub upper 0 4 = "NAME"
+          in
+          let data_lines = match lines with
+            | [] -> []
+            | first :: rest -> if is_header first then rest else lines
+          in
+          let models = data_lines
             |> List.filter_map (fun line ->
                 (* Parse: "model:tag    id    size    modified" *)
                 let parts = String.split_on_char '\t' line in

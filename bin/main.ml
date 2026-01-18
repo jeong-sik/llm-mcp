@@ -456,7 +456,7 @@ let main stdio host port agent_opt prompt_opt model_opt timeout =
 
 let cmd =
   let doc = "Multi-LLM MCP Server (OCaml) - MCP 2025-11-25" in
-  let info = Cmd.info "llm-mcp" ~version:"2.0.0" ~doc in
+  let info = Cmd.info "llm-mcp" ~version:"2.0.1" ~doc in
   Cmd.v info Term.(const main $ stdio_flag $ host_arg $ port_arg $ agent_arg $ prompt_arg $ model_arg $ timeout_arg)
 
 let () = exit (Cmd.eval cmd)
