@@ -52,6 +52,13 @@ let string_of_output_format = function
   | Json -> "json"
   | StreamJson -> "stream-json"
 
+(** MCP Tool schema - defined early for use in tool_args *)
+type tool_schema = {
+  name : string;
+  description : string;
+  input_schema : Yojson.Safe.t;
+}
+
 (** Tool arguments - strongly typed! *)
 type tool_args =
   | Gemini of {
@@ -89,6 +96,7 @@ type tool_args =
       temperature : float;
       timeout : int;
       stream : bool;  (* Enable SSE streaming *)
+      tools : tool_schema list option;  (* MCP tools for function calling *)
     }
   | OllamaList  (* List available Ollama models *)
 
@@ -178,13 +186,6 @@ let tool_result_to_yojson { model; returncode; response; extra } =
   ] in
   let extra_json = List.map (fun (k, v) -> (k, `String v)) extra in
   `Assoc (base @ extra_json)
-
-(** MCP Tool schema *)
-type tool_schema = {
-  name : string;
-  description : string;
-  input_schema : Yojson.Safe.t;
-}
 
 (** Common response_format schema for all tools *)
 let response_format_schema =
@@ -417,11 +418,11 @@ CLI Direct Usage (without MCP):
 
 let ollama_schema : tool_schema = {
   name = "ollama";
-  description = {|Run local LLM via Ollama (completely free, no API key needed).
+  description = {|Run local LLM via Ollama with optional MCP tool support.
 
 Use cases:
-- Run Devstral, DeepSeek-R1, Qwen3-Coder locally
-- True open source execution - no API costs
+- Run Devstral, DeepSeek-R1, Qwen3-Coder locally (free, no API key)
+- Function calling with tool-capable models (devstral, qwen3, llama3.3)
 - Privacy-first: all processing on local machine
 - 128GB RAM can run multiple 30B+ models simultaneously
 
@@ -430,7 +431,12 @@ Parameters:
 - model: Model name (default: devstral). Examples: devstral, deepseek-r1:32b, qwen3-coder:30b
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
-- timeout: Timeout in seconds (default: 300)|};
+- timeout: Timeout in seconds (default: 300)
+- tools: Array of tool definitions for function calling (optional)
+
+Tool Calling:
+When tools are provided, uses /api/chat endpoint instead of /api/generate.
+Model must support tools capability (devstral, qwen3, llama3.3, etc).|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -456,6 +462,18 @@ Parameters:
         ("type", `String "integer");
         ("description", `String "Timeout in seconds");
         ("default", `Int 300);
+      ]);
+      ("tools", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Array of MCP tool definitions for function calling. Each tool has name, description, and input_schema (JSON Schema).");
+        ("items", `Assoc [
+          ("type", `String "object");
+          ("properties", `Assoc [
+            ("name", `Assoc [("type", `String "string")]);
+            ("description", `Assoc [("type", `String "string")]);
+            ("input_schema", `Assoc [("type", `String "object")]);
+          ]);
+        ]);
       ]);
       response_format_schema;
     ]);
