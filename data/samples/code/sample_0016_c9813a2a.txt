@@ -1,0 +1,56 @@
+Here is an example of a TypeScript React component for a login form variation 6:
+```
+import React, { useState } from 'react';
+import { Box, Container, TextField, Button, Typography } from '@mui/material';
+
+interface LoginFormProps {
+  // Add any necessary props here
+}
+
+const LoginForm: React.FC<LoginFormProps> = () => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    // Add login logic here
+    console.log('Login submitted:', email, password);
+  };
+
+  return (
+    <Container maxWidth="xs">
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Box sx={{ padding: '20px', backgroundColor: '#f0f0f0' }}>
+          <Typography variant="h4">Login</Typography>
+          <form onSubmit={handleSubmit}>
+            <TextField
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              sx={{ marginBottom: '16px', width: '100%' }}
+            />
+            <TextField
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              sx={{ marginBottom: '16px', width: '100%' }}
+            />
+            <Button type="submit" variant="contained">
+              Login
+            </Button>
+          </form>
+        </Box>
+      </Box>
+    </Container>
+  );
+};
+
+export default LoginForm;
+```
+This component uses the Material-UI library to style the form and buttons. You can customize the styles by modifying the `sx` prop in the `TextField`, `Button`, and other components.
+
+You can also add more props to the component, such as a `onLoginSuccess` function that is called when the login is successful, or an `onLoginError` function that is called when there is an error.
+
+Remember to replace the comment `// Add login logic here` with your actual login logic.

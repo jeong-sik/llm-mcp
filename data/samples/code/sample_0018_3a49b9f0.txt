@@ -1,0 +1,52 @@
+Here's an example of how you can create a Go function to handle concurrent API requests with rate limiting using the `sync` package and goroutine scheduling.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "math/rand"
+    "time"
+
+    "github.com/kevinusai/laminate/v8"
+)
+
+// APIRequest represents a single API request
+type APIRequest struct {
+    URL     string
+    Method  string
+    Payload map[string]interface{}
+}
+
+func main() {
+    // Create a new laminate client with rate limiting enabled and 10 concurrent requests allowed per second
+    laminateClient := laminate.New(
+        laminate.NewRateLimiter(
+            laminate.NewFixedWindow(60 * time.Second), // 1 minute window
+            laminate.NewPerSecond(10), // 10 requests per second
+        ),
+        laminate.NewConcurrencyLimit(10),
+    )
+
+    // Generate some API requests
+    apiRequests := []APIRequest{
+        {"https://api.example.com/endpoint1", "GET"},
+        {"https://api.example.com/endpoint2", "POST", map[string]interface{}{"key": "value"}},
+        {"https://api.example.com/endpoint3", "PUT"},
+        {"https://api.example.com/endpoint4", "DELETE", map[string]interface{}{"key": "value"}},
+    }
+
+    // Handle API requests concurrently with rate limiting
+    for _, request := range apiRequests {
+        fmt.Printf("Handling request: %s, %s\n", request.URL, request.Method)
+        laminateClient.HandleRequest(context.Background(), request)
+    }
+}
+```
+
+This example uses the `laminate` package to create a client with rate limiting enabled. It sets up a 1-minute window for requests and limits the number of requests per second to 10.
+
+The `HandleRequest` function is used to handle each API request concurrently while respecting the rate limiting rules.
+
+Note that this code needs to be replaced by your own crate (package) name, as `github.com/kevinusai/laminate/v8` was provided for demonstration purposes only.

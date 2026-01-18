@@ -1,0 +1,155 @@
+Here is a simple example of a Login Form variation 1 using TypeScript and React:
+
+```typescript
+import React from 'react';
+import styled, { keyframes } from 'styled-components';
+
+interface Props {
+  handleLogin: () => void;
+}
+
+const scaleIn = keyframes`
+  0% {
+    transform: scale(0);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+`;
+
+interface StyledContainer extends React HTMLAttributes<HTMLDivElement> {
+  loginStyle?: string;
+}
+
+const LoginContainer = styled.div<StyledContainer>`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f0f0;
+`;
+
+interface FormFields extends React.HTMLAttributes<HTMLFormElement> {
+  name?: string;
+  email?: string;
+  password?: string;
+}
+
+const FormFieldsContainer = styled.div<FormFields>`
+  display: flex;
+  width: 300px;
+  margin-bottom: 20px;
+  background-color: #fff;
+  padding: 16px;
+`;
+
+interface FormLabel extends React.HTMLAttributes<HTMLSpanElement> {
+  labelValue?: string;
+}
+
+const FormLabelContainer = styled.span<FormLabel>`
+  font-size: 18px;
+  color: ${props => props.labelValue};
+`;
+
+interface FormInput extends React.HTMLProps<HTMLInputElement> {
+  name?: string;
+  type?: string;
+}
+
+const FormInputContainer = styled.input<FormInput>`
+  margin-bottom: 16px;
+  padding: 8px;
+  border-radius: 4px;
+  border: none;
+  background-color: #f0f0f0;
+`;
+
+interface FormButton extends React.HTMLProps<HTMLButtonElement> {
+  buttonStyle?: string;
+}
+
+const FormButtonContainer = styled.button<FormButton>`
+  margin-top: 16px;
+  padding: 8px;
+  background-color: ${props => props.buttonStyle};
+  border-radius: 4px;
+  cursor: pointer;
+`;
+
+interface LoginFooter extends React.HTMLProps<HTMLSpanElement> {
+  footerText?: string;
+}
+
+const LoginFooterContainer = styled.span<LoginFooter>`
+  font-size: 14px;
+  color: #666;
+`;
+
+const LoginForm: React.FC<Props> = ({ handleLogin }) => {
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.name === 'name') {
+      setName(event.target.value);
+    } else if (event.target.name === 'email') {
+      setEmail(event.target.value);
+    } else if (event.target.name === 'password') {
+      setPassword(event.target.value);
+    }
+  };
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    handleLogin(name, email, password);
+  };
+
+  return (
+    <LoginContainer loginStyle="scale-in">
+      <FormFieldsContainer>
+        <FormLabel labelValue="Name" />
+        <FormInput
+          type="text"
+          name="name"
+          value={name}
+          onChange={handleChange}
+        />
+      </FormFieldsContainer>
+      <FormFieldsContainer>
+        <FormLabel labelValue="Email" />
+        <FormInput
+          type="email"
+          name="email"
+          value={email}
+          onChange={handleChange}
+        />
+      </FormFieldsContainer>
+      <FormFieldsContainer>
+        <FormLabel labelValue="Password" />
+        <FormInput
+          type="password"
+          name="password"
+          value={password}
+          onChange={handleChange}
+        />
+      </FormFieldsContainer>
+      <FormButtonContainer buttonStyle="#007bff">
+        Login
+      </FormButtonContainer>
+      <LoginFooterContainer footerText="Don't have an account? Sign up here" />
+    </LoginContainer>
+  );
+};
+
+export default LoginForm;
+```
+
+In this code:
+
+*   We define a `LoginForm` component that takes a `handleLogin` prop, which is called when the user submits the form.
+*   We use styled components to create a visually appealing layout for our login form.
+*   We define state variables (`name`, `email`, and `password`) using React's `useState` hook and update them in response to user input changes.
+*   We handle form submission by calling the `handleLogin` prop with the current values of the state variables.

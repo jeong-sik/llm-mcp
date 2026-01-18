@@ -1,0 +1,4 @@
+(tests
+ (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log)
+ (libraries llm_mcp alcotest alcotest-lwt lwt lwt.unix str zstd domainslib)
+ (preprocess (pps lwt_ppx)))

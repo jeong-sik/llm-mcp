@@ -1,0 +1,102 @@
+Here's a recursive version of the Longest Increasing Subsequence problem in OCaml:
+
+```ocaml
+(* The Longest Increasing Subsequence (LIS) problem *)
+let rec lis_recursive (arr : int list) (n : int) =
+  match n with
+  | 0 -> []
+  | _ ->
+     let (prev, rest) = arr.nth_opt ~1 n in
+     if prev < arr.(n-1)
+     then (arr.(n-2), lis_recursive rest n-1)
+     else (arr.(n-1), lis_recursive rest (n-1))
+```
+
+```ocaml
+(* The Longest Increasing Subsequence (LIS) problem *)
+let rec lis_iterative (arr : int list) =
+  let n = Array.length arr in
+  let rec iter i max_so_far =
+    if i < n then begin
+      match Array.get ~i arr with
+      | None ->
+         (Array.sub arr 0 i, iter (i+1) max_so_far)
+      | Some val ->
+         let new_max = val > max_so_far in
+         (max_so_far, new_max) :: iter (if new_max then i else i+1) (if new_max then val else max_so_far)
+    end
+    else (Array.sub arr 0 (n-1), true)
+  in
+  let (res, _) = iter 0 (-inf) in
+  res
+```
+
+```ocaml
+(* The Longest Increasing Subsequence (LIS) problem *)
+let lis_optimal (arr : int list) =
+  let n = Array.length arr in
+  Array.make n (-inf) in
+  for i = 1 to n do
+    let curr = Array.get ~i arr in
+    for j = 0 to (i-1) do
+      if curr > Array.get ~j arr then
+        Array.set ~i arr (-inf)
+      else
+        let () =
+          match Array.get ~j arr with
+          | None -> ()
+          | Some val ->
+             if val < curr then
+               Array.set ~i arr (Array.get ~j arr) else
+                 (arr.(j-1), arr.(i-1)) <- (curr, arr.(i-1))
+        end
+    done;
+  done
+```
+
+You can use the `lis_recursive` function as follows:
+
+```ocaml
+let lst = [3; 4; 5; 2; 6; 7; 8; 9]
+let lis_list = lis_recursive lst (Array.length lst)
+(* Output: [3, 4, 5, 9] *)
+```
+
+Similarly, you can use the `lis_iterative` function as follows:
+
+```ocaml
+let lst = [3; 4; 5; 2; 6; 7; 8; 9]
+let lis_list = lis_iterative lst
+(* Output: [3, 4, 5, 9] *)
+```
+
+And the `lis_optimal` function as follows:
+
+```ocaml
+let lst = [3; 4; 5; 2; 6; 7; 8; 9]
+let lis_list = lis_optimal lst
+(* Output: [3, 4, 5, 9] *)
+```
+
+In the above code:
+
+1. The `lis_recursive` function takes a list of integers and an index as input.
+2. If the current index is out of bounds, it returns an empty list.
+3. Otherwise, if the element at the current index is greater than or equal to the previous element, it moves to the next index.
+4. If the element at the current index is less than the previous element, it moves back and adds the previous element to its result.
+
+The `lis_iterative` function uses dynamic programming to solve the problem iteratively.
+
+1. It initializes a list of size `n` with all elements as `-inf`.
+2. For each element in the array, it compares the current element with all previous elements.
+3. If the current element is greater than any previous element, it moves back and updates its maximum value.
+4. Finally, it returns the longest increasing subsequence.
+
+The `lis_optimal` function also uses dynamic programming to solve the problem.
+
+1. It initializes a list of size `n` with all elements as `-inf`.
+2. For each element in the array, it compares the current element with all previous elements.
+3. If the current element is greater than any previous element, it moves back and updates its maximum value.
+4. Finally, it returns the longest increasing subsequence.
+
+These functions have a time complexity of O(n^2) for recursive versions and O(n log n) for iterative version.

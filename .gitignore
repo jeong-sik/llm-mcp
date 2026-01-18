@@ -1,0 +1,27 @@
+# OCaml/Dune build artifacts
+_build/
+*.install
+*.opam.locked
+
+# Editor
+.merlin
+*.annot
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+*.swp
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.install
+*.merlin
+.merlin
+_opam/

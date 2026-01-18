@@ -1,0 +1,99 @@
+**Database Schema Technical Specification - Variation 9**
+
+**Overview**
+
+This technical specification outlines the design and structure of the database schema, which is used to store and manage data for our application. The schema is based on relational databases and uses standard SQL syntax.
+
+**Database Structure**
+
+The database will consist of six tables:
+
+1. **Users**
+2. **Orders**
+3. **OrderItems**
+4. **Products**
+5. **Categories**
+6. **Payments**
+
+**Table 1: Users**
+
+| Column Name | Data Type | Description |
+| --- | --- | --- |
+| `id` | `int` | Unique identifier for the user |
+| `username` | `varchar(50)` | Username chosen by the user |
+| `email` | `varchar(100)` | Email address associated with the user |
+| `password` | `varchar(255)` | Password stored securely using hashing |
+| `created_at` | `datetime` | Timestamp when the user account was created |
+
+**Table 2: Orders**
+
+| Column Name | Data Type | Description |
+| --- | --- | --- |
+| `id` | `int` | Unique identifier for the order |
+| `user_id` | `int` | Foreign key referencing the Users table |
+| `order_date` | `datetime` | Timestamp when the order was placed |
+| `total_cost` | `decimal(10, 2)` | Total cost of the order |
+
+**Table 3: OrderItems**
+
+| Column Name | Data Type | Description |
+| --- | --- | --- |
+| `id` | `int` | Unique identifier for the order item |
+| `order_id` | `int` | Foreign key referencing the Orders table |
+| `product_id` | `int` | Foreign key referencing the Products table |
+| `quantity` | `int` | Quantity of product ordered |
+
+**Table 4: Products**
+
+| Column Name | Data Type | Description |
+| --- | --- | --- |
+| `id` | `int` | Unique identifier for the product |
+| `name` | `varchar(100)` | Product name |
+| `description` | `text` | Product description |
+| `price` | `decimal(10, 2)` | Price of the product |
+
+**Table 5: Categories**
+
+| Column Name | Data Type | Description |
+| --- | --- | --- |
+| `id` | `int` | Unique identifier for the category |
+| `name` | `varchar(50)` | Category name |
+
+**Table 6: Payments**
+
+| Column Name | Data Type | Description |
+| --- | --- | --- |
+| `id` | `int` | Unique identifier for the payment |
+| `order_id` | `int` | Foreign key referencing the Orders table |
+| `payment_method` | `varchar(20)` | Payment method used (e.g. credit card, PayPal) |
+| `transaction_date` | `datetime` | Timestamp when the payment was processed |
+
+**Relationships**
+
+* A user can have many orders (one-to-many).
+* An order is associated with one user.
+* An order can have many order items (one-to-many).
+* An order item is associated with one order and one product.
+* A product belongs to one category (many-to-one).
+* A payment is associated with one order.
+
+**Indexing**
+
+The following columns will be indexed for improved query performance:
+
+* `Users.username`
+* `Orders.order_date`
+* `Products.name`
+* `Categories.name`
+
+**Constraints**
+
+The following constraints will be enforced on the data:
+
+* Primary keys: `id` in each table.
+* Foreign key constraints:
+ + `Users.user_id` references `Orders.id`.
+ + `OrderItems.product_id` references `Products.id`.
+ + `Payments.order_id` references `Orders.id`.
+
+This technical specification outlines the database schema for our application, including the design and structure of the tables and relationships between them. The indexing and constraints sections provide additional details on how data will be queried and validated.

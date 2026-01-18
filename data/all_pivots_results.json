@@ -1,0 +1,41 @@
+{
+  "date": "2026-01-12 15:08:40",
+  "pivots": {
+    "A_similarity": {
+      "human_avg": 45.12016368495987,
+      "llm_avg": 95.20889020124766,
+      "delta": 50.088726516287785
+    },
+    "B_delta": {
+      "full": 26.702997275204353,
+      "comments": 9.411764705882353,
+      "strings": -56.52173913043479,
+      "structure": -19.565217391304344,
+      "whitespace": 36.0
+    },
+    "C_baseline": {
+      "Human\u2192Human": 87.62003054106083,
+      "Human\u2192LLM": 40.539108694691436,
+      "LLM\u2192Human": 45.12016368495987,
+      "LLM\u2192LLM": 95.20889020124766
+    },
+    "D_system": {
+      "3b37d64e-78c6-4c5f-8041-d1374776b4b3.jsonl": {
+        "original": 123794,
+        "compressed": 21501,
+        "ratio": 82.63162996591112
+      },
+      "agent-acda28d.jsonl": {
+        "original": 6808,
+        "compressed": 3622,
+        "ratio": 46.7978848413631
+      },
+      "agent-a4ab654.jsonl": {
+        "original": 4990,
+        "compressed": 2529,
+        "ratio": 49.31863727454909
+      }
+    }
+  },
+  "recommendation": "See terminal output"
+}

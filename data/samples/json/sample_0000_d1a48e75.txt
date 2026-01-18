@@ -1,0 +1,59 @@
+Here is the JSON for an API response with status, data array, and pagination (variation 0):
+
+```
+{
+  "status": {
+    "code": 200,
+    "message": "OK"
+  },
+  "data": [
+    // array of objects
+  ],
+  "pagination": {
+    "total_count": 10,
+    "page_size": 20,
+    "current_page": 1,
+    "total_pages": 5,
+    "next_page": null
+  }
+}
+```
+
+Note that the `next_page` property is set to `null` in this case, but it could be any URL or identifier depending on how the API handles pagination.
+
+Alternatively, here's a more concise version:
+
+```
+{
+  "status": {
+    "code": 200,
+    "message": "OK"
+  },
+  "data": [
+    // array of objects
+  ],
+  "pagination": {
+    "total_count": 10,
+    "page_size": 20,
+    "current_page": 1,
+    "total_pages": 5
+  }
+}
+```
+
+Or, if you want to only include the pagination properties in a separate response:
+
+```
+{
+  "status": {
+    "code": 200,
+    "message": "OK"
+  },
+  "pagination": {
+    "next_page": null
+  },
+  "data": [
+    // array of objects
+  ]
+}
+```

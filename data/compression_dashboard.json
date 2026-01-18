@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-01-12T15:23:52Z",
+  "files_tested": 20,
+  "total_files": 1887,
+  "original_bytes": 780805886,
+  "zstd_standard_bytes": 113316325,
+  "zstd_dict_bytes": 114414805,
+  "compression_ratio_std": 85.49,
+  "compression_ratio_dict": 85.35,
+  "dict_advantage_pct": -0.14,
+  "estimated_total_bytes": 1689999639,
+  "estimated_savings_std": 1444734392,
+  "estimated_savings_dict": 1442356809
+}

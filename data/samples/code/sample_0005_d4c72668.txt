@@ -1,0 +1,36 @@
+import csv
+from io import StringIO
+
+def parse_csv_file(file_path):
+    """
+    Parse a CSV file and return the content as a list of lists.
+    
+    Args:
+        file_path (str): The path to the CSV file.
+
+    Returns:
+        list: A list of lists where each sublist represents a row in the CSV file.
+    
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        csv.Error: If there is an error parsing the CSV file.
+    """
+    try:
+        with open(file_path, 'r') as file:
+            reader = csv.reader(StringIO(file.read()))
+            data = list(reader)
+            return data
+    except FileNotFoundError:
+        print(f"The file {file_path} does not exist.")
+        raise
+    except csv.Error as e:
+        print(f"Error parsing the CSV file: {e}")
+        raise
+
+# Example usage
+try:
+    parsed_data = parse_csv_file('example.csv')
+    for row in parsed_data:
+        print(row)
+except Exception as e:
+    print(f"An error occurred: {e}")

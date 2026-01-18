@@ -1,0 +1,6 @@
+(library
+ (name llm_mcp)
+ (public_name llm_mcp)
+ (libraries lwt lwt.unix yojson cohttp-lwt-unix str unix mcp_protocol msgpck grpc-direct-core zstd compact-protocol domainslib)
+ (ocamlopt_flags (:standard -O3))
+ (preprocess (pps lwt_ppx ppx_deriving_yojson)))

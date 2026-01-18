@@ -1,0 +1,54 @@
+Here is an example of a TypeScript React component for a login form variation 6:
+
+```typescript
+import * as React from 'react';
+
+interface LoginFormProps {
+  onLogin: (username: string, password: string) => void;
+}
+
+const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
+  const [username, setUsername] = React.useState('');
+  const [password, setPassword] = React.useState('');
+
+  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setUsername(e.target.value);
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+  };
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    onLogin(username, password);
+  };
+
+  return (
+    <div className="login-form-container">
+      <h2>Login</h2>
+      <form onSubmit={handleSubmit}>
+        <label>
+          Username:
+          <input type="text" value={username} onChange={handleUsernameChange} />
+        </label>
+        <label>
+          Password:
+          <input type="password" value={password} onChange={handlePasswordChange} />
+        </label>
+        <button type="submit">Login</button>
+      </form>
+    </div>
+  );
+};
+
+export default LoginForm;
+```
+
+In this component, we're using the React Hooks API to manage state for the username and password fields. The `onLogin` prop is a callback function that will be called when the form is submitted.
+
+The JSX for the form includes two input fields (`username` and `password`) and a submit button. The `handleUsernameChange` and `handlePasswordChange` functions update the corresponding state values when the user types into these fields.
+
+When the form is submitted, the `handleSubmit` function calls the `onLogin` prop with the current username and password as arguments.
+
+Finally, we're using CSS classes to style the form element. You can adjust the class names to match your existing CSS styles.

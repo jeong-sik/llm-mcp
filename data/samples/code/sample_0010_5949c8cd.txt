@@ -1,0 +1,36 @@
+import csv
+
+def parse_csv_file(file_path):
+    """
+    Parse a CSV file and return its contents.
+
+    Args:
+        file_path (str): The path to the CSV file.
+
+    Returns:
+        list: A list of lists, where each inner list represents a row in the CSV file.
+    """
+
+    try:
+        with open(file_path, 'r') as file:
+            csv_reader = csv.reader(file)
+            data = [row for row in csv_reader]
+            return data
+
+    except FileNotFoundError:
+        print(f"The file {file_path} does not exist.")
+        return []
+
+    except PermissionError:
+        print(f"You do not have permission to read the file {file_path}.")
+        return []
+
+    except csv.Error as e:
+        print(f"Error parsing CSV: {e}")
+        return []
+
+# Example usage
+data = parse_csv_file('example.csv')
+if data:
+    for i, row in enumerate(data):
+        print(f"Row {i+1}: {row}")

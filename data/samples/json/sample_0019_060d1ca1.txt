@@ -1,0 +1,13 @@
+Here is an example of how you can create a JSON object with user profile data:
+
+```
+{
+    "name": "John Doe",
+    "email": "john.doe@example.com",
+    "preferences": {
+        "colorScheme": "dark",
+        "fontSize": 12,
+        "theme": "light"
+    }
+}
+```

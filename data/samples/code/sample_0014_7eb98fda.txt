@@ -1,0 +1,60 @@
+Here's an example of how you can use the `clap` crate in Rust to parse command-line arguments, variation 4:
+
+```rust
+use clap::{App, Arg};
+
+fn main() {
+    // Create a new app instance
+    let matches = App::new("My App")
+        .version("1.0")
+        .author("Your Name")
+        .about("A great app!")
+        .arg(
+            Arg::with_name("foo")
+                .long("foo")
+                .takes_value(true)
+                .help("Some description"),
+        )
+        .get_matches();
+
+    // Get the value of foo
+    let foo = matches.value_of("foo").unwrap_or("");
+
+    println!("Foo: {}", foo);
+}
+```
+
+However, since you requested variation 4, here's how to parse a flag and an option:
+
+```rust
+use clap::{App, Arg};
+
+fn main() {
+    // Create a new app instance
+    let matches = App::new("My App")
+        .version("1.0")
+        .author("Your Name")
+        .about("A great app!")
+        .arg(
+            Arg::with_name("foo")
+                .long("foo")
+                .takes_value(false)
+                .help("Some description"),
+        )
+        .arg(
+            Arg::with_name("bar")
+                .long("bar")
+                .takes_value(true)
+                .required(true),
+        )
+        .get_matches();
+
+    // Get the value of bar
+    let bar = matches.value_of("bar").unwrap_or("");
+
+    println!("Foo: {}", matches.is_present("foo"));
+    println!("Bar: {}", bar);
+}
+```
+
+In this code, we have a flag named "foo" and an option (a required argument) named "bar". We then print whether the foo flag is present and the value of the bar option.

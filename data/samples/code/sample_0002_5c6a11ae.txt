@@ -1,0 +1,41 @@
+Here's a simple implementation of Longest Increasing Subsequence using dynamic programming in OCaml. The function `longest_increasing_subsequence` takes as input a list of integers and returns the length of the longest increasing subsequence.
+
+```ocaml
+(* Function to find the index of the first element that is greater than previous element *)
+let rec find_first_greater (lst : int list) (i : int) (prev : int option) =
+  match prev with
+  | Some x -> if x < lst.(i) then i else find_first_greater lst (succ i) None
+  | None -> find_first_greater lst (0) Some (head lst)
+
+(* Function to build the dynamic programming table *)
+let rec build_dp_table (lst : int list) (n : int) =
+  let dp = Array.create n (-1) in
+  for i = 0 to n-1 do
+    dp.(i) <- find_first_greater lst i None
+  done;
+  dp
+
+(* Function to find the length of longest increasing subsequence using dynamic programming *)
+let longest_increasing_subsequence (lst : int list) =
+  let n = List.length lst in
+  let dp_table = build_dp_table lst n in
+  let rec find_lis len (i : int) =
+    match i with
+    | -1 -> len
+    | _ ->
+      let next_idx = dp_table.(i)+1 in
+      find_lis (max len (len+1)) (next_idx)
+  in
+  find_lis 0 (-1)
+
+(* Example usage *)
+let () =
+  let lst = [3; 10; 2; 1; 20] in
+  let lis_len = longest_increasing_subsequence lst in
+  print_int lis_len;
+  print_char '\n'
+```
+
+This function builds a dynamic programming table `dp` where the value at position `i` is the index of the first element greater than the previous element at that index. It then uses this table to build up the longest increasing subsequence by starting from each element and moving forward until it reaches a point where there are no more elements greater than it.
+
+The example usage shows how to use this function to find the length of the longest increasing subsequence in a list `[3; 10; 2; 1; 20]`.

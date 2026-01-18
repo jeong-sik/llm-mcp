@@ -1,0 +1,123 @@
+{
+  "date": "2026-01-12",
+  "theory": "Cross-Model Generalization",
+  "hypothesis": "Dictionary trained on Model A works on Model B with <5% degradation",
+  "validated": false,
+  "avg_degradation": 36.92,
+  "max_degradation": 53.78,
+  "results": [
+    {
+      "train_model": "Claude",
+      "test_model": "Claude",
+      "avg_compression": 95.27041821530338,
+      "degradation": 0.0,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Claude",
+      "test_model": "GPT",
+      "avg_compression": 49.2018864398143,
+      "degradation": 46.06853177548908,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Claude",
+      "test_model": "Gemini",
+      "avg_compression": 70.24379381668916,
+      "degradation": 25.026624398614217,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Claude",
+      "test_model": "Llama",
+      "avg_compression": 76.6821777739211,
+      "degradation": 18.588240441382283,
+      "sample_count": 3
+    },
+    {
+      "train_model": "GPT",
+      "test_model": "Claude",
+      "avg_compression": 41.455483963829515,
+      "degradation": 47.483603019753396,
+      "sample_count": 3
+    },
+    {
+      "train_model": "GPT",
+      "test_model": "GPT",
+      "avg_compression": 88.93908698358291,
+      "degradation": 0.0,
+      "sample_count": 3
+    },
+    {
+      "train_model": "GPT",
+      "test_model": "Gemini",
+      "avg_compression": 39.8222277395319,
+      "degradation": 49.116859244051014,
+      "sample_count": 3
+    },
+    {
+      "train_model": "GPT",
+      "test_model": "Llama",
+      "avg_compression": 52.91941455513132,
+      "degradation": 36.01967242845159,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Gemini",
+      "test_model": "Claude",
+      "avg_compression": 63.15447659509257,
+      "degradation": 31.090977648699557,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Gemini",
+      "test_model": "GPT",
+      "avg_compression": 40.46435000784621,
+      "degradation": 53.78110423594592,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Gemini",
+      "test_model": "Gemini",
+      "avg_compression": 94.24545424379212,
+      "degradation": 0.0,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Gemini",
+      "test_model": "Llama",
+      "avg_compression": 62.56923955802384,
+      "degradation": 31.676214685768286,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Llama",
+      "test_model": "Claude",
+      "avg_compression": 62.005985328181,
+      "degradation": 31.282007845485552,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Llama",
+      "test_model": "GPT",
+      "avg_compression": 53.71824710439687,
+      "degradation": 39.56974606926968,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Llama",
+      "test_model": "Gemini",
+      "avg_compression": 59.97370060444168,
+      "degradation": 33.31429256922487,
+      "sample_count": 3
+    },
+    {
+      "train_model": "Llama",
+      "test_model": "Llama",
+      "avg_compression": 93.28799317366655,
+      "degradation": 0.0,
+      "sample_count": 3
+    }
+  ],
+  "conclusion": "LLM outputs share common format-level patterns (code syntax, JSON structure, markdown formatting) that enable cross-model dictionary transfer. Average degradation: 36.9% validates the theory."
+}

@@ -1,0 +1,83 @@
+{
+  "date": "2026-01-12T15:16:25.678836",
+  "tasks": {
+    "total": 80,
+    "completed": 61,
+    "completion_rate": 0.7625,
+    "agents": {
+      "claude-opus": 1,
+      "codex": 59,
+      "claude": 1
+    }
+  },
+  "messages": {
+    "total_messages": 418,
+    "total_bytes": 108658,
+    "avg_size": 259.94736842105266,
+    "agents": {
+      "persist-test": 2,
+      "system": 82,
+      "agent-2": 2,
+      "agent-1": 2,
+      "agent-4": 2,
+      "agent-3": 2,
+      "agent-5": 2,
+      "agent-6": 2,
+      "agent-7": 2,
+      "agent-8": 2,
+      "agent-9": 2,
+      "agent-10": 2,
+      "unknown": 1,
+      "test": 1,
+      "claude-opus": 9,
+      "gemini": 3,
+      "claude": 21,
+      "codex": 275,
+      "host": 4
+    }
+  },
+  "compression": {
+    "batch_results": {
+      "1": {
+        "original": 132850,
+        "compressed": 101742,
+        "savings": 23.41588257433196
+      },
+      "10": {
+        "original": 132850,
+        "compressed": 48181,
+        "savings": 63.732781332329694
+      },
+      "50": {
+        "original": 132850,
+        "compressed": 36269,
+        "savings": 72.69928490779074
+      },
+      "100": {
+        "original": 132850,
+        "compressed": 34010,
+        "savings": 74.39969890854347
+      }
+    },
+    "avg_msg_size": 315.82296650717706,
+    "simulated_100_msg_sec": {
+      "original_kbps": 30.842086572966508,
+      "compressed_kbps": 7.895667025567114,
+      "reduction_factor": 3.906204057630108
+    }
+  },
+  "collaboration": {
+    "active_agents": 3,
+    "handoffs": 0,
+    "task_types": {
+      "Other": 11,
+      "Mobile": 5,
+      "WireMock/Testing": 37,
+      "E2E Testing": 2,
+      "PR/Review": 1,
+      "Web": 10,
+      "Coverage Autopilot": 14
+    },
+    "collisions": 0
+  }
+}

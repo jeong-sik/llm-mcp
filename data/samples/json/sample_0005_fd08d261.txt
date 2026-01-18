@@ -1,0 +1,34 @@
+Here's the code snippet in JavaScript that generates a JSON object for API responses:
+
+```javascript
+function generateJson(status, data, pagination = {}) {
+    return {
+        "status": status,
+        "data": data,
+        "pagination": {
+            "page": pagination.page || 1,
+            "pages": Math.ceil(pagination.total / 10) // Assume each page contains 10 items.
+            // pages: Math.ceil(data.length / 10), // If you know the total number of records, 
+            // this could be used to calculate the correct number of pages.
+        }
+    };
+}
+
+// Example usage:
+const status = "success";
+const data = [
+    { id: 1, name: "John Doe" },
+    { id: 2, name: "Jane Doe" },
+    { id: 3, name: "Bob Smith" },
+];
+
+const totalItems = 30; // Assuming the database returns all records in a single response.
+const pageSize = 10;
+const pageNumber = 1;
+
+const responseJson = generateJson(status, data, {
+    total: totalItems,
+    pages: Math.ceil(totalItems / pageSize),
+});
+console.log(responseJson);
+```

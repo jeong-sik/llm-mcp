@@ -1,0 +1,35 @@
+Here is a sample JSON for an API response that includes the requested elements:
+
+```
+{
+    "status": {
+        "code": 200,
+        "message": "OK"
+    },
+    "data": [
+        // List of items
+    ],
+    "pagination": {
+        "total_count": 100, // total number of records in the database
+        "current_page": 1,
+        "per_page": 10, // number of records to return per page
+        "last_page": 10, // last page number that is available in the database
+        "next_page": null, // URL for the next page (null if there are no more pages)
+        "prev_page": null, // URL for the previous page (null if there are no previous pages)
+        "page_links": [1, 2, 3, 4, 5] // array of available page numbers
+    }
+}
+```
+
+In this example, `data` is an empty array because we don't have any data to return. You can replace it with the actual list of items you want to display.
+
+The `pagination` object includes several useful properties:
+
+*   `total_count`: The total number of records in the database.
+*   `current_page`: The current page number being displayed (usually 1).
+*   `per_page`: The number of records to return per page (e.g., 10 items per page).
+*   `last_page`: The last page number that is available in the database.
+*   `next_page` and `prev_page`: URLs for the next and previous pages, respectively. If there are no more pages or previous pages, these will be null.
+*   `page_links`: An array of available page numbers.
+
+These properties provide useful metadata about the data being returned, which can help with pagination and navigation in your API.

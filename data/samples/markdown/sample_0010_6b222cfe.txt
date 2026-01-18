@@ -1,0 +1,137 @@
+RESTful API Endpoint Documentation
+=====================================
+
+**Endpoint Overview**
+
+This API provides a simple resource management system. It allows users to create, read, update and delete (CRUD) resources.
+
+**Endpoint URL**
+
+`/resources`
+
+**HTTP Methods**
+
+* **GET**: Retrieve all resources
+* **POST**: Create a new resource
+* **PUT**: Update an existing resource
+* **DELETE**: Delete a resource
+
+### GET /resources
+
+**Description**
+
+Retrieve a list of all available resources.
+
+**Request Parameters**
+
+None
+
+**Response Body**
+
+* `id` (integer): Unique identifier for the resource
+* `name` (string): Name of the resource
+* `description` (string): Description of the resource
+
+**Example Response**
+```json
+{
+  "resources": [
+    {
+      "id": 1,
+      "name": "Resource 1",
+      "description": "This is a description of Resource 1"
+    },
+    {
+      "id": 2,
+      "name": "Resource 2",
+      "description": "This is a description of Resource 2"
+    }
+  ]
+}
+```
+### POST /resources
+
+**Description**
+
+Create a new resource.
+
+**Request Body**
+
+* `name` (string): Name of the resource
+* `description` (string): Description of the resource
+
+**Example Request Body**
+```json
+{
+  "name": "New Resource",
+  "description": "This is a description of the new resource"
+}
+```
+**Response Status Code**
+
+* **201 Created**: New resource created successfully
+* **400 Bad Request**: Invalid request body or parameters
+
+**Example Response**
+```json
+{
+  "id": 3,
+  "name": "New Resource",
+  "description": "This is a description of the new resource"
+}
+```
+### PUT /resources/:id
+
+**Description**
+
+Update an existing resource.
+
+**Request Parameters**
+
+* `id` (integer): Unique identifier for the resource
+
+**Request Body**
+
+* `name` (string): New name for the resource
+* `description` (string): New description for the resource
+
+**Example Request Body**
+```json
+{
+  "name": "Updated Resource",
+  "description": "This is an updated description of the resource"
+}
+```
+**Response Status Code**
+
+* **200 OK**: Resource updated successfully
+* **400 Bad Request**: Invalid request body or parameters
+
+**Example Response**
+```json
+{
+  "id": 1,
+  "name": "Updated Resource",
+  "description": "This is an updated description of the resource"
+}
+```
+### DELETE /resources/:id
+
+**Description**
+
+Delete a resource.
+
+**Request Parameters**
+
+* `id` (integer): Unique identifier for the resource
+
+**Response Status Code**
+
+* **204 No Content**: Resource deleted successfully
+* **400 Bad Request**: Invalid request body or parameters
+
+**Example Response**
+```json
+{}
+```
+Note: This documentation assumes that the API is built using a standard HTTP client and server. The specific implementation details may vary depending on the chosen technology stack.

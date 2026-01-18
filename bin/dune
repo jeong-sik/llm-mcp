@@ -1,0 +1,387 @@
+(executable
+ (name main)
+ (public_name llm-mcp)
+ (package llm_mcp)
+ (modules main)
+ (libraries llm_mcp lwt.unix cmdliner cohttp-lwt-unix mcp_protocol)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name save_prompt)
+ (public_name save-prompt)
+ (package llm_mcp)
+ (modules save_prompt)
+ (libraries lwt lwt.unix cmdliner caqti caqti-lwt caqti-lwt.unix caqti-driver-postgresql re uri)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name skill_activator)
+ (public_name skill-activator)
+ (package llm_mcp)
+ (modules skill_activator)
+ (libraries llm_mcp cmdliner yojson re))
+
+(executable
+ (name log_refinement)
+ (public_name log-refinement)
+ (package llm_mcp)
+ (modules log_refinement)
+ (libraries lwt lwt.unix cmdliner caqti caqti-lwt caqti-lwt.unix caqti-driver-postgresql yojson uri)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name build_query_context)
+ (public_name build-query-context)
+ (package llm_mcp)
+ (modules build_query_context)
+ (libraries llm_mcp unix cmdliner yojson re))
+
+(executable
+ (name person_lookup)
+ (public_name person-lookup)
+ (package llm_mcp)
+ (modules person_lookup)
+ (libraries lwt lwt.unix neo4j_bolt yojson)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name memory_retriever)
+ (public_name memory-retriever)
+ (package llm_mcp)
+ (modules memory_retriever)
+ (libraries lwt lwt.unix cohttp-lwt-unix yojson cmdliner unix)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name claude_cli)
+ (public_name claude-cli-ocaml)
+ (package llm_mcp)
+ (modules claude_cli)
+ (libraries unix yojson cmdliner))
+
+(executable
+ (name fast_query_analyzer)
+ (public_name fast-query-analyzer)
+ (package llm_mcp)
+ (modules fast_query_analyzer)
+ (libraries unix yojson cmdliner))
+
+(executable
+ (name session_metadata)
+ (public_name session-metadata)
+ (package llm_mcp)
+ (modules session_metadata)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name retrospective_checker)
+ (public_name retrospective-checker)
+ (package llm_mcp)
+ (modules retrospective_checker)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name agent_stats)
+ (public_name agent-stats)
+ (package llm_mcp)
+ (modules agent_stats)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name oauth_status)
+ (public_name oauth-status)
+ (package llm_mcp)
+ (modules oauth_status)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name neo4j_health)
+ (public_name neo4j-health)
+ (package llm_mcp)
+ (modules neo4j_health)
+ (libraries lwt lwt.unix neo4j_bolt yojson)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name subagent_logger)
+ (public_name subagent-logger)
+ (package llm_mcp)
+ (modules subagent_logger)
+ (libraries lwt lwt.unix neo4j_bolt)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name hook_input)
+ (public_name hook-input)
+ (package llm_mcp)
+ (modules hook_input)
+ (libraries yojson))
+
+(executable
+ (name neo4j_session)
+ (public_name neo4j-session)
+ (package llm_mcp)
+ (modules neo4j_session)
+ (libraries lwt lwt.unix neo4j_bolt yojson re unix)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name neo4j_session_context)
+ (public_name neo4j-session-context)
+ (package llm_mcp)
+ (modules neo4j_session_context)
+ (libraries lwt lwt.unix neo4j_bolt yojson)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name session_logger)
+ (public_name session-logger)
+ (package llm_mcp)
+ (modules session_logger)
+ (libraries unix))
+
+(executable
+ (name previously_on)
+ (public_name previously-on)
+ (package llm_mcp)
+ (modules previously_on)
+ (libraries lwt lwt.unix neo4j_bolt yojson)
+ (preprocess (pps lwt_ppx)))
+
+(executable
+ (name council_vote)
+ (public_name council-vote)
+ (package llm_mcp)
+ (modules council_vote)
+ (libraries unix str))
+
+(executable
+ (name twin_analyzer)
+ (public_name twin-analyzer)
+ (package llm_mcp)
+ (modules twin_analyzer)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name daily_summary)
+ (public_name daily-summary)
+ (package llm_mcp)
+ (modules daily_summary)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name wisdom_synthesizer)
+ (public_name wisdom-synthesizer)
+ (package llm_mcp)
+ (modules wisdom_synthesizer)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_akasha)
+ (public_name ouroboros-akasha)
+ (package llm_mcp)
+ (modules ouroboros_akasha)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_curriculum)
+ (public_name ouroboros-curriculum)
+ (package llm_mcp)
+ (modules ouroboros_curriculum)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_governance)
+ (public_name ouroboros-governance)
+ (package llm_mcp)
+ (modules ouroboros_governance)
+ (libraries llm_mcp unix str))
+
+(executable
+ (name ouroboros_evolve)
+ (public_name ouroboros-evolve)
+ (package llm_mcp)
+ (modules ouroboros_evolve)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_critique)
+ (public_name ouroboros-critique)
+ (package llm_mcp)
+ (modules ouroboros_critique)
+ (libraries llm_mcp unix))
+
+(executable
+ (name ouroboros_spawn)
+ (public_name ouroboros-spawn)
+ (package llm_mcp)
+ (modules ouroboros_spawn)
+ (libraries llm_mcp unix))
+
+(executable
+ (name ouroboros_swarm)
+ (public_name ouroboros-swarm)
+ (package llm_mcp)
+ (modules ouroboros_swarm)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_architect)
+ (public_name ouroboros-architect)
+ (package llm_mcp)
+ (modules ouroboros_architect)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_dream)
+ (public_name ouroboros-dream)
+ (package llm_mcp)
+ (modules ouroboros_dream)
+ (libraries llm_mcp unix yojson str))
+
+(executable
+ (name ouroboros_researcher)
+ (public_name ouroboros-researcher)
+ (package llm_mcp)
+ (modules ouroboros_researcher)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_alliance)
+ (public_name ouroboros-alliance)
+ (package llm_mcp)
+ (modules ouroboros_alliance)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_diplomacy)
+ (public_name ouroboros-diplomacy)
+ (package llm_mcp)
+ (modules ouroboros_diplomacy)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_trade)
+ (public_name ouroboros-trade)
+ (package llm_mcp)
+ (modules ouroboros_trade)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_loop)
+ (public_name ouroboros-loop)
+ (package llm_mcp)
+ (modules ouroboros_loop)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_cli)
+ (public_name ouroboros-cli)
+ (package llm_mcp)
+ (modules ouroboros_cli)
+ (libraries llm_mcp unix))
+
+(executable
+ (name ouroboros_daemon)
+ (public_name ouroboros-daemon)
+ (package llm_mcp)
+ (modules ouroboros_daemon)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_dashboard)
+ (public_name ouroboros-dashboard)
+ (package llm_mcp)
+ (modules ouroboros_dashboard)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_decomposer)
+ (public_name ouroboros-decomposer)
+ (package llm_mcp)
+ (modules ouroboros_decomposer)
+ (libraries llm_mcp unix str))
+
+(executable
+ (name ouroboros_dispatcher)
+ (public_name ouroboros-dispatcher)
+ (package llm_mcp)
+ (modules ouroboros_dispatcher)
+ (libraries llm_mcp unix))
+
+(executable
+ (name ouroboros_formal)
+ (public_name ouroboros-formal)
+ (package llm_mcp)
+ (modules ouroboros_formal)
+ (libraries str))
+
+(executable
+ (name ouroboros_meta)
+ (public_name ouroboros-meta)
+ (package llm_mcp)
+ (modules ouroboros_meta)
+ (libraries str))
+
+(executable
+ (name ouroboros_nas)
+ (public_name ouroboros-nas)
+ (package llm_mcp)
+ (modules ouroboros_nas)
+ (libraries llm_mcp unix))
+
+(executable
+ (name ouroboros_nerve)
+ (public_name ouroboros-nerve)
+ (package llm_mcp)
+ (modules ouroboros_nerve)
+ (libraries unix str))
+
+(executable
+ (name ouroboros_profiler)
+ (public_name ouroboros-profiler)
+ (package llm_mcp)
+ (modules ouroboros_profiler)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_recombinator)
+ (public_name ouroboros-recombinator)
+ (package llm_mcp)
+ (modules ouroboros_recombinator)
+ (libraries llm_mcp unix))
+
+(executable
+ (name ouroboros_scholar)
+ (public_name ouroboros-scholar)
+ (package llm_mcp)
+ (modules ouroboros_scholar)
+ (libraries str))
+
+(executable
+ (name ouroboros_sense)
+ (public_name ouroboros-sense)
+ (package llm_mcp)
+ (modules ouroboros_sense)
+ (libraries llm_mcp unix yojson str))
+
+(executable
+ (name ouroboros_symbiosis)
+ (public_name ouroboros-symbiosis)
+ (package llm_mcp)
+ (modules ouroboros_symbiosis)
+ (libraries llm_mcp unix yojson))
+
+(executable
+ (name ouroboros_economy_v2)
+ (public_name ouroboros-economy-v2)
+ (package llm_mcp)
+ (modules ouroboros_economy_v2)
+ (libraries str))
+
+(executable
+ (name train_dictionary)
+ (public_name train-dictionary)
+ (package llm_mcp)
+ (modules train_dictionary)
+ (libraries llm_mcp unix yojson))

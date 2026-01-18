@@ -1,0 +1,86 @@
+**Variation 0: GET /users**
+
+### Overview
+
+The `/users` endpoint is used to retrieve a list of users. This endpoint returns a JSON array of user objects, each containing information about an individual user.
+
+### Request Methods
+
+* **GET**: Retrieves a list of all users.
+
+### Request Parameters
+
+None.
+
+### Response
+
+| HTTP Status Code | Description |
+| --- | --- |
+| 200 OK | The request was successful and the list of users is returned. |
+| 400 Bad Request | The request was invalid or cannot be processed. |
+| 500 Internal Server Error | An unexpected error occurred while processing the request. |
+
+### Response Body
+
+The response body contains a JSON array of user objects, each with the following properties:
+
+* `id`: Unique identifier for the user (integer).
+* `name`: Full name of the user (string).
+* `email`: Email address of the user (string).
+
+Example Response:
+```json
+[
+  {
+    "id": 1,
+    "name": "John Doe",
+    "email": "john.doe@example.com"
+  },
+  {
+    "id": 2,
+    "name": "Jane Smith",
+    "email": "jane.smith@example.com"
+  }
+]
+```
+### Examples
+
+#### Example 1: Get all users
+```bash
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+[
+  {
+    "id": 1,
+    "name": "John Doe",
+    "email": "john.doe@example.com"
+  },
+  {
+    "id": 2,
+    "name": "Jane Smith",
+    "email": "jane.smith@example.com"
+  }
+]
+```
+#### Example 2: Error response (400 Bad Request)
+```bash
+GET /users HTTP/1.1
+Host: example.com
+Accept: application/json
+
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+
+{
+  "error": "Invalid request parameters"
+}
+```
+
+### API Documentation Tools
+
+This documentation was generated using the OpenAPI specification (formerly known as Swagger). For more information on OpenAPI, please refer to the official documentation at <https://openapi-spec.org>.

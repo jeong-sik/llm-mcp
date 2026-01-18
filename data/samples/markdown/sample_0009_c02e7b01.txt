@@ -1,0 +1,84 @@
+**Database Schema Technical Specification (Variation 9)**
+
+**Overview**
+
+This document outlines the technical specifications for our database schema, which will be used to store and manage data for our application. The schema is designed to accommodate a wide range of data types and relationships, ensuring flexibility and scalability.
+
+**Database Structure**
+
+The database consists of three main components: **Users**, **Products**, and **Orders**.
+
+### 1. Users Table
+
+| Field Name | Data Type | Description |
+| --- | --- | --- |
+| id (Primary Key) | int | Unique identifier for each user |
+| username | varchar(50) | Username chosen by the user |
+| password_hash | varchar(255) | Hashed password stored securely |
+| email | varchar(100) | User's email address |
+| created_at | timestamp | Timestamp when the user account was created |
+
+### 2. Products Table
+
+| Field Name | Data Type | Description |
+| --- | --- | --- |
+| id (Primary Key) | int | Unique identifier for each product |
+| name | varchar(100) | Product name |
+| description | text | Brief product description |
+| price | decimal(10, 2) | Product price |
+| image_url | varchar(255) | URL of the product image |
+| category_id (Foreign Key) | int | Category ID that belongs to this product |
+
+### 3. Orders Table
+
+| Field Name | Data Type | Description |
+| --- | --- | --- |
+| id (Primary Key) | int | Unique identifier for each order |
+| user_id (Foreign Key) | int | User ID who placed the order |
+| order_date | timestamp | Timestamp when the order was created |
+| total_cost | decimal(10, 2) | Total cost of the order |
+
+### 4. Order Items Table
+
+| Field Name | Data Type | Description |
+| --- | --- | --- |
+| id (Primary Key) | int | Unique identifier for each order item |
+| order_id (Foreign Key) | int | Order ID that this item belongs to |
+| product_id (Foreign Key) | int | Product ID of the item |
+| quantity | int | Quantity of the item in the order |
+
+### 5. Categories Table
+
+| Field Name | Data Type | Description |
+| --- | --- | --- |
+| id (Primary Key) | int | Unique identifier for each category |
+| name | varchar(50) | Category name |
+| description | text | Brief category description |
+
+**Indexing and Constraints**
+
+* Primary keys: `id` in Users, Products, Orders, Order Items, and Categories
+* Foreign keys:
+ + User ID references the id in Users
+ + Product ID references the id in Products
+ + Order ID references the id in Orders
+ + Category ID references the id in Categories
+* Indexes:
+ + Create a composite index on `Users` for efficient username lookups
+ + Create a composite index on `Products` for efficient product name and category lookups
+
+**Data Types**
+
+* Integer values will be stored as signed 32-bit integers (int)
+* Decimal values will be stored with a maximum of 10 digits before the decimal point and 2 digits after the decimal point (decimal(10, 2))
+* String values will be stored as Unicode strings using UTF-8 encoding
+
+**Storage**
+
+The database will be stored on a relational database management system (RDBMS) such as MySQL or PostgreSQL.
+
+**Backup and Recovery**
+
+Regular backups of the database will be performed to ensure data integrity and availability. In case of a failure, the backup data can be restored to restore the original state of the database.
+
+By following this technical specification, we aim to create a robust and scalable database schema that meets our application's requirements.

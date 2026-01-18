@@ -1,0 +1,30 @@
+Here's an example of a JSON response that includes a status field, a data array, and pagination information in variation 0:
+
+```
+{
+    "status": {
+        "code": "success",
+        "message": "Data retrieved successfully"
+    },
+    "data": [
+        {
+            "id": 1,
+            "name": "John Doe",
+            "email": "johndoe@example.com"
+        },
+        {
+            "id": 2,
+            "name": "Jane Doe",
+            "email": "janedoe@example.com"
+        }
+    ],
+    "pagination": {
+        "total": 100,
+        "per_page": 10,
+        "current_page": 1,
+        "last_page": 10
+    }
+}
+```
+
+In this example, the status is set to a success code with a descriptive message. The data array contains two objects, each representing an item in the dataset. The pagination object provides information about the total number of records (100), the number of records per page (10), the current page number (1), and the total number of pages (10).

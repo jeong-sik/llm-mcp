@@ -1,0 +1,118 @@
+{
+  "date": "2026-01-12",
+  "normal_avg_compression": 94.64,
+  "adversarial_avg_compression": 9.69,
+  "degradation_percent": 84.95,
+  "degraded_cases": 8,
+  "total_adversarial_cases": 9,
+  "results": [
+    {
+      "name": "python_code",
+      "category": "normal",
+      "size": 513,
+      "compact_ratio": 95.71,
+      "zstd_ratio": 53.61,
+      "gzip_ratio": 56.53,
+      "verdict": "baseline"
+    },
+    {
+      "name": "json_api",
+      "category": "normal",
+      "size": 347,
+      "compact_ratio": 93.66,
+      "zstd_ratio": 33.43,
+      "gzip_ratio": 35.16,
+      "verdict": "baseline"
+    },
+    {
+      "name": "markdown_doc",
+      "category": "normal",
+      "size": 403,
+      "compact_ratio": 94.54,
+      "zstd_ratio": 33.0,
+      "gzip_ratio": 34.74,
+      "verdict": "baseline"
+    },
+    {
+      "name": "random_bytes_1k",
+      "category": "adversarial",
+      "size": 1024,
+      "compact_ratio": -1.37,
+      "zstd_ratio": -0.98,
+      "gzip_ratio": -2.25,
+      "verdict": "\u26a0\ufe0f low"
+    },
+    {
+      "name": "random_ascii_1k",
+      "category": "adversarial",
+      "size": 1024,
+      "compact_ratio": -1.37,
+      "zstd_ratio": 12.79,
+      "gzip_ratio": 12.99,
+      "verdict": "\u26a0\ufe0f degraded"
+    },
+    {
+      "name": "anti_pattern_1k",
+      "category": "adversarial",
+      "size": 1024,
+      "compact_ratio": -1.37,
+      "zstd_ratio": 25.78,
+      "gzip_ratio": 25.39,
+      "verdict": "\u26a0\ufe0f degraded"
+    },
+    {
+      "name": "unique_words_200",
+      "category": "adversarial",
+      "size": 1723,
+      "compact_ratio": 38.54,
+      "zstd_ratio": 38.65,
+      "gzip_ratio": 37.09,
+      "verdict": "\u2705 robust"
+    },
+    {
+      "name": "unicode_chaos_1k",
+      "category": "adversarial",
+      "size": 1024,
+      "compact_ratio": 7.62,
+      "zstd_ratio": 24.9,
+      "gzip_ratio": 37.21,
+      "verdict": "\u26a0\ufe0f degraded"
+    },
+    {
+      "name": "binary_like_1k",
+      "category": "adversarial",
+      "size": 1024,
+      "compact_ratio": 15.53,
+      "zstd_ratio": 49.22,
+      "gzip_ratio": 49.02,
+      "verdict": "\u26a0\ufe0f degraded"
+    },
+    {
+      "name": "json_chaos_deep",
+      "category": "adversarial",
+      "size": 1311,
+      "compact_ratio": 29.29,
+      "zstd_ratio": 44.47,
+      "gzip_ratio": 46.68,
+      "verdict": "\u26a0\ufe0f degraded"
+    },
+    {
+      "name": "random_bytes_5k",
+      "category": "adversarial",
+      "size": 5000,
+      "compact_ratio": -0.28,
+      "zstd_ratio": -0.2,
+      "gzip_ratio": -0.46,
+      "verdict": "\u26a0\ufe0f low"
+    },
+    {
+      "name": "mixed_adversarial",
+      "category": "adversarial",
+      "size": 1017,
+      "compact_ratio": 0.59,
+      "zstd_ratio": 12.09,
+      "gzip_ratio": 14.06,
+      "verdict": "\u26a0\ufe0f degraded"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+Here's an example of how you could define a user profile in JSON format:
+
+```
+{
+    "name": {
+        "first_name": "",
+        "last_name": ""
+    },
+    "email": "",
+    "preferences": {
+        // Variation 4
+        "display_name": "",
+        "locale": "",
+        "language": "",
+        "currency": "",
+        "timezone": ""
+    }
+}
+```
+
+In this structure, the `name` object contains first and last names for the user. The `email` field is a string that holds the user's email address.
+
+The `preferences` object is where you can store any additional information about the user. In variation 4, it includes:
+
+*   `display_name`: This is the name displayed to others when they interact with the user.
+*   `locale`: This is the locale (region) of the user.
+*   `language`: This is the language spoken by the user.
+*   `currency`: This is the currency used by the user.
+*   `timezone`:

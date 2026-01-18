@@ -1,0 +1,23 @@
+Here's an example of a JSON error response in Variation 3 format:
+
+```
+{
+    "code": 400,
+    "message": "Invalid request",
+    "details": {
+        "errorType": "validationError",
+        "invalidFields": [
+            {
+                "field": "username",
+                "errorMessage": "Username is required"
+            },
+            {
+                "field": "email",
+                "errorMessage": "Email is invalid"
+            }
+        ]
+    }
+}
+```
+
+In this response, we have a code of 400 (Bad Request), a message indicating that the request was invalid. The details section includes an error type and a list of invalid fields with their corresponding error messages.

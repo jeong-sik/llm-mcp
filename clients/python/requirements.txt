@@ -1,0 +1,4 @@
+# Compact Protocol v1.3 Decoder Dependencies
+msgpack>=1.0.0
+pytest>=7.0.0
+requests>=2.31.0  # for example_usage.py
