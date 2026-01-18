@@ -1,6 +1,6 @@
 # llm-mcp 🐫
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/jeong-sik/llm-mcp)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/jeong-sik/llm-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
@@ -8,7 +8,7 @@
 
 Multi-LLM MCP Server written in OCaml (native binary).
 
-> **Note**: Python 버전은 `features/_archived/llm-mcp-python/`에 아카이브됨
+> **Note**: Python 버전은 별도 아카이브로 이동됨 (이 저장소에는 OCaml 버전만 유지)
 
 **MAGI Pentarchy (오두정치)**: Unified MCP wrapper for multiple LLM CLIs:
 

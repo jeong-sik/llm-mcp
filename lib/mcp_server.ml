@@ -293,6 +293,12 @@ let handle_call_tool ~wants_stream id params =
     | _ -> false
   in
 
+  (* Check if Ollama has tools (for agentic execution) *)
+  let has_tools = match args with
+    | Types.Ollama { tools = Some t; _ } -> List.length t > 0
+    | _ -> false
+  in
+
   (* Enable SSE keepalive if the client accepts streaming or caller requests it. *)
   let stream_requested = match args with
     | Types.Gemini { stream; _ }
@@ -306,8 +312,55 @@ let handle_call_tool ~wants_stream id params =
   (* For slow tools (local ollama models) with streaming client, use SSE *)
   let is_local_model = name = "ollama" in
 
-  (* Token-by-token streaming via SseTokenStream *)
-  if wants_keepalive && is_local_model && wants_token_stream then begin
+  (* Agentic execution for Ollama with tools (non-streaming, uses agent loop) *)
+  if is_local_model && has_tools then begin
+    let tools = match args with
+      | Types.Ollama { tools = Some t; _ } -> t
+      | _ -> []
+    in
+    let stream = Sse.create_stream () in
+    let (push_stream, push) = Lwt_stream.create () in
+    let finished = ref false in
+
+    let rec keepalive () =
+      if !finished then Lwt.return_unit
+      else
+        let event = Sse.progress_event stream ~progress:0.0 ~message:"[agentic] thinking..." in
+        push (Some event);
+        let* () = Lwt_unix.sleep 3.0 in
+        keepalive ()
+    in
+
+    let starter () =
+      let started_at = Unix.gettimeofday () in
+      Lwt.async keepalive;
+      let on_turn turn _prompt =
+        let event = Sse.progress_event stream ~progress:0.0
+          ~message:(Printf.sprintf "[turn %d] processing..." turn) in
+        push (Some event);
+        Lwt.return_unit
+      in
+      let* result = Tools.execute_ollama_agentic ~tools ~on_turn args in
+      finished := true;
+      let () = record_run ~streamed:true started_at result in
+      let formatted = format_result result in
+      let response = make_response ~id (`Assoc [
+        ("content", `List [
+          `Assoc [
+            ("type", `String "text");
+            ("text", `String formatted);
+          ]
+        ]);
+        ("isError", `Bool (result.returncode <> 0));
+      ]) in
+      push (Some (Sse.json_event stream response));
+      push None;
+      Lwt.return_unit
+    in
+    Lwt.return @@ SseTokenStream (stream, push_stream, starter)
+
+  (* Token-by-token streaming via SseTokenStream (no tools) *)
+  end else if wants_keepalive && is_local_model && wants_token_stream then begin
     let sse_stream = Sse.create_stream () in
     let (push_stream, push) = Lwt_stream.create () in
     let started_at = ref (Unix.gettimeofday ()) in
