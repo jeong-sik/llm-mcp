@@ -23,7 +23,37 @@
  (name test_agent_core_eio)
  (libraries agent_core_eio alcotest eio eio_main))
 
+; Validator Eio tests
+(test
+ (name test_validator_eio)
+ (libraries llm_mcp.agent_core_eio eio eio_main))
+
 ; Lwt/Eio bridge tests
 (test
  (name test_lwt_bridge)
  (libraries agent_core_bridge alcotest eio eio_main lwt lwt.unix lwt_eio str))
+
+; Validator Presets tests
+(test
+ (name test_presets)
+ (libraries llm_mcp.agent_core_eio eio eio_main))
+
+; Spec DSL tests
+(test
+ (name test_spec_dsl)
+ (libraries llm_mcp.agent_core_eio eio eio_main))
+
+; Validation Stack tests
+(test
+ (name test_validation_stack)
+ (libraries llm_mcp.agent_core_eio eio eio_main))
+
+; CLI Runner Eio tests
+(test
+ (name test_cli_runner_eio)
+ (libraries llm_mcp eio eio_main))
+
+; Tools Eio tests
+(test
+ (name test_tools_eio)
+ (libraries llm_mcp eio eio_main))

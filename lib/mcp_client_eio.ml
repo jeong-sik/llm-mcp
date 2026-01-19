@@ -1,0 +1,147 @@
+(** MCP Client for Eio - Direct-Style Implementation
+
+    Enables llm-mcp to call external MCP servers using Eio.
+    Direct-style (no monadic bind), structured concurrency.
+
+    Protocol: JSON-RPC 2.0 over HTTP
+    Default endpoints:
+    - llm-mcp internal tools: self-execution
+    - masc-mcp: http://127.0.0.1:8935
+    - Other MCP: configurable via tool arguments
+*)
+
+open Printf
+
+module Client = Cohttp_eio.Client
+module Body = Cohttp_eio.Body
+
+(** {1 Configuration} *)
+
+(** Request ID counter - atomic for thread safety *)
+let request_id = Atomic.make 0
+
+let next_id () =
+  Atomic.fetch_and_add request_id 1
+
+(** Default MASC-MCP endpoint *)
+let masc_mcp_url = "http://127.0.0.1:8935"
+
+(** {1 JSON-RPC Helpers} *)
+
+(** Build JSON-RPC 2.0 request *)
+let build_jsonrpc_request method_name params =
+  `Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int (next_id ()));
+    ("method", `String method_name);
+    ("params", params);
+  ]
+
+(** {1 Core Client Functions} *)
+
+(** Client type - wraps Eio network and cohttp client *)
+type t = {
+  client : Client.t;
+  sw : Eio.Switch.t;
+}
+
+(** Create MCP client from Eio environment *)
+let make ~sw ~net =
+  let client = Client.make ~https:None net in
+  { client; sw }
+
+(** Call MCP server via HTTP POST - Direct-style *)
+let call_mcp_server t ~url ~method_name ~params =
+  let uri = Uri.of_string (url ^ "/mcp") in
+  let body_str = build_jsonrpc_request method_name params |> Yojson.Safe.to_string in
+  let headers = Http.Header.init_with "Content-Type" "application/json" in
+  let body = Body.of_string body_str in
+
+  try
+    let (resp, resp_body) =
+      Client.post t.client ~sw:t.sw ~headers ~body uri
+    in
+
+    let status = Http.Response.status resp in
+    let resp_str =
+      Eio.Buf_read.(of_flow ~max_size:max_int resp_body |> take_all)
+    in
+
+    if Cohttp.Code.is_success (Http.Status.to_int status) then begin
+      let open Yojson.Safe.Util in
+      try
+        let json = Yojson.Safe.from_string resp_str in
+        let result = json |> member "result" in
+        let error = json |> member "error" in
+        if error <> `Null then
+          let msg = try error |> member "message" |> to_string
+                    with _ -> "Unknown error" in
+          Error msg
+        else
+          Ok result
+      with e ->
+        Error (sprintf "Parse error: %s" (Printexc.to_string e))
+    end else
+      Error (sprintf "HTTP error %d: %s"
+               (Http.Status.to_int status) resp_str)
+  with e ->
+    Error (sprintf "Connection error: %s" (Printexc.to_string e))
+
+(** {1 Tool Operations} *)
+
+(** Call tools/call on an MCP server *)
+let call_tool t ~url ~tool_name ~arguments =
+  let params = `Assoc [
+    ("name", `String tool_name);
+    ("arguments", arguments);
+  ] in
+  call_mcp_server t ~url ~method_name:"tools/call" ~params
+
+(** List available tools from MCP server *)
+let list_tools t ~url =
+  call_mcp_server t ~url ~method_name:"tools/list" ~params:`Null
+
+(** {1 MASC-MCP Convenience Functions} *)
+
+(** Call MASC tool *)
+let call_masc t ~tool_name ~arguments =
+  call_tool t ~url:masc_mcp_url ~tool_name ~arguments
+
+(** {1 Result Formatting} *)
+
+(** Format tool result for Ollama chat *)
+let format_tool_result tool_name result =
+  match result with
+  | Ok json ->
+      `Assoc [
+        ("role", `String "tool");
+        ("content", `String (Yojson.Safe.to_string json));
+        ("name", `String tool_name);
+      ]
+  | Error msg ->
+      `Assoc [
+        ("role", `String "tool");
+        ("content", `String (sprintf "Error: %s" msg));
+        ("name", `String tool_name);
+      ]
+
+(** {1 One-Shot Convenience Functions}
+
+    These functions create a temporary client for single requests.
+    Use these when you don't need to reuse connections.
+*)
+
+(** One-shot call to MCP server *)
+let call_once ~sw ~net ~url ~method_name ~params =
+  let t = make ~sw ~net in
+  call_mcp_server t ~url ~method_name ~params
+
+(** One-shot tool call *)
+let call_tool_once ~sw ~net ~url ~tool_name ~arguments =
+  let t = make ~sw ~net in
+  call_tool t ~url ~tool_name ~arguments
+
+(** One-shot MASC call *)
+let call_masc_once ~sw ~net ~tool_name ~arguments =
+  let t = make ~sw ~net in
+  call_masc t ~tool_name ~arguments
