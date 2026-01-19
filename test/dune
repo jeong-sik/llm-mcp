@@ -43,6 +43,11 @@
  (name test_spec_dsl)
  (libraries llm_mcp.agent_core_eio eio eio_main))
 
+; Validation Stack tests
+(test
+ (name test_validation_stack)
+ (libraries llm_mcp.agent_core_eio eio eio_main))
+
 ; CLI Runner Eio tests
 (test
  (name test_cli_runner_eio)

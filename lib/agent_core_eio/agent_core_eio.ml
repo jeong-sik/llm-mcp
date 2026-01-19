@@ -39,6 +39,9 @@ module Validator_presets = Validator_presets
 (** Spec DSL - SSOT-Driven Validation *)
 module Spec_dsl = Spec_dsl
 
+(** Validation Stack - Multi-Level Validation Hierarchy *)
+module Validation_stack = Validation_stack
+
 (** Main functor for creating agent loops *)
 module Make_Loop = Agent_loop_eio.Make
 
