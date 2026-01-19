@@ -22,3 +22,8 @@
 (test
  (name test_agent_core_eio)
  (libraries agent_core_eio alcotest eio eio_main))
+
+; Lwt/Eio bridge tests
+(test
+ (name test_lwt_bridge)
+ (libraries agent_core_bridge alcotest eio eio_main lwt lwt.unix lwt_eio str))
