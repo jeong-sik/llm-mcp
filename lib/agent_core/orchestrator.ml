@@ -559,3 +559,153 @@ let run_orchestrator_workers
   in
 
   orchestrate initial_state 0
+
+
+(** {1 Self-Validator Pattern}
+
+    제3의 검증자 - 목표 달성 진행 상황을 주기적으로 검증합니다.
+
+    주요 기능:
+    - 일정 주기(N 이터레이션)마다 진행 상황 검증
+    - LLM을 사용한 메타 분석
+    - OnTrack/NeedsCorrection/Abort 판정
+*)
+
+(** Check if haystack contains needle *)
+let string_contains ~haystack ~needle =
+  try
+    let _ = Str.search_forward (Str.regexp_string needle) haystack 0 in
+    true
+  with Not_found -> false
+
+(** Validation verdict *)
+type validation_verdict =
+  | OnTrack of string               (** 목표 방향 유지, 이유 *)
+  | NeedsCorrection of string       (** 방향 수정 필요, 피드백 *)
+  | Abort of string                 (** 목표 달성 불가, 중단 *)
+
+(** Validation result *)
+type validation_result = {
+  verdict : validation_verdict;
+  confidence : float;               (** 0.0 - 1.0 *)
+  iteration_checked : int;
+  suggestions : string list;
+}
+
+(** Validator module signature *)
+module type VALIDATOR = sig
+  type state
+  val validate : goal:string -> state:state -> iteration:int -> validation_result Lwt.t
+  val check_frequency : int         (** 몇 이터레이션마다 검증할지 *)
+end
+
+(** Functor to create a Validator with LLM-based analysis *)
+module Make_Validator (S : sig
+    type t
+    val check_frequency : int
+    val get_progress : t -> float           (** 0.0 - 1.0 progress *)
+    val get_recent_outputs : t -> string list
+    val llm_call : string -> string Lwt.t   (** LLM call function *)
+  end) : VALIDATOR with type state = S.t = struct
+
+  type state = S.t
+
+  let check_frequency = S.check_frequency
+
+  let validate ~goal ~state ~iteration =
+    let progress = S.get_progress state in
+    let recent = S.get_recent_outputs state in
+    let recent_text = String.concat "\n---\n" recent in
+
+    let prompt = Printf.sprintf
+      {|당신은 AI 에이전트의 진행 상황을 검증하는 제3자 평가자입니다.
+
+목표: %s
+현재 진행률: %.1f%%
+이터레이션: %d
+최근 출력물:
+%s
+
+위 정보를 바탕으로 다음을 평가해주세요:
+1. 목표를 향해 올바른 방향으로 진행 중인가?
+2. 수정이 필요한 부분이 있는가?
+3. 목표 달성이 불가능해 보이는가?
+
+응답 형식 (JSON):
+{
+  "verdict": "OnTrack" | "NeedsCorrection" | "Abort",
+  "reason": "판단 이유",
+  "confidence": 0.0-1.0,
+  "suggestions": ["제안1", "제안2"]
+}|}
+      goal (progress *. 100.0) iteration recent_text
+    in
+
+    let* response = S.llm_call prompt in
+
+    (* Parse JSON response - simple parsing *)
+    let verdict =
+      if string_contains ~haystack:response ~needle:"\"Abort\"" then
+        Abort "목표 달성 불가능으로 판단됨"
+      else if string_contains ~haystack:response ~needle:"\"NeedsCorrection\"" then
+        NeedsCorrection "방향 수정이 필요함"
+      else
+        OnTrack "올바른 방향으로 진행 중"
+    in
+
+    let confidence =
+      (* Extract confidence from response *)
+      try
+        let re = Str.regexp {|"confidence"[ ]*:[ ]*\([0-9.]+\)|} in
+        if Str.search_forward re response 0 >= 0 then
+          float_of_string (Str.matched_group 1 response)
+        else 0.7
+      with _ -> 0.7
+    in
+
+    Lwt.return {
+      verdict;
+      confidence;
+      iteration_checked = iteration;
+      suggestions = [];  (* TODO: parse suggestions from JSON *)
+    }
+end
+
+(** Run agent loop with periodic validation *)
+let run_with_validation
+    (type st)
+    (module V : VALIDATOR with type state = st)
+    ~goal
+    ~max_iterations
+    ~on_iteration
+    ~initial_state
+    ~(on_validation : validation_result -> unit Lwt.t)
+  =
+  let rec loop state iteration =
+    if iteration >= max_iterations then
+      Lwt.return (Error "Max iterations reached")
+    else begin
+      (* Run iteration *)
+      let* state' = on_iteration state iteration in
+
+      (* Check if validation is needed *)
+      let* () =
+        if iteration > 0 && iteration mod V.check_frequency = 0 then begin
+          let* result = V.validate ~goal ~state:state' ~iteration in
+          let* () = on_validation result in
+          match result.verdict with
+          | Abort reason -> Lwt.fail_with reason
+          | _ -> Lwt.return_unit
+        end
+        else Lwt.return_unit
+      in
+
+      loop state' (iteration + 1)
+    end
+  in
+
+  Lwt.catch
+    (fun () ->
+       let* _ = loop initial_state 0 in
+       Lwt.return (Ok ()))
+    (fun exn -> Lwt.return (Error (Printexc.to_string exn)))
