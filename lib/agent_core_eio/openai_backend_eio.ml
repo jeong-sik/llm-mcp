@@ -25,6 +25,28 @@
 
 open Agent_types
 
+(** {1 HTTPS/TLS Support} *)
+
+(** Create HTTPS context for secure connections using system CA certificates *)
+let make_https_ctx () =
+  match Ca_certs.authenticator () with
+  | Error (`Msg m) ->
+    Printf.eprintf "Warning: Failed to load system CAs: %s. HTTPS will fail.\n%!" m;
+    None
+  | Ok authenticator ->
+    (* Tls.Config.client returns Result - handle it *)
+    match Tls.Config.client ~authenticator () with
+    | Error (`Msg m) ->
+      Printf.eprintf "Warning: TLS config error: %s. HTTPS will fail.\n%!" m;
+      None
+    | Ok tls_config ->
+      Some (fun uri raw ->
+          let host =
+            Uri.host uri
+            |> Option.map (fun h -> Domain_name.(host_exn (of_string_exn h)))
+          in
+          Tls_eio.client_of_flow tls_config ?host raw)
+
 (** {1 Configuration} *)
 
 type config = {
@@ -230,8 +252,9 @@ let call_http ~sw ~net ~(config:config) ~body =
   let req_body = Cohttp_eio.Body.of_string body_str in
 
   try
-    (* Create HTTP client with Eio network capability *)
-    let client = Cohttp_eio.Client.make ~https:None net in
+    (* Create HTTP client with HTTPS/TLS support *)
+    let https = make_https_ctx () in
+    let client = Cohttp_eio.Client.make ~https net in
     let (resp, resp_body) = Cohttp_eio.Client.post client ~sw ~headers ~body:req_body uri in
 
     let status = Cohttp.Response.status resp in
@@ -279,7 +302,8 @@ let list_models ~sw ~net ~(config:config) () =
   in
 
   try
-    let client = Cohttp_eio.Client.make ~https:None net in
+    let https = make_https_ctx () in
+    let client = Cohttp_eio.Client.make ~https net in
     let (_resp, body) = Cohttp_eio.Client.get client ~sw ~headers uri in
     let body_str = Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) body |> take_all) in
     let json = Yojson.Safe.from_string body_str in
