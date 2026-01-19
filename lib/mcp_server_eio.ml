@@ -1,12 +1,13 @@
 (** MCP Protocol Server - Eio Direct-Style Implementation
 
     Pure Eio implementation for MCP 2025-11-25.
-    Uses httpun-eio for HTTP, Lwt_eio bridge for tool execution.
+    Uses httpun-eio for HTTP, Tools_eio for direct-style tool execution.
 
     Key differences from Lwt version:
     - Direct-style (no monadic bind)
     - Structured concurrency with Eio.Switch
     - Fiber-based parallelism
+    - No Lwt_eio bridge needed
 *)
 
 open Printf
@@ -200,26 +201,26 @@ let handle_list_tools id =
   ) Types.all_schemas in
   make_response ~id (`Assoc [("tools", `List tools)])
 
-(** Handle tools/call request - uses Lwt_eio bridge for now *)
-let handle_call_tool id params =
+(** Handle tools/call request - direct Eio execution *)
+let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let open Yojson.Safe.Util in
   let name = params |> member "name" |> to_string in
   let arguments = params |> member "arguments" in
 
   (* Parse arguments based on tool *)
   let args : Types.tool_args = match name with
-    | "gemini" -> Tools.parse_gemini_args arguments
-    | "claude-cli" -> Tools.parse_claude_args arguments
-    | "codex" -> Tools.parse_codex_args arguments
-    | "ollama" -> Tools.parse_ollama_args arguments
-    | "ollama-list" -> Tools.parse_ollama_list_args arguments
+    | "gemini" -> Tools_eio.parse_gemini_args arguments
+    | "claude-cli" -> Tools_eio.parse_claude_args arguments
+    | "codex" -> Tools_eio.parse_codex_args arguments
+    | "ollama" -> Tools_eio.parse_ollama_args arguments
+    | "ollama-list" -> Tools_eio.parse_ollama_list_args arguments
     | _ -> failwith (sprintf "Unknown tool: %s" name)
   in
 
-  (* Execute via Lwt_eio bridge *)
+  (* Execute via direct Eio call *)
   let result =
     try
-      Lwt_eio.Promise.await_lwt (Tools.execute args)
+      Tools_eio.execute ~sw ~proc_mgr ~clock args
     with exn ->
       { Types.model = "error";
         returncode = 1;
@@ -287,7 +288,7 @@ let is_jsonrpc_v2 json =
   | _ -> false
 
 (** Main request handler - Direct-style, no Lwt *)
-let handle_request ~store ~headers request_str =
+let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
   try
     let json = Yojson.Safe.from_string request_str in
 
@@ -327,7 +328,7 @@ let handle_request ~store ~headers request_str =
                       | Some sid ->
                           (match get_session store sid with
                            | Some _ ->
-                               (session_id_opt, handle_call_tool id params)
+                               (session_id_opt, handle_call_tool ~sw ~proc_mgr ~clock id params)
                            | None ->
                                eprintf "[session] Session %s not found, rejecting tools/call\n%!" sid;
                                (None, make_error ~id (-32000) "Session not found. Please call initialize first."))
@@ -419,7 +420,7 @@ let extract_headers request =
   Httpun.Headers.to_list request.Httpun.Request.headers
 
 (** Handle HTTP request - httpun callback style *)
-let handle_http ~store reqd =
+let handle_http ~sw ~proc_mgr ~clock ~store reqd =
   let request = Httpun.Reqd.request reqd in
   let path = Http.Request.path request in
   let meth = Http.Request.meth request in
@@ -482,7 +483,7 @@ let handle_http ~store reqd =
           (* MCP JSON-RPC endpoint *)
           | (`POST, "/mcp" | `POST, "/") ->
               Http.Request.read_body_async reqd (fun body_str ->
-                let (_session_id_opt, response) = handle_request ~store ~headers body_str in
+                let (_session_id_opt, response) = handle_request ~sw ~proc_mgr ~clock ~store ~headers body_str in
                 let response_str = Yojson.Safe.to_string response in
                 Http.Response.json response_str reqd
               )
@@ -497,6 +498,7 @@ let handle_http ~store reqd =
 let run ~sw ~env ?(config = Http.default_config) () =
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
 
   let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, config.port) in
   let socket = Eio.Net.listen net ~sw ~backlog:config.max_connections addr in
@@ -524,7 +526,7 @@ let run ~sw ~env ?(config = Http.default_config) () =
   (* request_handler: sockaddr -> Gluten.Reqd.t -> unit *)
   let request_handler _client_addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
-    handle_http ~store reqd
+    handle_http ~sw ~proc_mgr ~clock ~store reqd
   in
 
   let rec accept_loop () =

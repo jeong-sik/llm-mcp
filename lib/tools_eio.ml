@@ -474,3 +474,291 @@ let call_mcp_with_env ~sw ~env ~server_name ~tool_name ~arguments ~timeout =
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout
+
+(** {1 Format-Aware Execution} *)
+
+(** Execute a tool and format result based on response_format.
+
+    This is the main entry point for LLM-to-LLM communication where
+    token efficiency matters. The format parameter controls output:
+    - Verbose: Full JSON (human readable, for debugging)
+    - Compact: DSL format "RES|OK|G3|150|result" (~70% token savings)
+    - Binary: Base64-encoded compact (for high-volume scenarios)
+*)
+let execute_formatted ~sw ~proc_mgr ~clock ~(format : response_format) args : string =
+  let result = execute ~sw ~proc_mgr ~clock args in
+  format_tool_result ~format result
+
+(** Execute with default Verbose format (backwards compatible) *)
+let execute_verbose ~sw ~proc_mgr ~clock args : string =
+  execute_formatted ~sw ~proc_mgr ~clock ~format:Verbose args
+
+(** Execute with Compact format (for MAGI inter-agent communication) *)
+let execute_compact ~sw ~proc_mgr ~clock args : string =
+  execute_formatted ~sw ~proc_mgr ~clock ~format:Compact args
+
+(** Convenience wrappers with Eio env *)
+let execute_formatted_with_env ~sw ~env ~format args =
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  execute_formatted ~sw ~proc_mgr ~clock ~format args
+
+let execute_verbose_with_env ~sw ~env args =
+  execute_formatted_with_env ~sw ~env ~format:Verbose args
+
+let execute_compact_with_env ~sw ~env args =
+  execute_formatted_with_env ~sw ~env ~format:Compact args
+
+(** {1 Ollama Agentic Execution} *)
+
+(** Ollama API endpoint *)
+let ollama_base_url = "http://127.0.0.1:11434"
+
+(** Conversation message type for agentic loop *)
+type agent_message = {
+  role : string;
+  content : string;
+  tool_calls : Ollama_parser.tool_call list option;
+  name : string option;
+}
+
+(** Convert message to JSON for Ollama API *)
+let agent_message_to_json msg =
+  let base = [
+    ("role", `String msg.role);
+    ("content", `String msg.content);
+  ] in
+  let with_name = match msg.name with
+    | Some n -> base @ [("name", `String n)]
+    | None -> base
+  in
+  `Assoc with_name
+
+(** Build Ollama chat request *)
+let build_agentic_request ~model ~temperature ~tools messages =
+  `Assoc [
+    ("model", `String model);
+    ("messages", `List (List.map agent_message_to_json messages));
+    ("stream", `Bool false);
+    ("options", `Assoc [
+      ("temperature", `Float temperature);
+    ]);
+    ("tools", `List tools);
+  ]
+
+(** Call Ollama chat API - Eio version using curl subprocess *)
+let call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_json =
+  let body = Yojson.Safe.to_string request_json in
+  let url = ollama_base_url ^ "/api/chat" in
+  let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
+    "-s"; "-X"; "POST"; url;
+    "-H"; "Content-Type: application/json";
+    "-d"; body
+  ] in
+  match result with
+  | Error (Timeout t) -> Error (sprintf "Timeout after %ds" t)
+  | Error (ProcessError msg) -> Error (sprintf "Connection error: %s" msg)
+  | Ok r ->
+      if r.exit_code <> 0 then
+        Error (sprintf "curl failed with exit code %d: %s" r.exit_code r.stderr)
+      else
+        Ok r.stdout
+
+(** Execute a single tool call - calls external MCP if configured *)
+let execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url (tc : Ollama_parser.tool_call) =
+  let args = try Yojson.Safe.from_string tc.arguments with _ -> `Null in
+  match external_mcp_url with
+  | Some url ->
+      (* Call external MCP server *)
+      let request_body = `Assoc [
+        ("jsonrpc", `String "2.0");
+        ("id", `Int 1);
+        ("method", `String "tools/call");
+        ("params", `Assoc [
+          ("name", `String tc.name);
+          ("arguments", args);
+        ]);
+      ] |> Yojson.Safe.to_string in
+      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
+        "-s"; "-X"; "POST"; url;
+        "-H"; "Content-Type: application/json";
+        "-d"; request_body
+      ] in
+      (match result with
+      | Error _ -> (tc.name, sprintf "Error: MCP call to %s failed" tc.name)
+      | Ok r ->
+          try
+            let json = Yojson.Safe.from_string r.stdout in
+            let open Yojson.Safe.Util in
+            let content = json |> member "result" |> member "content" in
+            match content with
+            | `List items ->
+                let texts = List.filter_map (fun item ->
+                  match item |> member "type" |> to_string_option with
+                  | Some "text" -> item |> member "text" |> to_string_option
+                  | _ -> None
+                ) items in
+                (tc.name, String.concat "\n" texts)
+            | _ -> (tc.name, r.stdout)
+          with _ -> (tc.name, r.stdout))
+  | None ->
+      (tc.name, sprintf "Error: Unknown tool '%s' and no external MCP configured" tc.name)
+
+(** Single agent turn result *)
+type turn_result =
+  | TurnDone of string
+  | TurnContinue of Ollama_parser.tool_call list
+  | TurnError of string
+
+(** Execute single agent turn *)
+let execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request_body =
+  let result = call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_body in
+  match result with
+  | Error err -> TurnError err
+  | Ok body_str ->
+      match Ollama_parser.parse_chat_result body_str with
+      | Error e -> TurnError e
+      | Ok (Ollama_parser.TextResponse text) -> TurnDone text
+      | Ok (Ollama_parser.ToolCalls calls) -> TurnContinue calls
+      | Ok (Ollama_parser.TextWithTools (text, calls)) ->
+          if calls = [] then TurnDone text
+          else TurnContinue calls
+
+(** Execute Ollama with agentic tool calling loop.
+
+    When tools are provided, this:
+    1. Sends prompt to Ollama with tool definitions
+    2. Executes any tool_calls from Ollama's response
+    3. Sends tool results back to Ollama
+    4. Repeats until no more tool_calls or max_turns reached
+
+    This enables tool-capable models (devstral, qwen3, llama3.3)
+    to use MCP tools natively through llm-mcp.
+
+    @param sw Eio switch for structured concurrency
+    @param proc_mgr Eio process manager
+    @param clock Eio clock
+    @param tools MCP tool schemas for function calling
+    @param external_mcp_url URL of external MCP server for tool execution
+    @param on_turn Callback for each turn (turn number, prompt)
+*)
+let execute_ollama_agentic
+    ~sw ~proc_mgr ~clock
+    ~(tools : Types.tool_schema list)
+    ?(external_mcp_url : string option = None)
+    ?(on_turn : int -> string -> unit = fun _ _ -> ())
+    args : tool_result =
+  match args with
+  | Ollama { model; prompt; system_prompt; temperature; timeout; stream = _; tools = _ } ->
+      let max_turns = 10 in
+
+      (* Convert tools to Ollama format *)
+      let ollama_tools = List.map (fun (t : Types.tool_schema) ->
+        `Assoc [
+          ("type", `String "function");
+          ("function", `Assoc [
+            ("name", `String t.name);
+            ("description", `String t.description);
+            ("parameters", t.input_schema);
+          ]);
+        ]
+      ) tools in
+
+      let system = match system_prompt with
+        | Some s -> s
+        | None -> "You are a helpful assistant with access to tools."
+      in
+
+      let initial_messages = [
+        { role = "system"; content = system; tool_calls = None; name = None }
+      ] in
+
+      (* Process tool calls recursively *)
+      let rec process_tool_calls messages turn tool_calls =
+        if turn >= max_turns then
+          Error (sprintf "Max turns (%d) reached" max_turns)
+        else begin
+          (* Execute tool calls *)
+          let tool_results = List.map (fun tc ->
+            execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url tc
+          ) tool_calls in
+
+          (* Build assistant message with tool calls *)
+          let assistant_msg = {
+            role = "assistant";
+            content = "";
+            tool_calls = Some tool_calls;
+            name = None;
+          } in
+
+          (* Build tool result messages *)
+          let tool_msgs = List.map (fun (name, result) ->
+            { role = "tool"; content = result; tool_calls = None; name = Some name }
+          ) tool_results in
+
+          let new_messages = messages @ [assistant_msg] @ tool_msgs in
+
+          (* Send continuation request *)
+          let request = build_agentic_request ~model ~temperature ~tools:ollama_tools new_messages in
+          let next_result = execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request in
+
+          match next_result with
+          | TurnDone text -> Ok text
+          | TurnError err -> Error err
+          | TurnContinue more_calls ->
+              process_tool_calls new_messages (turn + 1) more_calls
+        end
+      in
+
+      (* Main loop *)
+      let run_loop () =
+        on_turn 0 prompt;
+
+        let user_msg = { role = "user"; content = prompt; tool_calls = None; name = None } in
+        let messages = initial_messages @ [user_msg] in
+
+        let request = build_agentic_request ~model ~temperature ~tools:ollama_tools messages in
+        let result = execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request in
+
+        match result with
+        | TurnDone text -> Ok text
+        | TurnError err -> Error err
+        | TurnContinue tool_calls ->
+            process_tool_calls messages 1 tool_calls
+      in
+
+      (match run_loop () with
+      | Ok response ->
+          {
+            model = sprintf "ollama (%s) [agentic]" model;
+            returncode = 0;
+            response;
+            extra = [
+              ("temperature", sprintf "%.1f" temperature);
+              ("local", "true");
+              ("agentic", "true");
+              ("tools_count", string_of_int (List.length tools));
+            ];
+          }
+      | Error err ->
+          {
+            model = sprintf "ollama (%s) [agentic]" model;
+            returncode = -1;
+            response = sprintf "Agent loop error: %s" err;
+            extra = [
+              ("temperature", sprintf "%.1f" temperature);
+              ("local", "true");
+              ("agentic", "true");
+              ("error", "true");
+            ];
+          })
+
+  | _ ->
+      (* Non-Ollama args: fall back to regular execute *)
+      execute ~sw ~proc_mgr ~clock args
+
+(** Execute Ollama agentic with Eio env *)
+let execute_ollama_agentic_with_env ~sw ~env ~tools ?external_mcp_url ?on_turn args =
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  execute_ollama_agentic ~sw ~proc_mgr ~clock ~tools ?external_mcp_url ?on_turn args
