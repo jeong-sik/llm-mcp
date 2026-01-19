@@ -182,6 +182,53 @@ module Compose = struct
           metadata = [("pass_count", string_of_int pass_count)];
         }
     end)
+
+  (** Monadic bind: V1 결과에 따라 V2를 동적 선택 (>>=) *)
+  let bind
+      (type s c)
+      (module V1 : VALIDATOR with type state = s and type context = c)
+      (f : c result -> (module VALIDATOR with type state = s and type context = c))
+    : (module VALIDATOR with type state = s and type context = c) =
+    (module struct
+      type state = s
+      type context = c
+
+      let name = Printf.sprintf "%s >>= ?" V1.name
+
+      let validate state =
+        let r1 = V1.validate state in
+        match r1.verdict with
+        | Fail _ -> r1  (* Fail시 전파, 다음 Validator 실행 안함 *)
+        | _ ->
+          let (module V2) = f r1 in  (* 동적으로 다음 Validator 선택! *)
+          let r2 = V2.validate state in
+          { r2 with
+            children = [r1; r2];
+            metadata = ("bound_from", V1.name) :: r2.metadata;
+          }
+    end)
+
+  (** Functor map: 결과 변환 *)
+  let map
+      (type s c1 c2)
+      (f : c1 -> c2)
+      (module V : VALIDATOR with type state = s and type context = c1)
+    : (module VALIDATOR with type state = s and type context = c2) =
+    (module struct
+      type state = s
+      type context = c2
+
+      let name = Printf.sprintf "map(%s)" V.name
+
+      let validate state =
+        let r = V.validate state in
+        { verdict = r.verdict;
+          confidence = r.confidence;
+          context = f r.context;
+          children = [];  (* context 타입이 달라서 children 유지 불가 *)
+          metadata = r.metadata;
+        }
+    end)
 end
 
 (** {1 Meta-Validator} *)

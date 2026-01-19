@@ -250,4 +250,72 @@ let () = Eio_main.run @@ fun env ->
       Printf.printf "[OK] timeout validator\n%!"
     in
 
-    Printf.printf "\n✅ All 10 validator tests passed!\n%!"
+    (* Test 11: Monadic bind - 동적 Validator 선택 *)
+    let () =
+      let module V1 : VALIDATOR with type state = int and type context = int = struct
+        type state = int
+        type context = int
+        let name = "score_check"
+        let validate n =
+          { verdict = Pass "checked"; confidence = 1.0; context = n;
+            children = []; metadata = []; }
+      end in
+
+      (* 점수에 따라 다른 Validator 선택 *)
+      let choose_next (r : int result) =
+        if r.context >= 80 then
+          (module struct
+            type state = int
+            type context = int
+            let name = "excellent"
+            let validate _ =
+              { verdict = Pass "A grade"; confidence = 1.0; context = r.context;
+                children = []; metadata = [("grade", "A")]; }
+          end : VALIDATOR with type state = int and type context = int)
+        else
+          (module struct
+            type state = int
+            type context = int
+            let name = "needs_work"
+            let validate _ =
+              { verdict = Warn "needs improvement"; confidence = 0.7; context = r.context;
+                children = []; metadata = [("grade", "C")]; }
+          end : VALIDATOR with type state = int and type context = int)
+      in
+
+      let module Bound = (val Compose.bind (module V1) choose_next) in
+
+      (* 90점 -> excellent 경로 *)
+      let r1 = Bound.validate 90 in
+      assert (match r1.verdict with Pass "A grade" -> true | _ -> false);
+      assert (List.exists (fun (k, v) -> k = "grade" && v = "A") r1.metadata);
+
+      (* 60점 -> needs_work 경로 *)
+      let r2 = Bound.validate 60 in
+      assert (match r2.verdict with Warn _ -> true | _ -> false);
+      assert (List.exists (fun (k, v) -> k = "grade" && v = "C") r2.metadata);
+
+      Printf.printf "[OK] monadic bind (dynamic selection)\n%!"
+    in
+
+    (* Test 12: Functor map *)
+    let () =
+      let module V : VALIDATOR with type state = int and type context = int = struct
+        type state = int
+        type context = int
+        let name = "doubler"
+        let validate n =
+          { verdict = Pass "doubled"; confidence = 1.0; context = n * 2;
+            children = []; metadata = []; }
+      end in
+
+      let module Mapped = (val Compose.map (fun x -> string_of_int x) (module V)) in
+      let r = Mapped.validate 21 in
+      assert (r.context = "42");  (* int -> string 변환 *)
+      Printf.printf "[OK] functor map\n%!"
+    in
+
+    let _ = sw in  (* suppress unused warning *)
+    let _ = clock in
+
+    Printf.printf "\n✅ All 12 validator tests passed!\n%!"
