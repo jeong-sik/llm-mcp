@@ -253,4 +253,117 @@ let () = Eio_main.run @@ fun env ->
       Printf.printf "[OK] Diamond pattern\n%!"
     in
 
-    Printf.printf "\n✅ All 15 preset tests passed!\n%!"
+    (* Test 16: Circuit breaker - stays closed on success *)
+    let () =
+      let breaker_state = Circuit_breaker.create_state () in
+      let circuit = Circuit_breaker.create ~clock ~breaker_state
+        (module Always_pass : VALIDATOR with type state = int and type context = unit)
+      in
+      let module C = (val circuit) in
+      let r = C.validate 5 in
+      assert (match r.verdict with Pass _ -> true | _ -> false);
+      assert (not breaker_state.is_open);
+      Printf.printf "[OK] Circuit breaker stays closed on success\n%!"
+    in
+
+    (* Test 17: Circuit breaker - opens after threshold failures *)
+    let () =
+      let breaker_state = Circuit_breaker.create_state () in
+      let config = { Circuit_breaker.failure_threshold = 3; reset_timeout_sec = 30.0 } in
+      let circuit = Circuit_breaker.create ~clock ~config ~breaker_state
+        (module Always_fail : VALIDATOR with type state = int and type context = unit)
+      in
+      let module C = (val circuit) in
+      (* 3 failures should open the circuit *)
+      let _ = C.validate 5 in
+      let _ = C.validate 5 in
+      let _ = C.validate 5 in
+      assert breaker_state.is_open;
+      (* Next call should fast-fail *)
+      let r = C.validate 5 in
+      assert (match r.verdict with Fail msg -> String.sub msg 0 15 = "Circuit breaker" | _ -> false);
+      Printf.printf "[OK] Circuit breaker opens after threshold\n%!"
+    in
+
+    (* Test 18: Saga - all steps pass *)
+    let () =
+      let compensations = ref [] in
+      let steps : (int, unit) Saga.step list = [
+        { name = "step1"; validator = (module Always_pass : VALIDATOR with type state = int and type context = unit);
+          compensate = fun _ -> compensations := "comp1" :: !compensations };
+        { name = "step2"; validator = (module Check_positive);
+          compensate = fun _ -> compensations := "comp2" :: !compensations };
+      ] in
+      let saga = Saga.create ~sw steps in
+      let module S = (val saga) in
+      let r = S.validate 5 in
+      assert (match r.verdict with Pass _ -> true | _ -> false);
+      assert (!compensations = []);  (* No compensation on success *)
+      Printf.printf "[OK] Saga all steps pass\n%!"
+    in
+
+    (* Test 19: Saga - failure triggers compensation *)
+    let () =
+      let compensations = ref [] in
+      let steps : (int, unit) Saga.step list = [
+        { name = "step1"; validator = (module Always_pass : VALIDATOR with type state = int and type context = unit);
+          compensate = fun _ -> compensations := "comp1" :: !compensations };
+        { name = "step2"; validator = (module Always_fail);
+          compensate = fun _ -> compensations := "comp2" :: !compensations };
+      ] in
+      let saga = Saga.create ~sw steps in
+      let module S = (val saga) in
+      let r = S.validate 5 in
+      assert (match r.verdict with Fail _ -> true | _ -> false);
+      assert (!compensations = ["comp1"]);  (* Only step1 compensated *)
+      Printf.printf "[OK] Saga failure triggers compensation\n%!"
+    in
+
+    (* Test 20: Checkpoint - saves progress *)
+    let () =
+      let saved = ref None in
+      let checkpoint = Checkpoint.{
+        save = (fun _s idx -> saved := Some idx);
+        load = (fun () -> None);
+      } in
+      let validators = [
+        (module Always_pass : VALIDATOR with type state = int and type context = unit);
+        (module Check_positive);
+      ] in
+      let chk = Checkpoint.create ~sw ~checkpoint validators in
+      let module C = (val chk) in
+      let r = C.validate 5 in
+      assert (match r.verdict with Pass _ -> true | _ -> false);
+      assert (!saved = Some 2);  (* All 2 checkpoints saved *)
+      Printf.printf "[OK] Checkpoint saves progress\n%!"
+    in
+
+    (* Test 21: Checkpoint - resumes from saved state *)
+    let () =
+      let call_count = ref 0 in
+      let module Counting_pass : VALIDATOR with type state = int and type context = unit = struct
+        type state = int
+        type context = unit
+        let name = "counting_pass"
+        let validate _ =
+          incr call_count;
+          { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+      end in
+      let checkpoint = Checkpoint.{
+        save = (fun _ _ -> ());
+        load = (fun () -> Some (1, 5));  (* Resume from step 1 *)
+      } in
+      let validators = [
+        (module Counting_pass : VALIDATOR with type state = int and type context = unit);
+        (module Counting_pass);
+        (module Counting_pass);
+      ] in
+      let chk = Checkpoint.create ~sw ~checkpoint validators in
+      let module C = (val chk) in
+      let r = C.validate 5 in
+      assert (match r.verdict with Pass _ -> true | _ -> false);
+      assert (!call_count = 2);  (* Skipped step 0, ran steps 1-2 *)
+      Printf.printf "[OK] Checkpoint resumes from saved state\n%!"
+    in
+
+    Printf.printf "\n✅ All 21 preset tests passed!\n%!"
