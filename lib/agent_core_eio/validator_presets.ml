@@ -25,6 +25,10 @@
 
 open Validator_eio
 
+(** Logger source for validator presets *)
+let src = Logs.Src.create "validator.presets" ~doc:"Validator preset patterns"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 (** {1 Pipeline Pattern}
     순차 실행, 하나라도 실패하면 중단 *)
 module Pipeline = struct
@@ -319,26 +323,36 @@ module Circuit_breaker = struct
         (* 회로가 열려있고 리셋 시간이 지났으면 half-open *)
         if breaker_state.is_open &&
            now -. breaker_state.last_failure > config.reset_timeout_sec then begin
+          Log.info (fun m -> m "[%s] Circuit HALF-OPEN after %.1fs timeout" name config.reset_timeout_sec);
           breaker_state.is_open <- false;
           breaker_state.failure_count <- 0;
         end;
 
         (* 회로가 열려있으면 빠른 실패 *)
-        if breaker_state.is_open then
+        if breaker_state.is_open then begin
+          Log.warn (fun m -> m "[%s] Circuit OPEN - fast failing" name);
           { verdict = Fail "Circuit breaker open";
             confidence = 0.0;
             context = (Obj.magic () : c);
             children = [];
             metadata = [("circuit", "open")]; }
+        end
         else
           let result = V.validate state in
           (match result.verdict with
            | Fail _ ->
              breaker_state.failure_count <- breaker_state.failure_count + 1;
              breaker_state.last_failure <- now;
-             if breaker_state.failure_count >= config.failure_threshold then
+             if breaker_state.failure_count >= config.failure_threshold then begin
+               Log.err (fun m -> m "[%s] Circuit OPENED after %d consecutive failures"
+                 name breaker_state.failure_count);
                breaker_state.is_open <- true
+             end else
+               Log.debug (fun m -> m "[%s] Failure %d/%d"
+                 name breaker_state.failure_count config.failure_threshold)
            | Pass _ | Warn _ ->
+             if breaker_state.failure_count > 0 then
+               Log.debug (fun m -> m "[%s] Reset failure count (was %d)" name breaker_state.failure_count);
              breaker_state.failure_count <- 0
            | Defer _ -> ());
           { result with
@@ -488,10 +502,12 @@ module Saga = struct
       let name = "saga[" ^ String.concat " -> " (List.map (fun s -> s.name) steps) ^ "]"
 
       let validate state =
+        Log.info (fun m -> m "[%s] Starting saga with %d steps" name (List.length steps));
         let completed = ref [] in
         let rec run_steps remaining =
           match remaining with
           | [] ->
+            Log.info (fun m -> m "[%s] Saga completed successfully (%d steps)" name (List.length steps));
             { verdict = Pass "All saga steps completed";
               confidence = 1.0;
               context = (Obj.magic () : c);
@@ -499,6 +515,7 @@ module Saga = struct
               metadata = [("completed_steps", string_of_int (List.length steps))]; }
           | step :: rest ->
             let module V = (val step.validator : VALIDATOR with type state = s and type context = c) in
+            Log.debug (fun m -> m "[%s] Executing step '%s'" name step.name);
             let result = V.validate state in
             match result.verdict with
             | Pass _ | Warn _ ->
@@ -506,17 +523,25 @@ module Saga = struct
               run_steps rest
             | Fail reason ->
               (* 보상 트랜잭션 실행 *)
-              List.iter (fun s -> s.compensate state) !completed;
+              let comp_count = List.length !completed in
+              Log.err (fun m -> m "[%s] Step '%s' failed: %s. Compensating %d steps..."
+                name step.name reason comp_count);
+              List.iter (fun s ->
+                Log.debug (fun m -> m "[%s] Compensating step '%s'" name s.name);
+                s.compensate state
+              ) !completed;
+              Log.warn (fun m -> m "[%s] Compensation complete (%d steps rolled back)" name comp_count);
               { verdict = Fail (Printf.sprintf "Saga failed at '%s': %s (compensated %d steps)"
-                                  step.name reason (List.length !completed));
+                                  step.name reason comp_count);
                 confidence = 0.0;
                 context = result.context;
                 children = [result];
                 metadata = [
                   ("failed_step", step.name);
-                  ("compensated", string_of_int (List.length !completed));
+                  ("compensated", string_of_int comp_count);
                 ]; }
             | Defer reason ->
+              Log.debug (fun m -> m "[%s] Step '%s' deferred: %s" name step.name reason);
               { verdict = Defer (Printf.sprintf "Saga deferred at '%s': %s" step.name reason);
                 confidence = result.confidence;
                 context = result.context;
@@ -551,8 +576,13 @@ module Checkpoint = struct
         (* 이전 체크포인트에서 복구 *)
         let start_idx, current_state =
           match checkpoint.load () with
-          | Some (idx, s) when idx < List.length validators -> (idx, s)
-          | _ -> (0, state)
+          | Some (idx, s) when idx < List.length validators ->
+            Log.info (fun m -> m "[%s] Resuming from checkpoint %d/%d"
+              name idx (List.length validators));
+            (idx, s)
+          | _ ->
+            Log.debug (fun m -> m "[%s] Starting fresh (no checkpoint)" name);
+            (0, state)
         in
 
         let validators_array = Array.of_list validators in
@@ -560,22 +590,27 @@ module Checkpoint = struct
         let final_state = ref current_state in
 
         let rec run idx =
-          if idx >= Array.length validators_array then
+          if idx >= Array.length validators_array then begin
+            Log.info (fun m -> m "[%s] All %d checkpoints passed" name (List.length validators));
             { verdict = Pass "All checkpoints passed";
               confidence = 1.0;
               context = (Obj.magic () : c);
               children = List.rev !results;
               metadata = [("checkpoints", string_of_int (List.length validators))]; }
-          else
+          end
+          else begin
             let module V = (val validators_array.(idx)) in
+            Log.debug (fun m -> m "[%s] Running checkpoint %d/%d" name idx (List.length validators));
             let result = V.validate !final_state in
             results := result :: !results;
 
             match result.verdict with
             | Pass _ | Warn _ ->
+              Log.debug (fun m -> m "[%s] Checkpoint %d saved" name (idx + 1));
               checkpoint.save !final_state (idx + 1);
               run (idx + 1)
             | Fail reason ->
+              Log.err (fun m -> m "[%s] Failed at checkpoint %d: %s" name idx reason);
               { verdict = Fail (Printf.sprintf "Failed at checkpoint %d: %s" idx reason);
                 confidence = 0.0;
                 context = result.context;
@@ -587,6 +622,7 @@ module Checkpoint = struct
                 context = result.context;
                 children = List.rev !results;
                 metadata = [("deferred_checkpoint", string_of_int idx)]; }
+          end
         in
         run start_idx
     end)
