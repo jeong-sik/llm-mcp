@@ -41,9 +41,18 @@ let make_https_ctx () =
       None
     | Ok tls_config ->
       Some (fun uri raw ->
+          (* Use safe Result-returning functions instead of _exn variants
+             to avoid runtime crashes on malformed hostnames *)
           let host =
-            Uri.host uri
-            |> Option.map (fun h -> Domain_name.(host_exn (of_string_exn h)))
+            match Uri.host uri with
+            | None -> None
+            | Some h ->
+              match Domain_name.of_string h with
+              | Error _ -> None  (* Invalid domain format, proceed without SNI *)
+              | Ok dn ->
+                match Domain_name.host dn with
+                | Error _ -> None  (* Not a valid SNI host (e.g., IP address) *)
+                | Ok host -> Some host
           in
           Tls_eio.client_of_flow tls_config ?host raw)
 
