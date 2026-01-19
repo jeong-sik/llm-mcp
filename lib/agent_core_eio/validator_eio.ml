@@ -208,7 +208,7 @@ module Compose = struct
           }
     end)
 
-  (** Functor map: 결과 변환 *)
+  (** Functor map: 결과 변환 (children 정보는 metadata로 보존) *)
   let map
       (type s c1 c2)
       (f : c1 -> c2)
@@ -220,13 +220,28 @@ module Compose = struct
 
       let name = Printf.sprintf "map(%s)" V.name
 
+      (* children 정보를 metadata로 직렬화 *)
+      let serialize_children children =
+        let verdict_to_string = function
+          | Pass s -> "Pass:" ^ s
+          | Warn s -> "Warn:" ^ s
+          | Fail s -> "Fail:" ^ s
+          | Defer s -> "Defer:" ^ s
+        in
+        let child_summaries = List.mapi (fun i c ->
+            (Printf.sprintf "child_%d_verdict" i, verdict_to_string c.verdict)
+          ) children
+        in
+        ("children_count", string_of_int (List.length children)) :: child_summaries
+
       let validate state =
         let r = V.validate state in
+        let children_meta = serialize_children r.children in
         { verdict = r.verdict;
           confidence = r.confidence;
           context = f r.context;
-          children = [];  (* context 타입이 달라서 children 유지 불가 *)
-          metadata = r.metadata;
+          children = [];  (* 타입 변환으로 직접 보존 불가, metadata로 대체 *)
+          metadata = children_meta @ r.metadata;
         }
     end)
 end

@@ -315,7 +315,157 @@ let () = Eio_main.run @@ fun env ->
       Printf.printf "[OK] functor map\n%!"
     in
 
+    (* Test 13: Monad Associativity Law *)
+    (* bind (bind m f) g ≡ bind m (λx. bind (f x) g) *)
+    let () =
+      let module M : VALIDATOR with type state = int and type context = int = struct
+        type state = int
+        type context = int
+        let name = "m"
+        let validate n =
+          { verdict = Pass "m"; confidence = 1.0; context = n;
+            children = []; metadata = []; }
+      end in
+
+      (* f: int result -> Validator (doubles context) *)
+      let f (_r : int result) : (module VALIDATOR with type state = int and type context = int) =
+        (module struct
+          type state = int
+          type context = int
+          let name = "f"
+          let validate n =
+            { verdict = Pass "f"; confidence = 1.0; context = n * 2;
+              children = []; metadata = []; }
+        end)
+      in
+
+      (* g: int result -> Validator (adds 10 to context) *)
+      let g (_r : int result) : (module VALIDATOR with type state = int and type context = int) =
+        (module struct
+          type state = int
+          type context = int
+          let name = "g"
+          let validate _ =
+            { verdict = Pass "g"; confidence = 1.0; context = _r.context + 10;
+              children = []; metadata = []; }
+        end)
+      in
+
+      (* Left side: bind (bind m f) g *)
+      let module MF = (val Compose.bind (module M) f) in
+      let module Left = (val Compose.bind (module MF) g) in
+
+      (* Right side: bind m (λx. bind (f x) g) *)
+      let fg (r : int result) =
+        let (module F_result) = f r in
+        Compose.bind (module F_result) g
+      in
+      let module Right = (val Compose.bind (module M) fg) in
+
+      let left_result = Left.validate 5 in
+      let right_result = Right.validate 5 in
+
+      (* Both should produce same final context: (5 * 2) + 10 = 20 *)
+      assert (left_result.context = right_result.context);
+      assert (left_result.context = 20);
+
+      Printf.printf "[OK] monad associativity law\n%!"
+    in
+
+    (* Test 14: Functor Identity Law *)
+    (* map id ≡ id *)
+    let () =
+      let module V : VALIDATOR with type state = int and type context = int = struct
+        type state = int
+        type context = int
+        let name = "v"
+        let validate n =
+          { verdict = Pass "v"; confidence = 0.9; context = n * 3;
+            children = []; metadata = [("key", "value")]; }
+      end in
+
+      let module Mapped = (val Compose.map (fun x -> x) (module V)) in
+      let original = V.validate 7 in
+      let mapped = Mapped.validate 7 in
+
+      assert (original.context = mapped.context);
+      assert (original.confidence = mapped.confidence);
+      assert (match original.verdict, mapped.verdict with
+        | Pass a, Pass b -> a = b
+        | _ -> false);
+
+      Printf.printf "[OK] functor identity law\n%!"
+    in
+
+    (* Test 15: Functor Composition Law *)
+    (* map (f . g) ≡ map f . map g *)
+    let () =
+      let module V : VALIDATOR with type state = int and type context = int = struct
+        type state = int
+        type context = int
+        let name = "v"
+        let validate n =
+          { verdict = Pass "v"; confidence = 1.0; context = n;
+            children = []; metadata = []; }
+      end in
+
+      let f x = x * 2 in
+      let g x = x + 3 in
+
+      (* Left: map (f . g) *)
+      let module Left = (val Compose.map (fun x -> f (g x)) (module V)) in
+
+      (* Right: map f . map g *)
+      let module G_mapped = (val Compose.map g (module V)) in
+      let module Right = (val Compose.map f (module G_mapped)) in
+
+      let left_result = Left.validate 10 in
+      let right_result = Right.validate 10 in
+
+      (* Both should produce: (10 + 3) * 2 = 26 *)
+      assert (left_result.context = right_result.context);
+      assert (left_result.context = 26);
+
+      Printf.printf "[OK] functor composition law\n%!"
+    in
+
+    (* Test 16: map preserves children info in metadata *)
+    let () =
+      (* Create a validator that has children *)
+      let module V1 : VALIDATOR with type state = int and type context = unit = struct
+        type state = int
+        type context = unit
+        let name = "v1"
+        let validate _ =
+          { verdict = Pass "v1 ok"; confidence = 0.8; context = ();
+            children = []; metadata = []; }
+      end in
+      let module V2 : VALIDATOR with type state = int and type context = unit = struct
+        type state = int
+        type context = unit
+        let name = "v2"
+        let validate _ =
+          { verdict = Pass "v2 ok"; confidence = 0.9; context = ();
+            children = []; metadata = []; }
+      end in
+
+      (* Sequence creates children *)
+      let module Seq = (val Compose.sequence (module V1) (module V2)) in
+
+      (* Map over sequence result *)
+      let module Mapped = (val Compose.map (fun () -> "mapped") (module Seq)) in
+
+      let r = Mapped.validate 1 in
+
+      (* Check children info preserved in metadata *)
+      assert (List.assoc_opt "children_count" r.metadata = Some "2");
+      assert (List.assoc_opt "child_0_verdict" r.metadata = Some "Pass:v1 ok");
+      assert (List.assoc_opt "child_1_verdict" r.metadata = Some "Pass:v2 ok");
+
+      Printf.printf "[OK] map preserves children in metadata\n%!"
+    in
+
     let _ = sw in  (* suppress unused warning *)
     let _ = clock in
 
-    Printf.printf "\n✅ All 12 validator tests passed!\n%!"
+    Printf.printf "\n✅ All 16 validator tests passed!\n%!"
