@@ -5,5 +5,7 @@
    lwt
    lwt.unix
    yojson
+   cohttp
+   cohttp-lwt-unix
    ppx_deriving.runtime)
  (preprocess (pps lwt_ppx ppx_deriving.show ppx_deriving.eq)))

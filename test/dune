@@ -1,4 +1,12 @@
 (tests
- (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log)
- (libraries llm_mcp alcotest alcotest-lwt lwt lwt.unix str zstd domainslib)
+ (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log test_agent_core test_agent_core_stress test_agent_soak_1min test_ollama_backend test_claude_cli_backend test_openai_backend)
+ (modules (:standard \ test_agent_soak_1hour))
+ (libraries llm_mcp llm_mcp.agent_core alcotest alcotest-lwt lwt lwt.unix str zstd domainslib)
+ (preprocess (pps lwt_ppx)))
+
+; Long-running soak test (run manually with duration argument)
+(executable
+ (name test_agent_soak_1hour)
+ (modules test_agent_soak_1hour)
+ (libraries llm_mcp.agent_core lwt lwt.unix)
  (preprocess (pps lwt_ppx)))
