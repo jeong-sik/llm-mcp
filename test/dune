@@ -42,3 +42,13 @@
 (test
  (name test_spec_dsl)
  (libraries llm_mcp.agent_core_eio eio eio_main))
+
+; CLI Runner Eio tests
+(test
+ (name test_cli_runner_eio)
+ (libraries llm_mcp eio eio_main))
+
+; Tools Eio tests
+(test
+ (name test_tools_eio)
+ (libraries llm_mcp eio eio_main))
