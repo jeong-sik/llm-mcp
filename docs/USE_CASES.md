@@ -257,8 +257,9 @@ end)
 | Layered | Fast→Slow 최적화 | ✅ |
 | Diamond | Split→Merge | ✅ |
 | Weighted | 가중치 투표 | ✅ |
-| Circuit Breaker | 장애 차단 | - |
-| Saga | 분산 트랜잭션 | - |
+| Circuit Breaker | 장애 차단 | ✅ |
+| Saga | 분산 트랜잭션 | ✅ |
+| Checkpoint | 진행 저장/복구 | ✅ |
 
 ---
 
