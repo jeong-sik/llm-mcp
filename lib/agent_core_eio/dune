@@ -10,5 +10,6 @@
    uri
    tls-eio
    ca-certs
-   mirage-crypto-rng-eio)
+   mirage-crypto-rng-eio
+   logs)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq)))
