@@ -21,12 +21,23 @@ let parse_gemini_args = Tools.parse_gemini_args
 let parse_claude_args = Tools.parse_claude_args
 let parse_codex_args = Tools.parse_codex_args
 let parse_ollama_args = Tools.parse_ollama_args
+let parse_ollama_list_args = Tools.parse_ollama_list_args
 let build_gemini_cmd = Tools.build_gemini_cmd
 let build_claude_cmd = Tools.build_claude_cmd
 let build_codex_cmd = Tools.build_codex_cmd
 let build_ollama_curl_cmd = Tools.build_ollama_curl_cmd
 let parse_ollama_response = Ollama_parser.parse_response
+let parse_ollama_chunk = Ollama_parser.parse_chunk
 let clean_codex_output = Tools.clean_codex_output
+
+(* MCP config helpers *)
+let get_mcp_server_url = Tool_config.get_mcp_server_url
+let get_mcp_server_config = Tool_config.get_mcp_server_config
+
+(* Ollama helpers *)
+let thinking_prompt_prefix = Tools.thinking_prompt_prefix
+let tool_schema_to_ollama_tool = Tools.tool_schema_to_ollama_tool
+let tool_calls_to_json = Tools.tool_calls_to_json
 
 (* Gemini error handling - from Types module *)
 let classify_gemini_error = Types.classify_gemini_error
