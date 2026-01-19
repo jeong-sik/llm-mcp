@@ -31,3 +31,10 @@ module Ollama_parser = Ollama_parser
 
 (* Compact Protocol v4: Trained Dictionary Compression *)
 module Dictionary = Dictionary
+
+(* Eio-based modules (OCaml 5.0+ direct-style) *)
+module Cli_runner_eio = Cli_runner_eio
+module Mcp_client_eio = Mcp_client_eio
+module Mcp_server_eio = Mcp_server_eio
+module Http_server_eio = Http_server_eio
+module Tools_eio = Tools_eio
