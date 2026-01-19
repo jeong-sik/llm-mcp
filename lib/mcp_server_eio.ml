@@ -383,8 +383,8 @@ let extract_bearer_token headers =
 *)
 let auth_middleware headers =
   match Sys.getenv_opt "LLM_MCP_API_KEY" with
-  | None ->
-      (* Development mode - no auth required *)
+  | None | Some "" ->
+      (* Development mode - no auth required (empty string = unset) *)
       Ok ()
   | Some expected_token ->
       (* Production mode - check Bearer token *)

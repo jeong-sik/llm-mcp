@@ -1,6 +1,7 @@
 (library
  (name llm_mcp)
  (public_name llm_mcp)
+ (flags (:standard -w -69))
  (libraries
    ; Lwt (for existing mcp_server.ml, mcp_client.ml, tools.ml)
    lwt

@@ -55,3 +55,9 @@
 (test
  (name test_tools_eio)
  (libraries llm_mcp eio eio_main))
+
+; MCP Server Eio tests
+(test
+ (name test_mcp_server_eio)
+ (libraries llm_mcp alcotest eio eio_main))
+
