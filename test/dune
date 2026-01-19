@@ -49,15 +49,15 @@
 ; CLI Runner Eio tests
 (test
  (name test_cli_runner_eio)
- (libraries llm_mcp eio eio_main))
+ (libraries llm_mcp.eio llm_mcp.common eio eio_main))
 
 ; Tools Eio tests
 (test
  (name test_tools_eio)
- (libraries llm_mcp eio eio_main))
+ (libraries llm_mcp.eio llm_mcp.common eio eio_main))
 
 ; MCP Server Eio tests
 (test
  (name test_mcp_server_eio)
- (libraries llm_mcp alcotest eio eio_main))
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main))
 

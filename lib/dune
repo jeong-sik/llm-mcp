@@ -1,14 +1,50 @@
+; =============================================================================
+; llm_mcp_common - Shared modules (NO Lwt, NO Eio runtime!)
+; =============================================================================
 (library
- (name llm_mcp)
- (public_name llm_mcp)
+ (name llm_mcp_common)
+ (public_name llm_mcp.common)
+ (wrapped false)
  (flags (:standard -w -69))
+ (modules
+   ; Pure OCaml - shared between Eio and Lwt
+   common
+   types
+   dictionary
+   ollama_parser
+   tool_config
+   tool_parsers)
  (libraries
-   ; Lwt (for existing mcp_server.ml, mcp_client.ml, tools.ml)
-   lwt
-   lwt.unix
-   cohttp-lwt-unix
-   domainslib
-   ; Eio (for new http_server_eio.ml, mcp_server_eio.ml)
+   yojson
+   str
+   unix
+   zstd
+   msgpck
+   compact-protocol
+   grpc-direct-core
+   mcp_protocol)
+ (ocamlopt_flags (:standard -O3))
+ (preprocess (pps ppx_deriving_yojson)))
+
+; =============================================================================
+; llm_mcp_eio - Pure Eio Library (NO Lwt!)
+; =============================================================================
+(library
+ (name llm_mcp_eio)
+ (public_name llm_mcp.eio)
+ (wrapped false)
+ (flags (:standard -w -69))
+ (modules
+   ; Core Eio modules
+   http_server_eio
+   mcp_server_eio
+   tools_eio
+   mcp_client_eio
+   cli_runner_eio)
+ (libraries
+   ; Shared modules
+   llm_mcp.common
+   ; Pure Eio - NO LWT!
    eio
    eio_main
    httpun
@@ -16,8 +52,48 @@
    gluten
    gluten-eio
    cohttp-eio
-   lwt_eio
    ipaddr
+   ; Common
+   yojson
+   str
+   unix
+   mcp_protocol
+   msgpck
+   grpc-direct-core
+   zstd
+   compact-protocol)
+ (ocamlopt_flags (:standard -O3))
+ (preprocess (pps ppx_deriving_yojson)))
+
+; =============================================================================
+; llm_mcp - Legacy Lwt Library (for backwards compatibility)
+; =============================================================================
+(library
+ (name llm_mcp)
+ (public_name llm_mcp)
+ (flags (:standard -w -69))
+ (modules
+   ; Lwt-based modules
+   mcp_server
+   tools
+   mcp_client
+   agent_loop
+   cli_runner
+   parallel_utils
+   run_log
+   mcp_session
+   notification_sse
+   sse
+   llm_mcp)
+ (libraries
+   ; Shared modules
+   llm_mcp.common
+   ; Lwt
+   lwt
+   lwt.unix
+   cohttp-lwt-unix
+   domainslib
+   lwt_eio
    ; Common
    yojson
    str
