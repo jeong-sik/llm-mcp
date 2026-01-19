@@ -1,6 +1,6 @@
 ; Core tests (no agent_core dependency)
 (tests
- (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log)
+ (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log)
  (modules (:standard \ test_ollama_integration test_agent_core_eio test_validator_eio test_lwt_bridge test_presets test_spec_dsl test_validation_stack test_orchestration_eio test_cli_runner_eio test_tools_eio test_mcp_server_eio test_tool_parsers))
  (libraries llm_mcp alcotest alcotest-lwt lwt lwt.unix str zstd domainslib)
  (preprocess (pps lwt_ppx)))
@@ -65,4 +65,3 @@
 (test
  (name test_tool_parsers)
  (libraries llm_mcp.common alcotest))
-
