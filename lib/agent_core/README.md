@@ -2,33 +2,20 @@
 
 > Reusable Agent Loop abstraction with retry, timeout, and memory management.
 
-## Quick Start
+## Quick Start (Built-in Ollama Backend)
 
 ```ocaml
-(* 1. Define your LLM backend *)
-module My_Backend : Agent_core.Sigs.LLM_BACKEND = struct
-  type config = { api_url: string; model: string }
-  type response = { content: string; tool_calls: tool_call list option }
+open Agent_core
 
-  let name = "my_llm"
-
-  let call ~config ~messages ~tools =
-    (* Your LLM API call here *)
-    Lwt.return (Ok { content = "Hello!"; tool_calls = None })
-
-  let parse_tool_calls r = r.tool_calls
-  let extract_content r = r.content
-  let is_final r = r.tool_calls = None
-end
-
-(* 2. Define your tool executor *)
-module My_Tools : Agent_core.Sigs.TOOL_EXECUTOR = struct
+(* 1. Define your tools *)
+module My_Tools : Sigs.TOOL_EXECUTOR = struct
   let execute tc =
-    match tc.name with
-    | "search" -> Lwt.return (Ok (ToolSuccess "Found: ..."))
-    | _ -> Lwt.return (Error "Unknown tool")
+    match tc.Types.name with
+    | "search" -> Lwt.return (Result.Ok (Types.ToolSuccess "Found: ..."))
+    | _ -> Lwt.return (Result.Error "Unknown tool")
 
   let to_message tc result =
+    let open Types in
     let content = match result with
       | ToolSuccess s -> s
       | ToolError e -> "Error: " ^ e
@@ -38,36 +25,68 @@ module My_Tools : Agent_core.Sigs.TOOL_EXECUTOR = struct
   let available_tools () = ["search"; "calculate"]
 end
 
-(* 3. Create the loop with the functor *)
-module My_Loop = Agent_core.Make_Loop(My_Backend)(My_Tools)(Agent_core.Default_state)
+(* 2. Create the loop with built-in Ollama backend *)
+module My_Loop = Make_Loop(Ollama_backend)(My_Tools)(Default_state)
 
-(* 4. Run it! *)
+(* 3. Run it! *)
 let () =
-  let config = {
-    Agent_core.Types.default_loop_config with
+  let backend_config = Ollama_backend.{
+    base_url = "http://127.0.0.1:11434";
+    model = "llama3";
+    temperature = 0.7;
+    stream = false;
+    timeout_ms = Some 60_000;
+  } in
+
+  let loop_config = {
+    Types.default_loop_config with
     max_turns = 10;
-    timeout_ms = 30000;  (* 30s per turn *)
-    max_messages = 50;   (* sliding window *)
+    timeout_ms = 30000;
+    max_messages = 50;
   } in
 
   let result = Lwt_main.run (
     My_Loop.run
-      ~config
-      ~backend_config:{ api_url = "http://localhost:11434"; model = "llama3" }
+      ~config:loop_config
+      ~backend_config
       ~initial_prompt:"Hello, solve this problem..."
       ~tools:[]
       ()
   ) in
 
   match result with
-  | Completed { response; turns_used } ->
+  | Types.Completed { response; turns_used } ->
       Printf.printf "Done in %d turns: %s\n" turns_used response
-  | MaxTurnsReached { last_response; _ } ->
+  | Types.MaxTurnsReached { last_response; _ } ->
       Printf.printf "Max turns: %s\n" last_response
-  | TimedOut { turns_completed } ->
+  | Types.TimedOut { turns_completed } ->
       Printf.printf "Timed out after %d turns\n" turns_completed
-  | Error msg ->
+  | Types.Error msg ->
       Printf.printf "Error: %s\n" msg
+  | Types.CircuitOpen ->
+      Printf.printf "Circuit breaker tripped\n"
+```
+
+## Custom Backend Example
+
+```ocaml
+(* Define your own LLM backend *)
+module My_Backend : Agent_core.Sigs.LLM_BACKEND = struct
+  type config = { api_url: string; model: string }
+  type response = { content: string; tool_calls: tool_call list option }
+
+  let name = "my_llm"
+
+  let call ~config ~messages ~tools =
+    (* Your LLM API call here *)
+    Lwt.return (Result.Ok { content = "Hello!"; tool_calls = None })
+
+  let parse_tool_calls r = r.tool_calls
+  let extract_content r = r.content
+  let is_final r = r.tool_calls = None
+end
+
+module My_Loop = Agent_core.Make_Loop(My_Backend)(My_Tools)(Agent_core.Default_state)
 ```
 
 ## Key Features
@@ -146,8 +165,71 @@ agent_core/
 ├── retry.ml               # Exponential backoff with jitter
 ├── timeout.ml             # Lwt-based timeout
 ├── default_state.ml       # Default state manager
+├── ollama_backend.ml      # Built-in Ollama LLM backend
 ├── BENCHMARKS.md          # Performance benchmarks
 └── README.md              # This file
+```
+
+## Built-in Backends
+
+### Ollama Backend
+
+The `Ollama_backend` module provides a ready-to-use implementation for local LLMs via Ollama:
+
+```ocaml
+(* Configuration options *)
+type config = {
+  base_url : string;       (* Default: "http://127.0.0.1:11434" *)
+  model : string;          (* e.g., "llama3", "qwen3", "devstral" *)
+  temperature : float;     (* 0.0 - 2.0 *)
+  stream : bool;           (* Streaming support *)
+  timeout_ms : int option; (* Request timeout *)
+}
+
+(* Utility functions *)
+val health_check : ?base_url:string -> unit -> bool Lwt.t
+val list_models : ?base_url:string -> unit -> (string list, string) result Lwt.t
+```
+
+### Claude CLI Backend
+
+The `Claude_cli_backend` module wraps the Claude Code CLI for programmatic access:
+
+```ocaml
+(* Configuration options *)
+type config = {
+  model : string;              (* "sonnet", "opus", "haiku" *)
+  timeout_ms : int option;     (* Command timeout *)
+  system_prompt : string option;
+  allowed_tools : string list option;
+  print_mode : bool;           (* Always true for non-interactive *)
+}
+
+(* Utility functions *)
+val is_available : unit -> bool Lwt.t
+val version : unit -> (string, string) result Lwt.t
+```
+
+### OpenAI Backend
+
+The `Openai_backend` module provides access to OpenAI's API (GPT-4, GPT-3.5, etc.):
+
+```ocaml
+(* Configuration options *)
+type config = {
+  api_key : string;           (* OPENAI_API_KEY *)
+  model : string;             (* "gpt-4", "gpt-3.5-turbo", etc. *)
+  temperature : float;        (* 0.0 - 2.0 *)
+  base_url : string;          (* For Azure or proxies *)
+  timeout_ms : int option;
+  max_tokens : int option;
+  organization : string option;
+}
+
+(* Utility functions *)
+val has_api_key : config -> bool
+val config_from_env : ?model:string -> unit -> config
+val list_models : config:config -> unit -> (string list, string) result Lwt.t
 ```
 
 ## Types Reference

@@ -6,19 +6,21 @@
     {1 Quick Start}
 
     {[
-      (* Define your backend *)
-      module My_Backend : Agent_sigs.LLM_BACKEND = struct ... end
-
-      (* Define your tools *)
+      (* Use the built-in Ollama backend *)
       module My_Tools : Agent_sigs.TOOL_EXECUTOR = struct ... end
+      module My_Loop = Agent_loop_functor.Make(Ollama_backend)(My_Tools)(Default_state)
 
-      (* Create the loop *)
-      module My_Loop = Agent_loop_functor.Make(My_Backend)(My_Tools)(Default_state)
+      let config = Ollama_backend.{
+        base_url = "http://127.0.0.1:11434";
+        model = "llama3";
+        temperature = 0.7;
+        stream = false;
+        timeout_ms = Some 60_000;
+      }
 
-      (* Run it *)
       let result = My_Loop.run
         ~config:Agent_types.default_loop_config
-        ~backend_config:my_config
+        ~backend_config:config
         ~initial_prompt:"Hello"
         ~tools:[]
         ()
@@ -37,6 +39,13 @@
     - {!Agent_sigs} - Module type signatures
     - {!Agent_loop_functor} - The main functor
     - {!Default_state} - Simple state manager implementation
+    - {!Ollama_backend} - Ollama API backend implementation
+
+    {1 Built-in Backends}
+
+    - {!Ollama_backend} - For local LLMs via Ollama
+    - {!Claude_cli_backend} - For Claude Code CLI
+    - {!Openai_backend} - For OpenAI API (GPT-4, GPT-3.5, etc.)
 *)
 
 module Types = Agent_types
@@ -46,3 +55,6 @@ module Timeout = Timeout
 module Agent_loop_functor = Agent_loop_functor
 module Make_Loop = Agent_loop_functor.Make
 module Default_state = Default_state
+module Ollama_backend = Ollama_backend
+module Claude_cli_backend = Claude_cli_backend
+module Openai_backend = Openai_backend
