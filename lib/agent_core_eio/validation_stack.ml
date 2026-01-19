@@ -698,7 +698,8 @@ end) : INTERVENOR with type context = float * float * int  (* progress, time, fa
   let should_intervene (progress, time_spent, failures) =
     if failures >= Config.max_failures then
       Some (RepeatedFailure { attempts = failures; last_error = "Max failures reached" })
-    else if time_spent > Config.stall_threshold_sec && progress < 0.5 then
+    (* 0.3 미만에서만 Stalled 트리거 - decide와 일치 *)
+    else if time_spent > Config.stall_threshold_sec && progress < 0.3 then
       Some (Stalled { duration_sec = time_spent; progress })
     else
       None
@@ -706,6 +707,7 @@ end) : INTERVENOR with type context = float * float * int  (* progress, time, fa
   let decide _obs trigger =
     match trigger with
     | Stalled { duration_sec; progress } ->
+      (* should_intervene에서 progress < 0.3일 때만 트리거됨 *)
       if progress < 0.1 then
         Redefine {
           original_problem = "Current task";
@@ -719,6 +721,7 @@ end) : INTERVENOR with type context = float * float * int  (* progress, time, fa
           reason = "Low progress after significant time"
         }
       else
+        (* 방어적: progress >= 0.3이면 개입 불필요 *)
         Continue
     | LowPriority _ ->
       Redirect {

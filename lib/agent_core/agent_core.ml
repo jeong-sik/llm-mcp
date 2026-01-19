@@ -1,5 +1,15 @@
 (** Agent Core - Reusable Agent Loop abstraction
 
+    {b DEPRECATED}: This Lwt-based module is deprecated. Use {!Agent_core_eio}
+    for new code, which provides direct-style concurrency with Eio instead of
+    monadic Lwt.
+
+    Migration guide:
+    - [Ollama_backend] → [Ollama_backend_eio]
+    - [Claude_cli_backend] → [Claude_cli_backend_eio]
+    - [Openai_backend] → [Openai_backend_eio]
+    - Pass [~sw] and [~net]/[~proc_mgr] as function arguments
+
     This module provides a functor-based approach to building agentic loops
     that can work with different LLM backends, tool executors, and state managers.
 
@@ -62,7 +72,14 @@ module Timeout = Timeout
 module Agent_loop_functor = Agent_loop_functor
 module Make_Loop = Agent_loop_functor.Make
 module Default_state = Default_state
+(** @deprecated Use Ollama_backend_eio from agent_core_eio instead *)
 module Ollama_backend = Ollama_backend
+
+(** @deprecated Use Claude_cli_backend_eio from agent_core_eio instead *)
 module Claude_cli_backend = Claude_cli_backend
+
+(** @deprecated Use Openai_backend_eio from agent_core_eio instead *)
 module Openai_backend = Openai_backend
+
+(** @deprecated Use Validator/Validation_stack from agent_core_eio instead *)
 module Orchestrator = Orchestrator
