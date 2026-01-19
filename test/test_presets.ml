@@ -45,6 +45,13 @@ let () = Eio_main.run @@ fun env ->
         { verdict = Pass "slow ok"; confidence = 0.9; context = (); children = []; metadata = []; }
     end in
 
+    let verdict_tag = function
+      | Pass _ -> "pass"
+      | Fail _ -> "fail"
+      | Warn _ -> "warn"
+      | Defer _ -> "defer"
+    in
+
     (* Test 1: Pipeline *)
     let () =
       let pipeline = Pipeline.create ~sw [
@@ -366,4 +373,77 @@ let () = Eio_main.run @@ fun env ->
       Printf.printf "[OK] Checkpoint resumes from saved state\n%!"
     in
 
-    Printf.printf "\n✅ All 21 preset tests passed!\n%!"
+    (* Test 22: Meta determinism *)
+    let () =
+      let meta = Meta.create ~sw ~name:"deterministic" ~policy:Meta.MajorityPass [
+        (module Always_pass : VALIDATOR with type state = int and type context = unit);
+        (module Check_positive);
+        (module Always_fail);
+      ] in
+      let module M = (val meta) in
+      let r1 = M.validate 5 in
+      let r2 = M.validate 5 in
+      assert (verdict_tag r1.verdict = verdict_tag r2.verdict);
+      Printf.printf "[OK] Meta determinism\n%!"
+    in
+
+    (* Test 23: Majority boundary (1/2 should fail) *)
+    let () =
+      let quorum = Quorum.majority ~sw [
+        (module Always_pass : VALIDATOR with type state = int and type context = unit);
+        (module Always_fail);
+      ] in
+      let module Q = (val quorum) in
+      let r = Q.validate 5 in
+      assert (match r.verdict with Fail _ -> true | _ -> false);
+      Printf.printf "[OK] Majority boundary strict\n%!"
+    in
+
+    (* Test 24: Majority monotonic pass *)
+    let () =
+      let quorum1 = Quorum.majority ~sw [
+        (module Always_pass : VALIDATOR with type state = int and type context = unit);
+        (module Always_pass);
+        (module Always_fail);
+      ] in
+      let quorum2 = Quorum.majority ~sw [
+        (module Always_pass : VALIDATOR with type state = int and type context = unit);
+        (module Always_pass);
+        (module Always_fail);
+        (module Always_pass);
+      ] in
+      let module Q1 = (val quorum1) in
+      let module Q2 = (val quorum2) in
+      let r1 = Q1.validate 5 in
+      let r2 = Q2.validate 5 in
+      assert (match r1.verdict with Pass _ -> true | _ -> false);
+      assert (match r2.verdict with Pass _ -> true | _ -> false);
+      Printf.printf "[OK] Majority monotonic pass\n%!"
+    in
+
+    (* Test 25: Weighted vote threshold *)
+    let () =
+      let weighted_pass = Meta.create ~sw ~name:"weighted_pass"
+        ~policy:(Meta.WeightedVote [("always_pass", 0.6); ("always_fail", 0.4)])
+        [
+          (module Always_pass : VALIDATOR with type state = int and type context = unit);
+          (module Always_fail);
+        ]
+      in
+      let weighted_fail = Meta.create ~sw ~name:"weighted_fail"
+        ~policy:(Meta.WeightedVote [("always_pass", 0.4); ("always_fail", 0.6)])
+        [
+          (module Always_pass : VALIDATOR with type state = int and type context = unit);
+          (module Always_fail);
+        ]
+      in
+      let module WP = (val weighted_pass) in
+      let module WF = (val weighted_fail) in
+      let r_pass = WP.validate 5 in
+      let r_fail = WF.validate 5 in
+      assert (match r_pass.verdict with Pass _ -> true | _ -> false);
+      assert (match r_fail.verdict with Fail _ -> true | _ -> false);
+      Printf.printf "[OK] Weighted vote threshold\n%!"
+    in
+
+    Printf.printf "\n✅ All 25 preset tests passed!\n%!"
