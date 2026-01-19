@@ -39,13 +39,20 @@
     - {!Agent_sigs} - Module type signatures
     - {!Agent_loop_functor} - The main functor
     - {!Default_state} - Simple state manager implementation
-    - {!Ollama_backend} - Ollama API backend implementation
+    - {!Orchestrator} - Multi-agent coordination patterns
 
     {1 Built-in Backends}
 
     - {!Ollama_backend} - For local LLMs via Ollama
     - {!Claude_cli_backend} - For Claude Code CLI
     - {!Openai_backend} - For OpenAI API (GPT-4, GPT-3.5, etc.)
+
+    {1 Orchestration Patterns}
+
+    - {b Goal-based Loop}: Run until goal reached, not just turn-limited
+    - {b Evaluator-Optimizer}: Evaluate results, iterate until quality
+    - {b Pipeline}: Sequential agent handoffs (A → B → C)
+    - {b Orchestrator-Workers}: Central coordinator distributes tasks
 *)
 
 module Types = Agent_types
@@ -58,3 +65,4 @@ module Default_state = Default_state
 module Ollama_backend = Ollama_backend
 module Claude_cli_backend = Claude_cli_backend
 module Openai_backend = Openai_backend
+module Orchestrator = Orchestrator

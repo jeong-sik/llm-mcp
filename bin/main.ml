@@ -449,7 +449,7 @@ let run_agent ~agent ~prompt ~model_opt ~timeout =
   let args = match String.lowercase_ascii agent with
     | "ollama" ->
         let model = Option.value model_opt ~default:"devstral" in
-        Ollama { prompt; model; system_prompt = None; temperature = 0.7; timeout; stream = false; tools = None; max_turns = 10; chain = None; parallel = None }
+        Ollama { prompt; model; system_prompt = None; temperature = 0.7; timeout; stream = false; tools = None }
     | "gemini" ->
         let model = Option.value model_opt ~default:"gemini-3-pro-preview" in
         Gemini { prompt; model; thinking_level = High; yolo = false; timeout; stream = false }
