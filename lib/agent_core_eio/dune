@@ -3,5 +3,9 @@
  (public_name llm_mcp.agent_core_eio)
  (libraries
    eio
-   yojson)
+   eio_main
+   yojson
+   cohttp
+   cohttp-eio
+   uri)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq)))
