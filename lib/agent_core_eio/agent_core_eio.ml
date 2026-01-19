@@ -30,6 +30,9 @@ module Retry = Retry_eio
 (** Timeout utilities *)
 module Timeout = Timeout_eio
 
+(** Composable Meta-Validator *)
+module Validator = Validator_eio
+
 (** Main functor for creating agent loops *)
 module Make_Loop = Agent_loop_eio.Make
 

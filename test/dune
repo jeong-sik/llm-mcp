@@ -23,6 +23,11 @@
  (name test_agent_core_eio)
  (libraries agent_core_eio alcotest eio eio_main))
 
+; Validator Eio tests
+(test
+ (name test_validator_eio)
+ (libraries llm_mcp.agent_core_eio eio eio_main))
+
 ; Lwt/Eio bridge tests
 (test
  (name test_lwt_bridge)
