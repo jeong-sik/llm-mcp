@@ -42,6 +42,9 @@ module Spec_dsl = Spec_dsl
 (** Validation Stack - Multi-Level Validation Hierarchy *)
 module Validation_stack = Validation_stack
 
+(** Ollama Backend - Direct Eio implementation for local LLM *)
+module Ollama_backend_eio = Ollama_backend_eio
+
 (** Main functor for creating agent loops *)
 module Make_Loop = Agent_loop_eio.Make
 

@@ -1,27 +1,20 @@
+; Core tests (no agent_core dependency)
 (tests
- (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log test_agent_core test_agent_core_stress test_agent_soak_1min test_ollama_backend test_claude_cli_backend test_openai_backend)
- (modules (:standard \ test_agent_soak_1hour test_ollama_integration))
- (libraries llm_mcp llm_mcp.agent_core alcotest alcotest-lwt lwt lwt.unix str zstd domainslib)
- (preprocess (pps lwt_ppx)))
-
-; Long-running soak test (run manually with duration argument)
-(executable
- (name test_agent_soak_1hour)
- (modules test_agent_soak_1hour)
- (libraries llm_mcp.agent_core lwt lwt.unix)
+ (names test_types test_tools test_mcp_server test_binaries test_msgpack_size test_input_compression test_dictionary test_parallel test_cli_runner test_common test_mcp_session test_sse test_notification_sse test_run_log)
+ (modules (:standard \ test_ollama_integration test_agent_core_eio test_validator_eio test_lwt_bridge test_presets test_spec_dsl test_validation_stack test_orchestration_eio test_cli_runner_eio test_tools_eio))
+ (libraries llm_mcp alcotest alcotest-lwt lwt lwt.unix str zstd domainslib)
  (preprocess (pps lwt_ppx)))
 
 ; Ollama integration test (requires OLLAMA_TEST=1)
 (executable
  (name test_ollama_integration)
  (modules test_ollama_integration)
- (libraries llm_mcp.agent_core alcotest lwt lwt.unix str)
- (preprocess (pps lwt_ppx)))
+ (libraries llm_mcp.agent_core_eio alcotest eio eio_main str))
 
-; Eio-based tests (separate stanza - no lwt_ppx)
+; Eio-based tests
 (test
  (name test_agent_core_eio)
- (libraries agent_core_eio alcotest eio eio_main))
+ (libraries llm_mcp.agent_core_eio alcotest eio eio_main))
 
 ; Validator Eio tests
 (test
