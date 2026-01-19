@@ -394,3 +394,11 @@
  (package llm_mcp)
  (modules train_dictionary)
  (libraries llm_mcp unix yojson))
+
+(executable
+ (name quote_agent)
+ (public_name quote-agent)
+ (package llm_mcp)
+ (modules quote_agent)
+ (libraries llm_mcp llm_mcp.agent_core lwt lwt.unix unix str)
+ (preprocess (pps lwt_ppx)))
