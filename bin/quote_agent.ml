@@ -1,13 +1,11 @@
-(** Quote Agent - 3-hour long-running goal-based loop demo
+(** Quote Agent - 3-hour long-running goal-based loop demo (Eio version)
 
     Prints a famous quote every 10 minutes for 3 hours.
     At each hour mark (1h, 2h, 3h), composes a Korean poem using accumulated quotes.
-    Demonstrates Orchestrator's goal-based loop pattern + LLM integration.
+    Demonstrates Goal-based Loop pattern + LLM integration.
 
     Usage: dune exec bin/quote_agent.exe
 *)
-
-open Lwt.Syntax
 
 (* Categories for quote generation *)
 let categories = [|
@@ -24,7 +22,7 @@ let categories = [|
 |]
 
 (* Ollama backend config *)
-let ollama_config = Agent_core.Ollama_backend.{
+let ollama_config = Agent_core_eio.Ollama_backend_eio.{
   base_url = "http://127.0.0.1:11434";
   model = "qwen3:1.7b";
   temperature = 0.9;
@@ -33,8 +31,8 @@ let ollama_config = Agent_core.Ollama_backend.{
 }
 
 (* Generate quote using Ollama with context from previous quotes *)
-let generate_quote ~previous_quotes category =
-  let open Agent_core.Types in
+let generate_quote ~sw ~net ~previous_quotes category =
+  let open Agent_core_eio.Types in
 
   (* Build context from previous quotes *)
   let context_section =
@@ -64,8 +62,7 @@ let generate_quote ~previous_quotes category =
 명언 하나만 출력하세요 (설명 없이):|} context_section category in
 
   let messages = [{ role = User; content = prompt; tool_calls = None; name = None }] in
-  let open Lwt.Syntax in
-  let* result = Agent_core.Ollama_backend.call ~config:ollama_config ~messages ~tools:[] in
+  let result = Agent_core_eio.Ollama_backend_eio.call ~sw ~net ~config:ollama_config ~messages ~tools:[] in
   match result with
   | Ok response ->
     (* Clean up the response - remove thinking tags if present *)
@@ -77,8 +74,8 @@ let generate_quote ~previous_quotes category =
         Str.global_replace re "" content |> String.trim
       else content
     in
-    Lwt.return cleaned
-  | Error e -> Lwt.return (Printf.sprintf "(생성 실패: %s)" e)
+    cleaned
+  | Error e -> Printf.sprintf "(생성 실패: %s)" e
 
 (* Get random category *)
 let get_random_category () =
@@ -102,6 +99,13 @@ type state = {
   poems_written : int;
 }
 
+(* Goal status - Failed kept for future error handling *)
+type goal_status =
+  | Reached of string
+  | NotReached of string
+  | Failed of string
+[@@warning "-37"]
+
 (* Goal: 18 iterations (3 hours at 10-min intervals) *)
 let max_iterations = 18
 let interval_seconds = 600.0  (* 10 minutes *)
@@ -113,10 +117,10 @@ let is_hour_mark iteration =
 (* Check if goal reached *)
 let check_goal state =
   if state.iteration >= max_iterations then
-    Agent_core.Orchestrator.Reached (Printf.sprintf "Completed %d quotes and %d poems over 3 hours!" max_iterations state.poems_written)
+    Reached (Printf.sprintf "Completed %d quotes and %d poems over 3 hours!" max_iterations state.poems_written)
   else
     let progress = (float_of_int state.iteration) /. (float_of_int max_iterations) *. 100.0 in
-    Agent_core.Orchestrator.NotReached (Printf.sprintf "Progress: %.1f%% (%d/%d)" progress state.iteration max_iterations)
+    NotReached (Printf.sprintf "Progress: %.1f%% (%d/%d)" progress state.iteration max_iterations)
 
 (* Print status bar *)
 let print_status state =
@@ -127,7 +131,7 @@ let print_status state =
 
   Printf.printf "\n";
   Printf.printf "╔══════════════════════════════════════════════════════════════╗\n";
-  Printf.printf "║  🎯 Quote Agent - Goal-based Loop Demo                       ║\n";
+  Printf.printf "║  🎯 Quote Agent - Goal-based Loop Demo (Eio)                 ║\n";
   Printf.printf "╠══════════════════════════════════════════════════════════════╣\n";
   Printf.printf "║  Iteration: %2d / %2d                                          ║\n" state.iteration max_iterations;
   Printf.printf "║  Elapsed:   %-6s                                         ║\n" (format_duration_mins elapsed_mins);
@@ -140,8 +144,8 @@ let print_status state =
   flush stdout
 
 (* Generate poem using Ollama *)
-let generate_poem_with_ollama quotes_list hour_num =
-  let open Agent_core.Types in
+let generate_poem_with_ollama ~sw ~net quotes_list hour_num =
+  let open Agent_core_eio.Types in
   let quotes_text = String.concat "\n" (List.mapi (fun i q -> Printf.sprintf "%d. %s" (i+1) q) (List.rev quotes_list)) in
   let prompt = Printf.sprintf {|다음 명언들을 영감으로 삼아 아름다운 한국어 시를 한 편 지어주세요.
 이것은 %d시간째 시입니다. 명언들의 핵심 메시지를 담아 4-8줄의 시를 작성해주세요.
@@ -155,7 +159,7 @@ let generate_poem_with_ollama quotes_list hour_num =
 [시 내용]|} hour_num quotes_text in
 
   (* Use Ollama backend *)
-  let backend_config = Agent_core.Ollama_backend.{
+  let backend_config = Agent_core_eio.Ollama_backend_eio.{
     base_url = "http://127.0.0.1:11434";
     model = "qwen3:1.7b";
     temperature = 0.8;
@@ -164,10 +168,10 @@ let generate_poem_with_ollama quotes_list hour_num =
   } in
 
   let messages = [{ role = User; content = prompt; tool_calls = None; name = None }] in
-  let* result = Agent_core.Ollama_backend.call ~config:backend_config ~messages ~tools:[] in
+  let result = Agent_core_eio.Ollama_backend_eio.call ~sw ~net ~config:backend_config ~messages ~tools:[] in
   match result with
-  | Ok response -> Lwt.return response.content
-  | Error e -> Lwt.return (Printf.sprintf "(시 생성 실패: %s)\n\n대신 간단한 시를 드립니다:\n\n제목: 명언의 빛\n\n지혜의 말들이 모여\n하나의 길을 비추네\n삶의 여정 속에서\n우리는 배우고 성장하리" e)
+  | Ok response -> response.content
+  | Error e -> Printf.sprintf "(시 생성 실패: %s)\n\n대신 간단한 시를 드립니다:\n\n제목: 명언의 빛\n\n지혜의 말들이 모여\n하나의 길을 비추네\n삶의 여정 속에서\n우리는 배우고 성장하리" e
 
 (* Print poem section *)
 let print_poem hour_num poem =
@@ -181,12 +185,12 @@ let print_poem hour_num poem =
   flush stdout
 
 (* Main loop *)
-let run_agent () =
+let run_agent ~sw ~net ~clock =
   let start_time = Unix.gettimeofday () in
   let initial_state = { iteration = 0; start_time; quotes_shown = []; poems_written = 0 } in
 
   Printf.printf "\n";
-  Printf.printf "🚀 Starting Quote Agent - 3 Hour Run (with Poetry!)\n";
+  Printf.printf "🚀 Starting Quote Agent - 3 Hour Run (with Poetry!) [Eio]\n";
   Printf.printf "   Interval: 10 minutes\n";
   Printf.printf "   Total quotes: %d\n" max_iterations;
   Printf.printf "   Poems at: 1h, 2h, 3h (using accumulated quotes)\n";
@@ -199,26 +203,26 @@ let run_agent () =
 
   let rec loop state =
     match check_goal state with
-    | Agent_core.Orchestrator.Reached summary ->
+    | Reached summary ->
       Printf.printf "\n🎉 %s\n" summary;
       Printf.printf "   Total runtime: %s\n"
         (format_duration_mins (int_of_float ((Unix.gettimeofday () -. start_time) /. 60.0)));
       flush stdout;
-      Lwt.return state
+      state
 
-    | Agent_core.Orchestrator.Failed reason ->
+    | Failed reason ->
       Printf.printf "\n❌ Failed: %s\n" reason;
       flush stdout;
-      Lwt.return state
+      state
 
-    | Agent_core.Orchestrator.NotReached _ ->
+    | NotReached _ ->
       (* Print status and generate quote with LLM *)
       print_status state;
       let category = get_random_category () in
       Printf.printf "   📚 주제: %s\n" category;
       Printf.printf "   🤖 명언 생성 중... (컨텍스트: %d개 이전 명언)\n" (List.length state.quotes_shown);
       flush stdout;
-      let* quote = generate_quote ~previous_quotes:state.quotes_shown category in
+      let quote = generate_quote ~sw ~net ~previous_quotes:state.quotes_shown category in
       Printf.printf "   %s\n\n" quote;
       flush stdout;
 
@@ -227,16 +231,16 @@ let run_agent () =
       let new_iteration = state.iteration + 1 in
 
       (* Check if it's an hour mark - write poem! *)
-      let* (poems_written, new_quotes_for_state) =
+      let (poems_written, new_quotes_for_state) =
         if is_hour_mark new_iteration then begin
           let hour_num = new_iteration / 6 in
           Printf.printf "🎭 %d시간 경과! 지금까지의 명언들로 시를 짓습니다...\n" hour_num;
           flush stdout;
-          let* poem = generate_poem_with_ollama new_quotes hour_num in
+          let poem = generate_poem_with_ollama ~sw ~net new_quotes hour_num in
           print_poem hour_num poem;
-          Lwt.return (state.poems_written + 1, new_quotes)
+          (state.poems_written + 1, new_quotes)
         end else
-          Lwt.return (state.poems_written, new_quotes)
+          (state.poems_written, new_quotes)
       in
 
       (* Wait for next interval *)
@@ -245,7 +249,7 @@ let run_agent () =
         Printf.printf "   (Press Ctrl+C to stop early)\n";
       flush stdout;
 
-      let* () = Lwt_unix.sleep interval_seconds in
+      Eio.Time.sleep clock interval_seconds;
 
       (* Continue loop *)
       let new_state = {
@@ -265,15 +269,16 @@ let () =
   Random.self_init ();
 
   (* Handle Ctrl+C gracefully *)
-  let _ = Lwt_unix.on_signal Sys.sigint (fun _ ->
+  Sys.set_signal Sys.sigint (Signal_handle (fun _ ->
     Printf.printf "\n\n⚠️  Interrupted by user. Exiting gracefully...\n";
     exit 0
-  ) in
+  ));
 
-  Lwt_main.run (
-    let* final_state = run_agent () in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    let final_state = run_agent ~sw ~net ~clock in
     Printf.printf "\n📊 Session Summary:\n";
     Printf.printf "   Quotes shown: %d\n" (List.length final_state.quotes_shown);
-    Printf.printf "   Poems written: %d\n" final_state.poems_written;
-    Lwt.return_unit
-  )
+    Printf.printf "   Poems written: %d\n" final_state.poems_written

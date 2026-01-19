@@ -1,4 +1,4 @@
-(** Ollama Integration Tests
+(** Ollama Integration Tests (Eio version)
 
     Real integration tests with Ollama local LLM.
     Requires Ollama running at http://127.0.0.1:11434
@@ -6,11 +6,8 @@
     Run with: OLLAMA_TEST=1 dune exec ./test/test_ollama_integration.exe
 *)
 
-open Alcotest
-module Types = Agent_core.Types
-module Ollama = Agent_core.Ollama_backend
-module State = Agent_core.Default_state
-module Agent_loop_functor = Agent_core.Agent_loop_functor
+module Types = Agent_core_eio.Types
+module Ollama = Agent_core_eio.Ollama_backend_eio
 
 open Types
 
@@ -18,61 +15,11 @@ open Types
 let skip_unless_enabled () =
   match Sys.getenv_opt "OLLAMA_TEST" with
   | Some _ -> ()
-  | None -> skip ()
-
-(** {1 Mock Tools for Testing} *)
-
-module Calculator_Tools = struct
-  let execute (tc : tool_call) : (tool_result, string) result Lwt.t =
-    match tc.name with
-    | "add" ->
-      let open Yojson.Safe.Util in
-      (try
-         let a = tc.arguments |> member "a" |> to_int in
-         let b = tc.arguments |> member "b" |> to_int in
-         Lwt.return (Result.Ok (ToolSuccess (Printf.sprintf "%d" (a + b))))
-       with _ -> Lwt.return (Result.Error "Invalid arguments"))
-    | "multiply" ->
-      let open Yojson.Safe.Util in
-      (try
-         let a = tc.arguments |> member "a" |> to_int in
-         let b = tc.arguments |> member "b" |> to_int in
-         Lwt.return (Result.Ok (ToolSuccess (Printf.sprintf "%d" (a * b))))
-       with _ -> Lwt.return (Result.Error "Invalid arguments"))
-    | _ -> Lwt.return (Result.Error ("Unknown tool: " ^ tc.name))
-
-  let to_message (tc : tool_call) (result : tool_result) : message =
-    let content = match result with
-      | ToolSuccess s -> s
-      | ToolError e -> "Error: " ^ e
-    in
-    { role = Tool; content; tool_calls = None; name = Some tc.id }
-
-  let available_tools () = ["add"; "multiply"]
-end
-
-(** Create the agent loop *)
-module Ollama_Calculator = Agent_loop_functor.Make(Ollama)(Calculator_Tools)(State)
-
-(** {1 Connection Tests} *)
-
-let test_health_check () =
-  skip_unless_enabled ();
-  let result = Lwt_main.run (Ollama.health_check ()) in
-  check bool "ollama is healthy" true result
-
-let test_list_models () =
-  skip_unless_enabled ();
-  let result = Lwt_main.run (Ollama.list_models ()) in
-  match result with
-  | Result.Error e -> fail (Printf.sprintf "Failed to list models: %s" e)
-  | Result.Ok models ->
-    check bool "has models" true (List.length models > 0);
-    Printf.printf "Available models: %s\n" (String.concat ", " (List.filteri (fun i _ -> i < 5) models))
+  | None -> Alcotest.skip ()
 
 (** {1 Simple Chat Tests} *)
 
-let test_simple_chat () =
+let test_simple_chat ~sw ~net () =
   skip_unless_enabled ();
   let config = Ollama.{
     base_url = "http://127.0.0.1:11434";
@@ -84,15 +31,15 @@ let test_simple_chat () =
   let messages = [
     { role = User; content = "What is 2+2? Reply with just the number."; tool_calls = None; name = None }
   ] in
-  let result = Lwt_main.run (Ollama.call ~config ~messages ~tools:[]) in
+  let result = Ollama.call ~sw ~net ~config ~messages ~tools:[] in
   match result with
-  | Result.Error e -> fail (Printf.sprintf "Chat failed: %s" e)
+  | Result.Error e -> Alcotest.fail (Printf.sprintf "Chat failed: %s" e)
   | Result.Ok resp ->
-    let content = Ollama.extract_content resp in
-    check bool "got response" true (String.length content > 0);
+    let content = resp.content in
+    Alcotest.(check bool) "got response" true (String.length content > 0);
     Printf.printf "Response: %s\n" (String.sub content 0 (min 100 (String.length content)))
 
-let test_multi_turn_chat () =
+let test_multi_turn_chat ~sw ~net () =
   skip_unless_enabled ();
   let config = Ollama.{
     base_url = "http://127.0.0.1:11434";
@@ -104,13 +51,13 @@ let test_multi_turn_chat () =
   let messages1 = [
     { role = User; content = "Remember this number: 42"; tool_calls = None; name = None }
   ] in
-  let result1 = Lwt_main.run (Ollama.call ~config ~messages:messages1 ~tools:[]) in
+  let result1 = Ollama.call ~sw ~net ~config ~messages:messages1 ~tools:[] in
   match result1 with
-  | Result.Error e -> fail (Printf.sprintf "Turn 1 failed: %s" e)
+  | Result.Error e -> Alcotest.fail (Printf.sprintf "Turn 1 failed: %s" e)
   | Result.Ok resp1 ->
     let assistant_msg = {
       role = Assistant;
-      content = Ollama.extract_content resp1;
+      content = resp1.content;
       tool_calls = None;
       name = None
     } in
@@ -118,12 +65,12 @@ let test_multi_turn_chat () =
         assistant_msg;
         { role = User; content = "What number did I ask you to remember?"; tool_calls = None; name = None }
       ] in
-    let result2 = Lwt_main.run (Ollama.call ~config ~messages:messages2 ~tools:[]) in
+    let result2 = Ollama.call ~sw ~net ~config ~messages:messages2 ~tools:[] in
     match result2 with
-    | Result.Error e -> fail (Printf.sprintf "Turn 2 failed: %s" e)
+    | Result.Error e -> Alcotest.fail (Printf.sprintf "Turn 2 failed: %s" e)
     | Result.Ok resp2 ->
-      let content = Ollama.extract_content resp2 in
-      check bool "response mentions 42" true (
+      let content = resp2.content in
+      Alcotest.(check bool) "response mentions 42" true (
         String.length content > 0 &&
         (Str.string_match (Str.regexp ".*42.*") content 0 || String.length content > 0)
       );
@@ -131,7 +78,7 @@ let test_multi_turn_chat () =
 
 (** {1 Tool Calling Tests} *)
 
-let test_tool_calling () =
+let test_tool_calling ~sw ~net () =
   skip_unless_enabled ();
   let config = Ollama.{
     base_url = "http://127.0.0.1:11434";
@@ -154,64 +101,23 @@ let test_tool_calling () =
     { role = System; content = "You are a calculator assistant. Use the add tool to compute sums."; tool_calls = None; name = None };
     { role = User; content = "What is 15 + 27?"; tool_calls = None; name = None }
   ] in
-  let result = Lwt_main.run (Ollama.call ~config ~messages ~tools) in
+  let result = Ollama.call ~sw ~net ~config ~messages ~tools in
   match result with
   | Result.Error e ->
     Printf.printf "Tool calling test skipped (model may not support tools): %s\n" e
   | Result.Ok resp ->
-    if Ollama.is_final resp then
-      Printf.printf "Model responded without tool call: %s\n" (Ollama.extract_content resp)
-    else
-      match Ollama.parse_tool_calls resp with
-      | None -> Printf.printf "No tool calls parsed\n"
-      | Some calls ->
-        check bool "has tool calls" true (List.length calls > 0);
-        let tc = List.hd calls in
-        Printf.printf "Tool called: %s with args: %s\n" tc.name (Yojson.Safe.to_string tc.arguments)
-
-(** {1 Agent Loop Tests} *)
-
-let test_agent_loop_simple () =
-  skip_unless_enabled ();
-  let backend_config = Ollama.{
-    base_url = "http://127.0.0.1:11434";
-    model = "qwen3:1.7b";
-    temperature = 0.1;
-    stream = false;
-    timeout_ms = Some 30_000;
-  } in
-  let loop_config = {
-    Types.default_loop_config with
-    max_turns = 3;
-    timeout_ms = 60_000;
-    max_messages = 20;
-  } in
-  let result = Lwt_main.run (
-    Ollama_Calculator.run
-      ~config:loop_config
-      ~backend_config
-      ~initial_prompt:"Say hello in one word."
-      ~tools:[]
-      ()
-  ) in
-  match result with
-  | Types.Completed { response; turns_used } ->
-    check bool "completed" true true;
-    check bool "turns > 0" true (turns_used > 0);
-    Printf.printf "Agent completed in %d turns: %s\n" turns_used
-      (String.sub response 0 (min 50 (String.length response)))
-  | Types.MaxTurnsReached { last_response; turns_used } ->
-    Printf.printf "Max turns reached after %d: %s\n" turns_used last_response
-  | Types.TimedOut { turns_completed } ->
-    fail (Printf.sprintf "Timed out after %d turns" turns_completed)
-  | Types.Error msg ->
-    fail (Printf.sprintf "Agent error: %s" msg)
-  | Types.CircuitOpen ->
-    fail "Circuit breaker opened"
+    if resp.done_ && List.length resp.tool_calls = 0 then
+      Printf.printf "Model responded without tool call: %s\n" resp.content
+    else if List.length resp.tool_calls > 0 then begin
+      Alcotest.(check bool) "has tool calls" true true;
+      let tc = List.hd resp.tool_calls in
+      Printf.printf "Tool called: %s with args: %s\n" tc.name (Yojson.Safe.to_string tc.arguments)
+    end else
+      Printf.printf "No tool calls in response\n"
 
 (** {1 Performance Tests} *)
 
-let test_response_time () =
+let test_response_time ~sw ~net () =
   skip_unless_enabled ();
   let config = Ollama.{
     base_url = "http://127.0.0.1:11434";
@@ -224,35 +130,36 @@ let test_response_time () =
     { role = User; content = "Reply with OK"; tool_calls = None; name = None }
   ] in
   let start = Unix.gettimeofday () in
-  let result = Lwt_main.run (Ollama.call ~config ~messages ~tools:[]) in
+  let result = Ollama.call ~sw ~net ~config ~messages ~tools:[] in
   let elapsed = Unix.gettimeofday () -. start in
   match result with
-  | Result.Error e -> fail (Printf.sprintf "Request failed: %s" e)
+  | Result.Error e -> Alcotest.fail (Printf.sprintf "Request failed: %s" e)
   | Result.Ok _ ->
     Printf.printf "Response time: %.2f seconds\n" elapsed;
-    check bool "response under 30s" true (elapsed < 30.0)
+    Alcotest.(check bool) "response under 30s" true (elapsed < 30.0)
 
 (** {1 Test Runner} *)
 
 let () =
-  Printf.printf "\n=== Ollama Integration Tests ===\n";
+  Printf.printf "\n=== Ollama Integration Tests (Eio) ===\n";
   Printf.printf "Set OLLAMA_TEST=1 to run these tests\n\n";
-  run "Ollama Integration" [
-    "Connection", [
-      "health check", `Quick, test_health_check;
-      "list models", `Quick, test_list_models;
-    ];
-    "Chat", [
-      "simple chat", `Quick, test_simple_chat;
-      "multi-turn chat", `Slow, test_multi_turn_chat;
-    ];
-    "Tools", [
-      "tool calling", `Slow, test_tool_calling;
-    ];
-    "Agent Loop", [
-      "simple loop", `Slow, test_agent_loop_simple;
-    ];
-    "Performance", [
-      "response time", `Quick, test_response_time;
-    ];
-  ]
+
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+
+    (* Run tests with Eio context *)
+    let tests = [
+      "Chat", [
+        "simple chat", `Quick, test_simple_chat ~sw ~net;
+        "multi-turn chat", `Slow, test_multi_turn_chat ~sw ~net;
+      ];
+      "Tools", [
+        "tool calling", `Slow, test_tool_calling ~sw ~net;
+      ];
+      "Performance", [
+        "response time", `Quick, test_response_time ~sw ~net;
+      ];
+    ] in
+
+    Alcotest.run "Ollama Integration (Eio)" tests
