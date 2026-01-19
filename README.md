@@ -1,6 +1,6 @@
 # llm-mcp 🐫
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/jeong-sik/llm-mcp)
+[![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)](https://github.com/jeong-sik/llm-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
@@ -15,6 +15,12 @@ Multi-LLM MCP Server written in OCaml.
 - `claude-cli` - Claude Code CLI
 - `codex` - Codex CLI (GPT)
 - `ollama` - 로컬 LLM (에이전틱 모드 지원)
+
+## 📚 Documentation
+
+- **[Use Cases & Diagrams](docs/USE_CASES.md)** - 현실적 유즈케이스와 아키텍처 다이어그램
+- **[Compact Protocol](docs/PROTOCOL.md)** - LLM-to-LLM 통신 최적화 프로토콜
+- **[Research Notes](docs/RESEARCH-NOTES.md)** - 개발 배경 및 설계 결정
 
 ## Why OCaml?
 
