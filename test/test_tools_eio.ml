@@ -1,7 +1,7 @@
 (** Test Tools Eio - Direct-style LLM execution *)
 
-open Llm_mcp.Tools_eio
-open Llm_mcp.Types
+open Tools_eio
+open Types
 
 let () = Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

@@ -1,6 +1,6 @@
 (** Test CLI Runner Eio - Direct-style subprocess execution *)
 
-open Llm_mcp.Cli_runner_eio
+open Cli_runner_eio
 
 let () = Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

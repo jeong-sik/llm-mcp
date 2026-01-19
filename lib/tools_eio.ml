@@ -13,31 +13,31 @@ open Printf
 open Types
 open Cli_runner_eio
 
-(** {1 Re-exports from Tools} *)
+(** {1 Re-exports from Tool_parsers (Pure, no Lwt)} *)
 
-(* Pure functions - no Lwt, just re-export *)
-let budget_mode_value = Tool_config.budget_mode_value
-let parse_gemini_args = Tools.parse_gemini_args
-let parse_claude_args = Tools.parse_claude_args
-let parse_codex_args = Tools.parse_codex_args
-let parse_ollama_args = Tools.parse_ollama_args
-let parse_ollama_list_args = Tools.parse_ollama_list_args
-let build_gemini_cmd = Tools.build_gemini_cmd
-let build_claude_cmd = Tools.build_claude_cmd
-let build_codex_cmd = Tools.build_codex_cmd
-let build_ollama_curl_cmd = Tools.build_ollama_curl_cmd
-let parse_ollama_response = Ollama_parser.parse_response
-let parse_ollama_chunk = Ollama_parser.parse_chunk
-let clean_codex_output = Tools.clean_codex_output
+(* Pure functions - from Tool_parsers module *)
+let budget_mode_value = Tool_parsers.budget_mode_value
+let parse_gemini_args = Tool_parsers.parse_gemini_args
+let parse_claude_args = Tool_parsers.parse_claude_args
+let parse_codex_args = Tool_parsers.parse_codex_args
+let parse_ollama_args = Tool_parsers.parse_ollama_args
+let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
+let build_gemini_cmd = Tool_parsers.build_gemini_cmd
+let build_claude_cmd = Tool_parsers.build_claude_cmd
+let build_codex_cmd = Tool_parsers.build_codex_cmd
+let build_ollama_curl_cmd = Tool_parsers.build_ollama_curl_cmd
+let parse_ollama_response = Tool_parsers.parse_ollama_response
+let parse_ollama_chunk = Tool_parsers.parse_ollama_chunk
+let clean_codex_output = Tool_parsers.clean_codex_output
 
 (* MCP config helpers *)
 let get_mcp_server_url = Tool_config.get_mcp_server_url
 let get_mcp_server_config = Tool_config.get_mcp_server_config
 
 (* Ollama helpers *)
-let thinking_prompt_prefix = Tools.thinking_prompt_prefix
-let tool_schema_to_ollama_tool = Tools.tool_schema_to_ollama_tool
-let tool_calls_to_json = Tools.tool_calls_to_json
+let thinking_prompt_prefix = Tool_parsers.thinking_prompt_prefix
+let tool_schema_to_ollama_tool = Tool_parsers.tool_schema_to_ollama_tool
+let tool_calls_to_json = Tool_parsers.tool_calls_to_json
 
 (* Gemini error handling - from Types module *)
 let classify_gemini_error = Types.classify_gemini_error
@@ -189,7 +189,7 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
                 on_token token
             | Error _ -> ()
           else
-            match Tools.parse_ollama_chunk line with
+            match Tool_parsers.parse_ollama_chunk line with
             | Ok (token, _done) ->
                 Buffer.add_string full_response token;
                 on_token token
@@ -200,7 +200,7 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
         | Ok _ ->
             let extra = extra_base @ [("streamed", "true")] in
             let extra = if !accumulated_tool_calls <> [] then
-              extra @ [("tool_calls", Tools.tool_calls_to_json !accumulated_tool_calls)]
+              extra @ [("tool_calls", Tool_parsers.tool_calls_to_json !accumulated_tool_calls)]
             else extra in
             { model = model_name;
               returncode = 0;

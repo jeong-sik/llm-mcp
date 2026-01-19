@@ -5,7 +5,6 @@
 *)
 
 open Alcotest
-open Llm_mcp
 
 module Server = Mcp_server_eio
 
