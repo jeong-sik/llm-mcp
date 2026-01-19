@@ -33,6 +33,12 @@ module Timeout = Timeout_eio
 (** Composable Meta-Validator *)
 module Validator = Validator_eio
 
+(** Validator Presets - Common Patterns *)
+module Validator_presets = Validator_presets
+
+(** Spec DSL - SSOT-Driven Validation *)
+module Spec_dsl = Spec_dsl
+
 (** Main functor for creating agent loops *)
 module Make_Loop = Agent_loop_eio.Make
 
