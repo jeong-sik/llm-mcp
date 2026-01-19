@@ -1,6 +1,22 @@
 # Agent Core
 
+> ⚠️ **DEPRECATED**: This Lwt-based library is deprecated. Use `agent_core_eio` instead, which provides direct-style concurrency with Eio.
+
 > Reusable Agent Loop abstraction with retry, timeout, and memory management.
+
+## Migration to agent_core_eio
+
+| Old (Lwt)              | New (Eio)                   |
+|------------------------|-----------------------------|
+| `Ollama_backend`       | `Ollama_backend_eio`        |
+| `Claude_cli_backend`   | `Claude_cli_backend_eio`    |
+| `Openai_backend`       | `Openai_backend_eio`        |
+| `Orchestrator`         | `Validator`/`Validation_stack` |
+
+Key differences:
+- No `Lwt.t` wrappers - direct style code
+- Pass `~sw` (switch) and `~net` or `~proc_mgr` as function parameters
+- Use `Eio_main.run` as the entry point
 
 ## Quick Start (Built-in Ollama Backend)
 
