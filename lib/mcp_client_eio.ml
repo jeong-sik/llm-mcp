@@ -40,10 +40,10 @@ let build_jsonrpc_request method_name params =
 (** {1 Core Client Functions} *)
 
 (** Client type - wraps Eio network and cohttp client *)
-type t = {
+type 'a t = {
   client : Client.t;
   sw : Eio.Switch.t;
-  clock : _ Eio.Time.clock;
+  clock : 'a Eio.Time.clock;
 }
 
 (** Create MCP client from Eio environment *)
@@ -51,8 +51,8 @@ let make ~sw ~net ~clock =
   let client = Client.make ~https:None net in
   { client; sw; clock }
 
-let retry_policy = Resilience.default_policy
-let mcp_breaker = Resilience.create_circuit_breaker ~name:"mcp_client" ~failure_threshold:5 ()
+let retry_policy = Mcp_resilience.default_policy
+let mcp_breaker = Mcp_resilience.create_circuit_breaker ~name:"mcp_client" ~failure_threshold:5 ()
 
 (** Call MCP server via HTTP POST - Direct-style with Resilience *)
 let call_mcp_server t ~url ~method_name ~params =
@@ -62,46 +62,64 @@ let call_mcp_server t ~url ~method_name ~params =
   let body = Body.of_string body_str in
 
   let op () =
-    try
-      let (resp, resp_body) =
-        Client.post t.client ~sw:t.sw ~headers ~body uri
-      in
+    let result =
+      try
+        let (resp, resp_body) =
+          Client.post t.client ~sw:t.sw ~headers ~body uri
+        in
 
-      let status = Http.Response.status resp in
-      let code = Http.Status.to_int status in
-      let resp_str =
-        Eio.Buf_read.(of_flow ~max_size:max_int resp_body |> take_all)
-      in
+        let status = Http.Response.status resp in
+        let code = Http.Status.to_int status in
+        let resp_str =
+          Eio.Buf_read.(of_flow ~max_size:max_int resp_body |> take_all)
+        in
 
-      if Cohttp.Code.is_success code then begin
-        let open Yojson.Safe.Util in
-        try
-          let json = Yojson.Safe.from_string resp_str in
-          let result = json |> member "result" in
-          let error = json |> member "error" in
-          if error <> `Null then
-            let msg = try error |> member "message" |> to_string
-                      with _ -> "Unknown error" in
-            Result.Error msg
-          else
-            Result.Ok result
-        with e ->
-          Result.Error (sprintf "Parse error: %s" (Printexc.to_string e))
-      end else if code = 429 || (code >= 500 && code < 600) then
-        failwith (sprintf "Retryable HTTP error %d: %s" code resp_str)
-      else
-        Result.Error (sprintf "HTTP error %d: %s" code resp_str)
-    with 
-    | Failure msg when String.starts_with ~prefix:"Retryable" msg -> raise (Failure msg)
-    | e -> Result.Error (sprintf "Connection error: %s" (Printexc.to_string e))
+        if Cohttp.Code.is_success code then begin
+          let open Yojson.Safe.Util in
+          try
+            let json = Yojson.Safe.from_string resp_str in
+            let result = json |> member "result" in
+            let error = json |> member "error" in
+            if error <> `Null then
+              let msg = try error |> member "message" |> to_string
+                        with _ -> "Unknown error" in
+              Result.Error msg
+            else
+              Result.Ok result
+          with e ->
+            Result.Error (sprintf "Parse error: %s" (Printexc.to_string e))
+        end else if code = 429 || (code >= 500 && code < 600) then
+          Result.Error (sprintf "Retryable HTTP error %d: %s" code resp_str)
+        else
+          Result.Error (sprintf "HTTP error %d: %s" code resp_str)
+      with
+      | e -> Result.Error (sprintf "Connection error: %s" (Printexc.to_string e))
+    in
+    match result with
+    | Ok value -> Mcp_resilience.Ok value
+    | Error err -> Mcp_resilience.Error err
   in
 
-  match Resilience.with_retry_eio ~clock:t.clock ~policy:retry_policy ~circuit_breaker:(Some mcp_breaker) ~op_name:"mcp_call" op with
-  | Success (Ok res) -> Ok res
-  | Success (Error err) -> Error err
+  let classify msg =
+    if String.starts_with ~prefix:"Retryable HTTP error" msg then
+      Mcp_resilience.Retry
+    else if String.starts_with ~prefix:"Connection error" msg then
+      Mcp_resilience.Retry
+    else
+      Mcp_resilience.Fail msg
+  in
+  match Mcp_resilience.with_retry_eio
+          ~clock:t.clock
+          ~policy:retry_policy
+          ~circuit_breaker:(Some mcp_breaker)
+          ~op_name:"mcp_call"
+          ~classify
+          op
+  with
+  | Ok res -> Ok res
+  | Error err -> Error err
   | CircuitOpen -> Error "Circuit breaker open"
-  | Exhausted { last_error; _ } -> Error (sprintf "All retries failed: %s" last_error)
-  | TimedOut _ -> Error "Request timed out"
+  | TimedOut -> Error "Request timed out"
 
 (** {1 Tool Operations} *)
 
