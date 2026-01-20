@@ -128,6 +128,65 @@ let test_tool_node_substitution ~sw ~clock () =
   assert (result.output = "[gemini]hello");
   Printf.printf "[OK] tool args substitution works\n%!"
 
+let test_parallel_levels_2x2x2 () =
+  let json = Yojson.Safe.from_string {|
+    {
+      "id": "scale_2x2x2",
+      "nodes": [
+        { "id": "a1", "type": "llm", "model": "gemini", "prompt": "A1" },
+        { "id": "a2", "type": "llm", "model": "gemini", "prompt": "A2" },
+        { "id": "b1", "type": "llm", "model": "claude", "prompt": "B1 {{a1.output}} {{a2.output}}" },
+        { "id": "b2", "type": "llm", "model": "claude", "prompt": "B2 {{a1.output}} {{a2.output}}" },
+        { "id": "c1", "type": "llm", "model": "codex", "prompt": "C1 {{b1.output}} {{b2.output}}" },
+        { "id": "c2", "type": "llm", "model": "codex", "prompt": "C2 {{b1.output}} {{b2.output}}" }
+      ],
+      "output": "c2"
+    }
+  |} in
+  let chain = parse_chain_exn json in
+  let plan = compile_exn chain in
+  let sizes = List.map List.length plan.Chain_types.parallel_groups in
+  assert (sizes = [2; 2; 2]);
+  Printf.printf "[OK] 2x2x2 parallel groups inferred\n%!"
+
+let test_cycle_detection () =
+  let json = Yojson.Safe.from_string {|
+    {
+      "id": "cycle",
+      "nodes": [
+        { "id": "a", "type": "llm", "model": "gemini", "prompt": "A {{b.output}}" },
+        { "id": "b", "type": "llm", "model": "claude", "prompt": "B {{a.output}}" }
+      ],
+      "output": "a"
+    }
+  |} in
+  let chain = parse_chain_exn json in
+  match Chain_compiler.compile chain with
+  | Ok _ -> failwith "compile should fail on cycle"
+  | Error _ -> Printf.printf "[OK] cycle detected\n%!"
+
+let test_depth_limit () =
+  let json = Yojson.Safe.from_string {|
+    {
+      "id": "depth_limit",
+      "config": { "max_depth": 3 },
+      "nodes": [
+        { "id": "p1", "type": "pipeline", "nodes": [
+          { "id": "p2", "type": "pipeline", "nodes": [
+            { "id": "p3", "type": "pipeline", "nodes": [
+              { "id": "a", "type": "llm", "model": "gemini", "prompt": "X" }
+            ]}
+          ]}
+        ]}
+      ],
+      "output": "p1"
+    }
+  |} in
+  let chain = parse_chain_exn json in
+  match Chain_compiler.compile chain with
+  | Ok _ -> failwith "compile should fail on depth limit"
+  | Error _ -> Printf.printf "[OK] depth limit enforced\n%!"
+
 let () =
   Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -136,5 +195,8 @@ let () =
       test_quorum ~sw ~clock ();
       test_gate_else ~sw ~clock ();
       test_tool_node_substitution ~sw ~clock ();
+      test_parallel_levels_2x2x2 ();
+      test_cycle_detection ();
+      test_depth_limit ();
     test_compile_duplicate_ids ();
     Printf.printf "\n✅ Chain Engine tests passed\n%!"
