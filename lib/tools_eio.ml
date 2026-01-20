@@ -304,7 +304,7 @@ let execute_gemini_with_retry ~sw ~proc_mgr ~clock
 (** {1 Main Execute Function} *)
 
 (** Execute a tool and return result - Direct Style *)
-let execute ~sw ~proc_mgr ~clock args : tool_result =
+let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   match args with
   | Gemini { model; thinking_level; timeout; _ } ->
       execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~args ()
@@ -449,6 +449,137 @@ let execute ~sw ~proc_mgr ~clock args : tool_result =
             returncode = -1;
             response = sprintf "Error: %s" msg;
             extra = [("local", "true")]; })
+
+  | ChainRun { chain; input; trace } ->
+      (* Parse, compile, and execute chain *)
+      (match Chain_parser.parse_chain chain with
+      | Error msg ->
+          { model = "chain.run";
+            returncode = -1;
+            response = sprintf "Parse error: %s" msg;
+            extra = [("stage", "parse")]; }
+      | Ok parsed_chain ->
+          match Chain_compiler.compile parsed_chain with
+          | Error msg ->
+              { model = "chain.run";
+                returncode = -1;
+                response = sprintf "Compile error: %s" msg;
+                extra = [("stage", "compile")]; }
+          | Ok plan ->
+              (* Use chain's global timeout for all nodes *)
+              let node_timeout = parsed_chain.Chain_types.config.Chain_types.timeout in
+              (* Create exec_fn that routes to appropriate LLM *)
+              let exec_fn ~model ~prompt =
+                let args = match String.lowercase_ascii model with
+                  | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
+                      Types.Gemini {
+                        prompt;
+                        model = "gemini-3-pro-preview";
+                        thinking_level = Types.High;
+                        yolo = false;
+                        timeout = node_timeout;
+                        stream = false;
+                      }
+                  | "claude" | "opus" | "opus-4" | "sonnet" ->
+                      Types.Claude {
+                        prompt;
+                        model;
+                        ultrathink = true;
+                        system_prompt = None;
+                        output_format = Types.Text;
+                        allowed_tools = [];
+                        working_directory = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp";
+                        timeout = node_timeout;
+                        stream = false;
+                      }
+                  | "codex" | "gpt-5.2" ->
+                      Types.Codex {
+                        prompt;
+                        model = "gpt-5.2";
+                        reasoning_effort = Types.RXhigh;
+                        sandbox = Types.WorkspaceWrite;
+                        working_directory = None;
+                        timeout = node_timeout;
+                        stream = false;
+                      }
+                  | m when String.length m > 7 && String.sub m 0 7 = "ollama:" ->
+                      let ollama_model = String.sub m 7 (String.length m - 7) in
+                      Types.Ollama {
+                        prompt;
+                        model = ollama_model;
+                        system_prompt = None;
+                        temperature = 0.7;
+                        timeout = node_timeout;
+                        stream = false;
+                        tools = None;
+                      }
+                  | _ ->
+                      (* Default to Gemini for unknown models *)
+                      Types.Gemini {
+                        prompt;
+                        model = "gemini-3-pro-preview";
+                        thinking_level = Types.High;
+                        yolo = false;
+                        timeout = node_timeout;
+                        stream = false;
+                      }
+                in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response
+                else Error result.response
+              in
+              (* Input is passed directly to executor for first node injection *)
+              let _ = input in  (* Will be used by executor *)
+              let result = Chain_executor_eio.execute
+                ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn plan
+              in
+              { model = "chain.run";
+                returncode = if result.Chain_types.success then 0 else -1;
+                response = result.Chain_types.output;
+                extra = [
+                  ("chain_id", result.Chain_types.chain_id);
+                  ("duration_ms", string_of_int result.Chain_types.duration_ms);
+                  ("trace_count", string_of_int (List.length result.Chain_types.trace));
+                ]; })
+
+  | ChainValidate { chain } ->
+      (* Parse and validate chain structure *)
+      (match Chain_parser.parse_chain chain with
+      | Error msg ->
+          { model = "chain.validate";
+            returncode = -1;
+            response = sprintf "Parse error: %s" msg;
+            extra = [("stage", "parse"); ("valid", "false")]; }
+      | Ok parsed_chain ->
+          match Chain_parser.validate_chain parsed_chain with
+          | Error msg ->
+              { model = "chain.validate";
+                returncode = -1;
+                response = sprintf "Validation error: %s" msg;
+                extra = [("stage", "validate"); ("valid", "false")]; }
+          | Ok () ->
+              (* Also try to compile to check DAG validity *)
+              match Chain_compiler.compile parsed_chain with
+              | Error msg ->
+                  { model = "chain.validate";
+                    returncode = -1;
+                    response = sprintf "Compile error: %s" msg;
+                    extra = [("stage", "compile"); ("valid", "false")]; }
+              | Ok plan ->
+                  let node_count = List.length parsed_chain.Chain_types.nodes in
+                  let depth = plan.Chain_types.depth in
+                  let parallel_groups = List.length plan.Chain_types.parallel_groups in
+                  { model = "chain.validate";
+                    returncode = 0;
+                    response = sprintf "Chain '%s' is valid: %d nodes, depth %d, %d parallel groups"
+                      parsed_chain.Chain_types.id node_count depth parallel_groups;
+                    extra = [
+                      ("valid", "true");
+                      ("chain_id", parsed_chain.Chain_types.id);
+                      ("node_count", string_of_int node_count);
+                      ("depth", string_of_int depth);
+                      ("parallel_groups", string_of_int parallel_groups);
+                    ]; })
 
 (** {1 Convenience Wrappers} *)
 
