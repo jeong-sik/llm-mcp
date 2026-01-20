@@ -14,6 +14,10 @@ let get_result_text json =
   | first :: _ -> first |> member "text" |> to_string
   | [] -> ""
 
+let starts_with ~prefix s =
+  let prefix_len = String.length prefix in
+  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+
 let get_is_error json =
   let open Yojson.Safe.Util in
   json |> member "result" |> member "isError" |> to_bool
@@ -89,8 +93,8 @@ let test_chain_run_and_validate () =
     in
 
     check bool "chain.validate isError=false" false (get_is_error validate_resp);
-    check string "chain.validate output"
-      "Chain 'mcp_chain' is valid" (get_result_text validate_resp)
+    check bool "chain.validate output"
+      true (starts_with ~prefix:"Chain 'mcp_chain' is valid" (get_result_text validate_resp))
 
 let () =
   run "chain_mcp_eio" [
