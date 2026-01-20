@@ -32,3 +32,4 @@ llm-mcp-linux-x64
 # Track the local release artifact
 !llm-mcp-macos-arm64
 .worktrees/
+.worktree/
