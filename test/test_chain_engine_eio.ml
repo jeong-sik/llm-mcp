@@ -16,6 +16,16 @@ let exec_fn ~model ~prompt =
   if String.contains prompt '!' then Error "forced failure"
   else Ok (Printf.sprintf "[%s]%s" model prompt)
 
+let tool_exec ~name ~args =
+  let open Yojson.Safe.Util in
+  match name with
+  | "echo" ->
+      (match args |> member "text" |> to_string_option with
+      | Some text -> Ok text
+      | None -> Error "missing text")
+  | _ ->
+      Ok (Printf.sprintf "[%s]%s" name (Yojson.Safe.to_string args))
+
 let test_simple_pipeline ~sw ~clock () =
   let json = Yojson.Safe.from_string {|
     {
@@ -31,7 +41,7 @@ let test_simple_pipeline ~sw ~clock () =
   let chain = parse_chain_exn json in
   let plan = compile_exn chain in
   let result = Chain_executor_eio.execute ~sw ~clock
-    ~timeout:30 ~trace:true ~exec_fn plan in
+    ~timeout:30 ~trace:true ~exec_fn ~tool_exec plan in
   assert (result.success = true);
   assert (String.length result.output > 0);
   Printf.printf "[OK] simple pipeline executes (output=%s)\n%!"
@@ -58,7 +68,7 @@ let test_quorum ~sw ~clock () =
   let chain = parse_chain_exn json in
   let plan = compile_exn chain in
   let result = Chain_executor_eio.execute ~sw ~clock
-    ~timeout:30 ~trace:true ~exec_fn plan in
+    ~timeout:30 ~trace:true ~exec_fn ~tool_exec plan in
   assert (result.success = true);
   Printf.printf "[OK] quorum passes with 2/3 successes\n%!"
 
@@ -80,7 +90,7 @@ let test_gate_else ~sw ~clock () =
   let chain = parse_chain_exn json in
   let plan = compile_exn chain in
   let result = Chain_executor_eio.execute ~sw ~clock
-    ~timeout:30 ~trace:false ~exec_fn plan in
+    ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan in
   assert (String.contains result.output 'e');
   Printf.printf "[OK] gate executes else branch\n%!"
 
@@ -100,6 +110,24 @@ let test_compile_duplicate_ids () =
   | Ok _ -> failwith "compile should fail on duplicate IDs"
   | Error _ -> Printf.printf "[OK] duplicate ID detected\n%!"
 
+let test_tool_node_substitution ~sw ~clock () =
+  let json = Yojson.Safe.from_string {|
+    {
+      "id": "tool_substitute",
+      "nodes": [
+        { "id": "a", "type": "llm", "model": "gemini", "prompt": "hello" },
+        { "id": "t", "type": "tool", "name": "echo", "args": { "text": "{{a.output}}" } }
+      ],
+      "output": "t"
+    }
+  |} in
+  let chain = parse_chain_exn json in
+  let plan = compile_exn chain in
+  let result = Chain_executor_eio.execute ~sw ~clock
+    ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan in
+  assert (result.output = "[gemini]hello");
+  Printf.printf "[OK] tool args substitution works\n%!"
+
 let () =
   Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
@@ -107,5 +135,6 @@ let () =
       test_simple_pipeline ~sw ~clock ();
       test_quorum ~sw ~clock ();
       test_gate_else ~sw ~clock ();
+      test_tool_node_substitution ~sw ~clock ();
     test_compile_duplicate_ids ();
     Printf.printf "\n✅ Chain Engine tests passed\n%!"

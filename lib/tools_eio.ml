@@ -922,6 +922,19 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
             extra = [("error", "compile_error")];
           }
       | Ok plan ->
+          let starts_with ~prefix s =
+            let prefix_len = String.length prefix in
+            String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+          in
+          let split_tool_name name =
+            match String.index_opt name '.' with
+            | None -> None
+            | Some idx ->
+                let server = String.sub name 0 idx in
+                let tool_len = String.length name - idx - 1 in
+                if server = "" || tool_len <= 0 then None
+                else Some (server, String.sub name (idx + 1) tool_len)
+          in
           let exec_fn ~model ~prompt =
             match model with
             | "stub" | "mock" ->
@@ -979,7 +992,42 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
           in
-          let result = Chain_executor_eio.execute ~sw ~clock ~timeout ~trace ~exec_fn plan in
+          let tool_exec ~name ~args =
+            match split_tool_name name with
+            | Some (server_name, tool_name) ->
+                let output =
+                  call_mcp ~sw ~proc_mgr ~clock
+                    ~server_name ~tool_name ~arguments:args ~timeout
+                in
+                if starts_with ~prefix:"Error:" output then Error output else Ok output
+            | None ->
+                let result =
+                  match name with
+                  | "gemini" ->
+                      let args = parse_gemini_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "claude-cli" ->
+                      let args = parse_claude_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "codex" ->
+                      let args = parse_codex_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "ollama" ->
+                      let args = parse_ollama_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "ollama-list" ->
+                      let args = parse_ollama_list_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | _ ->
+                      { Types.model = "chain.tool";
+                        returncode = -1;
+                        response = sprintf "Unknown tool: %s" name;
+                        extra = [("tool", name)];
+                      }
+                in
+                if result.returncode = 0 then Ok result.response else Error result.response
+          in
+          let result = Chain_executor_eio.execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec plan in
           {
             model = sprintf "chain.run (%s)" chain.Chain_types.id;
             returncode = (if result.success then 0 else -1);

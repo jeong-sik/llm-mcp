@@ -174,10 +174,30 @@ let substitute_prompt prompt (inputs : (string * string) list) : string =
     Buffer.contents buf
   ) prompt inputs
 
+(** Substitute placeholders inside JSON values *)
+let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
+  let rec map = function
+    | `String s ->
+        let mappings = Chain_parser.extract_input_mappings s in
+        if mappings = [] then `String s
+        else
+          let inputs = resolve_inputs ctx mappings in
+          `String (substitute_prompt s inputs)
+    | `Assoc fields ->
+        `Assoc (List.map (fun (k, v) -> (k, map v)) fields)
+    | `List items ->
+        `List (List.map map items)
+    | other -> other
+  in
+  map json
+
 (** {1 Node Execution} *)
 
 (** Type of execution function callback *)
 type exec_fn = model:string -> prompt:string -> (string, string) result
+
+(** Type of tool execution callback *)
+type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 
 (** Execute a single LLM node *)
 let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, string) result =
@@ -194,63 +214,73 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
           record_complete ctx node.id ~duration_ms ~success:true;
           Hashtbl.add ctx.outputs node.id output;
           Ok output
+  | Error msg ->
+      record_complete ctx node.id ~duration_ms ~success:false;
+      record_error ctx node.id msg;
+      Error msg)
+  | _ -> Error "execute_llm_node called with non-LLM node"
+
+(** Execute a tool node *)
+let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string, string) result =
+  match tool with
+  | Tool { name; args } ->
+      record_start ctx node.id;
+      let start = Unix.gettimeofday () in
+      let resolved_args = substitute_json ctx args in
+      let result =
+        try tool_exec ~name ~args:resolved_args
+        with exn -> Error (Printexc.to_string exn)
+      in
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      (match result with
+      | Ok output ->
+          record_complete ctx node.id ~duration_ms ~success:true;
+          Hashtbl.add ctx.outputs node.id output;
+          Ok output
       | Error msg ->
           record_complete ctx node.id ~duration_ms ~success:false;
           record_error ctx node.id msg;
           Error msg)
-  | _ -> Error "execute_llm_node called with non-LLM node"
-
-(** Execute a tool node (placeholder - needs MCP integration) *)
-let execute_tool_node ctx ~(node : node) (tool : node_type) : (string, string) result =
-  match tool with
-  | Tool { name; args } ->
-      record_start ctx node.id;
-      (* TODO: Integrate with MCP tool execution *)
-      let output = Printf.sprintf "Tool '%s' called with args: %s"
-        name (Yojson.Safe.to_string args) in
-      record_complete ctx node.id ~duration_ms:0 ~success:true;
-      Hashtbl.add ctx.outputs node.id output;
-      Ok output
   | _ -> Error "execute_tool_node called with non-Tool node"
 
 (** {1 Recursive Execution} *)
 
 (** Forward declaration for recursive execution *)
-let rec execute_node ctx ~sw ~clock ~exec_fn (node : node) : (string, string) result =
+let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =
   match node.node_type with
   | Llm _ -> execute_llm_node ctx ~exec_fn ~node node.node_type
-  | Tool _ -> execute_tool_node ctx ~node node.node_type
-  | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn nodes
-  | Fanout nodes -> execute_fanout ctx ~sw ~clock ~exec_fn node nodes
-  | Quorum { required; nodes } -> execute_quorum ctx ~sw ~clock ~exec_fn node ~required nodes
+  | Tool _ -> execute_tool_node ctx ~tool_exec ~node node.node_type
+  | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec nodes
+  | Fanout nodes -> execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
+  | Quorum { required; nodes } -> execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec node ~required nodes
   | Gate { condition; then_node; else_node } ->
-      execute_gate ctx ~sw ~clock ~exec_fn node ~condition ~then_node ~else_node
-  | Subgraph chain -> execute_subgraph ctx ~sw ~clock ~exec_fn node chain
+      execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec node ~condition ~then_node ~else_node
+  | Subgraph chain -> execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec node chain
   | ChainRef ref_id ->
       (* Look up chain in registry and execute as subgraph *)
       (match Chain_registry.lookup ref_id with
        | Some referenced_chain ->
-           execute_subgraph ctx ~sw ~clock ~exec_fn node referenced_chain
+           execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec node referenced_chain
        | None ->
            record_error ctx node.id (Printf.sprintf "ChainRef '%s' not found in registry" ref_id);
            Error (Printf.sprintf "ChainRef '%s' not found in registry" ref_id))
-  | Map { func; inner } -> execute_map ctx ~sw ~clock ~exec_fn node ~func inner
-  | Bind { func; inner } -> execute_bind ctx ~sw ~clock ~exec_fn node ~func inner
-  | Merge { strategy; nodes } -> execute_merge ctx ~sw ~clock ~exec_fn node ~strategy nodes
+  | Map { func; inner } -> execute_map ctx ~sw ~clock ~exec_fn ~tool_exec node ~func inner
+  | Bind { func; inner } -> execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec node ~func inner
+  | Merge { strategy; nodes } -> execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec node ~strategy nodes
 
 (** Execute nodes in sequence (Pipeline) *)
-and execute_pipeline ctx ~sw ~clock ~exec_fn (nodes : node list) : (string, string) result =
+and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (string, string) result =
   let rec loop last_output = function
     | [] -> Ok last_output
     | node :: rest ->
-        match execute_node ctx ~sw ~clock ~exec_fn node with
+        match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
         | Ok output -> loop output rest
         | Error msg -> Error msg
   in
   loop "" nodes
 
 (** Execute nodes in parallel (Fanout) *)
-and execute_fanout ctx ~sw ~clock ~exec_fn (parent : node) (nodes : node list) : (string, string) result =
+and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
@@ -260,7 +290,7 @@ and execute_fanout ctx ~sw ~clock ~exec_fn (parent : node) (nodes : node list) :
 
   Eio.Fiber.all (List.map (fun node ->
     fun () ->
-      let result = execute_node ctx ~sw ~clock ~exec_fn node in
+      let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
       Eio.Mutex.use_rw mutex ~protect:true (fun () ->
         results := (node.id, result) :: !results
       )
@@ -290,7 +320,7 @@ and execute_fanout ctx ~sw ~clock ~exec_fn (parent : node) (nodes : node list) :
   end
 
 (** Execute N/K quorum (require N successes from K nodes) *)
-and execute_quorum ctx ~sw ~clock ~exec_fn (parent : node) ~required (nodes : node list) : (string, string) result =
+and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~required (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
@@ -304,7 +334,7 @@ and execute_quorum ctx ~sw ~clock ~exec_fn (parent : node) ~required (nodes : no
   Eio.Fiber.all (List.map (fun node ->
     fun () ->
       if Eio.Promise.is_resolved done_promise then () else
-      let result = execute_node ctx ~sw ~clock ~exec_fn node in
+      let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
       Eio.Mutex.use_rw mutex ~protect:true (fun () ->
         match result with
         | Ok output -> successes := (node.id, output) :: !successes
@@ -332,7 +362,7 @@ and execute_quorum ctx ~sw ~clock ~exec_fn (parent : node) ~required (nodes : no
   end
 
 (** Execute conditional gate *)
-and execute_gate ctx ~sw ~clock ~exec_fn (parent : node) ~condition ~then_node ~else_node : (string, string) result =
+and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~then_node ~else_node : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
@@ -350,10 +380,10 @@ and execute_gate ctx ~sw ~clock ~exec_fn (parent : node) ~condition ~then_node ~
 
   let result =
     if condition_met then
-      execute_node ctx ~sw ~clock ~exec_fn then_node
+      execute_node ctx ~sw ~clock ~exec_fn ~tool_exec then_node
     else
       match else_node with
-      | Some node -> execute_node ctx ~sw ~clock ~exec_fn node
+      | Some node -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
       | None -> Ok ""  (* No else branch, return empty *)
   in
 
@@ -369,14 +399,14 @@ and execute_gate ctx ~sw ~clock ~exec_fn (parent : node) ~condition ~then_node ~
       Error msg)
 
 (** Execute inline subgraph (recursive) *)
-and execute_subgraph ctx ~sw ~clock ~exec_fn (parent : node) (chain : chain) : (string, string) result =
+and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain : chain) : (string, string) result =
   record_start ctx parent.id;
   add_trace ctx parent.id (ChainStart { chain_id = chain.id });
   let start = Unix.gettimeofday () in
 
   (* Execute subgraph nodes sequentially for now *)
   (* TODO: Use compiled plan for proper parallel execution *)
-  let result = execute_pipeline ctx ~sw ~clock ~exec_fn chain.nodes in
+  let result = execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes in
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
   let success = Result.is_ok result in
@@ -395,11 +425,11 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn (parent : node) (chain : chain) : (
   | Error msg -> Error msg)
 
 (** Execute map (transform output) *)
-and execute_map ctx ~sw ~clock ~exec_fn (parent : node) ~func (inner : node) : (string, string) result =
+and execute_map ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func (inner : node) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
-  let result = execute_node ctx ~sw ~clock ~exec_fn inner in
+  let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
   (match result with
@@ -420,13 +450,13 @@ and execute_map ctx ~sw ~clock ~exec_fn (parent : node) ~func (inner : node) : (
       Error msg)
 
 (** Execute bind (dynamic routing based on output) *)
-and execute_bind ctx ~sw ~clock ~exec_fn (parent : node) ~func:_ (inner : node) : (string, string) result =
+and execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func:_ (inner : node) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
   (* Bind executes inner, then could route to another node based on output *)
   (* For now, just execute inner and return *)
-  let result = execute_node ctx ~sw ~clock ~exec_fn inner in
+  let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
   (match result with
@@ -440,7 +470,7 @@ and execute_bind ctx ~sw ~clock ~exec_fn (parent : node) ~func:_ (inner : node) 
       Error msg)
 
 (** Execute merge (combine parallel results) *)
-and execute_merge ctx ~sw ~clock ~exec_fn (parent : node) ~strategy (nodes : node list) : (string, string) result =
+and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
@@ -450,7 +480,7 @@ and execute_merge ctx ~sw ~clock ~exec_fn (parent : node) ~strategy (nodes : nod
 
   Eio.Fiber.all (List.map (fun node ->
     fun () ->
-      let result = execute_node ctx ~sw ~clock ~exec_fn node in
+      let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
       Eio.Mutex.use_rw mutex ~protect:true (fun () ->
         results := (node.id, result) :: !results
       )
@@ -509,7 +539,7 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 (** {1 Main Execution Entry Point} *)
 
 (** Execute a compiled execution plan *)
-let execute ~sw ~clock ~timeout ~trace ~exec_fn (plan : execution_plan) : chain_result =
+let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_plan) : chain_result =
   let _ = clock in  (* Used for timeout in future *)
   let start_time = Unix.gettimeofday () in
   let ctx = make_context ~start_time ~trace_enabled:trace ~timeout in
@@ -545,14 +575,14 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn (plan : execution_plan) : chain_
     | step :: rest ->
         let result = match step with
           | Sequential node ->
-              execute_node ctx ~sw ~clock ~exec_fn node
+              execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
           | Parallel nodes ->
               (* Execute all nodes in parallel *)
               let results = ref [] in
               let mutex = Eio.Mutex.create () in
               Eio.Fiber.all (List.map (fun node ->
                 fun () ->
-                  let r = execute_node ctx ~sw ~clock ~exec_fn node in
+                  let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
                   Eio.Mutex.use_rw mutex ~protect:true (fun () ->
                     results := (node.Chain_types.id, r) :: !results
                   )

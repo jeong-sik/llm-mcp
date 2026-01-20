@@ -65,12 +65,12 @@ flowchart LR
 }
 ```
 
-v0.1에서는 `inputs`를 직접 파싱하지 않고, LLM 프롬프트의 `{{ref}}`에서 의존성을 추출한다.
+v0.1에서는 `inputs`를 직접 파싱하지 않고, LLM 프롬프트의 `{{ref}}`에서 의존성을 추출한다. tool args의 문자열 필드에서도 `{{ref}}` 치환이 적용된다.
 
 ### 노드 타입과 의도
 
 - llm: 모델 호출
-- tool: MCP 도구 호출
+- tool: MCP 도구 호출 (`server.tool`이면 외부 MCP 라우팅, 아니면 로컬 도구)
 - pipeline: 순차 실행
 - fanout: 병렬 실행
 - quorum: N/K 합의
@@ -294,11 +294,11 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 - 구현: core node 타입 파싱
 - 구현: 기본 검증(빈 nodes, depth, quorum size)
 - 구현: exec_fn 기반 LLM 실행 스텁
+- 구현: tool 노드 실행 wiring(MCP/내장 도구)
 
 스텁/부분:
 - fanout/quorum/gate/merge는 동작하지만 병렬성/합성은 단순화
 - trace는 존재하지만 표준화/저장 미구현
-- tool 노드는 실행 wiring 미구현
 - condition 평가기는 문자열 기반
 
 미구현:
@@ -310,7 +310,6 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 
 다음 단계(우선순위):
 - registry + chain_ref 해석
-- tool 노드 실행 wiring
 - chain.validate 테스트(사이클/참조 검증)
 - trace 정규화(메타 스키마 고정)
 
