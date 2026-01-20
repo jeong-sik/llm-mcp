@@ -56,22 +56,16 @@ type tool_result =
 
 (** {1 Loop Control Types} *)
 
-(** Retry policy *)
-type retry_policy = {
-  max_attempts : int;
-  initial_delay_ms : int;
-  max_delay_ms : int;
-  backoff_multiplier : float;
-  jitter : bool;
+(** Alias to shared Resilience types *)
+type retry_policy = Resilience.retry_policy = {
+  max_attempts: int;
+  initial_delay_ms: int;
+  max_delay_ms: int;
+  backoff_multiplier: float;
+  jitter: bool;
 }
 
-let default_retry_policy = {
-  max_attempts = 3;
-  initial_delay_ms = 100;
-  max_delay_ms = 10000;
-  backoff_multiplier = 2.0;
-  jitter = true;
-}
+let default_retry_policy = Resilience.default_policy
 
 (** Loop configuration *)
 type loop_config = {
@@ -98,11 +92,11 @@ type loop_result =
 
 (** {1 Retry Result Types} *)
 
-type 'a retry_result =
+type 'a retry_result = 'a Resilience.retry_result =
   | Success of 'a
-  | Exhausted of { attempts : int; last_error : string }
-  | RetryTimedOut of { timeout_ms : int }
-  | RetryCircuitOpen
+  | Exhausted of { attempts: int; last_error: string }
+  | CircuitOpen
+  | TimedOut of { timeout_ms: int }
 
 (** {1 Helper Functions} *)
 

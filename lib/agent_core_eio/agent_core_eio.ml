@@ -25,7 +25,7 @@ module Types = Agent_types
 module Sigs = Agent_sigs_eio
 
 (** Retry utilities *)
-module Retry = Retry_eio
+module Retry = Resilience
 
 (** Timeout utilities *)
 module Timeout = Timeout_eio
