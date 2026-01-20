@@ -120,6 +120,7 @@ type tool_args =
       timeout : int;                       (* Overall timeout in seconds *)
       trace : bool;                        (* Enable execution tracing *)
       verify_on_complete : bool;           (* Run LLM verification on completion *)
+      orchestrator_model : string;         (* LLM model for Design/Verify: gemini, claude, codex, ollama, stub *)
     }
 
 (** Gemini-specific error classification for retry logic.
@@ -664,6 +665,12 @@ Parameters:
         ("type", `String "boolean");
         ("description", `String "Run LLM verification on completion (default: true)");
         ("default", `Bool true);
+      ]);
+      ("orchestrator_model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "LLM model for Design/Verify phases: gemini, claude, codex, ollama, stub (default: gemini)");
+        ("default", `String "gemini");
+        ("enum", `List [`String "gemini"; `String "claude"; `String "codex"; `String "ollama"; `String "stub"]);
       ]);
     ]);
     ("required", `List [`String "goal"]);
