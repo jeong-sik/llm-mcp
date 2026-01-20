@@ -1,0 +1,83 @@
+{
+  "id": "magi-code-review",
+  "name": "MAGI Code Review Pipeline",
+  "description": "3-LLM consensus code review using MELCHIOR (Codex), BALTHASAR (Claude), CASPER (Gemini)",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "read-target",
+      "type": "tool",
+      "tool": {
+        "server": "filesystem",
+        "name": "read_file",
+        "args": { "path": "{{input.file_path}}" }
+      },
+      "output_key": "source_code"
+    },
+    {
+      "id": "melchior-review",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "You are MELCHIOR, the scientist. Analyze this code for:\n1. Logic errors and bugs\n2. Performance issues\n3. Security vulnerabilities\n\nCode:\n```\n{{source_code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"bug|perf|security\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+      },
+      "depends_on": ["read-target"],
+      "output_key": "melchior_findings"
+    },
+    {
+      "id": "balthasar-review",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "You are BALTHASAR, the mother/values guardian. Analyze this code for:\n1. Code clarity and readability\n2. Maintainability concerns\n3. Best practices violations\n\nCode:\n```\n{{source_code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"clarity|maintainability|practice\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+      },
+      "depends_on": ["read-target"],
+      "output_key": "balthasar_findings"
+    },
+    {
+      "id": "casper-review",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "You are CASPER, the strategist. Analyze this code for:\n1. Architectural concerns\n2. Scalability issues\n3. Integration risks\n\nCode:\n```\n{{source_code}}\n```\n\nProvide structured findings as JSON: {\"issues\": [{\"severity\": \"high|medium|low\", \"type\": \"architecture|scalability|integration\", \"line\": N, \"description\": \"...\", \"suggestion\": \"...\"}]}"
+      },
+      "depends_on": ["read-target"],
+      "output_key": "casper_findings"
+    },
+    {
+      "id": "consensus-merge",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "You are the MAGI System coordinator. Merge these 3 reviews into a unified report.\n\nMELCHIOR (bugs/perf/security):\n{{melchior_findings}}\n\nBALTHASAR (clarity/maintainability):\n{{balthasar_findings}}\n\nCASPER (architecture/scalability):\n{{casper_findings}}\n\nCreate a prioritized action plan:\n1. Deduplicate overlapping issues\n2. Rank by severity and consensus (issues found by multiple reviewers = higher priority)\n3. Output markdown report with:\n   - Executive Summary (1 paragraph)\n   - Critical Issues (must fix)\n   - Recommendations (should fix)\n   - Minor Suggestions (nice to have)\n   - Consensus Score (how much the 3 AIs agreed)"
+      },
+      "depends_on": ["melchior-review", "balthasar-review", "casper-review"],
+      "output_key": "final_report"
+    }
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "file_path": {
+        "type": "string",
+        "description": "Path to the file to review"
+      }
+    },
+    "required": ["file_path"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "final_report": { "type": "string" },
+      "melchior_findings": { "type": "string" },
+      "balthasar_findings": { "type": "string" },
+      "casper_findings": { "type": "string" }
+    }
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["magi", "code-review", "multi-llm", "consensus"],
+    "estimated_duration_sec": 120,
+    "estimated_cost_usd": 0.15
+  }
+}
