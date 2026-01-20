@@ -167,11 +167,17 @@ let prompt_chars_of_args (args : tool_args) =
   | Codex { prompt; _ }
   | Ollama { prompt; _ } -> String.length prompt
   | OllamaList -> 0  (* No prompt for list operation *)
-  | ChainRun { chain; _ } ->
-      (* Estimate chain size from JSON *)
-      String.length (Yojson.Safe.to_string chain)
-  | ChainValidate { chain } ->
-      String.length (Yojson.Safe.to_string chain)
+  | ChainRun { chain; mermaid; _ } ->
+      (* Estimate chain size from JSON or Mermaid *)
+      (match (chain, mermaid) with
+       | (Some c, _) -> String.length (Yojson.Safe.to_string c)
+       | (_, Some m) -> String.length m
+       | (None, None) -> 0)
+  | ChainValidate { chain; mermaid } ->
+      (match (chain, mermaid) with
+       | (Some c, _) -> String.length (Yojson.Safe.to_string c)
+       | (_, Some m) -> String.length m
+       | (None, None) -> 0)
 
 let split_once s ch =
   match String.index_opt s ch with
