@@ -2,6 +2,8 @@
 
 > Eio 기반 에이전트 시스템의 유즈케이스 다이어그램
 
+Chain DSL 스펙: docs/CHAIN_RFC.md (실용 오케스트레이션 DSL 및 예시).
+
 ## Status
 
 | Pattern | 구현 | 테스트 | 모듈 |
@@ -43,6 +45,30 @@
 - OpenAI: 프로덕션/고품질
 - Claude CLI: Claude Code 통합
 
+**Chain DSL (초안)**:
+```json
+{
+  "chain": {
+    "id": "backend_select",
+    "nodes": [
+      {
+        "id": "ollama_gate",
+        "type": "gate",
+        "condition": "backend == 'ollama'",
+        "then": { "id": "ollama", "type": "llm", "model": "ollama", "prompt": "{{input}}" }
+      },
+      {
+        "id": "claude_gate",
+        "type": "gate",
+        "condition": "backend == 'claude'",
+        "then": { "id": "claude", "type": "llm", "model": "claude", "prompt": "{{input}}" }
+      }
+    ],
+    "output": "claude_gate"
+  }
+}
+```
+
 ---
 
 ## 2. Pipeline (순차 검증)
@@ -68,6 +94,21 @@ let pipeline = Presets.Pipeline.create ~sw [
   (module Type_safety_validator);
   (module Security_validator);
 ]
+```
+
+**Chain DSL (v0.1 예시)**:
+```json
+{
+  "chain": {
+    "id": "pipeline_review",
+    "nodes": [
+      { "id": "syntax", "type": "llm", "model": "gemini", "prompt": "Syntax: {{input}}" },
+      { "id": "types", "type": "llm", "model": "claude", "prompt": "Type safety: {{syntax.output}}" },
+      { "id": "security", "type": "llm", "model": "codex", "prompt": "Security: {{types.output}}" }
+    ],
+    "output": "security"
+  }
+}
 ```
 
 ---
@@ -100,6 +141,28 @@ let quorum = Presets.Quorum.create ~sw ~required:2 [
 ]
 ```
 
+**Chain DSL (v0.1 예시)**:
+```json
+{
+  "chain": {
+    "id": "quorum_review",
+    "nodes": [
+      {
+        "id": "vote",
+        "type": "quorum",
+        "required": 2,
+        "nodes": [
+          { "id": "g", "type": "llm", "model": "gemini", "prompt": "Review: {{input}}" },
+          { "id": "c", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" },
+          { "id": "x", "type": "llm", "model": "codex", "prompt": "Review: {{input}}" }
+        ]
+      }
+    ],
+    "output": "vote"
+  }
+}
+```
+
 ---
 
 ## 4. Gate (조건부 실행)
@@ -126,6 +189,24 @@ let gated = Presets.Gate.feature_flag
   ~name:"experimental"
   ~flag:"experimental_review"
   (module AI_review_validator)
+```
+
+**Chain DSL (v0.1 예시)**:
+```json
+{
+  "chain": {
+    "id": "feature_gate",
+    "nodes": [
+      {
+        "id": "gate",
+        "type": "gate",
+        "condition": "feature_flag('experimental_review')",
+        "then": { "id": "review", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" }
+      }
+    ],
+    "output": "gate"
+  }
+}
 ```
 
 ---
@@ -166,6 +247,41 @@ let layered = Presets.Layered.create ~sw [
 ]
 ```
 
+**Chain DSL (v0.1 예시)**:
+```json
+{
+  "chain": {
+    "id": "layered_review",
+    "nodes": [
+      {
+        "id": "layered",
+        "type": "pipeline",
+        "nodes": [
+          {
+            "id": "fast",
+            "type": "fanout",
+            "branches": [
+              { "id": "format", "type": "llm", "model": "gemini", "prompt": "Format: {{input}}" },
+              { "id": "required", "type": "llm", "model": "gemini", "prompt": "Required fields: {{input}}" }
+            ]
+          },
+          {
+            "id": "medium",
+            "type": "fanout",
+            "branches": [
+              { "id": "db", "type": "tool", "name": "db-check", "args": {} },
+              { "id": "rules", "type": "llm", "model": "claude", "prompt": "Rules: {{input}}" }
+            ]
+          },
+          { "id": "slow", "type": "llm", "model": "codex", "prompt": "LLM deep check: {{input}}" }
+        ]
+      }
+    ],
+    "output": "layered"
+  }
+}
+```
+
 ---
 
 ## 6. Diamond (병렬 → 합류)
@@ -197,6 +313,28 @@ let layered = Presets.Layered.create ~sw [
 let diamond = Presets.Diamond.create ~sw
   ~merge:weighted_average
   [(module Grammar); (module Factual); (module Style)]
+```
+
+**Chain DSL (v0.1 예시)**:
+```json
+{
+  "chain": {
+    "id": "diamond_review",
+    "nodes": [
+      {
+        "id": "merge",
+        "type": "merge",
+        "strategy": "weighted_average",
+        "nodes": [
+          { "id": "grammar", "type": "llm", "model": "gemini", "prompt": "Grammar: {{input}}" },
+          { "id": "factual", "type": "llm", "model": "claude", "prompt": "Factual: {{input}}" },
+          { "id": "style", "type": "llm", "model": "codex", "prompt": "Style: {{input}}" }
+        ]
+      }
+    ],
+    "output": "merge"
+  }
+}
 ```
 
 ---
@@ -242,6 +380,20 @@ let intervenor = Validation_stack.Make_ai_intervenor(struct
   let stall_threshold = 120
   let retry_limit = 5
 end)
+```
+
+**Chain DSL (주의)**: v0.1 DSL에는 루프 프리미티브가 없다. 외부 루프에서 이 체인을 반복 실행한다.
+```json
+{
+  "chain": {
+    "id": "goal_iteration",
+    "nodes": [
+      { "id": "agent", "type": "llm", "model": "codex", "prompt": "Improve: {{input}}" },
+      { "id": "check", "type": "llm", "model": "gemini", "prompt": "Validate goal: {{agent.output}}" }
+    ],
+    "output": "check"
+  }
+}
 ```
 
 ---
