@@ -41,6 +41,16 @@ let extract_input_mappings (prompt : string) : (string * string) list =
       | [node_id; _field] -> (ref, node_id)
       | _ -> (ref, ref))
 
+(** Extract input mappings from JSON arguments *)
+let rec extract_json_mappings (json : Yojson.Safe.t) : (string * string) list =
+  match json with
+  | `String s -> extract_input_mappings s
+  | `Assoc fields ->
+      List.concat (List.map (fun (_k, v) -> extract_json_mappings v) fields)
+  | `List items ->
+      List.concat (List.map extract_json_mappings items)
+  | _ -> []
+
 (** Parse chain config from JSON *)
 let parse_config (json : Yojson.Safe.t) : chain_config =
   let open Yojson.Safe.Util in
@@ -68,7 +78,7 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
 
     let* node_type = parse_node_type json node_type_str in
 
-    (* Parse explicit input_mapping if provided, otherwise extract from prompt *)
+    (* Parse explicit input_mapping if provided, otherwise extract from prompt/args *)
     let input_mapping =
       try
         let mapping_json = json |> member "input_mapping" in
@@ -79,15 +89,16 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
               | `List [`String k; `String v] -> Some (k, v)
               | _ -> None
             ) pairs
-        | `Null -> (* No explicit mapping, extract from prompt *)
+        | `Null ->
             (match node_type with
              | Llm { prompt; _ } -> extract_input_mappings prompt
+             | Tool { args; _ } -> extract_json_mappings args
              | _ -> [])
         | _ -> []
       with _ ->
-        (* Fallback: extract from prompt *)
         match node_type with
         | Llm { prompt; _ } -> extract_input_mappings prompt
+        | Tool { args; _ } -> extract_json_mappings args
         | _ -> []
     in
 
@@ -246,4 +257,3 @@ let validate_chain (c : Chain_types.chain) : (unit, string) result =
             check_dups (id :: seen) rest
     in
     check_dups [] node_ids
-
