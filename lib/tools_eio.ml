@@ -277,8 +277,8 @@ let execute_gemini_with_retry ~sw ~proc_mgr ~clock
           | Error (ProcessError msg) -> Result.Error (sprintf "Error: %s" msg)
         in
         match outcome with
-        | Ok value -> Mcp_resilience.Ok value
-        | Error err -> Mcp_resilience.Error err
+        | Ok value -> Result.Ok value
+        | Error err -> Result.Error err
       in
       
       let classify _ = Mcp_resilience.Retry in
@@ -290,17 +290,17 @@ let execute_gemini_with_retry ~sw ~proc_mgr ~clock
               ~classify
               op
       with
-      | Ok (exit_code, response) ->
+      | `Ok (exit_code, response) ->
           let extra = [
             ("thinking_level", string_of_thinking_level thinking_level);
             ("thinking_prompt_applied", string_of_bool thinking_applied);
           ] in
           { model = sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
-      | Error err ->
+      | `Error err ->
           { model = sprintf "gemini (%s)" model; returncode = -1; response = err; extra = [] }
-      | CircuitOpen ->
+      | `CircuitOpen ->
           { model = sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
-      | TimedOut ->
+      | `TimedOut ->
           { model = sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
 
 (** {1 Main Execute Function} *)

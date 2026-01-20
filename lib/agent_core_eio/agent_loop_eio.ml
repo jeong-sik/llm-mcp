@@ -52,9 +52,9 @@ module Make
         ~classify
         (fun () ->
            match Backend.call ~config:backend_config ~messages ~tools with
-           | Ok res -> Mcp_resilience.Ok res
-           | Error err -> Mcp_resilience.Error err
-           | exception exn -> Mcp_resilience.Error (Printexc.to_string exn))
+           | Ok res -> Result.Ok res
+           | Error err -> Result.Error err
+           | exception exn -> Result.Error (Printexc.to_string exn))
     in
 
     (* Wrap in timeout *)
@@ -65,13 +65,13 @@ module Make
     match call_result with
     | None ->
       TurnError "Turn timed out"
-    | Some (Error err) ->
+    | Some (`Error err) ->
       TurnError ("Failed: " ^ err)
-    | Some CircuitOpen ->
+    | Some `CircuitOpen ->
       TurnError "Circuit breaker open"
-    | Some TimedOut ->
+    | Some `TimedOut ->
       TurnError "Retry timed out"
-    | Some (Ok response) ->
+    | Some (`Ok response) ->
       let content = Backend.extract_content response in
       let tool_calls = Backend.parse_tool_calls response in
       let is_final = Backend.is_final response in
@@ -140,9 +140,9 @@ module Make
         ~classify
         (fun () ->
            match Backend.call ~config:backend_config ~messages ~tools with
-           | Ok res -> Mcp_resilience.Ok res
-           | Error err -> Mcp_resilience.Error err
-           | exception exn -> Mcp_resilience.Error (Printexc.to_string exn))
+           | Ok res -> Result.Ok res
+           | Error err -> Result.Error err
+           | exception exn -> Result.Error (Printexc.to_string exn))
     in
 
     let call_result =
@@ -151,12 +151,12 @@ module Make
 
     match call_result with
     | None -> TurnError "Turn timed out"
-    | Some (Error err) ->
+    | Some (`Error err) ->
       TurnError ("Failed: " ^ err)
-    | Some CircuitOpen -> TurnError "Circuit breaker open"
-    | Some TimedOut ->
+    | Some `CircuitOpen -> TurnError "Circuit breaker open"
+    | Some `TimedOut ->
       TurnError "Retry timed out"
-    | Some (Ok response) ->
+    | Some (`Ok response) ->
       let content = Backend.extract_content response in
       let tool_calls = Backend.parse_tool_calls response in
       let is_final = Backend.is_final response in

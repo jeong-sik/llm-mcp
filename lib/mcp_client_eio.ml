@@ -95,9 +95,7 @@ let call_mcp_server t ~url ~method_name ~params =
       with
       | e -> Result.Error (sprintf "Connection error: %s" (Printexc.to_string e))
     in
-    match result with
-    | Ok value -> Mcp_resilience.Ok value
-    | Error err -> Mcp_resilience.Error err
+    result
   in
 
   let classify msg =
@@ -116,10 +114,10 @@ let call_mcp_server t ~url ~method_name ~params =
           ~classify
           op
   with
-  | Ok res -> Ok res
-  | Error err -> Error err
-  | CircuitOpen -> Error "Circuit breaker open"
-  | TimedOut -> Error "Request timed out"
+  | `Ok res -> Ok res
+  | `Error err -> Error err
+  | `CircuitOpen -> Error "Circuit breaker open"
+  | `TimedOut -> Error "Request timed out"
 
 (** {1 Tool Operations} *)
 

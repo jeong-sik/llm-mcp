@@ -76,12 +76,17 @@ let create_circuit_breaker
     logger;
   }
 
-let circuit_allows cb =
+let get_now clock =
+  match clock with
+  | Some c -> Eio.Time.now c
+  | None -> Unix.gettimeofday ()
+
+let circuit_allows ?clock cb =
   Eio.Mutex.use_rw ~protect:true cb.mutex (fun () ->
     match cb.state with
     | Closed -> true
     | Open ->
-        let now = Unix.gettimeofday () in
+        let now = get_now clock in
         let elapsed_ms = (now -. cb.last_failure_time) *. 1000.0 in
         if elapsed_ms >= float_of_int cb.timeout_ms then begin
           cb.state <- HalfOpen;
@@ -116,9 +121,9 @@ let circuit_record_success cb =
     | Open -> ()
   )
 
-let circuit_record_failure cb =
+let circuit_record_failure ?clock cb =
   Eio.Mutex.use_rw ~protect:true cb.mutex (fun () ->
-    cb.last_failure_time <- Unix.gettimeofday ();
+    cb.last_failure_time <- get_now clock;
     match cb.state with
     | Closed ->
         cb.failure_count <- cb.failure_count + 1;
@@ -138,13 +143,6 @@ let circuit_record_failure cb =
 (* Retry Logic (Pure & Eio)                     *)
 (* ============================================ *)
 
-type 'a retry_result =
-  | Ok of 'a
-  | Error of string
-  | CircuitOpen
-  | TimedOut
-
-(** Retry action classification *)
 type retry_action =
   | Retry
   | Fail of string
@@ -172,14 +170,14 @@ let with_retry_eio
   let rec attempt n last_error =
     let cb_allows = match circuit_breaker with
       | None -> true
-      | Some cb -> circuit_allows cb
+      | Some cb -> circuit_allows ~clock cb
     in
     if not cb_allows then begin
       logger Warn (Printf.sprintf "%s: circuit breaker OPEN, rejecting" op_name);
-      CircuitOpen
+      `CircuitOpen
     end
     else if n > policy.max_attempts then begin
-      Error (match last_error with Some e -> e | None -> "Max attempts reached")
+      `Error (match last_error with Some e -> e | None -> "Max attempts reached")
     end
     else begin
       if n > 1 then begin
@@ -191,17 +189,15 @@ let with_retry_eio
       match f () with
       | Ok v ->
           (match circuit_breaker with Some cb -> circuit_record_success cb | None -> ());
-          Ok v
+          `Ok v
       | Error e ->
           (match classify e with
           | Fail msg ->
-              (match circuit_breaker with Some cb -> circuit_record_failure cb | None -> ());
-              Error msg
+              (match circuit_breaker with Some cb -> circuit_record_failure ~clock cb | None -> ());
+              `Error msg
           | Retry ->
-              (match circuit_breaker with Some cb -> circuit_record_failure cb | None -> ());
+              (match circuit_breaker with Some cb -> circuit_record_failure ~clock cb | None -> ());
               attempt (n + 1) (Some (match classify e with Fail m -> m | Retry -> "Retryable error")))
-      | CircuitOpen -> CircuitOpen
-      | TimedOut -> TimedOut
     end
   in
   attempt 1 None
@@ -214,11 +210,12 @@ let with_timeout_eio ~clock ~timeout_ms f =
       (fun () ->
          try
            Eio.Time.sleep clock timeout_sec;
-           Error "Timeout"
-         with Eio.Cancel.Cancelled _ -> Error "Cancelled")
-      (fun () -> Ok (f ()))
+           `TimedOut
+         with Eio.Cancel.Cancelled _ -> `Cancelled)
+      (fun () -> `Ok (f ()))
   in
   match result with
-  | Ok res -> Ok res
-  | Error _ -> Error "Timeout"
-  | _ -> Error "Unknown error"
+  | `Ok res -> `Ok res
+  | `TimedOut -> `TimedOut
+  | `Cancelled -> `Cancelled
+  | _ -> `Error "Unknown error"

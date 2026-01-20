@@ -236,9 +236,9 @@ let with_retry_lwt ~(policy : Mcp_resilience.retry_policy) ~circuit_breaker ~op_
       | Some cb -> Mcp_resilience.circuit_allows cb
     in
     if not cb_allows then
-      Lwt.return Mcp_resilience.CircuitOpen
+      Lwt.return `CircuitOpen
     else if n > policy.max_attempts then
-      Lwt.return (Mcp_resilience.Error (Option.value last_error ~default:"Max attempts reached"))
+      Lwt.return (`Error (Option.value last_error ~default:"Max attempts reached"))
     else
       let* () =
         if n > 1 then
@@ -251,7 +251,7 @@ let with_retry_lwt ~(policy : Mcp_resilience.retry_policy) ~circuit_breaker ~op_
       match result with
       | Ok v ->
           (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_success cb | None -> ());
-          Lwt.return (Mcp_resilience.Ok v)
+          Lwt.return (`Ok v)
       | Error err ->
           (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_failure cb | None -> ());
           attempt (n + 1) (Some err)
@@ -292,17 +292,17 @@ let execute_gemini_with_retry
         ~policy ~circuit_breaker:(Some gemini_breaker) ~op_name:"gemini_call_lwt" op in
       
       match result with
-      | Ok (exit_code, response) ->
+      | `Ok (exit_code, response) ->
           let extra = [
             ("thinking_level", string_of_thinking_level thinking_level);
             ("thinking_prompt_applied", string_of_bool thinking_applied);
           ] in
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
-      | Error err ->
+      | `Error err ->
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = err; extra = [] }
-      | CircuitOpen ->
+      | `CircuitOpen ->
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
-      | TimedOut ->
+      | `TimedOut ->
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
 
 (** Execute a tool and return result *)

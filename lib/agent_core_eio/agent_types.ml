@@ -90,14 +90,6 @@ type loop_result =
   | TimedOut of { turns_completed : int }
   | CircuitOpen
 
-(** {1 Retry Result Types} *)
-
-type 'a retry_result = 'a Mcp_resilience.retry_result =
-  | Ok of 'a
-  | Error of string
-  | CircuitOpen
-  | TimedOut
-
 (** {1 Helper Functions} *)
 
 let role_to_string = function

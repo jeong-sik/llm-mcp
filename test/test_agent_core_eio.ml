@@ -23,10 +23,10 @@ let test_retry_success () =
   let call_count = ref 0 in
   let f () =
     incr call_count;
-    AC.Retry.Ok "success"
+    Result.Ok "success"
   in
   match AC.Retry.with_retry_eio ~clock ~policy ~op_name:"test_retry_success" ~classify:retry_classify f with
-  | Types.Ok result ->
+  | `Ok result ->
     Alcotest.(check string) "result" "success" result;
     Alcotest.(check int) "called once" 1 !call_count
   | _ ->
@@ -44,11 +44,11 @@ let test_retry_eventual_success () =
   let call_count = ref 0 in
   let f () =
     incr call_count;
-    if !call_count < 3 then AC.Retry.Error "not yet"
-    else AC.Retry.Ok "finally"
+    if !call_count < 3 then Result.Error "not yet"
+    else Result.Ok "finally"
   in
   match AC.Retry.with_retry_eio ~clock ~policy ~op_name:"test_retry_eventual_success" ~classify:retry_classify f with
-  | Types.Ok result ->
+  | `Ok result ->
     Alcotest.(check string) "result" "finally" result;
     Alcotest.(check int) "called 3 times" 3 !call_count
   | _ ->
@@ -63,9 +63,9 @@ let test_retry_exhausted () =
     backoff_multiplier = 2.0;
     jitter = false;
   } in
-  let f () = AC.Retry.Error "always fails" in
+  let f () = Result.Error "always fails" in
   match AC.Retry.with_retry_eio ~clock ~policy ~op_name:"test_retry_exhausted" ~classify:retry_classify f with
-  | Types.Error _ -> ()
+  | `Error _ -> ()
   | _ ->
     Alcotest.fail "expected Error"
 
@@ -81,11 +81,11 @@ let test_retry_with_jitter () =
   let call_count = ref 0 in
   let f () =
     incr call_count;
-    if !call_count < 2 then AC.Retry.Error "retry"
-    else AC.Retry.Ok "done"
+    if !call_count < 2 then Result.Error "retry"
+    else Result.Ok "done"
   in
   match AC.Retry.with_retry_eio ~clock ~policy ~op_name:"test_retry_with_jitter" ~classify:retry_classify f with
-  | Types.Ok _ ->
+  | `Ok _ ->
     Alcotest.(check int) "called twice" 2 !call_count
   | _ ->
     Alcotest.fail "expected Ok"
