@@ -227,9 +227,13 @@ let rec execute_node ctx ~sw ~clock ~exec_fn (node : node) : (string, string) re
       execute_gate ctx ~sw ~clock ~exec_fn node ~condition ~then_node ~else_node
   | Subgraph chain -> execute_subgraph ctx ~sw ~clock ~exec_fn node chain
   | ChainRef ref_id ->
-      (* TODO: Registry lookup *)
-      record_error ctx node.id (Printf.sprintf "ChainRef '%s' not implemented" ref_id);
-      Error (Printf.sprintf "ChainRef '%s' requires registry (not implemented)" ref_id)
+      (* Look up chain in registry and execute as subgraph *)
+      (match Chain_registry.lookup ref_id with
+       | Some referenced_chain ->
+           execute_subgraph ctx ~sw ~clock ~exec_fn node referenced_chain
+       | None ->
+           record_error ctx node.id (Printf.sprintf "ChainRef '%s' not found in registry" ref_id);
+           Error (Printf.sprintf "ChainRef '%s' not found in registry" ref_id))
   | Map { func; inner } -> execute_map ctx ~sw ~clock ~exec_fn node ~func inner
   | Bind { func; inner } -> execute_bind ctx ~sw ~clock ~exec_fn node ~func inner
   | Merge { strategy; nodes } -> execute_merge ctx ~sw ~clock ~exec_fn node ~strategy nodes

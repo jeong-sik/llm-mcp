@@ -167,6 +167,11 @@ let prompt_chars_of_args (args : tool_args) =
   | Codex { prompt; _ }
   | Ollama { prompt; _ } -> String.length prompt
   | OllamaList -> 0  (* No prompt for list operation *)
+  | ChainRun { chain; _ } ->
+      (* Estimate chain size from JSON *)
+      String.length (Yojson.Safe.to_string chain)
+  | ChainValidate { chain } ->
+      String.length (Yojson.Safe.to_string chain)
 
 let split_once s ch =
   match String.index_opt s ch with
@@ -306,6 +311,8 @@ let handle_call_tool ~wants_stream id params =
     | Types.Codex { stream; _ }
     | Types.Ollama { stream; _ } -> stream
     | Types.OllamaList -> false
+    | Types.ChainRun _ -> false  (* Chains don't stream in Lwt mode *)
+    | Types.ChainValidate _ -> false
   in
   let wants_keepalive = wants_stream || stream_requested in
 

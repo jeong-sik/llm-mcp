@@ -14,10 +14,11 @@
    ollama_parser
    tool_config
    tool_parsers
-   ; Chain Engine (Phase 3)
+   ; Chain Engine (Phase 3-4)
    chain_types
    chain_parser
-   chain_compiler)
+   chain_compiler
+   chain_registry)
  (libraries
    yojson
    str
