@@ -287,6 +287,24 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 }
 ```
 
+### 예제 3: 로컬 Ollama 모델로 빠른 프로토타이핑
+
+- 전제: Ollama 데몬 실행 + 모델 설치
+- model 값은 Ollama 모델 이름 그대로 전달됨
+
+```json
+{
+  "chain": {
+    "id": "local_ollama_quick",
+    "config": { "timeout": 120, "max_concurrency": 1, "trace": false },
+    "nodes": [
+      { "id": "summarize", "type": "llm", "model": "llama3.1:8b", "prompt": "Summarize: {{input}}" }
+    ],
+    "output": "summarize"
+  }
+}
+```
+
 ## 9. 구현 상태
 
 현재 (v0.1 in llm-mcp):
