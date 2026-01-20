@@ -1,11 +1,10 @@
 (** LLM-MCP Server - Eio/httpun-eio Implementation
 
     Pure Eio HTTP server using httpun-eio for MCP 2025-11-25.
-    Uses lwt_eio bridge for existing Lwt-based tools/handlers.
 
     Architecture:
     - Server: httpun-eio (Eio native, Effect-based)
-    - MCP Handler: Lwt via lwt_eio bridge (gradual migration)
+    - MCP Handler: Mcp_server_eio (pure Eio, chain.run enabled)
     - SSE: Native Eio streaming
 *)
 
@@ -230,35 +229,6 @@ let[@warning "-32"] send_sse_event_with_id body ~id ~event ~data =
 let json_rpc_error code message =
   Yojson.Safe.to_string (Mcp_server.make_error ~id:`Null code message)
 
-let jsonrpc_error_code = function
-  | `Assoc fields -> (
-      match List.assoc_opt "error" fields with
-      | Some (`Assoc err_fields) -> (
-          match List.assoc_opt "code" err_fields with
-          | Some (`Int code) -> Some code
-          | _ -> None)
-      | _ -> None)
-  | _ -> None
-
-let is_http_error_response = function
-  | Mcp_server.JsonResponse (`Assoc fields) ->
-      let id_is_null = match List.assoc_opt "id" fields with Some `Null -> true | _ -> false in
-      let code = jsonrpc_error_code (`Assoc fields) in
-      id_is_null && (code = Some (-32700) || code = Some (-32600))
-  | _ -> false
-
-(** ============== MCP Processing (Lwt Bridge) ============== *)
-
-(** Process MCP request using Lwt_main.run (sync bridge from Eio) *)
-let process_mcp_request_sync ~session ~wants_stream body_str =
-  let open Lwt.Syntax in
-  Lwt_main.run begin
-    let+ (_session_opt, response) =
-      Mcp_server.handle_request ~session_opt:(Some session) ~wants_stream body_str
-    in
-    response
-  end
-
 (** ============== HTTP Handlers ============== *)
 
 let health_handler _request reqd =
@@ -316,7 +286,7 @@ let handle_get_mcp ~clock headers reqd =
     ping_loop ()
   )
 
-let handle_post_mcp headers reqd =
+let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
   let protocol_version = get_protocol_version headers in
 
   if not (accepts_streamable_mcp headers) then begin
@@ -324,69 +294,55 @@ let handle_post_mcp headers reqd =
       "Invalid Accept header: must include application/json and text/event-stream" in
     Response.json ~status:`Bad_request body reqd
   end else begin
-    let session = get_or_create_session ~protocol_version headers in
     let wants_stream = wants_sse headers in
+    let session_id_from_header = get_session_id_header headers in
 
-    log_debug "LLM_MCP_DEBUG: POST /mcp session=%s protocol=%s stream=%b\n%!"
-      session.id protocol_version wants_stream;
+    log_debug "LLM_MCP_DEBUG: POST /mcp (Eio) protocol=%s stream=%b session_header=%s\n%!"
+      protocol_version wants_stream
+      (Option.value session_id_from_header ~default:"<none>");
 
     Request.read_body_async reqd (fun body_str ->
-      let response = process_mcp_request_sync ~session ~wants_stream body_str in
+      (* Convert Httpun.Headers to (string * string) list for Mcp_server_eio *)
+      let headers_list = Httpun.Headers.to_list headers in
 
-      match response with
-      | Mcp_server.NoResponse ->
-          let headers = Httpun.Headers.of_list (
-            Response.mcp_headers session.id protocol_version @ Response.cors_headers
-          ) in
-          let resp = Httpun.Response.create ~headers `Accepted in
-          Httpun.Reqd.respond_with_string reqd resp ""
+      (* Call the Eio-native handler *)
+      let (new_session_id_opt, json_response) =
+        Mcp_server_eio.handle_request
+          ~sw ~proc_mgr ~clock ~store
+          ~headers:headers_list
+          body_str
+      in
 
-      | Mcp_server.JsonResponse json when is_http_error_response response ->
-          Response.json_with_session ~status:`Bad_request
-            ~session_id:session.id ~protocol_version
-            (Yojson.Safe.to_string json) reqd
+      (* Determine session ID: use new one if created, otherwise from header *)
+      let session_id = match new_session_id_opt with
+        | Some id -> id
+        | None -> Option.value session_id_from_header ~default:"unknown"
+      in
 
-      | Mcp_server.JsonResponse json ->
-          if wants_stream then begin
-            (* SSE response with single message event *)
-            let stream = Sse.create_stream () in
-            let body = (Sse.prime_event stream) ^ (Sse.json_event stream json) in
-            let headers = Httpun.Headers.of_list ([
-              ("content-type", "text/event-stream");
-              ("content-length", string_of_int (String.length body));
-            ] @ Response.mcp_headers session.id protocol_version @ Response.cors_headers) in
-            let resp = Httpun.Response.create ~headers `OK in
-            Httpun.Reqd.respond_with_string reqd resp body
-          end else
-            Response.json_with_session ~session_id:session.id ~protocol_version
-              (Yojson.Safe.to_string json) reqd
+      (* Check if response is an error *)
+      let is_error = match json_response with
+        | `Assoc fields ->
+            (match List.assoc_opt "error" fields with Some _ -> true | None -> false)
+        | _ -> false
+      in
 
-      | Mcp_server.SseStream (stream, generator) ->
-          (* Wait for result then send as SSE *)
-          let result_event = Lwt_main.run (generator ()) in
-          let body = (Sse.prime_event stream) ^ result_event in
-          let headers = Httpun.Headers.of_list ([
-            ("content-type", "text/event-stream");
-            ("content-length", string_of_int (String.length body));
-          ] @ Response.mcp_headers session.id protocol_version @ Response.cors_headers) in
-          let resp = Httpun.Response.create ~headers `OK in
-          Httpun.Reqd.respond_with_string reqd resp body
-
-      | Mcp_server.SseTokenStream (stream, event_stream, starter) ->
-          (* Real-time token streaming - collect all then send *)
-          Lwt_main.run begin
-            let open Lwt.Syntax in
-            let* () = starter () in
-            let+ events = Lwt_stream.to_list event_stream in
-            let prime = Sse.prime_event stream in
-            let body = prime ^ (String.concat "" events) in
-            let headers = Httpun.Headers.of_list ([
-              ("content-type", "text/event-stream");
-              ("content-length", string_of_int (String.length body));
-            ] @ Response.mcp_headers session.id protocol_version @ Response.cors_headers) in
-            let resp = Httpun.Response.create ~headers `OK in
-            Httpun.Reqd.respond_with_string reqd resp body
-          end
+      if is_error then
+        Response.json_with_session ~status:`Bad_request
+          ~session_id ~protocol_version
+          (Yojson.Safe.to_string json_response) reqd
+      else if wants_stream then begin
+        (* SSE response with single message event *)
+        let stream = Sse.create_stream () in
+        let body = (Sse.prime_event stream) ^ (Sse.json_event stream json_response) in
+        let resp_headers = Httpun.Headers.of_list ([
+          ("content-type", "text/event-stream");
+          ("content-length", string_of_int (String.length body));
+        ] @ Response.mcp_headers session_id protocol_version @ Response.cors_headers) in
+        let resp = Httpun.Response.create ~headers:resp_headers `OK in
+        Httpun.Reqd.respond_with_string reqd resp body
+      end else
+        Response.json_with_session ~session_id ~protocol_version
+          (Yojson.Safe.to_string json_response) reqd
     )
   end
 
@@ -408,7 +364,7 @@ let handle_delete_mcp headers reqd =
 
 (** ============== Router ============== *)
 
-let route_request ~clock request reqd =
+let route_request ~sw ~clock ~proc_mgr ~store request reqd =
   let path = Request.path request in
   let meth = Request.meth request in
   let headers = Request.headers request in
@@ -435,7 +391,7 @@ let route_request ~clock request reqd =
       handle_get_mcp ~clock headers reqd
 
   | `POST, "/" | `POST, "/mcp" ->
-      handle_post_mcp headers reqd
+      handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd
 
   | `DELETE, "/mcp" ->
       handle_delete_mcp headers reqd
@@ -445,11 +401,11 @@ let route_request ~clock request reqd =
 
 (** ============== httpun-eio Server ============== *)
 
-let make_request_handler ~clock =
+let make_request_handler ~sw ~clock ~proc_mgr ~store =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    route_request ~clock request reqd
+    route_request ~sw ~clock ~proc_mgr ~store request reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
@@ -465,8 +421,8 @@ let error_handler _client_addr ?request:_ error start_response =
 (** Graceful shutdown exception *)
 exception Shutdown
 
-let run ~sw ~net ~clock config =
-  let request_handler = make_request_handler ~clock in
+let run ~sw ~net ~clock ~proc_mgr ~store config =
+  let request_handler = make_request_handler ~sw ~clock ~proc_mgr ~store in
   let ip = match Ipaddr.of_string config.host with
     | Ok addr -> Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets addr)
     | Error _ -> Eio.Net.Ipaddr.V4.loopback
@@ -503,6 +459,8 @@ let start_server config =
   Eio_main.run @@ fun env ->
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let store = Mcp_server_eio.create_session_store () in
 
   (* Graceful shutdown setup *)
   let switch_ref = ref None in
@@ -527,10 +485,18 @@ let start_server config =
   Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
 
+  (* Initialize Chain Registry *)
+  let chains_dir = "data/chains" in
+  if Sys.file_exists chains_dir && Sys.is_directory chains_dir then begin
+    eprintf "🐫 llm-mcp: Loading chains from %s...\n%!" chains_dir;
+    Chain_registry.init ~persist_dir:chains_dir ()
+  end else
+    Chain_registry.init ();
+
   (try
     Eio.Switch.run @@ fun sw ->
     switch_ref := Some sw;
-    run ~sw ~net ~clock config
+    run ~sw ~net ~clock ~proc_mgr ~store config
   with
   | Shutdown ->
       eprintf "🐫 llm-mcp: Shutdown complete.\n%!"

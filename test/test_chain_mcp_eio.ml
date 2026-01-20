@@ -138,6 +138,9 @@ flowchart TD
       Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers run_req
     in
 
+    (* Debug: print the actual response *)
+    Printf.eprintf "[DEBUG] mermaid run_resp: %s\n%!" (Yojson.Safe.pretty_to_string run_resp);
+
     check bool "mermaid chain.run isError=false" false (get_is_error run_resp);
     check string "mermaid chain.run output" "[stub]ping" (get_result_text run_resp);
 

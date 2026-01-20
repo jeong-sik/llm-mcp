@@ -24,6 +24,8 @@ let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
 let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
+let parse_chain_to_mermaid_args = Tool_parsers.parse_chain_to_mermaid_args
+let parse_chain_orchestrate_args = Tool_parsers.parse_chain_orchestrate_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -368,7 +370,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; })
 
   | Ollama { model; temperature; timeout; _ } ->
-      (match build_ollama_curl_cmd args with
+      (* Force stream=false for non-streaming execute path *)
+      (match build_ollama_curl_cmd ~force_stream:(Some false) args with
       | Error err ->
           { model = sprintf "ollama (%s)" model;
             returncode = -1;
@@ -532,6 +535,17 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         timeout = node_timeout;
                         stream = false;
                       }
+                  | "ollama" ->
+                      (* Plain ollama defaults to qwen3:1.7b for fast testing *)
+                      Types.Ollama {
+                        prompt;
+                        model = "qwen3:1.7b";
+                        system_prompt = None;
+                        temperature = 0.7;
+                        timeout = node_timeout;
+                        stream = false;
+                        tools = None;
+                      }
                   | m when String.length m > 7 && String.sub m 0 7 = "ollama:" ->
                       let ollama_model = String.sub m 7 (String.length m - 7) in
                       Types.Ollama {
@@ -611,6 +625,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   ("trace_count", string_of_int (List.length result.Chain_types.trace));
                 ]; })
 
+
   | ChainValidate { chain; mermaid } ->
       (* Parse from either JSON or Mermaid, then validate *)
       let parse_result = match (chain, mermaid) with
@@ -654,6 +669,40 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       ("depth", string_of_int depth);
                       ("parallel_groups", string_of_int parallel_groups);
                     ]; })
+
+  | ChainList ->
+      let ids = Chain_registry.list_ids () in
+      let response = String.concat ", " ids in
+      { model = "chain.list";
+        returncode = 0;
+        response = "Registered chains: " ^ response;
+        extra = [("count", string_of_int (List.length ids))];
+      }
+
+  | ChainToMermaid { chain } ->
+      (* Parse JSON to Chain AST, then convert to Mermaid *)
+      (match Chain_parser.parse_chain chain with
+      | Error msg ->
+          { model = "chain.to_mermaid";
+            returncode = -1;
+            response = sprintf "Parse error: %s" msg;
+            extra = [("stage", "parse")]; }
+      | Ok parsed_chain ->
+          let mermaid_text = Chain_mermaid_parser.chain_to_mermaid parsed_chain in
+          { model = "chain.to_mermaid";
+            returncode = 0;
+            response = mermaid_text;
+            extra = [
+              ("chain_id", parsed_chain.Chain_types.id);
+              ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
+            ]; })
+
+  | ChainOrchestrate { goal; _ } ->
+      (* Chain orchestration is handled separately by the orchestrator *)
+      { model = "chain.orchestrate";
+        returncode = 1;
+        response = Printf.sprintf "ChainOrchestrate not implemented in tools_eio. Goal: %s" goal;
+        extra = []; }
 
 (** {1 Convenience Wrappers} *)
 
@@ -1048,6 +1097,19 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   working_directory = None;
                   timeout;
                   stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | m when String.length m > 7 && String.sub m 0 7 = "ollama:" ->
+                let ollama_model = String.sub m 7 (String.length m - 7) in
+                let args = Ollama {
+                  prompt;
+                  model = ollama_model;
+                  system_prompt = None;
+                  temperature = 0.7;
+                  timeout;
+                  stream = false;
+                  tools = None;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response

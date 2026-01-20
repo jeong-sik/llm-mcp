@@ -21,7 +21,12 @@
    chain_parser
    chain_mermaid_parser
    chain_compiler
-   chain_registry)
+   chain_registry
+   ; Chain Engine (Phase 5 - Category Theory)
+   chain_category
+   chain_batch
+   chain_stats
+   chain_telemetry)
  (libraries
    yojson
    str

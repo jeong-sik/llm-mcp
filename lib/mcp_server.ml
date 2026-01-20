@@ -173,6 +173,7 @@ let starts_with ~prefix s =
     | ChainToMermaid { chain = _ } -> 0
     | ChainValidate { chain = _; mermaid = _ } -> 0
     | ChainList -> 0
+    | ChainOrchestrate { goal; _ } -> String.length goal
 let split_once s ch =
   match String.index_opt s ch with
   | None -> (s, None)
@@ -319,6 +320,7 @@ let handle_call_tool ~wants_stream id params =
     | Types.ChainValidate _ -> false
     | Types.ChainToMermaid _ -> false
     | Types.ChainList -> false
+    | Types.ChainOrchestrate _ -> false  (* Orchestration not available in Lwt mode *)
   in
   let wants_keepalive = wants_stream || stream_requested in
 
