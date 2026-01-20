@@ -100,12 +100,14 @@ type tool_args =
     }
   | OllamaList  (* List available Ollama models *)
   | ChainRun of {
-      chain : Yojson.Safe.t;  (* Chain definition as JSON *)
-      input : string option;  (* Optional initial input *)
-      trace : bool;           (* Enable execution tracing *)
+      chain : Yojson.Safe.t option;  (* Chain definition as JSON *)
+      mermaid : string option;       (* Mermaid flowchart text (WYSIWYE) *)
+      input : string option;         (* Optional initial input *)
+      trace : bool;                  (* Enable execution tracing *)
     }
   | ChainValidate of {
-      chain : Yojson.Safe.t;  (* Chain definition to validate *)
+      chain : Yojson.Safe.t option;  (* Chain definition to validate *)
+      mermaid : string option;       (* Mermaid flowchart text to validate *)
     }
 
 (** Gemini-specific error classification for retry logic.
@@ -515,15 +517,28 @@ let chain_run_schema : tool_schema = {
   description = {|Execute a Chain DSL workflow.
 
 Parameters:
-- chain: Chain DSL JSON (required)
+- chain: Chain DSL JSON (one of chain/mermaid required)
+- mermaid: Mermaid flowchart text (one of chain/mermaid required)
 - trace: Enable execution trace (default: false)
-- timeout: Overall timeout in seconds (default: 300)|};
+- timeout: Overall timeout in seconds (default: 300)
+
+Example Mermaid:
+```mermaid
+graph LR
+    A[LLM:gemini "Analyze this"] --> B{Quorum:2}
+    A --> C[LLM:claude "Review this"]
+    C --> B
+```|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
       ("chain", `Assoc [
         ("type", `String "object");
         ("description", `String "Chain DSL definition with nodes and output");
+      ]);
+      ("mermaid", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Mermaid flowchart text (WYSIWYE - What You See Is What You Execute)");
       ]);
       ("trace", `Assoc [
         ("type", `String "boolean");
@@ -536,7 +551,10 @@ Parameters:
         ("default", `Int 300);
       ]);
     ]);
-    ("required", `List [`String "chain"]);
+    ("oneOf", `List [
+      `Assoc [("required", `List [`String "chain"])];
+      `Assoc [("required", `List [`String "mermaid"])];
+    ]);
   ];
 }
 
@@ -545,7 +563,8 @@ let chain_validate_schema : tool_schema = {
   description = {|Validate a Chain DSL definition without executing it.
 
 Parameters:
-- chain: Chain DSL JSON to validate (required)|};
+- chain: Chain DSL JSON to validate (one of chain/mermaid required)
+- mermaid: Mermaid flowchart text to validate (one of chain/mermaid required)|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -553,8 +572,15 @@ Parameters:
         ("type", `String "object");
         ("description", `String "Chain DSL definition to validate");
       ]);
+      ("mermaid", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Mermaid flowchart text to validate");
+      ]);
     ]);
-    ("required", `List [`String "chain"]);
+    ("oneOf", `List [
+      `Assoc [("required", `List [`String "chain"])];
+      `Assoc [("required", `List [`String "mermaid"])];
+    ]);
   ];
 }
 

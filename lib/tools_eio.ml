@@ -452,9 +452,14 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Error: %s" msg;
             extra = [("local", "true")]; })
 
-  | ChainRun { chain; input; trace } ->
-      (* Parse, compile, and execute chain *)
-      (match Chain_parser.parse_chain chain with
+  | ChainRun { chain; mermaid; input; trace } ->
+      (* Parse from either JSON or Mermaid (WYSIWYE) *)
+      let parse_result = match (chain, mermaid) with
+        | (Some c, _) -> Chain_parser.parse_chain c
+        | (_, Some m) -> Chain_mermaid_parser.parse_chain m
+        | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
+      in
+      (match parse_result with
       | Error msg ->
           { model = "chain.run";
             returncode = -1;
@@ -606,9 +611,14 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   ("trace_count", string_of_int (List.length result.Chain_types.trace));
                 ]; })
 
-  | ChainValidate { chain } ->
-      (* Parse and validate chain structure *)
-      (match Chain_parser.parse_chain chain with
+  | ChainValidate { chain; mermaid } ->
+      (* Parse from either JSON or Mermaid, then validate *)
+      let parse_result = match (chain, mermaid) with
+        | (Some c, _) -> Chain_parser.parse_chain c
+        | (_, Some m) -> Chain_mermaid_parser.parse_chain m
+        | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
+      in
+      (match parse_result with
       | Error msg ->
           { model = "chain.validate";
             returncode = -1;
