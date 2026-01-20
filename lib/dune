@@ -24,7 +24,17 @@
    grpc-direct-core
    mcp_protocol)
  (ocamlopt_flags (:standard -O3))
- (preprocess (pps ppx_deriving_yojson)))
+(preprocess (pps ppx_deriving_yojson)))
+
+; =============================================================================
+; llm_mcp_resilience - Shared resilience helpers
+; =============================================================================
+(library
+ (name llm_mcp_resilience)
+ (public_name llm_mcp.resilience)
+ (wrapped false)
+ (modules mcp_resilience)
+ (libraries eio unix))
 
 ; =============================================================================
 ; llm_mcp_eio - Pure Eio Library (NO Lwt!)
@@ -61,7 +71,8 @@
    msgpck
    grpc-direct-core
    zstd
-   compact-protocol)
+   compact-protocol
+   llm_mcp_resilience)
  (ocamlopt_flags (:standard -O3))
  (preprocess (pps ppx_deriving_yojson)))
 
@@ -102,6 +113,7 @@
    msgpck
    grpc-direct-core
    zstd
-   compact-protocol)
+   compact-protocol
+   llm_mcp_resilience)
  (ocamlopt_flags (:standard -O3))
  (preprocess (pps lwt_ppx ppx_deriving_yojson)))
