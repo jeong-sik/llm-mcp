@@ -141,6 +141,8 @@ let parse_claude_args = Tool_parsers.parse_claude_args
 let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
+let parse_chain_run_args = Tool_parsers.parse_chain_run_args
+let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -436,9 +438,47 @@ let execute args : tool_result Lwt.t =
         response = "Chain execution not available in Lwt mode. Use Eio server (start-llm-mcp.sh --http)";
         extra = []; }
 
-  | ChainValidate { chain } ->
-      (* Validation can run synchronously *)
-      let result = match Chain_parser.parse_chain chain with
+  | ChainOrchestrate _ ->
+      (* Chain orchestration requires Eio direct-style concurrency *)
+      Lwt.return { model = "chain.orchestrate";
+        returncode = -1;
+        response = "Chain orchestration not available in Lwt mode. Use Eio server (start-llm-mcp.sh --http)";
+        extra = []; }
+
+  | ChainToMermaid { chain } ->
+      (* Convert Chain AST to Mermaid text *)
+      (match Chain_parser.parse_chain chain with
+      | Error msg ->
+          Lwt.return { model = "chain.to_mermaid";
+            returncode = -1;
+            response = Printf.sprintf "Parse error: %s" msg;
+            extra = [("stage", "parse")]; }
+      | Ok parsed_chain ->
+          let mermaid_text = Chain_mermaid_parser.chain_to_mermaid parsed_chain in
+          Lwt.return { model = "chain.to_mermaid";
+            returncode = 0;
+            response = mermaid_text;
+            extra = [
+              ("chain_id", parsed_chain.Chain_types.id);
+              ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
+            ]; })
+
+  | ChainList ->
+      let ids = Chain_registry.list_ids () in
+      let response = String.concat ", " ids in
+      Lwt.return { model = "chain.list";
+        returncode = 0;
+        response = "Registered chains: " ^ response;
+        extra = [("count", string_of_int (List.length ids))];
+      }
+
+  | ChainValidate { chain; mermaid } ->
+      let parse_result = match (chain, mermaid) with
+        | (Some c, _) -> Chain_parser.parse_chain c
+        | (_, Some m) -> Chain_mermaid_parser.parse_chain m
+        | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
+      in
+      let result = match parse_result with
         | Error msg ->
             { model = "chain.validate";
               returncode = -1;

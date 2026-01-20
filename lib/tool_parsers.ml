@@ -129,6 +129,39 @@ let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args
   let mermaid = json |> member "mermaid" |> to_string_option in
   ChainValidate { chain; mermaid }
 
+(** Parse JSON arguments for chain.to_mermaid tool *)
+let parse_chain_to_mermaid_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let chain = json |> member "chain" in
+  ChainToMermaid { chain }
+
+(** Parse JSON arguments for chain.orchestrate tool *)
+let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let goal = json |> member "goal" |> to_string in
+  let chain =
+    match json |> member "chain" with
+    | `Null -> None
+    | c -> Some c
+  in
+  let max_replans =
+    try json |> member "max_replans" |> to_int
+    with _ -> 3
+  in
+  let timeout =
+    try json |> member "timeout" |> to_int
+    with _ -> 600
+  in
+  let trace =
+    try json |> member "trace" |> to_bool
+    with _ -> false
+  in
+  let verify_on_complete =
+    try json |> member "verify_on_complete" |> to_bool
+    with _ -> true
+  in
+  ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete }
+
 (** {1 Command Builders} *)
 
 (** Build thinking prompt prefix based on thinking level *)

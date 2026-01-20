@@ -3,7 +3,7 @@
  (public_name llm-mcp)
  (package llm_mcp)
  (modules main_eio)
- (libraries llm_mcp eio eio_main httpun httpun-eio gluten gluten-eio
+ (libraries llm_mcp llm_mcp.eio eio eio_main httpun httpun-eio gluten gluten-eio
             cmdliner ipaddr mcp_protocol)
  (ocamlopt_flags (:standard -O3)))
 

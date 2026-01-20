@@ -45,7 +45,7 @@ let test_handle_list_tools () =
       let id = json |> member "id" |> to_int in
       let tools = json |> member "result" |> member "tools" |> to_list in
       Alcotest.(check int) "id matches" 2 id;
-      Alcotest.(check int) "has 7 tools" 7 (List.length tools);  (* gemini, claude-cli, codex, ollama, ollama_list, chain.run, chain.validate *)
+      Alcotest.(check int) "has 8 tools" 8 (List.length tools);  (* gemini, claude-cli, codex, ollama, ollama_list, chain.run, chain.validate, chain.to_mermaid *)
       let tool_names = List.map (fun t -> t |> member "name" |> to_string) tools in
       Alcotest.(check bool) "gemini exists" true (List.mem "gemini" tool_names);
       Alcotest.(check bool) "claude-cli exists" true (List.mem "claude-cli" tool_names);
@@ -53,7 +53,8 @@ let test_handle_list_tools () =
       Alcotest.(check bool) "ollama exists" true (List.mem "ollama" tool_names);
       Alcotest.(check bool) "ollama_list exists" true (List.mem "ollama_list" tool_names);
       Alcotest.(check bool) "chain.run exists" true (List.mem "chain.run" tool_names);
-      Alcotest.(check bool) "chain.validate exists" true (List.mem "chain.validate" tool_names)
+      Alcotest.(check bool) "chain.validate exists" true (List.mem "chain.validate" tool_names);
+      Alcotest.(check bool) "chain.to_mermaid exists" true (List.mem "chain.to_mermaid" tool_names)
   | _ -> Alcotest.fail "Expected JsonResponse"
 
 (** Test unknown method error *)

@@ -540,7 +540,6 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 
 (** Execute a compiled execution plan *)
 let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_plan) : chain_result =
-  let _ = clock in  (* Used for timeout in future *)
   let start_time = Unix.gettimeofday () in
   let ctx = make_context ~start_time ~trace_enabled:trace ~timeout in
 
@@ -602,4 +601,12 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
             make_result ~success:false ~output:msg
   in
 
-  execute_steps () (plan_to_steps plan)
+  (* Execute with timeout using Eio.Time.with_timeout *)
+  let timeout_secs = Float.of_int timeout in
+  match Eio.Time.with_timeout clock timeout_secs (fun () ->
+    Ok (execute_steps () (plan_to_steps plan))
+  ) with
+  | Ok result -> result
+  | Error `Timeout ->
+      add_trace ctx plan.chain.Chain_types.id (ChainComplete { chain_id = plan.chain.Chain_types.id; success = false });
+      make_result ~success:false ~output:(Printf.sprintf "Execution timeout after %d seconds" timeout)

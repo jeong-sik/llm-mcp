@@ -194,3 +194,66 @@ let make_fanout ~id nodes =
 (** Helper: Create a quorum node *)
 let make_quorum ~id ~required nodes =
   { id; node_type = Quorum { required; nodes }; input_mapping = [] }
+
+(** {1 Batch Execution Types - Phase 5} *)
+
+(** Batch priority levels *)
+type batch_priority =
+  | High
+  | Normal
+  | Low
+[@@deriving yojson]
+
+(** Retry configuration for batch execution *)
+type retry_config = {
+  max_retries: int;           (** Maximum retry attempts *)
+  initial_delay_ms: int;      (** Initial delay before first retry *)
+  backoff_multiplier: float;  (** Exponential backoff multiplier *)
+  max_delay_ms: int;          (** Maximum delay between retries *)
+}
+[@@deriving yojson]
+
+(** Default retry configuration *)
+let default_retry_config = {
+  max_retries = 3;
+  initial_delay_ms = 1000;
+  backoff_multiplier = 2.0;
+  max_delay_ms = 30000;
+}
+
+(** Batch execution configuration *)
+type batch_config = {
+  batch_max_concurrent: int;  (** Maximum concurrent chain executions *)
+  rate_limit_per_min: int;    (** Rate limit per minute per model *)
+  retry_policy: retry_config; (** Retry configuration *)
+  priority: batch_priority;   (** Batch priority level *)
+}
+[@@deriving yojson]
+
+(** Default batch configuration *)
+let default_batch_config = {
+  batch_max_concurrent = 5;
+  rate_limit_per_min = 60;
+  retry_policy = default_retry_config;
+  priority = Normal;
+}
+
+(** Batch execution statistics *)
+type batch_stats = {
+  total_chains: int;          (** Total chains in batch *)
+  completed: int;             (** Successfully completed chains *)
+  failed: int;                (** Failed chains *)
+  total_duration_ms: int;     (** Total execution time *)
+  total_tokens: Chain_category.token_usage;  (** Aggregated token usage *)
+  avg_duration_ms: float;     (** Average chain duration *)
+}
+[@@deriving yojson]
+
+(** Result of batch execution *)
+type batch_result = {
+  batch_id: string;                       (** Unique batch identifier *)
+  results: (string * chain_result) list;  (** Chain ID to result mapping *)
+  stats: batch_stats;                     (** Execution statistics *)
+  failed_chains: (string * string) list;  (** Chain ID to error mapping *)
+}
+[@@deriving yojson]

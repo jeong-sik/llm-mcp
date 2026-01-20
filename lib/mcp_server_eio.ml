@@ -216,6 +216,9 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "ollama-list" -> Tools_eio.parse_ollama_list_args arguments
     | "chain.run" -> Tools_eio.parse_chain_run_args arguments
     | "chain.validate" -> Tools_eio.parse_chain_validate_args arguments
+    | "chain.list" -> Types.ChainList
+    | "chain.to_mermaid" -> Tools_eio.parse_chain_to_mermaid_args arguments
+    | "chain.orchestrate" -> Tools_eio.parse_chain_orchestrate_args arguments
     | _ -> failwith (sprintf "Unknown tool: %s" name)
   in
 
@@ -335,8 +338,9 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
                                eprintf "[session] Session %s not found, rejecting tools/call\n%!" sid;
                                (None, make_error ~id (-32000) "Session not found. Please call initialize first."))
                       | None ->
-                          eprintf "[session] No session ID provided for tools/call\n%!";
-                          (None, make_error ~id (-32000) "Session required. Please call initialize first."))
+                          (* Allow tools/call without session for compatibility with Claude Code *)
+                          eprintf "[session] No session ID, allowing tools/call anyway\n%!";
+                          (None, handle_call_tool ~sw ~proc_mgr ~clock id params))
                  | None ->
                      (session_id_opt, make_error ~id (-32602) "Missing params"))
             | "resources/list" ->

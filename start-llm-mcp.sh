@@ -94,8 +94,8 @@ stop_existing_on_port() {
 # Resolve executable path
 # Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/llm-mcp-macos-arm64"
-WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/llm-mcp/bin/main.exe"
-LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
+WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/llm-mcp/bin/main_eio.exe"
+LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 INSTALLED_EXE="$(command -v llm-mcp || true)"
 LLM_EXE=""
 

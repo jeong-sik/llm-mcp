@@ -83,7 +83,7 @@ let quorum_id_re = Str.regexp {|quorum_\([0-9]+\)|}
 let consensus_id_re = Str.regexp {|consensus_\([0-9]+\)|}
 
 (** Known LLM model names *)
-let llm_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"]
+let llm_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"; "stub"]
 
 (** Known tool names *)
 let known_tools = ["eslint"; "tsc"; "prettier"; "jest"; "vitest"; "cargo"; "dune"; "make"; "npm"; "yarn"; "pnpm"]
@@ -142,26 +142,45 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
 
   | `Rect ->
       (* Rectangle nodes: LLM or Tool *)
-      (* Check if ID starts with known LLM model *)
-      let is_llm = List.exists (fun model ->
-        String.length id_lower >= String.length model &&
-        String.sub id_lower 0 (String.length model) = model
-      ) llm_models in
+      (* First, check for explicit "llm:<model>\nprompt" or "LLM:<model>\nprompt" in content *)
+      let llm_content_re = Str.regexp_case_fold {|^llm:\([a-z0-9_-]+\)[ \n\t]+\(.*\)$|} in
+      let tool_content_re = Str.regexp_case_fold {|^tool:\([a-z0-9_-]+\)[ \n\t]*\(.*\)$|} in
 
-      if is_llm then
-        (* Extract model from ID (e.g., "gemini_parse" -> "gemini") *)
-        let model = List.find (fun m ->
-          String.length id_lower >= String.length m &&
-          String.sub id_lower 0 (String.length m) = m
-        ) llm_models in
-        Ok (Llm { model; prompt = if text = "" then "{{input}}" else text; timeout = None })
-      else if List.mem id_lower known_tools then
-        Ok (Tool { name = id; args = `Null })
+      if Str.string_match llm_content_re text 0 then
+        (* Explicit LLM syntax in content: llm:model\nprompt *)
+        let model = String.lowercase_ascii (Str.matched_group 1 text) in
+        let prompt = trim (Str.matched_group 2 text) in
+        let prompt = if prompt = "" then "{{input}}" else prompt in
+        Ok (Llm { model; prompt; timeout = None })
+      else if Str.string_match tool_content_re text 0 then
+        (* Explicit Tool syntax in content: tool:name\nargs *)
+        let name = Str.matched_group 1 text in
+        let args_str = trim (Str.matched_group 2 text) in
+        let args = if args_str = "" then `Null else
+          try Yojson.Safe.from_string args_str with _ -> `String args_str
+        in
+        Ok (Tool { name; args })
       else
-        (* Default: treat as LLM with "gemini" default model, text as prompt *)
-        (* If ID is short (1-2 chars) or generic, use text as prompt *)
-        let prompt = if text = "" then id else text in
-        Ok (Llm { model = "gemini"; prompt; timeout = None })
+        (* Fallback: Check if ID starts with known LLM model *)
+        let is_llm = List.exists (fun model ->
+          String.length id_lower >= String.length model &&
+          String.sub id_lower 0 (String.length model) = model
+        ) llm_models in
+
+        if is_llm then
+          (* Extract model from ID (e.g., "gemini_parse" -> "gemini") *)
+          let model = List.find (fun m ->
+            String.length id_lower >= String.length m &&
+            String.sub id_lower 0 (String.length m) = m
+          ) llm_models in
+          Ok (Llm { model; prompt = if text = "" then "{{input}}" else text; timeout = None })
+        else if List.mem id_lower known_tools then
+          Ok (Tool { name = id; args = `Null })
+        else
+          (* Default: treat as LLM with "gemini" default model, text as prompt *)
+          (* If ID is short (1-2 chars) or generic, use text as prompt *)
+          let prompt = if text = "" then id else text in
+          Ok (Llm { model = "gemini"; prompt; timeout = None })
 
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
@@ -324,9 +343,59 @@ let parse_edge_line (line : string) : mermaid_edge list =
   in
   build_edges [] parts
 
+(** Join lines that have unclosed brackets (handle multiline node content) *)
+let join_multiline_brackets (lines : string list) : string list =
+  let count_brackets s open_count =
+    let len = String.length s in
+    let rec loop i count =
+      if i >= len then count
+      else match s.[i] with
+        | '[' -> loop (i + 1) (count + 1)
+        | ']' -> loop (i + 1) (count - 1)
+        | '{' -> loop (i + 1) (count + 1)
+        | '}' -> loop (i + 1) (count - 1)
+        | _ -> loop (i + 1) count
+    in
+    loop 0 open_count
+  in
+  let rec process acc pending_lines bracket_count = function
+    | [] ->
+        (* Flush any remaining pending lines *)
+        if pending_lines = [] then List.rev acc
+        else List.rev ((String.concat " " (List.rev pending_lines)) :: acc)
+    | line :: rest ->
+        let line = trim line in
+        if line = "" then
+          process acc pending_lines bracket_count rest
+        else if bracket_count > 0 then begin
+          (* Continue collecting multiline content *)
+          let new_count = count_brackets line bracket_count in
+          let new_pending = line :: pending_lines in
+          if new_count <= 0 then
+            (* Brackets closed, flush the joined line *)
+            let joined = String.concat " " (List.rev new_pending) in
+            process (joined :: acc) [] 0 rest
+          else
+            process acc new_pending new_count rest
+        end
+        else begin
+          (* Check if this line opens unclosed brackets *)
+          let count = count_brackets line 0 in
+          if count > 0 then
+            (* Line has unclosed brackets, start collecting *)
+            process acc [line] count rest
+          else
+            (* Normal complete line *)
+            process (line :: acc) [] 0 rest
+        end
+  in
+  process [] [] 0 lines
+
 (** Parse full Mermaid graph text *)
 let parse_mermaid_text (text : string) : (mermaid_graph, string) result =
-  let lines = String.split_on_char '\n' text |> List.map trim in
+  (* First join multiline bracket content *)
+  let raw_lines = String.split_on_char '\n' text |> List.map trim in
+  let lines = join_multiline_brackets raw_lines in
 
   (* Find graph direction *)
   let direction = ref "LR" in

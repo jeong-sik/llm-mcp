@@ -113,6 +113,14 @@ type tool_args =
   | ChainToMermaid of {
       chain : Yojson.Safe.t;         (* Chain definition to convert - required *)
     }
+  | ChainOrchestrate of {
+      goal : string;                       (* Goal description for the orchestration *)
+      chain : Yojson.Safe.t option;        (* Initial chain definition (optional) *)
+      max_replans : int;                   (* Maximum re-planning attempts *)
+      timeout : int;                       (* Overall timeout in seconds *)
+      trace : bool;                        (* Enable execution tracing *)
+      verify_on_complete : bool;           (* Run LLM verification on completion *)
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -609,6 +617,59 @@ let chain_list_schema : tool_schema = {
   ];
 }
 
+let chain_orchestrate_schema : tool_schema = {
+  name = "chain.orchestrate";
+  description = {|Execute a goal-driven orchestration workflow with automatic re-planning.
+
+Unlike chain.run which executes once, chain.orchestrate will:
+1. Design/execute a chain to achieve the goal
+2. Verify if the goal is met (via LLM verification)
+3. Re-plan and retry if needed (up to max_replans times)
+4. Return when goal is achieved or max attempts reached
+
+Parameters:
+- goal: Goal description to achieve (required)
+- chain: Initial chain definition (optional, will be auto-designed if not provided)
+- max_replans: Maximum re-planning attempts (default: 3)
+- timeout: Overall timeout in seconds (default: 600)
+- trace: Enable execution tracing (default: false)
+- verify_on_complete: Run LLM verification on completion (default: true)|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("goal", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Goal description to achieve");
+      ]);
+      ("chain", `Assoc [
+        ("type", `String "object");
+        ("description", `String "Initial chain definition (optional)");
+      ]);
+      ("max_replans", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Maximum re-planning attempts (default: 3)");
+        ("default", `Int 3);
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Overall timeout in seconds (default: 600)");
+        ("default", `Int 600);
+      ]);
+      ("trace", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable execution tracing (default: false)");
+        ("default", `Bool false);
+      ]);
+      ("verify_on_complete", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Run LLM verification on completion (default: true)");
+        ("default", `Bool true);
+      ]);
+    ]);
+    ("required", `List [`String "goal"]);
+  ];
+}
+
 let all_schemas = [
   gemini_schema;
   claude_schema;
@@ -619,6 +680,7 @@ let all_schemas = [
   chain_validate_schema;
   chain_list_schema;
   chain_to_mermaid_schema;
+  chain_orchestrate_schema;
 ]
 
 (* ============================================================================
