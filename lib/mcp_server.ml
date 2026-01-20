@@ -160,19 +160,19 @@ let starts_with ~prefix s =
   let plen = String.length prefix in
   String.length s >= plen && String.sub s 0 plen = prefix
 
-let prompt_chars_of_args (args : tool_args) =
-  match args with
-  | Gemini { prompt; _ }
-  | Claude { prompt; _ }
-  | Codex { prompt; _ }
-  | Ollama { prompt; _ } -> String.length prompt
-  | OllamaList -> 0  (* No prompt for list operation *)
-  | ChainRun { chain; _ } ->
-      (* Estimate chain size from JSON *)
-      String.length (Yojson.Safe.to_string chain)
-  | ChainValidate { chain } ->
-      String.length (Yojson.Safe.to_string chain)
-
+  let prompt_chars_of_args (args : tool_args) =
+    match args with
+    | Gemini { prompt; _ }
+    | Claude { prompt; _ }
+    | Codex { prompt; _ }
+    | Ollama { prompt; _ } -> String.length prompt
+    | OllamaList -> 0  (* No prompt for list operation *)
+    | ChainRun { chain; _ } ->
+        (* Estimate chain size from JSON *)
+        (match chain with Some c -> String.length (Yojson.Safe.to_string c) | None -> 0)
+    | ChainToMermaid { chain = _ } -> 0
+    | ChainValidate { chain = _; mermaid = _ } -> 0
+    | ChainList -> 0
 let split_once s ch =
   match String.index_opt s ch with
   | None -> (s, None)
@@ -259,10 +259,14 @@ let handle_call_tool ~wants_stream id params =
   let args_opt = match name with
     | "gemini" -> Some (Tools.parse_gemini_args arguments)
     | "claude-cli" -> Some (Tools.parse_claude_args arguments)
-    | "codex" -> Some (Tools.parse_codex_args arguments)
-    | "ollama" -> Some (Tools.parse_ollama_args arguments)
-    | "ollama_list" -> Some (Tools.parse_ollama_list_args arguments)
-    | _ -> None
+          | "codex" -> Some (Tools.parse_codex_args arguments)
+          | "ollama" -> Some (Tools.parse_ollama_args arguments)
+          | "ollama_list" -> Some (Tools.parse_ollama_list_args arguments)
+          | "chain.run" -> Some (Tool_parsers.parse_chain_run_args arguments)
+          | "chain.validate" -> Some (Tool_parsers.parse_chain_validate_args arguments)
+          | "chain.list" -> Some Types.ChainList
+          | _ -> None
+    
   in
   match args_opt with
   | None ->
@@ -313,6 +317,8 @@ let handle_call_tool ~wants_stream id params =
     | Types.OllamaList -> false
     | Types.ChainRun _ -> false  (* Chains don't stream in Lwt mode *)
     | Types.ChainValidate _ -> false
+    | Types.ChainToMermaid _ -> false
+    | Types.ChainList -> false
   in
   let wants_keepalive = wants_stream || stream_requested in
 

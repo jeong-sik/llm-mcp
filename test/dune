@@ -85,3 +85,14 @@
 (test
  (name test_mermaid_parser)
  (libraries llm_mcp.common alcotest))
+
+; Chain Composer tests (Neural Layer)
+(test
+ (name test_composer)
+ (libraries llm_mcp.common alcotest str unix))
+
+; MZ Chain 10-step test
+(executable
+ (name test_mz_chain)
+ (modules test_mz_chain)
+ (libraries llm_mcp.eio llm_mcp.common eio eio_main))
