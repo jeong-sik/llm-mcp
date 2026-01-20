@@ -436,9 +436,14 @@ let execute args : tool_result Lwt.t =
         response = "Chain execution not available in Lwt mode. Use Eio server (start-llm-mcp.sh --http)";
         extra = []; }
 
-  | ChainValidate { chain } ->
-      (* Validation can run synchronously *)
-      let result = match Chain_parser.parse_chain chain with
+  | ChainValidate { chain; mermaid } ->
+      (* Parse from either JSON or Mermaid, then validate *)
+      let parse_result = match (chain, mermaid) with
+        | (Some c, _) -> Chain_parser.parse_chain c
+        | (_, Some m) -> Chain_mermaid_parser.parse_chain m
+        | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
+      in
+      let result = match parse_result with
         | Error msg ->
             { model = "chain.validate";
               returncode = -1;
