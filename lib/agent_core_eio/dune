@@ -4,6 +4,7 @@
  (libraries
    eio
    eio_main
+   llm_mcp_resilience
    yojson
    cohttp
    cohttp-eio

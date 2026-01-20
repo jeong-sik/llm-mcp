@@ -10,6 +10,9 @@ type mcp_server_config = Tool_config.mcp_server_config
 let get_mcp_server_url = Tool_config.get_mcp_server_url
 let get_mcp_server_config = Tool_config.get_mcp_server_config
 
+let exponential_backoff ~base_delay attempt =
+  base_delay *. (2. ** float_of_int attempt)
+
 (* Call an external MCP tool via HTTP *)
 let call_external_mcp ~server_name ~tool_name ~arguments ~timeout =
   match get_mcp_server_url server_name with
@@ -223,7 +226,37 @@ let execute_ollama_streaming ~on_token args =
 
 (** {1 Gemini with Resilience} *)
 
-let gemini_breaker = Resilience.create_circuit_breaker ~name:"gemini_cli_lwt" ~failure_threshold:3 ()
+let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli_lwt" ~failure_threshold:3 ()
+
+let with_retry_lwt ~(policy : Mcp_resilience.retry_policy) ~circuit_breaker ~op_name:_ op =
+  let open Lwt.Syntax in
+  let rec attempt n last_error =
+    let cb_allows = match circuit_breaker with
+      | None -> true
+      | Some cb -> Mcp_resilience.circuit_allows cb
+    in
+    if not cb_allows then
+      Lwt.return Mcp_resilience.CircuitOpen
+    else if n > policy.max_attempts then
+      Lwt.return (Mcp_resilience.Error (Option.value last_error ~default:"Max attempts reached"))
+    else
+      let* () =
+        if n > 1 then
+          let delay_ms = Mcp_resilience.calculate_delay policy (n - 1) in
+          Lwt_unix.sleep (delay_ms /. 1000.0)
+        else
+          Lwt.return_unit
+      in
+      let* result = op () in
+      match result with
+      | Ok v ->
+          (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_success cb | None -> ());
+          Lwt.return (Mcp_resilience.Ok v)
+      | Error err ->
+          (match circuit_breaker with Some cb -> Mcp_resilience.circuit_record_failure cb | None -> ());
+          attempt (n + 1) (Some err)
+  in
+  attempt 1 None
 
 let execute_gemini_with_retry
     ?(max_retries = 2)
@@ -240,7 +273,7 @@ let execute_gemini_with_retry
   | Ok cmd_list ->
       let cmd = List.hd cmd_list in
       let cmd_args = List.tl cmd_list in
-      let policy = { Resilience.default_policy with max_attempts = max_retries + 1 } in
+      let policy = { Mcp_resilience.default_policy with max_attempts = max_retries + 1 } in
       
       let op () =
         let* result = run_command ~timeout cmd cmd_args in
@@ -255,24 +288,21 @@ let execute_gemini_with_retry
         | Error (ProcessError msg) -> Lwt.return (Result.Error (Printf.sprintf "Error: %s" msg))
       in
       
-      let* result = Resilience.with_retry_lwt
+      let* result = with_retry_lwt
         ~policy ~circuit_breaker:(Some gemini_breaker) ~op_name:"gemini_call_lwt" op in
       
       match result with
-      | Success (Ok (exit_code, response)) ->
+      | Ok (exit_code, response) ->
           let extra = [
             ("thinking_level", string_of_thinking_level thinking_level);
             ("thinking_prompt_applied", string_of_bool thinking_applied);
           ] in
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
-      | Success (Error err) ->
+      | Error err ->
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = err; extra = [] }
       | CircuitOpen ->
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
-      | Exhausted { attempts; last_error } ->
-          Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; 
-            response = Printf.sprintf "Exhausted after %d attempts: %s" attempts last_error; extra = [] }
-      | TimedOut _ ->
+      | TimedOut ->
           Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
 
 (** Execute a tool and return result *)

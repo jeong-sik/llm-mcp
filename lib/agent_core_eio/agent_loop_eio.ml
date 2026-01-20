@@ -17,7 +17,7 @@ open Agent_types
 open Agent_sigs_eio
 
 (** Re-export utilities *)
-module Retry = Resilience
+module Retry = Mcp_resilience
 module Timeout = Timeout_eio
 
 (** {1 Agent Loop Functor} *)
@@ -44,11 +44,17 @@ module Make
 
     (* Call LLM with retry *)
     let call_with_retry () =
-      Retry.with_retry_eio ~clock ~policy:loop_config.retry_policy ~op_name:"llm_agent_turn" (fun () ->
-        match Backend.call ~config:backend_config ~messages ~tools with
-        | res -> Ok res
-        | exception exn -> Error (Printexc.to_string exn)
-      )
+      let classify _ = Retry.Retry in
+      Retry.with_retry_eio
+        ~clock
+        ~policy:loop_config.retry_policy
+        ~op_name:"llm_agent_turn"
+        ~classify
+        (fun () ->
+           match Backend.call ~config:backend_config ~messages ~tools with
+           | Ok res -> Mcp_resilience.Ok res
+           | Error err -> Mcp_resilience.Error err
+           | exception exn -> Mcp_resilience.Error (Printexc.to_string exn))
     in
 
     (* Wrap in timeout *)
@@ -59,13 +65,13 @@ module Make
     match call_result with
     | None ->
       TurnError "Turn timed out"
-    | Some (Exhausted { attempts; last_error }) ->
-      TurnError (Printf.sprintf "Failed after %d attempts: %s" attempts last_error)
+    | Some (Error err) ->
+      TurnError ("Failed: " ^ err)
     | Some CircuitOpen ->
       TurnError "Circuit breaker open"
-    | Some (TimedOut { timeout_ms }) ->
-      TurnError (Printf.sprintf "Retry timed out after %dms" timeout_ms)
-    | Some (Success response) ->
+    | Some TimedOut ->
+      TurnError "Retry timed out"
+    | Some (Ok response) ->
       let content = Backend.extract_content response in
       let tool_calls = Backend.parse_tool_calls response in
       let is_final = Backend.is_final response in
@@ -126,11 +132,17 @@ module Make
     let messages = State.get_messages state in
 
     let call_with_retry () =
-      Retry.with_retry_eio ~clock ~policy:loop_config.retry_policy ~op_name:"llm_agent_turn_parallel" (fun () ->
-        match Backend.call ~config:backend_config ~messages ~tools with
-        | res -> Ok res
-        | exception exn -> Error (Printexc.to_string exn)
-      )
+      let classify _ = Retry.Retry in
+      Retry.with_retry_eio
+        ~clock
+        ~policy:loop_config.retry_policy
+        ~op_name:"llm_agent_turn_parallel"
+        ~classify
+        (fun () ->
+           match Backend.call ~config:backend_config ~messages ~tools with
+           | Ok res -> Mcp_resilience.Ok res
+           | Error err -> Mcp_resilience.Error err
+           | exception exn -> Mcp_resilience.Error (Printexc.to_string exn))
     in
 
     let call_result =
@@ -139,12 +151,12 @@ module Make
 
     match call_result with
     | None -> TurnError "Turn timed out"
-    | Some (Exhausted { attempts; last_error }) ->
-      TurnError (Printf.sprintf "Failed after %d attempts: %s" attempts last_error)
+    | Some (Error err) ->
+      TurnError ("Failed: " ^ err)
     | Some CircuitOpen -> TurnError "Circuit breaker open"
-    | Some (TimedOut { timeout_ms }) ->
-      TurnError (Printf.sprintf "Retry timed out after %dms" timeout_ms)
-    | Some (Success response) ->
+    | Some TimedOut ->
+      TurnError "Retry timed out"
+    | Some (Ok response) ->
       let content = Backend.extract_content response in
       let tool_calls = Backend.parse_tool_calls response in
       let is_final = Backend.is_final response in
