@@ -17,6 +17,7 @@
    ; Chain Engine (Phase 3-4)
    chain_types
    chain_parser
+   chain_mermaid_parser
    chain_compiler
    chain_registry)
  (libraries
