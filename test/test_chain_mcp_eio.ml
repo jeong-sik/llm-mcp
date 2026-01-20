@@ -96,9 +96,77 @@ let test_chain_run_and_validate () =
     check bool "chain.validate output"
       true (starts_with ~prefix:"Chain 'mcp_chain' is valid" (get_result_text validate_resp))
 
+(** Test Mermaid-based chain execution (WYSIWYE - What You See Is What You Execute) *)
+let test_mermaid_execution () =
+  run_eio @@ fun env ->
+  let store = Server.create_session_store () in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let headers = [] in
+
+  Eio.Switch.run @@ fun sw ->
+    let init_req = {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}|} in
+    let (_session_opt, init_resp) =
+      Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers init_req
+    in
+    let session_id = get_session_id init_resp in
+
+    (* Mermaid flowchart that renders AND executes *)
+    let mermaid_text = {|
+flowchart TD
+    A["llm:stub
+    ping"]
+|} in
+
+    (* Test chain.run with mermaid *)
+    let run_params = `Assoc [
+      ("name", `String "chain.run");
+      ("arguments", `Assoc [
+        ("mermaid", `String mermaid_text);
+        ("trace", `Bool false);
+        ("timeout", `Int 10);
+      ]);
+      ("sessionId", `String session_id);
+    ] in
+    let run_req = `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 2);
+      ("method", `String "tools/call");
+      ("params", run_params);
+    ] |> Yojson.Safe.to_string in
+    let (_session_opt, run_resp) =
+      Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers run_req
+    in
+
+    check bool "mermaid chain.run isError=false" false (get_is_error run_resp);
+    check string "mermaid chain.run output" "[stub]ping" (get_result_text run_resp);
+
+    (* Test chain.validate with mermaid *)
+    let validate_params = `Assoc [
+      ("name", `String "chain.validate");
+      ("arguments", `Assoc [
+        ("mermaid", `String mermaid_text);
+      ]);
+      ("sessionId", `String session_id);
+    ] in
+    let validate_req = `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 3);
+      ("method", `String "tools/call");
+      ("params", validate_params);
+    ] |> Yojson.Safe.to_string in
+    let (_session_opt, validate_resp) =
+      Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers validate_req
+    in
+
+    check bool "mermaid chain.validate isError=false" false (get_is_error validate_resp);
+    check bool "mermaid chain.validate output"
+      true (starts_with ~prefix:"Chain" (get_result_text validate_resp))
+
 let () =
   run "chain_mcp_eio" [
     ("chain", [
       test_case "chain.run/validate" `Quick test_chain_run_and_validate;
+      test_case "mermaid execution (WYSIWYE)" `Quick test_mermaid_execution;
     ]);
   ]
