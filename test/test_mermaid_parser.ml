@@ -315,6 +315,23 @@ graph LR
       Alcotest.(check string) "inner id" "handler" inner.id
   | _ -> Alcotest.fail "expected Bind node"
 
+let test_parse_merge_node () =
+  let mermaid = {|
+graph LR
+    A[LLM:gemini "Path 1"] --> M{Merge:weighted_avg}
+    B[LLM:claude "Path 2"] --> M
+  |} in
+  let chain = check_ok "parse merge" (parse_chain mermaid) in
+  Alcotest.(check int) "three nodes" 3 (List.length chain.nodes);
+  let m_node = find_node "M" chain.nodes in
+  match m_node.node_type with
+  | Merge { strategy; nodes } ->
+      Alcotest.(check int) "2 inputs" 2 (List.length nodes);
+      (match strategy with
+      | WeightedAvg -> ()
+      | _ -> Alcotest.fail "expected WeightedAvg strategy")
+  | _ -> Alcotest.fail "expected Merge node"
+
 (* ============================================================================
    Composition Tests
    ============================================================================ *)
@@ -432,6 +449,7 @@ let extended_type_tests = [
   "parse Fanout explicit", `Quick, test_parse_fanout_explicit;
   "parse Map", `Quick, test_parse_map_node;
   "parse Bind", `Quick, test_parse_bind_node;
+  "parse Merge", `Quick, test_parse_merge_node;
 ]
 
 let composition_tests = [
