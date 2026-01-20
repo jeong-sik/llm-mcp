@@ -1,0 +1,191 @@
+(** Chain Compiler - AST to Execution Plan conversion
+
+    Transforms Chain_types.chain into an execution plan:
+    - Topological sorting of nodes (DAG ordering)
+    - Parallel group identification
+    - Depth calculation for recursion limits
+    - Dependency analysis
+*)
+
+open Chain_types
+
+(** Helper: Result bind operator *)
+let ( let* ) = Result.bind
+
+(** Build dependency graph from nodes *)
+let build_dependency_graph (nodes : Chain_types.node list) : (string, string list) Hashtbl.t =
+  let deps = Hashtbl.create (List.length nodes) in
+
+  (* Initialize all nodes with empty deps *)
+  List.iter (fun (n : Chain_types.node) -> Hashtbl.add deps n.id []) nodes;
+
+  (* Add dependencies from input mappings *)
+  List.iter (fun (n : Chain_types.node) ->
+    let node_deps = List.filter_map (fun (_, ref_node) ->
+      (* Only add if the referenced node exists *)
+      if Hashtbl.mem deps ref_node then Some ref_node
+      else None
+    ) n.input_mapping in
+    Hashtbl.replace deps n.id node_deps
+  ) nodes;
+
+  deps
+
+(** Topological sort using Kahn's algorithm *)
+let topological_sort (deps : (string, string list) Hashtbl.t) : (string list, string) result =
+  let in_degree = Hashtbl.create (Hashtbl.length deps) in
+  let reverse_deps = Hashtbl.create (Hashtbl.length deps) in
+
+  (* Initialize in-degrees and reverse dependency map *)
+  Hashtbl.iter (fun node _ ->
+    Hashtbl.add in_degree node 0;
+    Hashtbl.add reverse_deps node []
+  ) deps;
+
+  (* Calculate in-degrees *)
+  Hashtbl.iter (fun node node_deps ->
+    List.iter (fun dep ->
+      (* node depends on dep, so dep -> node in reverse *)
+      let current = Hashtbl.find reverse_deps dep in
+      Hashtbl.replace reverse_deps dep (node :: current);
+      (* Increment in-degree of node *)
+      let deg = Hashtbl.find in_degree node in
+      Hashtbl.replace in_degree node (deg + 1)
+    ) node_deps
+  ) deps;
+
+  (* Start with nodes that have no dependencies *)
+  let queue = Queue.create () in
+  Hashtbl.iter (fun node deg ->
+    if deg = 0 then Queue.add node queue
+  ) in_degree;
+
+  let rec process acc =
+    if Queue.is_empty queue then
+      (* Check if we processed all nodes *)
+      if List.length acc = Hashtbl.length deps then
+        Ok (List.rev acc)
+      else
+        Error "Cycle detected in chain graph"
+    else begin
+      let node = Queue.pop queue in
+      (* Decrement in-degree of all nodes that depend on this one *)
+      List.iter (fun dependent ->
+        let deg = Hashtbl.find in_degree dependent in
+        let new_deg = deg - 1 in
+        Hashtbl.replace in_degree dependent new_deg;
+        if new_deg = 0 then Queue.add dependent queue
+      ) (Hashtbl.find reverse_deps node);
+      process (node :: acc)
+    end
+  in
+  process []
+
+(** Identify parallel groups (nodes that can execute concurrently) *)
+let identify_parallel_groups
+    (nodes : Chain_types.node list)
+    (execution_order : string list)
+    (deps : (string, string list) Hashtbl.t) : string list list =
+  (* Group nodes by their "level" (max dependency depth) *)
+  let levels = Hashtbl.create (List.length nodes) in
+
+  List.iter (fun node_id ->
+    let node_deps = Hashtbl.find deps node_id in
+    let level =
+      if node_deps = [] then 0
+      else
+        1 + List.fold_left (fun max_level dep ->
+          max max_level (try Hashtbl.find levels dep with Not_found -> 0)
+        ) 0 node_deps
+    in
+    Hashtbl.add levels node_id level
+  ) execution_order;
+
+  (* Group by level *)
+  let max_level = Hashtbl.fold (fun _ l acc -> max l acc) levels 0 in
+  let groups = Array.make (max_level + 1) [] in
+
+  Hashtbl.iter (fun node_id level ->
+    groups.(level) <- node_id :: groups.(level)
+  ) levels;
+
+  Array.to_list groups
+  |> List.filter (fun g -> g <> [])
+
+(** Calculate maximum nesting depth *)
+let rec calculate_depth (node : Chain_types.node) : int =
+  match node.Chain_types.node_type with
+  | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _ -> 1
+  | Chain_types.Pipeline nodes | Chain_types.Fanout nodes ->
+      1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 nodes
+  | Chain_types.Quorum { nodes; _ } | Chain_types.Merge { nodes; _ } ->
+      1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 nodes
+  | Chain_types.Gate { then_node; else_node; _ } ->
+      let then_depth = calculate_depth then_node in
+      let else_depth = match else_node with
+        | Some n -> calculate_depth n
+        | None -> 0
+      in
+      1 + max then_depth else_depth
+  | Chain_types.Subgraph c ->
+      1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 c.Chain_types.nodes
+  | Chain_types.Map { inner; _ } | Chain_types.Bind { inner; _ } ->
+      1 + calculate_depth inner
+
+(** Main entry point: Compile chain to execution plan *)
+let compile (c : Chain_types.chain) : (Chain_types.execution_plan, string) result =
+  (* Validate the chain first *)
+  let* () = Chain_parser.validate_chain c in
+
+  (* Build dependency graph *)
+  let deps = build_dependency_graph c.Chain_types.nodes in
+
+  (* Topological sort *)
+  let* execution_order = topological_sort deps in
+
+  (* Identify parallel groups *)
+  let parallel_groups = identify_parallel_groups c.Chain_types.nodes execution_order deps in
+
+  (* Calculate max depth *)
+  let depth = List.fold_left
+    (fun acc n -> max acc (calculate_depth n))
+    0 c.Chain_types.nodes
+  in
+
+  (* Check depth limit *)
+  if depth > c.Chain_types.config.Chain_types.max_depth then
+    Error (Printf.sprintf "Chain depth %d exceeds max_depth %d" depth c.Chain_types.config.Chain_types.max_depth)
+  else
+    Ok {
+      Chain_types.chain = c;
+      execution_order;
+      parallel_groups;
+      depth;
+    }
+
+(** Get node by ID from chain *)
+let get_node (c : Chain_types.chain) (node_id : string) : Chain_types.node option =
+  List.find_opt (fun (n : Chain_types.node) -> n.id = node_id) c.Chain_types.nodes
+
+(** Get all dependencies of a node *)
+let get_dependencies (node : Chain_types.node) : string list =
+  List.map snd node.Chain_types.input_mapping
+  |> List.sort_uniq String.compare
+
+(** Check if node is ready to execute (all deps satisfied) *)
+let is_ready (completed : string list) (node : Chain_types.node) : bool =
+  let deps = get_dependencies node in
+  List.for_all (fun dep -> List.mem dep completed) deps
+
+(** Pretty print execution plan *)
+let pp_plan (plan : Chain_types.execution_plan) : string =
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf (Printf.sprintf "Chain: %s\n" plan.Chain_types.chain.Chain_types.id);
+  Buffer.add_string buf (Printf.sprintf "Depth: %d\n" plan.Chain_types.depth);
+  Buffer.add_string buf (Printf.sprintf "Execution order: %s\n"
+    (String.concat " -> " plan.Chain_types.execution_order));
+  Buffer.add_string buf "Parallel groups:\n";
+  List.iteri (fun i group ->
+    Buffer.add_string buf (Printf.sprintf "  [%d] %s\n" i (String.concat ", " group))
+  ) plan.Chain_types.parallel_groups;
+  Buffer.contents buf

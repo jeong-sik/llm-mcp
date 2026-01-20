@@ -13,7 +13,11 @@
    dictionary
    ollama_parser
    tool_config
-   tool_parsers)
+   tool_parsers
+   ; Chain Engine (Phase 3)
+   chain_types
+   chain_parser
+   chain_compiler)
  (libraries
    yojson
    str
@@ -50,7 +54,9 @@
    mcp_server_eio
    tools_eio
    mcp_client_eio
-   cli_runner_eio)
+   cli_runner_eio
+   ; Chain Engine (Phase 3)
+   chain_executor_eio)
  (libraries
    ; Shared modules
    llm_mcp.common
