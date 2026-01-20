@@ -103,7 +103,7 @@ let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
   OllamaList
 
 (** Parse JSON arguments for chain.run tool *)
-let parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
+let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let chain = json |> member "chain" in
   let input = json |> member "input" |> to_string_option in
@@ -114,7 +114,7 @@ let parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   ChainRun { chain; input; trace }
 
 (** Parse JSON arguments for chain.validate tool *)
-let parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =
+let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let chain = json |> member "chain" in
   ChainValidate { chain }
@@ -308,18 +308,3 @@ let clean_codex_output output =
   in
   let result = extract 0 [] lines |> String.concat "\n" |> String.trim in
   if String.length result > 0 then result else output
-
-(** {1 Chain DSL Parsers} *)
-
-(** Parse JSON arguments for chain.run tool *)
-let parse_chain_run_args (json : Yojson.Safe.t) : Yojson.Safe.t * bool * int =
-  let open Yojson.Safe.Util in
-  let chain = json |> member "chain" in
-  let trace = json |> member "trace" |> to_bool_option |> Option.value ~default:false in
-  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  (chain, trace, timeout)
-
-(** Parse JSON arguments for chain.validate tool *)
-let parse_chain_validate_args (json : Yojson.Safe.t) : Yojson.Safe.t =
-  let open Yojson.Safe.Util in
-  json |> member "chain"
