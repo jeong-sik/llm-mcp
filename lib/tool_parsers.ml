@@ -160,7 +160,11 @@ let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_a
     try json |> member "verify_on_complete" |> to_bool
     with _ -> true
   in
-  ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete }
+  let orchestrator_model =
+    json |> member "orchestrator_model" |> to_string_option
+    |> Option.value ~default:"gemini"
+  in
+  ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete; orchestrator_model }
 
 (** {1 Command Builders} *)
 

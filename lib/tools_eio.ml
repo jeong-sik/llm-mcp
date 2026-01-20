@@ -697,7 +697,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
             ]; })
 
-  | ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete } ->
+  | ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
       (* Build orchestration config *)
       let config : Chain_orchestrator_eio.orchestration_config = {
         max_replans;
@@ -707,19 +707,80 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       } in
 
       (* Create llm_call adapter: ~prompt:string -> string
-         Uses Gemini as the default orchestrator LLM *)
+         Uses specified orchestrator_model (default: gemini) *)
       let llm_call ~prompt =
-        let args = Types.Gemini {
-          prompt;
-          model = "gemini-3-pro-preview";
-          thinking_level = Types.High;
-          yolo = false;
-          timeout = 120;
-          stream = false;
-        } in
-        let result = execute ~sw ~proc_mgr ~clock args in
-        if result.returncode = 0 then result.response
-        else failwith (Printf.sprintf "LLM call failed: %s" result.response)
+        match orchestrator_model with
+        | "stub" ->
+            (* Stub model for testing - returns valid Chain JSON for Design phase *)
+            Printf.sprintf {|Here is a chain to accomplish the goal:
+
+```json
+{
+  "id": "stub_chain_%d",
+  "nodes": [
+    {"id": "step1", "type": "llm", "model": "stub", "prompt": "Process: %s"}
+  ],
+  "output": "step1",
+  "config": {"timeout": 30, "trace": true}
+}
+```
+
+This chain will execute the goal using a stub model.|}
+              (Random.int 10000)
+              (String.escaped (String.sub prompt 0 (min 50 (String.length prompt))))
+        | "claude" | "claude-cli" ->
+            let args = Types.Claude {
+              prompt;
+              model = "sonnet";
+              ultrathink = false;
+              system_prompt = Some "You are a chain orchestrator. Design, analyze, and verify workflows.";
+              output_format = Types.Text;
+              allowed_tools = [];
+              working_directory = Sys.getcwd ();
+              timeout = 120;
+              stream = false;
+            } in
+            let result = execute ~sw ~proc_mgr ~clock args in
+            if result.returncode = 0 then result.response
+            else failwith (Printf.sprintf "Claude call failed: %s" result.response)
+        | "codex" ->
+            let args = Types.Codex {
+              prompt;
+              model = "gpt-5.2";
+              reasoning_effort = Types.RHigh;
+              sandbox = Types.WorkspaceWrite;
+              working_directory = Some (Sys.getcwd ());
+              timeout = 120;
+              stream = false;
+            } in
+            let result = execute ~sw ~proc_mgr ~clock args in
+            if result.returncode = 0 then result.response
+            else failwith (Printf.sprintf "Codex call failed: %s" result.response)
+        | "ollama" ->
+            let args = Types.Ollama {
+              prompt;
+              model = "qwen3:32b";
+              system_prompt = Some "You are a chain orchestrator. Design, analyze, and verify workflows.";
+              temperature = 0.7;
+              timeout = 120;
+              stream = false;
+              tools = None;
+            } in
+            let result = execute ~sw ~proc_mgr ~clock args in
+            if result.returncode = 0 then result.response
+            else failwith (Printf.sprintf "Ollama call failed: %s" result.response)
+        | "gemini" | _ ->
+            let args = Types.Gemini {
+              prompt;
+              model = "gemini-3-pro-preview";
+              thinking_level = Types.High;
+              yolo = false;
+              timeout = 120;
+              stream = false;
+            } in
+            let result = execute ~sw ~proc_mgr ~clock args in
+            if result.returncode = 0 then result.response
+            else failwith (Printf.sprintf "Gemini call failed: %s" result.response)
       in
 
       (* Helper: parse "server.tool" format *)

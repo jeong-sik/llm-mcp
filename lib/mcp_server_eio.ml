@@ -213,7 +213,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "claude-cli" -> Tools_eio.parse_claude_args arguments
     | "codex" -> Tools_eio.parse_codex_args arguments
     | "ollama" -> Tools_eio.parse_ollama_args arguments
-    | "ollama-list" -> Tools_eio.parse_ollama_list_args arguments
+    | "ollama_list" -> Tools_eio.parse_ollama_list_args arguments
     | "chain.run" -> Tools_eio.parse_chain_run_args arguments
     | "chain.validate" -> Tools_eio.parse_chain_validate_args arguments
     | "chain.list" -> Types.ChainList
