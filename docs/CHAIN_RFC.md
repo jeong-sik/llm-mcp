@@ -227,7 +227,65 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 }
 ```
 
-## 8. 구현 상태
+## 8. 리얼월드 예제 (시간/품질 제약 포함)
+
+### 예제 1: BDD 자동 탐색 → 테스트 생성 → 브랜치 커버리지 95%
+
+- 목표: branch coverage >= 0.95
+- 시간 제약: 2시간(7200s)
+- 루프: v0.1에서는 외부 오케스트레이터가 반복 실행
+
+```json
+{
+  "chain": {
+    "id": "bdd_to_coverage",
+    "config": { "timeout": 7200, "max_concurrency": 3, "trace": true },
+    "nodes": [
+      { "id": "discover", "type": "llm", "model": "gemini", "prompt": "BDD/user stories: {{input}}" },
+      { "id": "plan", "type": "llm", "model": "claude", "prompt": "Test plan: {{discover.output}}" },
+      { "id": "codegen", "type": "llm", "model": "codex", "prompt": "Write tests: {{plan.output}}" },
+      { "id": "run", "type": "tool", "name": "tests.run", "args": {} },
+      { "id": "coverage", "type": "tool", "name": "coverage.report", "args": {} },
+      {
+        "id": "gate",
+        "type": "gate",
+        "condition": "branch_coverage >= 0.95",
+        "node": { "id": "done", "type": "llm", "model": "gemini", "prompt": "Summarize results: {{coverage.output}}" }
+      }
+    ],
+    "output": "gate"
+  }
+}
+```
+
+### 예제 2: Figma 구현 → 유사도 스코어 0.92 → 시간 2시간
+
+- 목표: similarity >= 0.92
+- 시간 제약: 2시간(7200s)
+- 종료 조건: 목표 달성, 시간 초과, 또는 작업 재선택
+
+```json
+{
+  "chain": {
+    "id": "figma_impl_loop",
+    "config": { "timeout": 7200, "max_concurrency": 2, "trace": true },
+    "nodes": [
+      { "id": "fetch", "type": "tool", "name": "figma.fetch", "args": { "node_id": "{{input.node_id}}" } },
+      { "id": "impl", "type": "llm", "model": "codex", "prompt": "Implement target={{input.target}} using {{fetch.output}}" },
+      { "id": "score", "type": "tool", "name": "visual.score", "args": { "target": "{{input.target}}" } },
+      {
+        "id": "decide",
+        "type": "bind",
+        "func": "score_or_rescope",
+        "node": { "id": "score_node", "type": "map", "func": "normalize", "node": { "id": "score_raw", "type": "llm", "model": "gemini", "prompt": "Analyze: {{score.output}}" } }
+      }
+    ],
+    "output": "decide"
+  }
+}
+```
+
+## 9. 구현 상태
 
 현재 (v0.1 in llm-mcp):
 - 구현: chain.run / chain.validate MCP tool 노출
@@ -254,7 +312,7 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 - chain.validate 테스트(사이클/참조 검증)
 - trace 정규화(메타 스키마 고정)
 
-## 9. 오픈 이슈
+## 10. 오픈 이슈
 
 - 컨텍스트 스키마/IO 타입 검증 방안
 - 루프 없이 재시도/장기 실행을 표현하는 방법
