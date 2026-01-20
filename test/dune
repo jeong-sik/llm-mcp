@@ -91,6 +91,11 @@
  (name test_composer)
  (libraries llm_mcp.common alcotest str unix))
 
+; Chain Orchestrator E2E tests (Integration Layer)
+(test
+ (name test_chain_orchestrator_eio)
+ (libraries llm_mcp.eio llm_mcp.common eio eio_main unix))
+
 ; MZ Chain 10-step test
 (executable
  (name test_mz_chain)
