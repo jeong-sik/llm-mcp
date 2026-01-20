@@ -62,11 +62,18 @@ let parse_config (json : Yojson.Safe.t) : chain_config =
     try json |> member key |> to_bool
     with _ -> default
   in
+  let get_direction_opt key default =
+    try
+      let s = json |> member key |> to_string in
+      direction_of_string s
+    with _ -> default
+  in
   {
     max_depth = get_int_opt "max_depth" default_config.max_depth;
     max_concurrency = get_int_opt "max_concurrency" default_config.max_concurrency;
     timeout = get_int_opt "timeout" default_config.timeout;
     trace = get_bool_opt "trace" default_config.trace;
+    direction = get_direction_opt "direction" default_config.direction;
   }
 
 (** Parse a single node from JSON *)
