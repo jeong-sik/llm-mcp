@@ -59,8 +59,9 @@
    tools_eio
    mcp_client_eio
    cli_runner_eio
-   ; Chain Engine (Phase 3)
-   chain_executor_eio)
+   ; Chain Engine (Phase 3-4)
+   chain_executor_eio
+   chain_orchestrator_eio)
  (libraries
    ; Shared modules
    llm_mcp.common
