@@ -105,19 +105,29 @@ let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
 (** Parse JSON arguments for chain.run tool *)
 let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
-  let chain = json |> member "chain" in
+  let chain =
+    match json |> member "chain" with
+    | `Null -> None
+    | c -> Some c
+  in
+  let mermaid = json |> member "mermaid" |> to_string_option in
   let input = json |> member "input" |> to_string_option in
   let trace =
     try json |> member "trace" |> to_bool
     with _ -> false
   in
-  ChainRun { chain; input; trace }
+  ChainRun { chain; mermaid; input; trace }
 
 (** Parse JSON arguments for chain.validate tool *)
 let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
-  let chain = json |> member "chain" in
-  ChainValidate { chain }
+  let chain =
+    match json |> member "chain" with
+    | `Null -> None
+    | c -> Some c
+  in
+  let mermaid = json |> member "mermaid" |> to_string_option in
+  ChainValidate { chain; mermaid }
 
 (** {1 Command Builders} *)
 

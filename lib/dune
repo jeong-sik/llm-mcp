@@ -16,6 +16,8 @@
    tool_parsers
    ; Chain Engine (Phase 3-4)
    chain_types
+   chain_evaluator
+   chain_composer
    chain_parser
    chain_mermaid_parser
    chain_compiler
