@@ -15,11 +15,14 @@
     │ [[Ref:chain_id]]            │ ChainRef chain_id                   │
     │ {Quorum:N}                  │ Quorum { required = N; nodes }      │
     │ {Gate:condition}            │ Gate { condition; then; else }      │
+    │ {Merge:strategy}            │ Merge { strategy; nodes }           │
     │ [[Pipeline:a,b,c]]          │ Pipeline [a; b; c]                  │
     │ [[Fanout:a,b,c]]            │ Fanout [a; b; c]                    │
     │ [[Map:func,node]]           │ Map { func; inner }                 │
     │ [[Bind:func,node]]          │ Bind { func; inner }                │
     └─────────────────────────────┴─────────────────────────────────────┘
+
+    Merge strategies: weighted_avg, first, last, concat, or custom name
 
     ═══════════════════════════════════════════════════════════════════
     COMPOSABILITY: All types can compose with each other
@@ -38,7 +41,7 @@
     ═══════════════════════════════════════════════════════════════════
 
     - [...]   = Rectangle: LLM or Tool nodes
-    - {...}   = Diamond: Quorum or Gate (decision) nodes
+    - {...}   = Diamond: Quorum, Gate, or Merge nodes
     - [[...]] = Subroutine: Ref, Pipeline, Fanout, Map, Bind
 *)
 
@@ -169,8 +172,20 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         let condition = trim (String.sub content 5 (String.length content - 5)) in
         (* Gate needs then/else filled in from edges *)
         Ok (Gate { condition; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] }; else_node = None })
+      else if String.length content > 6 && String.sub content 0 6 = "Merge:" then
+        (* {Merge:strategy} - e.g., {Merge:weighted_average} *)
+        let strategy_str = trim (String.sub content 6 (String.length content - 6)) in
+        let strategy = match strategy_str with
+          | "weighted_avg" | "weighted" -> WeightedAvg
+          | "first" -> First
+          | "last" -> Last
+          | "concat" -> Concat
+          | s -> Custom s  (* custom strategy name *)
+        in
+        (* Merge nodes need their inputs filled in later from edges *)
+        Ok (Merge { strategy; nodes = [] })
       else
-        Error (Printf.sprintf "Diamond node must be Quorum:N or Gate:condition, got: %s" content)
+        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, or Merge:strategy, got: %s" content)
 
   | `Rect ->
       (* [LLM:model "prompt"] or [Tool:name] *)
@@ -318,7 +333,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
         match parse_node_content mnode.shape mnode.content with
         | Error e -> convert_result := Error e
         | Ok node_type ->
-            (* For Quorum nodes, we need to fill in the child nodes *)
+            (* For Quorum and Merge nodes, we need to fill in the child nodes *)
             let node_type = match node_type with
               | Quorum { required; nodes = _ } ->
                   let input_ids =
@@ -331,6 +346,16 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                     { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
                   ) input_ids in
                   Quorum { required; nodes = input_nodes }
+              | Merge { strategy; nodes = _ } ->
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let input_nodes = List.map (fun input_id ->
+                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                  ) input_ids in
+                  Merge { strategy; nodes = input_nodes }
               | other -> other
             in
             let input_mapping =
