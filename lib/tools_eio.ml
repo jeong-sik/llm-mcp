@@ -29,6 +29,8 @@ let build_ollama_curl_cmd = Tool_parsers.build_ollama_curl_cmd
 let parse_ollama_response = Tool_parsers.parse_ollama_response
 let parse_ollama_chunk = Tool_parsers.parse_ollama_chunk
 let clean_codex_output = Tool_parsers.clean_codex_output
+let exponential_backoff ~base_delay attempt =
+  base_delay *. (2. ** float_of_int attempt)
 
 (* MCP config helpers *)
 let get_mcp_server_url = Tool_config.get_mcp_server_url
@@ -234,7 +236,7 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
 
 (** {1 Gemini with Resilience} *)
 
-let gemini_breaker = Resilience.create_circuit_breaker ~name:"gemini_cli" ~failure_threshold:3 ()
+let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli" ~failure_threshold:3 ()
 
 (** Execute Gemini with automatic retry for recoverable errors *)
 let execute_gemini_with_retry ~sw ~proc_mgr ~clock
@@ -257,34 +259,46 @@ let execute_gemini_with_retry ~sw ~proc_mgr ~clock
   | Ok cmd_list ->
       let cmd = List.hd cmd_list in
       let cmd_args = List.tl cmd_list in
-      let policy = { Resilience.default_policy with max_attempts = max_retries + 1 } in
+      let policy = { Mcp_resilience.default_policy with max_attempts = max_retries + 1 } in
       
       let op () =
         let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
-        match result with
-        | Ok r ->
-            let response = get_output r in
-            (match classify_gemini_error response with
-            | Some error when is_recoverable_gemini_error error ->
-                Result.Error (string_of_gemini_error error)
-            | _ -> Result.Ok (r.exit_code, response))
-        | Error (Timeout t) -> Result.Error (sprintf "Timeout after %ds" t)
-        | Error (ProcessError msg) -> Result.Error (sprintf "Error: %s" msg)
+        let outcome =
+          match result with
+          | Ok r ->
+              let response = get_output r in
+              (match classify_gemini_error response with
+              | Some error when is_recoverable_gemini_error error ->
+                  Result.Error (string_of_gemini_error error)
+              | _ -> Result.Ok (r.exit_code, response))
+          | Error (Timeout t) -> Result.Error (sprintf "Timeout after %ds" t)
+          | Error (ProcessError msg) -> Result.Error (sprintf "Error: %s" msg)
+        in
+        match outcome with
+        | Ok value -> Mcp_resilience.Ok value
+        | Error err -> Mcp_resilience.Error err
       in
       
-      match Resilience.with_retry_eio ~clock ~policy ~circuit_breaker:(Some gemini_breaker) ~op_name:"gemini_call" op with
-      | Success (exit_code, response) ->
+      let classify _ = Mcp_resilience.Retry in
+      match Mcp_resilience.with_retry_eio
+              ~clock
+              ~policy
+              ~circuit_breaker:(Some gemini_breaker)
+              ~op_name:"gemini_call"
+              ~classify
+              op
+      with
+      | Ok (exit_code, response) ->
           let extra = [
             ("thinking_level", string_of_thinking_level thinking_level);
             ("thinking_prompt_applied", string_of_bool thinking_applied);
           ] in
           { model = sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
+      | Error err ->
+          { model = sprintf "gemini (%s)" model; returncode = -1; response = err; extra = [] }
       | CircuitOpen ->
           { model = sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
-      | Exhausted { attempts; last_error } ->
-          { model = sprintf "gemini (%s)" model; returncode = -1; 
-            response = sprintf "Exhausted after %d attempts: %s" attempts last_error; extra = [] }
-      | TimedOut _ ->
+      | TimedOut ->
           { model = sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
 
 (** {1 Main Execute Function} *)

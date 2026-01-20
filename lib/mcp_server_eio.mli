@@ -62,7 +62,9 @@ module Http = Http_server_eio
 (** Run the Eio HTTP server.
     Requires an Eio switch and environment with net, clock, and process_mgr. *)
 val run : sw:Eio.Switch.t ->
-          env:< net : _ Eio.Net.t; clock : _ Eio.Time.clock; process_mgr : _ Eio.Process.mgr; .. > ->
+          env:< net : 'net Eio.Net.t;
+                clock : 'clock Eio.Time.clock;
+                process_mgr : 'pm Eio.Process.mgr; .. > ->
           ?config:Http.config -> unit -> unit
 
 (** Start server with Eio runtime.
