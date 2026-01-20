@@ -70,3 +70,8 @@
 (test
  (name test_chain_engine)
  (libraries llm_mcp.common alcotest))
+
+; Mermaid Parser tests (executable documentation)
+(test
+ (name test_mermaid_parser)
+ (libraries llm_mcp.common alcotest))
