@@ -63,6 +63,7 @@ type node_type =
       model : string;     (** Model name: gemini, claude, codex, ollama:* *)
       prompt : string;    (** Prompt template with {{var}} placeholders *)
       timeout : int option;
+      tools : Yojson.Safe.t option;  (** MCP tools for function calling (Ollama) *)
     }
   | Tool of {
       name : string;      (** MCP tool name *)
@@ -176,8 +177,8 @@ let node_type_name = function
   | Merge _ -> "merge"
 
 (** Helper: Create a simple LLM node *)
-let make_llm_node ~id ~model ~prompt ?timeout () =
-  { id; node_type = Llm { model; prompt; timeout }; input_mapping = [] }
+let make_llm_node ~id ~model ~prompt ?timeout ?tools () =
+  { id; node_type = Llm { model; prompt; timeout; tools }; input_mapping = [] }
 
 (** Helper: Create a simple tool node *)
 let make_tool_node ~id ~name ~args =

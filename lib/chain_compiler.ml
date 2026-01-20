@@ -12,6 +12,33 @@ open Chain_types
 (** Helper: Result bind operator *)
 let ( let* ) = Result.bind
 
+(** Recursively collect all input_mapping dependencies from nested nodes *)
+let rec collect_nested_dependencies (node : Chain_types.node) : string list =
+  let direct_deps = List.map snd node.input_mapping in
+  let nested_deps = match node.node_type with
+    | Chain_types.Pipeline nodes
+    | Chain_types.Fanout nodes ->
+        List.concat_map collect_nested_dependencies nodes
+    | Chain_types.Quorum { nodes; _ }
+    | Chain_types.Merge { nodes; _ } ->
+        List.concat_map collect_nested_dependencies nodes
+    | Chain_types.Gate { then_node; else_node; _ } ->
+        let then_deps = collect_nested_dependencies then_node in
+        let else_deps = match else_node with
+          | Some n -> collect_nested_dependencies n
+          | None -> []
+        in
+        then_deps @ else_deps
+    | Chain_types.Subgraph c ->
+        List.concat_map collect_nested_dependencies c.Chain_types.nodes
+    | Chain_types.Map { inner; _ } | Chain_types.Bind { inner; _ } ->
+        collect_nested_dependencies inner
+    | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _ ->
+        []
+  in
+  direct_deps @ nested_deps
+  |> List.sort_uniq String.compare
+
 (** Build dependency graph from nodes *)
 let build_dependency_graph (nodes : Chain_types.node list) : (string, string list) Hashtbl.t =
   let deps = Hashtbl.create (List.length nodes) in
@@ -19,14 +46,18 @@ let build_dependency_graph (nodes : Chain_types.node list) : (string, string lis
   (* Initialize all nodes with empty deps *)
   List.iter (fun (n : Chain_types.node) -> Hashtbl.add deps n.id []) nodes;
 
-  (* Add dependencies from input mappings *)
+  (* Collect all top-level node IDs for filtering external refs *)
+  let top_level_ids = List.map (fun (n : Chain_types.node) -> n.id) nodes in
+
+  (* Add dependencies from input mappings AND nested nodes *)
   List.iter (fun (n : Chain_types.node) ->
-    let node_deps = List.filter_map (fun (_, ref_node) ->
-      (* Only add if the referenced node exists *)
-      if Hashtbl.mem deps ref_node then Some ref_node
-      else None
-    ) n.input_mapping in
-    Hashtbl.replace deps n.id node_deps
+    (* Collect all dependencies including from nested nodes *)
+    let all_deps = collect_nested_dependencies n in
+    (* Filter to only top-level nodes that exist (external references) *)
+    let external_deps = List.filter (fun ref_node ->
+      List.mem ref_node top_level_ids && ref_node <> n.id
+    ) all_deps in
+    Hashtbl.replace deps n.id external_deps
   ) nodes;
 
   deps
