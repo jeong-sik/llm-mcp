@@ -100,7 +100,14 @@ let call_mcp_server t ~url ~method_name ~params =
     | Error err -> Mcp_resilience.Error err
   in
 
-  let classify _ = Mcp_resilience.Retry in
+  let classify msg =
+    if String.starts_with ~prefix:"Retryable HTTP error" msg then
+      Mcp_resilience.Retry
+    else if String.starts_with ~prefix:"Connection error" msg then
+      Mcp_resilience.Retry
+    else
+      Mcp_resilience.Fail msg
+  in
   match Mcp_resilience.with_retry_eio
           ~clock:t.clock
           ~policy:retry_policy
