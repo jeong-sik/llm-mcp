@@ -194,7 +194,7 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
 (** {1 Node Execution} *)
 
 (** Type of execution function callback *)
-type exec_fn = model:string -> prompt:string -> (string, string) result
+type exec_fn = model:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result
 
 (** Type of tool execution callback *)
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
@@ -202,12 +202,12 @@ type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 (** Execute a single LLM node *)
 let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, string) result =
   match llm with
-  | Llm { model; prompt; timeout = _ } ->
+  | Llm { model; prompt; timeout = _; tools } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       record_start ctx node.id;
       let start = Unix.gettimeofday () in
-      let result = exec_fn ~model ~prompt:resolved_prompt in
+      let result = exec_fn ~model ~prompt:resolved_prompt ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
@@ -250,7 +250,7 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   match node.node_type with
   | Llm _ -> execute_llm_node ctx ~exec_fn ~node node.node_type
   | Tool _ -> execute_tool_node ctx ~tool_exec ~node node.node_type
-  | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec nodes
+  | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
   | Fanout nodes -> execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
   | Quorum { required; nodes } -> execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec node ~required nodes
   | Gate { condition; then_node; else_node } ->
@@ -268,8 +268,8 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Bind { func; inner } -> execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec node ~func inner
   | Merge { strategy; nodes } -> execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec node ~strategy nodes
 
-(** Execute nodes in sequence (Pipeline) *)
-and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (string, string) result =
+(** Execute nodes in sequence (internal helper, no output storage) *)
+and execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (string, string) result =
   let rec loop last_output = function
     | [] -> Ok last_output
     | node :: rest ->
@@ -278,6 +278,21 @@ and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (s
         | Error msg -> Error msg
   in
   loop "" nodes
+
+(** Execute nodes in sequence (Pipeline container node) *)
+and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : node list) : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+  let result = execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec nodes in
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  (match result with
+   | Ok output ->
+       Hashtbl.add ctx.outputs parent.id output;
+       record_complete ctx parent.id ~duration_ms ~success:true
+   | Error msg ->
+       record_complete ctx parent.id ~duration_ms ~success:false;
+       record_error ctx parent.id msg);
+  result
 
 (** Execute nodes in parallel (Fanout) *)
 and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : node list) : (string, string) result =
@@ -406,7 +421,7 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
 
   (* Execute subgraph nodes sequentially for now *)
   (* TODO: Use compiled plan for proper parallel execution *)
-  let result = execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes in
+  let result = execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes in
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
   let success = Result.is_ok result in

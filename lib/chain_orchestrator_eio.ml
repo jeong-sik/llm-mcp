@@ -171,7 +171,7 @@ let orchestrate
     | Error e -> Error (Printf.sprintf "Compile error: %s" e)
     | Ok plan ->
       (* Create execution function for LLM nodes *)
-      let exec_fn ~model:_ ~prompt =
+      let exec_fn ~model:_ ~prompt ?tools:_ () =
         let result = llm_call ~prompt in
         Ok result
       in

@@ -76,12 +76,21 @@ let parse_config (json : Yojson.Safe.t) : chain_config =
     direction = get_direction_opt "direction" default_config.direction;
   }
 
+(** Helper: Get required string field with better error messages *)
+let require_string json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Null -> Error (Printf.sprintf "Missing required field '%s'" field_name)
+  | `String s -> Ok s
+  | other -> Error (Printf.sprintf "Field '%s' must be a string, got: %s"
+                      field_name (Yojson.Safe.to_string other))
+
 (** Parse a single node from JSON *)
 let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
   let open Yojson.Safe.Util in
   try
-    let id = json |> member "id" |> to_string in
-    let node_type_str = json |> member "type" |> to_string in
+    let* id = require_string json "id" in
+    let* node_type_str = require_string json "type" in
 
     let* node_type = parse_node_type json node_type_str in
 
@@ -121,16 +130,23 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
   let open Yojson.Safe.Util in
   match type_str with
   | "llm" ->
-      let model = json |> member "model" |> to_string in
-      let prompt = json |> member "prompt" |> to_string in
+      let* model = require_string json "model" in
+      let* prompt = require_string json "prompt" in
       let timeout =
         try Some (json |> member "timeout" |> to_int)
         with _ -> None
       in
-      Ok (Llm { model; prompt; timeout })
+      let tools =
+        try
+          match json |> member "tools" with
+          | `Null -> None
+          | v -> Some v
+        with _ -> None
+      in
+      Ok (Llm { model; prompt; timeout; tools })
 
   | "tool" ->
-      let name = json |> member "name" |> to_string in
+      let* name = require_string json "name" in
       let args =
         try json |> member "args"
         with _ -> `Assoc []
@@ -160,7 +176,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       Ok (Quorum { required; nodes })
 
   | "gate" ->
-      let condition = json |> member "condition" |> to_string in
+      let* condition = require_string json "condition" in
       let then_json = json |> member "then" in
       let* then_node = parse_node then_json in
       let else_node =
@@ -179,17 +195,17 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       Ok (Subgraph chain)
 
   | "chain_ref" ->
-      let ref_id = json |> member "ref" |> to_string in
+      let* ref_id = require_string json "ref" in
       Ok (ChainRef ref_id)
 
   | "map" ->
-      let func = json |> member "func" |> to_string in
+      let* func = require_string json "func" in
       let inner_json = json |> member "inner" in
       let* inner = parse_node inner_json in
       Ok (Map { func; inner })
 
   | "bind" ->
-      let func = json |> member "func" |> to_string in
+      let* func = require_string json "func" in
       let inner_json = json |> member "inner" in
       let* inner = parse_node inner_json in
       Ok (Bind { func; inner })
