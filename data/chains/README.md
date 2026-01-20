@@ -11,6 +11,7 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 | [pr-review-pipeline](#pr-review-pipeline) | Automated PR review | 90s | $0.12 |
 | [incident-response](#incident-response) | Automated incident triage | 120s | $0.18 |
 | [code-migration](#code-migration) | Code transformation with verification | 180s | $0.25 |
+| [mermaid-to-chain](#mermaid-to-chain) | Convert Mermaid diagrams to Chain JSON | 60s | $0.10 |
 
 ---
 
@@ -176,6 +177,43 @@ graph TD
 ```bash
 chain.orchestrate code-migration source_code="..." source_lang=Python target_lang=TypeScript
 ```
+
+---
+
+## Mermaid to Chain
+
+Convert Mermaid graph diagrams to executable Chain JSON definitions. **Visual Programming for Multi-LLM workflows!**
+
+```mermaid
+graph TD
+    A[parse-mermaid<br/>🔬 Codex<br/>Extract structure] --> B[infer-node-types<br/>🎯 Gemini<br/>LLM vs Tool]
+    A --> C[build-dependencies<br/>🎯 Gemini<br/>Execution order]
+    B --> D[generate-chain-json<br/>👩 Claude<br/>Final schema]
+    C --> D
+    D --> E[validate-chain<br/>🔬 Codex<br/>Circular deps check]
+    E --> F[final-output<br/>🎯 Gemini<br/>Fix & output]
+    D --> F
+
+    style A fill:#e1f5fe
+    style B fill:#e8f5e9
+    style C fill:#e8f5e9
+    style D fill:#fff3e0
+    style E fill:#e1f5fe
+    style F fill:#e8f5e9
+```
+
+**Usage:**
+```bash
+chain.orchestrate mermaid-to-chain mermaid="graph TD
+    A[fetch-data] --> B[analyze<br/>🔬 Codex]
+    A --> C[summarize<br/>👩 Claude]
+    B --> D[merge]
+    C --> D"
+```
+
+**Input**: Any Mermaid `graph TD` or `graph LR` diagram with node hints (🔬=Codex, 👩=Claude, 🎯=Gemini, 🔍=Tool).
+
+**Output**: Valid Chain JSON ready for execution.
 
 ---
 
