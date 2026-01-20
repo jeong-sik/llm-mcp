@@ -12,12 +12,30 @@
     - Monoid (merge): Combine parallel results
 *)
 
+(** Mermaid diagram direction for visualization *)
+type direction =
+  | LR  (** Left to Right - horizontal flow *)
+  | RL  (** Right to Left - reverse horizontal *)
+  | TB  (** Top to Bottom - vertical/hierarchical *)
+  | BT  (** Bottom to Top - reverse vertical *)
+[@@deriving yojson]
+
+let direction_to_string = function
+  | LR -> "LR" | RL -> "RL" | TB -> "TB" | BT -> "BT"
+
+let direction_of_string = function
+  | "LR" -> LR | "RL" -> RL
+  | "TB" | "TD" -> TB  (* TD is alias for TB *)
+  | "BT" -> BT
+  | _ -> LR  (* default *)
+
 (** Configuration for chain execution *)
 type chain_config = {
   max_depth : int;        (** Maximum recursion depth for subgraphs *)
   max_concurrency : int;  (** Max parallel executions per model *)
   timeout : int;          (** Default timeout in seconds *)
   trace : bool;           (** Enable execution tracing *)
+  direction : direction;  (** Mermaid diagram direction for WYSIWYE *)
 }
 [@@deriving yojson]
 
@@ -27,6 +45,7 @@ let default_config = {
   max_concurrency = 3;
   timeout = 300;
   trace = false;
+  direction = LR;
 }
 
 (** Merge strategy for combining parallel results *)

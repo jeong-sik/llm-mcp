@@ -246,16 +246,18 @@ graph LR
   | Error _ -> ()  (* Expected *)
   | Ok _ -> Alcotest.fail "should fail on invalid quorum"
 
-let test_invalid_subroutine () =
+let test_subroutine_as_chain_ref () =
+  (* With WYSIWYE: any subroutine [[X]] becomes ChainRef "X" *)
   let mermaid = {|
 graph LR
-    A[[InvalidFormat]]
+    A[[my_reusable_chain]]
   |} in
-  match parse_chain mermaid with
-  | Error e ->
-      Alcotest.(check bool) "error mentions Ref" true
-        (String.length e > 0)
-  | Ok _ -> Alcotest.fail "should fail on invalid subroutine"
+  let chain = check_ok "parse subroutine as ref" (parse_chain mermaid) in
+  let node = List.hd chain.nodes in
+  match node.node_type with
+  | ChainRef ref_id ->
+      Alcotest.(check string) "ref id" "my_reusable_chain" ref_id
+  | _ -> Alcotest.fail "expected ChainRef"
 
 (* ============================================================================
    Test Suite
@@ -289,7 +291,80 @@ let edge_case_tests = [
 
 let error_tests = [
   "invalid quorum", `Quick, test_invalid_quorum;
-  "invalid subroutine", `Quick, test_invalid_subroutine;
+  "subroutine as ChainRef", `Quick, test_subroutine_as_chain_ref;
+]
+
+(* ============================================================================
+   Direction Preservation Tests (종/횡)
+   ============================================================================ *)
+
+let test_direction_lr () =
+  let mermaid = {|
+graph LR
+    A[LLM:gemini "Hello"]
+  |} in
+  let chain = check_ok "parse LR" (parse_chain mermaid) in
+  Alcotest.(check string) "direction LR" "LR"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_tb () =
+  let mermaid = {|
+graph TB
+    A[LLM:claude "Top to bottom"]
+  |} in
+  let chain = check_ok "parse TB" (parse_chain mermaid) in
+  Alcotest.(check string) "direction TB" "TB"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_td_alias () =
+  let mermaid = {|
+flowchart TD
+    A[LLM:gemini "Test"]
+  |} in
+  let chain = check_ok "parse TD" (parse_chain mermaid) in
+  (* TD is alias for TB *)
+  Alcotest.(check string) "direction TD->TB" "TB"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_bt () =
+  let mermaid = {|
+graph BT
+    A[LLM:codex "Bottom to top"]
+  |} in
+  let chain = check_ok "parse BT" (parse_chain mermaid) in
+  Alcotest.(check string) "direction BT" "BT"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_rl () =
+  let mermaid = {|
+graph RL
+    A[LLM:gemini "Right to left"]
+  |} in
+  let chain = check_ok "parse RL" (parse_chain mermaid) in
+  Alcotest.(check string) "direction RL" "RL"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_round_trip_preserves_direction () =
+  let mermaid = {|
+graph TB
+    A[LLM:gemini "Hello"] --> B[LLM:claude "World"]
+  |} in
+  let result = round_trip mermaid in
+  match result with
+  | Error e -> Alcotest.fail (Printf.sprintf "round trip failed: %s" e)
+  | Ok output ->
+      (* Should contain "graph TB" *)
+      Alcotest.(check bool) "contains graph TB" true
+        (String.length output > 8 &&
+         String.sub output 0 8 = "graph TB")
+
+let direction_tests = [
+  "direction LR (횡)", `Quick, test_direction_lr;
+  "direction TB (종)", `Quick, test_direction_tb;
+  "direction TD alias", `Quick, test_direction_td_alias;
+  "direction BT (역종)", `Quick, test_direction_bt;
+  "direction RL (역횡)", `Quick, test_direction_rl;
+  "round trip preserves direction", `Quick, test_round_trip_preserves_direction;
 ]
 
 let () =
@@ -299,4 +374,5 @@ let () =
     ("Complex Workflows", complex_tests);
     ("Edge Cases", edge_case_tests);
     ("Error Cases", error_tests);
+    ("Direction (종/횡)", direction_tests);
   ]
