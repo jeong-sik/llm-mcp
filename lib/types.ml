@@ -99,6 +99,14 @@ type tool_args =
       tools : tool_schema list option;  (* MCP tools for function calling *)
     }
   | OllamaList  (* List available Ollama models *)
+  | ChainRun of {
+      chain : Yojson.Safe.t;  (* Chain definition as JSON *)
+      input : string option;  (* Optional initial input *)
+      trace : bool;           (* Enable execution tracing *)
+    }
+  | ChainValidate of {
+      chain : Yojson.Safe.t;  (* Chain definition to validate *)
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -498,7 +506,78 @@ Use this to discover which models are available before calling the ollama tool.|
   ];
 }
 
-let all_schemas = [gemini_schema; claude_schema; codex_schema; ollama_schema; ollama_list_schema]
+(** Chain DSL - Execute orchestrated LLM workflows *)
+let chain_run_schema : tool_schema = {
+  name = "chain.run";
+  description = {|Execute a Chain DSL workflow.
+
+Chain Engine enables orchestrated multi-LLM workflows with:
+- 11 node types: llm, tool, pipeline, fanout, quorum, gate, subgraph, chain_ref, map, bind, merge
+- DAG-based parallel execution with Eio Fibers
+- Category theory abstractions (Functor/Monad/Monoid)
+
+Example chain:
+{
+  "id": "magi_consensus",
+  "nodes": [
+    { "id": "casper", "type": "llm", "model": "gemini", "prompt": "Analyze: {{input}}" },
+    { "id": "balthasar", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" },
+    { "id": "consensus", "type": "quorum", "required": 2, "nodes": ["casper", "balthasar"] }
+  ],
+  "output": "consensus"
+}
+
+Parameters:
+- chain: Chain definition (JSON object with nodes, output, optional config)
+- input: Initial input string for the chain
+- trace: Enable execution tracing (default: false)|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("chain", `Assoc [
+        ("type", `String "object");
+        ("description", `String "Chain definition with nodes, output, and optional config");
+      ]);
+      ("input", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Initial input for the chain");
+      ]);
+      ("trace", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable execution tracing");
+        ("default", `Bool false);
+      ]);
+    ]);
+    ("required", `List [`String "chain"]);
+  ];
+}
+
+let chain_validate_schema : tool_schema = {
+  name = "chain.validate";
+  description = {|Validate a Chain DSL definition without executing it.
+
+Checks:
+- JSON structure validity
+- Node type correctness
+- Cycle detection in DAG
+- Depth limit compliance
+- Output node existence
+- Duplicate ID detection
+
+Returns validation result with any errors found.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("chain", `Assoc [
+        ("type", `String "object");
+        ("description", `String "Chain definition to validate");
+      ]);
+    ]);
+    ("required", `List [`String "chain"]);
+  ];
+}
+
+let all_schemas = [gemini_schema; claude_schema; codex_schema; ollama_schema; ollama_list_schema; chain_run_schema; chain_validate_schema]
 
 (* ============================================================================
    Compact Protocol v0.1 - LLM-to-LLM Communication

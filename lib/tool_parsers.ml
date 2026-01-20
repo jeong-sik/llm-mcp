@@ -102,6 +102,23 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
 let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
   OllamaList
 
+(** Parse JSON arguments for chain.run tool *)
+let parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let chain = json |> member "chain" in
+  let input = json |> member "input" |> to_string_option in
+  let trace =
+    try json |> member "trace" |> to_bool
+    with _ -> false
+  in
+  ChainRun { chain; input; trace }
+
+(** Parse JSON arguments for chain.validate tool *)
+let parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let chain = json |> member "chain" in
+  ChainValidate { chain }
+
 (** {1 Command Builders} *)
 
 (** Build thinking prompt prefix based on thinking level *)

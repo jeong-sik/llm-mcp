@@ -429,6 +429,53 @@ let execute args : tool_result Lwt.t =
           Lwt.return { model = "ollama_list";
             returncode = -1; response = Printf.sprintf "Error: %s" msg; extra = []; })
 
+  | ChainRun _ ->
+      (* Chain execution requires Eio direct-style concurrency *)
+      Lwt.return { model = "chain.run";
+        returncode = -1;
+        response = "Chain execution not available in Lwt mode. Use Eio server (start-llm-mcp.sh --http)";
+        extra = []; }
+
+  | ChainValidate { chain } ->
+      (* Validation can run synchronously *)
+      let result = match Chain_parser.parse_chain chain with
+        | Error msg ->
+            { model = "chain.validate";
+              returncode = -1;
+              response = Printf.sprintf "Parse error: %s" msg;
+              extra = [("stage", "parse"); ("valid", "false")]; }
+        | Ok parsed_chain ->
+            (match Chain_parser.validate_chain parsed_chain with
+            | Error msg ->
+                { model = "chain.validate";
+                  returncode = -1;
+                  response = Printf.sprintf "Validation error: %s" msg;
+                  extra = [("stage", "validate"); ("valid", "false")]; }
+            | Ok () ->
+                (match Chain_compiler.compile parsed_chain with
+                | Error msg ->
+                    { model = "chain.validate";
+                      returncode = -1;
+                      response = Printf.sprintf "Compile error: %s" msg;
+                      extra = [("stage", "compile"); ("valid", "false")]; }
+                | Ok plan ->
+                    let node_count = List.length parsed_chain.Chain_types.nodes in
+                    let depth = plan.Chain_types.depth in
+                    let parallel_groups = List.length plan.Chain_types.parallel_groups in
+                    { model = "chain.validate";
+                      returncode = 0;
+                      response = Printf.sprintf "Chain '%s' is valid: %d nodes, depth %d, %d parallel groups"
+                        parsed_chain.Chain_types.id node_count depth parallel_groups;
+                      extra = [
+                        ("valid", "true");
+                        ("chain_id", parsed_chain.Chain_types.id);
+                        ("node_count", string_of_int node_count);
+                        ("depth", string_of_int depth);
+                        ("parallel_groups", string_of_int parallel_groups);
+                      ]; }))
+      in
+      Lwt.return result
+
 (** Format results *)
 let execute_formatted ~(format : response_format) args : string Lwt.t =
   let open Lwt.Syntax in
