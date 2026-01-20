@@ -81,16 +81,23 @@ let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~t
               try
                 let json = Yojson.Safe.from_string json_str in
                 let open Yojson.Safe.Util in
-                let content = json |> member "result" |> member "content" in
-                match content with
-                | `List items ->
-                    let texts = List.filter_map (fun item ->
-                      match item |> member "type" |> to_string_option with
-                      | Some "text" -> item |> member "text" |> to_string_option
-                      | _ -> None
-                    ) items in
-                    String.concat "\n" texts
-                | _ -> json_str
+                let result = json |> member "result" in
+                let error = json |> member "error" in
+                if error <> `Null then
+                  let msg = try error |> member "message" |> to_string
+                            with _ -> "Unknown error" in
+                  sprintf "Error: %s" msg
+                else
+                  let content = result |> member "content" in
+                  match content with
+                  | `List items ->
+                      let texts = List.filter_map (fun item ->
+                        match item |> member "type" |> to_string_option with
+                        | Some "text" -> item |> member "text" |> to_string_option
+                        | _ -> None
+                      ) items in
+                      String.concat "\n" texts
+                  | _ -> json_str
               with _ -> r.stdout
 
 (** Call MCP via stdio subprocess - shell injection safe *)
@@ -123,18 +130,25 @@ let call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command ~args ~tool_name ~
         try
           let json = Yojson.Safe.from_string r.stdout in
           let open Yojson.Safe.Util in
-          let content = json |> member "result" |> member "content" in
-          match content with
-          | `List items ->
-              let texts = List.filter_map (fun item ->
-                match item |> member "type" |> to_string_option with
-                | Some "text" -> item |> member "text" |> to_string_option
-                | _ -> None
-              ) items in
-              String.concat "\n" texts
-          | _ ->
-              let result_str = json |> member "result" |> to_string_option in
-              Option.value result_str ~default:r.stdout
+          let result = json |> member "result" in
+          let error = json |> member "error" in
+          if error <> `Null then
+            let msg = try error |> member "message" |> to_string
+                      with _ -> "Unknown error" in
+            sprintf "Error: %s" msg
+          else
+            let content = result |> member "content" in
+            match content with
+            | `List items ->
+                let texts = List.filter_map (fun item ->
+                  match item |> member "type" |> to_string_option with
+                  | Some "text" -> item |> member "text" |> to_string_option
+                  | _ -> None
+                ) items in
+                String.concat "\n" texts
+            | _ ->
+                let result_str = result |> to_string_option in
+                Option.value result_str ~default:r.stdout
         with _ -> r.stdout
 
 (** Unified MCP call dispatcher *)
@@ -218,18 +232,13 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
               extra = extra_base; }
       end
 
-(** {1 Gemini with Retry} *)
+(** {1 Gemini with Resilience} *)
 
-let default_max_retries = 2
-let default_base_delay = 1.0
-
-let exponential_backoff ~base_delay attempt =
-  base_delay *. (Float.pow 2.0 (Float.of_int attempt))
+let gemini_breaker = Resilience.create_circuit_breaker ~name:"gemini_cli" ~failure_threshold:3 ()
 
 (** Execute Gemini with automatic retry for recoverable errors *)
 let execute_gemini_with_retry ~sw ~proc_mgr ~clock
-    ?(max_retries = default_max_retries)
-    ?(base_delay = default_base_delay)
+    ?(max_retries = 2)
     ~model ~thinking_level ~timeout ~args () =
 
   let thinking_applied = thinking_level = High in
@@ -248,62 +257,35 @@ let execute_gemini_with_retry ~sw ~proc_mgr ~clock
   | Ok cmd_list ->
       let cmd = List.hd cmd_list in
       let cmd_args = List.tl cmd_list in
-      let rec attempt n =
+      let policy = { Resilience.default_policy with max_attempts = max_retries + 1 } in
+      
+      let op () =
         let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
         match result with
         | Ok r ->
             let response = get_output r in
             (match classify_gemini_error response with
-            | Some error when is_recoverable_gemini_error error && n < max_retries ->
-                (* Recoverable error - retry with backoff *)
-                let delay = exponential_backoff ~base_delay n in
-                Eio.Time.sleep clock delay;
-                attempt (n + 1)
-            | Some error ->
-                (* Non-recoverable error or max retries reached *)
-                let extra = [
-                  ("thinking_level", string_of_thinking_level thinking_level);
-                  ("thinking_prompt_applied", string_of_bool thinking_applied);
-                  ("error_type", string_of_gemini_error error);
-                  ("retry_attempts", string_of_int n);
-                ] in
-                { model = sprintf "gemini (%s)" model;
-                  returncode = -1;
-                  response;
-                  extra; }
-            | None ->
-                (* Success *)
-                let extra = [
-                  ("thinking_level", string_of_thinking_level thinking_level);
-                  ("thinking_prompt_applied", string_of_bool thinking_applied);
-                  ("retry_attempts", string_of_int n);
-                ] in
-                { model = sprintf "gemini (%s)" model;
-                  returncode = r.exit_code;
-                  response;
-                  extra; })
-        | Error (Timeout t) ->
-            let extra = [
-              ("thinking_level", string_of_thinking_level thinking_level);
-              ("thinking_prompt_applied", string_of_bool thinking_applied);
-              ("retry_attempts", string_of_int n);
-            ] in
-            { model = sprintf "gemini (%s)" model;
-              returncode = -1;
-              response = sprintf "Timeout after %ds" t;
-              extra; }
-        | Error (ProcessError msg) ->
-            let extra = [
-              ("thinking_level", string_of_thinking_level thinking_level);
-              ("thinking_prompt_applied", string_of_bool thinking_applied);
-              ("retry_attempts", string_of_int n);
-            ] in
-            { model = sprintf "gemini (%s)" model;
-              returncode = -1;
-              response = sprintf "Error: %s" msg;
-              extra; }
+            | Some error when is_recoverable_gemini_error error ->
+                Result.Error (string_of_gemini_error error)
+            | _ -> Result.Ok (r.exit_code, response))
+        | Error (Timeout t) -> Result.Error (sprintf "Timeout after %ds" t)
+        | Error (ProcessError msg) -> Result.Error (sprintf "Error: %s" msg)
       in
-      attempt 0
+      
+      match Resilience.with_retry_eio ~clock ~policy ~circuit_breaker:(Some gemini_breaker) ~op_name:"gemini_call" op with
+      | Success (exit_code, response) ->
+          let extra = [
+            ("thinking_level", string_of_thinking_level thinking_level);
+            ("thinking_prompt_applied", string_of_bool thinking_applied);
+          ] in
+          { model = sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
+      | CircuitOpen ->
+          { model = sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
+      | Exhausted { attempts; last_error } ->
+          { model = sprintf "gemini (%s)" model; returncode = -1; 
+            response = sprintf "Exhausted after %d attempts: %s" attempts last_error; extra = [] }
+      | TimedOut _ ->
+          { model = sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
 
 (** {1 Main Execute Function} *)
 
@@ -314,7 +296,6 @@ let execute ~sw ~proc_mgr ~clock args : tool_result =
       execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~args ()
 
   | Claude { model; ultrathink; working_directory = _; timeout; _ } ->
-      (* Note: working_directory support requires fs from env - use execute_with_env for cwd support *)
       (match build_claude_cmd args with
       | Error err ->
           { model = sprintf "claude-cli (%s)" model;
@@ -437,7 +418,7 @@ let execute ~sw ~proc_mgr ~clock args : tool_result =
                       ("size", `String (size ^ " " ^ size_unit));
                       ("modified", `String modified);
                     ])
-                | _ -> None)
+                | _ -> None) 
           in
           let response = `List models |> Yojson.Safe.to_string in
           { model = "ollama_list";
@@ -590,16 +571,23 @@ let execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url (tc : 
           try
             let json = Yojson.Safe.from_string r.stdout in
             let open Yojson.Safe.Util in
-            let content = json |> member "result" |> member "content" in
-            match content with
-            | `List items ->
-                let texts = List.filter_map (fun item ->
-                  match item |> member "type" |> to_string_option with
-                  | Some "text" -> item |> member "text" |> to_string_option
-                  | _ -> None
-                ) items in
-                (tc.name, String.concat "\n" texts)
-            | _ -> (tc.name, r.stdout)
+            let result = json |> member "result" in
+            let error = json |> member "error" in
+            if error <> `Null then
+              let msg = try error |> member "message" |> to_string
+                        with _ -> "Unknown error" in
+              (tc.name, sprintf "Error: %s" msg)
+            else
+              let content = result |> member "content" in
+              match content with
+              | `List items ->
+                  let texts = List.filter_map (fun item ->
+                    match item |> member "type" |> to_string_option with
+                    | Some "text" -> item |> member "text" |> to_string_option
+                    | _ -> None
+                  ) items in
+                  (tc.name, String.concat "\n" texts)
+              | _ -> (tc.name, r.stdout)
           with _ -> (tc.name, r.stdout))
   | None ->
       (tc.name, sprintf "Error: Unknown tool '%s' and no external MCP configured" tc.name)
@@ -646,7 +634,7 @@ let execute_ollama_agentic
     ~sw ~proc_mgr ~clock
     ~(tools : Types.tool_schema list)
     ?(external_mcp_url : string option = None)
-    ?(on_turn : int -> string -> unit = fun _ _ -> ())
+    ?(on_turn : int -> string -> unit = fun _ _ -> ()) 
     args : tool_result =
   match args with
   | Ollama { model; prompt; system_prompt; temperature; timeout; stream = _; tools = _ } ->

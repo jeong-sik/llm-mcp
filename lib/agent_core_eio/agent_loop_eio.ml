@@ -17,7 +17,7 @@ open Agent_types
 open Agent_sigs_eio
 
 (** Re-export utilities *)
-module Retry = Retry_eio
+module Retry = Resilience
 module Timeout = Timeout_eio
 
 (** {1 Agent Loop Functor} *)
@@ -44,8 +44,10 @@ module Make
 
     (* Call LLM with retry *)
     let call_with_retry () =
-      Retry.with_retry ~clock loop_config.retry_policy (fun () ->
-        Backend.call ~config:backend_config ~messages ~tools
+      Retry.with_retry_eio ~clock ~policy:loop_config.retry_policy ~op_name:"llm_agent_turn" (fun () ->
+        match Backend.call ~config:backend_config ~messages ~tools with
+        | res -> Ok res
+        | exception exn -> Error (Printexc.to_string exn)
       )
     in
 
@@ -59,9 +61,9 @@ module Make
       TurnError "Turn timed out"
     | Some (Exhausted { attempts; last_error }) ->
       TurnError (Printf.sprintf "Failed after %d attempts: %s" attempts last_error)
-    | Some RetryCircuitOpen ->
+    | Some CircuitOpen ->
       TurnError "Circuit breaker open"
-    | Some (RetryTimedOut { timeout_ms }) ->
+    | Some (TimedOut { timeout_ms }) ->
       TurnError (Printf.sprintf "Retry timed out after %dms" timeout_ms)
     | Some (Success response) ->
       let content = Backend.extract_content response in
@@ -124,8 +126,10 @@ module Make
     let messages = State.get_messages state in
 
     let call_with_retry () =
-      Retry.with_retry ~clock loop_config.retry_policy (fun () ->
-        Backend.call ~config:backend_config ~messages ~tools
+      Retry.with_retry_eio ~clock ~policy:loop_config.retry_policy ~op_name:"llm_agent_turn_parallel" (fun () ->
+        match Backend.call ~config:backend_config ~messages ~tools with
+        | res -> Ok res
+        | exception exn -> Error (Printexc.to_string exn)
       )
     in
 
@@ -137,8 +141,8 @@ module Make
     | None -> TurnError "Turn timed out"
     | Some (Exhausted { attempts; last_error }) ->
       TurnError (Printf.sprintf "Failed after %d attempts: %s" attempts last_error)
-    | Some RetryCircuitOpen -> TurnError "Circuit breaker open"
-    | Some (RetryTimedOut { timeout_ms }) ->
+    | Some CircuitOpen -> TurnError "Circuit breaker open"
+    | Some (TimedOut { timeout_ms }) ->
       TurnError (Printf.sprintf "Retry timed out after %dms" timeout_ms)
     | Some (Success response) ->
       let content = Backend.extract_content response in
