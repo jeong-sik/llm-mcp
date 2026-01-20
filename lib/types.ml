@@ -109,6 +109,10 @@ type tool_args =
       chain : Yojson.Safe.t option;  (* Chain definition to validate *)
       mermaid : string option;       (* Mermaid flowchart text to validate *)
     }
+  | ChainList
+  | ChainToMermaid of {
+      chain : Yojson.Safe.t;         (* Chain definition to convert - required *)
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -551,10 +555,6 @@ graph LR
         ("default", `Int 300);
       ]);
     ]);
-    ("oneOf", `List [
-      `Assoc [("required", `List [`String "chain"])];
-      `Assoc [("required", `List [`String "mermaid"])];
-    ]);
   ];
 }
 
@@ -577,10 +577,35 @@ Parameters:
         ("description", `String "Mermaid flowchart text to validate");
       ]);
     ]);
-    ("oneOf", `List [
-      `Assoc [("required", `List [`String "chain"])];
-      `Assoc [("required", `List [`String "mermaid"])];
+  ];
+}
+
+let chain_to_mermaid_schema : tool_schema = {
+  name = "chain.to_mermaid";
+  description = {|Convert a Chain DSL definition to Mermaid flowchart text.
+
+Parameters:
+- chain: Chain DSL JSON to convert (required)
+
+Returns: Mermaid flowchart text that can be rendered or edited visually.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("chain", `Assoc [
+        ("type", `String "object");
+        ("description", `String "Chain DSL definition to convert to Mermaid");
+      ]);
     ]);
+    ("required", `List [`String "chain"]);
+  ];
+}
+
+let chain_list_schema : tool_schema = {
+  name = "chain.list";
+  description = "List all registered chains in the registry.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
   ];
 }
 
@@ -592,6 +617,8 @@ let all_schemas = [
   ollama_list_schema;
   chain_run_schema;
   chain_validate_schema;
+  chain_list_schema;
+  chain_to_mermaid_schema;
 ]
 
 (* ============================================================================
