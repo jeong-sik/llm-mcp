@@ -68,10 +68,27 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
 
     let* node_type = parse_node_type json node_type_str in
 
-    (* Extract input mappings if this is an LLM node *)
-    let input_mapping = match node_type with
-      | Llm { prompt; _ } -> extract_input_mappings prompt
-      | _ -> []
+    (* Parse explicit input_mapping if provided, otherwise extract from prompt *)
+    let input_mapping =
+      try
+        let mapping_json = json |> member "input_mapping" in
+        match mapping_json with
+        | `List pairs ->
+            List.filter_map (fun pair ->
+              match pair with
+              | `List [`String k; `String v] -> Some (k, v)
+              | _ -> None
+            ) pairs
+        | `Null -> (* No explicit mapping, extract from prompt *)
+            (match node_type with
+             | Llm { prompt; _ } -> extract_input_mappings prompt
+             | _ -> [])
+        | _ -> []
+      with _ ->
+        (* Fallback: extract from prompt *)
+        match node_type with
+        | Llm { prompt; _ } -> extract_input_mappings prompt
+        | _ -> []
     in
 
     Ok { id; node_type; input_mapping }
