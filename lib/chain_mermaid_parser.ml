@@ -3,26 +3,43 @@
     Enables "Executable Documentation" - the same Mermaid diagram that
     renders beautifully on GitHub can be executed as a real workflow.
 
-    Supported Mermaid syntax:
+    ═══════════════════════════════════════════════════════════════════
+    FULL 1:1 MAPPING: Mermaid ↔ Chain AST
+    ═══════════════════════════════════════════════════════════════════
+
+    ┌─────────────────────────────┬─────────────────────────────────────┐
+    │ Mermaid Syntax              │ Chain AST Type                      │
+    ├─────────────────────────────┼─────────────────────────────────────┤
+    │ [LLM:model "prompt"]        │ Llm { model; prompt }               │
+    │ [Tool:name]                 │ Tool { name; args }                 │
+    │ [[Ref:chain_id]]            │ ChainRef chain_id                   │
+    │ {Quorum:N}                  │ Quorum { required = N; nodes }      │
+    │ {Gate:condition}            │ Gate { condition; then; else }      │
+    │ [[Pipeline:a,b,c]]          │ Pipeline [a; b; c]                  │
+    │ [[Fanout:a,b,c]]            │ Fanout [a; b; c]                    │
+    │ [[Map:func,node]]           │ Map { func; inner }                 │
+    │ [[Bind:func,node]]          │ Bind { func; inner }                │
+    └─────────────────────────────┴─────────────────────────────────────┘
+
+    ═══════════════════════════════════════════════════════════════════
+    COMPOSABILITY: All types can compose with each other
+    ═══════════════════════════════════════════════════════════════════
+
+    Example: LLM -> Pipeline -> Map -> Quorum
     {[
       graph LR
-          A[LLM:gemini "Classify input"] --> B[LLM:claude "Review"]
-          A --> C[LLM:codex "Analyze"]
-          B & C --> D{Quorum:2}
-          D --> E[[Ref:summary_chain]]
+          A[LLM:gemini "Parse"] --> P[[Pipeline:step1,step2]]
+          P --> M[[Map:format,result]]
+          M --> Q{Quorum:2}
     ]}
 
-    Node shapes:
-    - [...]   = LLM or Tool node (rectangle)
-    - {...}   = Quorum or Gate node (diamond)
-    - [[...]] = ChainRef node (subroutine shape)
+    ═══════════════════════════════════════════════════════════════════
+    NODE SHAPES
+    ═══════════════════════════════════════════════════════════════════
 
-    Node content format:
-    - LLM:model "prompt"     → Llm { model; prompt }
-    - Tool:name              → Tool { name; args = {} }
-    - Quorum:N               → Quorum { required = N }
-    - Gate:condition         → Gate { condition }
-    - Ref:chain_id           → ChainRef chain_id
+    - [...]   = Rectangle: LLM or Tool nodes
+    - {...}   = Diamond: Quorum or Gate (decision) nodes
+    - [[...]] = Subroutine: Ref, Pipeline, Fanout, Map, Bind
 *)
 
 open Chain_types
@@ -87,12 +104,56 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
   let content = trim content in
   match shape with
   | `Subroutine ->
-      (* [[Ref:chain_id]] *)
+      (* [[Ref:chain_id]] or [[Pipeline:A,B,C]] or [[Fanout:A,B,C]] or [[Map:func,node]] or [[Bind:func,node]] *)
       if String.length content > 4 && String.sub content 0 4 = "Ref:" then
         let ref_id = trim (String.sub content 4 (String.length content - 4)) in
         Ok (ChainRef ref_id)
+      else if String.length content > 9 && String.sub content 0 9 = "Pipeline:" then
+        (* [[Pipeline:A,B,C]] - sequential execution *)
+        let node_ids = String.sub content 9 (String.length content - 9)
+          |> String.split_on_char ','
+          |> List.map trim
+          |> List.filter (fun s -> s <> "")
+        in
+        let placeholder_nodes = List.map (fun id ->
+          { id; node_type = ChainRef id; input_mapping = [] }
+        ) node_ids in
+        Ok (Pipeline placeholder_nodes)
+      else if String.length content > 7 && String.sub content 0 7 = "Fanout:" then
+        (* [[Fanout:A,B,C]] - parallel execution *)
+        let node_ids = String.sub content 7 (String.length content - 7)
+          |> String.split_on_char ','
+          |> List.map trim
+          |> List.filter (fun s -> s <> "")
+        in
+        let placeholder_nodes = List.map (fun id ->
+          { id; node_type = ChainRef id; input_mapping = [] }
+        ) node_ids in
+        Ok (Fanout placeholder_nodes)
+      else if String.length content > 4 && String.sub content 0 4 = "Map:" then
+        (* [[Map:func,node]] - transform output *)
+        let parts = String.sub content 4 (String.length content - 4)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        (match parts with
+        | [func; node_id] ->
+            Ok (Map { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+        | _ ->
+            Error (Printf.sprintf "Map requires func,node format, got: %s" content))
+      else if String.length content > 5 && String.sub content 0 5 = "Bind:" then
+        (* [[Bind:func,node]] - dynamic routing *)
+        let parts = String.sub content 5 (String.length content - 5)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        (match parts with
+        | [func; node_id] ->
+            Ok (Bind { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+        | _ ->
+            Error (Printf.sprintf "Bind requires func,node format, got: %s" content))
       else
-        Error (Printf.sprintf "Subroutine node must be Ref:chain_id, got: %s" content)
+        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind, got: %s" content)
 
   | `Diamond ->
       (* {Quorum:N} or {Gate:condition} *)
