@@ -246,168 +246,18 @@ graph LR
   | Error _ -> ()  (* Expected *)
   | Ok _ -> Alcotest.fail "should fail on invalid quorum"
 
-let test_invalid_subroutine () =
+let test_subroutine_as_chain_ref () =
+  (* With WYSIWYE: any subroutine [[X]] becomes ChainRef "X" *)
   let mermaid = {|
 graph LR
-    A[[InvalidFormat]]
+    A[[my_reusable_chain]]
   |} in
-  match parse_chain mermaid with
-  | Error e ->
-      Alcotest.(check bool) "error mentions Ref" true
-        (String.length e > 0)
-  | Ok _ -> Alcotest.fail "should fail on invalid subroutine"
-
-(* ============================================================================
-   Extended Node Types (Full Mapping)
-   ============================================================================ *)
-
-let test_parse_pipeline_explicit () =
-  let mermaid = {|
-graph LR
-    A[[Pipeline:step1,step2,step3]]
-  |} in
-  let chain = check_ok "parse pipeline explicit" (parse_chain mermaid) in
+  let chain = check_ok "parse subroutine as ref" (parse_chain mermaid) in
   let node = List.hd chain.nodes in
   match node.node_type with
-  | Pipeline nodes ->
-      Alcotest.(check int) "3 nodes" 3 (List.length nodes);
-      let ids = List.map (fun (n : node) -> n.id) nodes in
-      Alcotest.(check (list string)) "node ids" ["step1"; "step2"; "step3"] ids
-  | _ -> Alcotest.fail "expected Pipeline node"
-
-let test_parse_fanout_explicit () =
-  let mermaid = {|
-graph LR
-    A[[Fanout:path1,path2,path3]]
-  |} in
-  let chain = check_ok "parse fanout" (parse_chain mermaid) in
-  let node = List.hd chain.nodes in
-  match node.node_type with
-  | Fanout nodes ->
-      Alcotest.(check int) "3 nodes" 3 (List.length nodes);
-      let ids = List.map (fun (n : node) -> n.id) nodes in
-      Alcotest.(check (list string)) "node ids" ["path1"; "path2"; "path3"] ids
-  | _ -> Alcotest.fail "expected Fanout node"
-
-let test_parse_map_node () =
-  let mermaid = {|
-graph LR
-    A[[Map:extract_summary,llm_node]]
-  |} in
-  let chain = check_ok "parse map" (parse_chain mermaid) in
-  let node = List.hd chain.nodes in
-  match node.node_type with
-  | Map { func; inner } ->
-      Alcotest.(check string) "func" "extract_summary" func;
-      Alcotest.(check string) "inner id" "llm_node" inner.id
-  | _ -> Alcotest.fail "expected Map node"
-
-let test_parse_bind_node () =
-  let mermaid = {|
-graph LR
-    A[[Bind:route_by_type,handler]]
-  |} in
-  let chain = check_ok "parse bind" (parse_chain mermaid) in
-  let node = List.hd chain.nodes in
-  match node.node_type with
-  | Bind { func; inner } ->
-      Alcotest.(check string) "func" "route_by_type" func;
-      Alcotest.(check string) "inner id" "handler" inner.id
-  | _ -> Alcotest.fail "expected Bind node"
-
-let test_parse_merge_node () =
-  let mermaid = {|
-graph LR
-    A[LLM:gemini "Path 1"] --> M{Merge:weighted_avg}
-    B[LLM:claude "Path 2"] --> M
-  |} in
-  let chain = check_ok "parse merge" (parse_chain mermaid) in
-  Alcotest.(check int) "three nodes" 3 (List.length chain.nodes);
-  let m_node = find_node "M" chain.nodes in
-  match m_node.node_type with
-  | Merge { strategy; nodes } ->
-      Alcotest.(check int) "2 inputs" 2 (List.length nodes);
-      (match strategy with
-      | WeightedAvg -> ()
-      | _ -> Alcotest.fail "expected WeightedAvg strategy")
-  | _ -> Alcotest.fail "expected Merge node"
-
-(* ============================================================================
-   Composition Tests
-   ============================================================================ *)
-
-let test_pipeline_in_workflow () =
-  (* Pipeline feeds into Quorum for validation *)
-  let mermaid = {|
-graph LR
-    P[[Pipeline:step1,step2]] --> Q{Quorum:2}
-  |} in
-  let chain = check_ok "parse pipeline workflow" (parse_chain mermaid) in
-  Alcotest.(check int) "two nodes" 2 (List.length chain.nodes);
-
-  (* Find Pipeline node *)
-  let p_node = find_node "P" chain.nodes in
-  (match p_node.node_type with
-  | Pipeline _ -> ()
-  | _ -> Alcotest.fail "P should be Pipeline");
-
-  (* Find Quorum node with input from Pipeline *)
-  let q_node = find_node "Q" chain.nodes in
-  (match q_node.node_type with
-  | Quorum { required; _ } ->
-      Alcotest.(check int) "quorum 2" 2 required
-  | _ -> Alcotest.fail "Q should be Quorum");
-  Alcotest.(check int) "Q has 1 input" 1 (List.length q_node.input_mapping)
-
-let test_fanout_with_merge () =
-  (* Fanout branches merge into Quorum *)
-  let mermaid = {|
-graph LR
-    F[[Fanout:a,b,c]] --> M{Quorum:2}
-  |} in
-  let chain = check_ok "parse fanout merge" (parse_chain mermaid) in
-  Alcotest.(check int) "two nodes" 2 (List.length chain.nodes);
-  Alcotest.(check string) "output is M" "M" chain.output
-
-let test_map_in_pipeline () =
-  (* LLM -> Map -> Output *)
-  let mermaid = {|
-graph LR
-    L[LLM:gemini "Generate"] --> M[[Map:parse_json,result]]
-  |} in
-  let chain = check_ok "parse map pipeline" (parse_chain mermaid) in
-  Alcotest.(check int) "two nodes" 2 (List.length chain.nodes);
-
-  let m_node = find_node "M" chain.nodes in
-  (match m_node.node_type with
-  | Map { func; _ } ->
-      Alcotest.(check string) "func" "parse_json" func
-  | _ -> Alcotest.fail "M should be Map")
-
-let test_complex_composition () =
-  (* Real-world: LLM -> Pipeline -> Map for post-processing *)
-  (* All edges explicit, composable structure *)
-  let mermaid = {|
-graph LR
-    input[LLM:gemini "Parse"] --> pipe[[Pipeline:step1,step2]]
-    pipe --> transform[[Map:format_json,result]]
-  |} in
-  let chain = check_ok "parse complex" (parse_chain mermaid) in
-  Alcotest.(check int) "three nodes" 3 (List.length chain.nodes);
-  Alcotest.(check string) "output is transform" "transform" chain.output;
-
-  (* Verify node types *)
-  let p_node = find_node "pipe" chain.nodes in
-  (match p_node.node_type with
-  | Pipeline nodes ->
-      Alcotest.(check int) "2 steps" 2 (List.length nodes)
-  | _ -> Alcotest.fail "pipe should be Pipeline");
-
-  let t_node = find_node "transform" chain.nodes in
-  (match t_node.node_type with
-  | Map { func; _ } ->
-      Alcotest.(check string) "func" "format_json" func
-  | _ -> Alcotest.fail "transform should be Map")
+  | ChainRef ref_id ->
+      Alcotest.(check string) "ref id" "my_reusable_chain" ref_id
+  | _ -> Alcotest.fail "expected ChainRef"
 
 (* ============================================================================
    Test Suite
@@ -441,22 +291,80 @@ let edge_case_tests = [
 
 let error_tests = [
   "invalid quorum", `Quick, test_invalid_quorum;
-  "invalid subroutine", `Quick, test_invalid_subroutine;
+  "subroutine as ChainRef", `Quick, test_subroutine_as_chain_ref;
 ]
 
-let extended_type_tests = [
-  "parse Pipeline explicit", `Quick, test_parse_pipeline_explicit;
-  "parse Fanout explicit", `Quick, test_parse_fanout_explicit;
-  "parse Map", `Quick, test_parse_map_node;
-  "parse Bind", `Quick, test_parse_bind_node;
-  "parse Merge", `Quick, test_parse_merge_node;
-]
+(* ============================================================================
+   Direction Preservation Tests (종/횡)
+   ============================================================================ *)
 
-let composition_tests = [
-  "Pipeline in workflow", `Quick, test_pipeline_in_workflow;
-  "Fanout with merge", `Quick, test_fanout_with_merge;
-  "Map in pipeline", `Quick, test_map_in_pipeline;
-  "Complex composition", `Quick, test_complex_composition;
+let test_direction_lr () =
+  let mermaid = {|
+graph LR
+    A[LLM:gemini "Hello"]
+  |} in
+  let chain = check_ok "parse LR" (parse_chain mermaid) in
+  Alcotest.(check string) "direction LR" "LR"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_tb () =
+  let mermaid = {|
+graph TB
+    A[LLM:claude "Top to bottom"]
+  |} in
+  let chain = check_ok "parse TB" (parse_chain mermaid) in
+  Alcotest.(check string) "direction TB" "TB"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_td_alias () =
+  let mermaid = {|
+flowchart TD
+    A[LLM:gemini "Test"]
+  |} in
+  let chain = check_ok "parse TD" (parse_chain mermaid) in
+  (* TD is alias for TB *)
+  Alcotest.(check string) "direction TD->TB" "TB"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_bt () =
+  let mermaid = {|
+graph BT
+    A[LLM:codex "Bottom to top"]
+  |} in
+  let chain = check_ok "parse BT" (parse_chain mermaid) in
+  Alcotest.(check string) "direction BT" "BT"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_direction_rl () =
+  let mermaid = {|
+graph RL
+    A[LLM:gemini "Right to left"]
+  |} in
+  let chain = check_ok "parse RL" (parse_chain mermaid) in
+  Alcotest.(check string) "direction RL" "RL"
+    (Chain_types.direction_to_string chain.config.direction)
+
+let test_round_trip_preserves_direction () =
+  let mermaid = {|
+graph TB
+    A[LLM:gemini "Hello"] --> B[LLM:claude "World"]
+  |} in
+  let result = round_trip mermaid in
+  match result with
+  | Error e -> Alcotest.fail (Printf.sprintf "round trip failed: %s" e)
+  | Ok output ->
+      (* Should contain "graph TB" *)
+      Alcotest.(check bool) "contains graph TB" true
+        (String.length output > 8 &&
+         String.sub output 0 8 = "graph TB")
+
+let direction_tests = [
+  "direction LR (횡)", `Quick, test_direction_lr;
+  "direction TB (종)", `Quick, test_direction_tb;
+  "direction TD alias", `Quick, test_direction_td_alias;
+  "direction BT (역종)", `Quick, test_direction_bt;
+  "direction RL (역횡)", `Quick, test_direction_rl;
+  "round trip preserves direction", `Quick, test_round_trip_preserves_direction;
 ]
 
 let () =
@@ -466,6 +374,5 @@ let () =
     ("Complex Workflows", complex_tests);
     ("Edge Cases", edge_case_tests);
     ("Error Cases", error_tests);
-    ("Extended Types", extended_type_tests);
-    ("Composition", composition_tests);
+    ("Direction (종/횡)", direction_tests);
   ]
