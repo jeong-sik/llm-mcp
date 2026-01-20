@@ -599,7 +599,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "ollama" ->
                           let args = parse_ollama_args args in
                           execute ~sw ~proc_mgr ~clock args
-                      | "ollama-list" ->
+                      | "ollama_list" ->
                           let args = parse_ollama_list_args args in
                           execute ~sw ~proc_mgr ~clock args
                       | _ ->
@@ -697,12 +697,128 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
             ]; })
 
-  | ChainOrchestrate { goal; _ } ->
-      (* Chain orchestration is handled separately by the orchestrator *)
-      { model = "chain.orchestrate";
-        returncode = 1;
-        response = Printf.sprintf "ChainOrchestrate not implemented in tools_eio. Goal: %s" goal;
-        extra = []; }
+  | ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete } ->
+      (* Build orchestration config *)
+      let config : Chain_orchestrator_eio.orchestration_config = {
+        max_replans;
+        timeout_ms = timeout * 1000;
+        trace_enabled = trace;
+        verify_on_complete;
+      } in
+
+      (* Create llm_call adapter: ~prompt:string -> string
+         Uses Gemini as the default orchestrator LLM *)
+      let llm_call ~prompt =
+        let args = Types.Gemini {
+          prompt;
+          model = "gemini-3-pro-preview";
+          thinking_level = Types.High;
+          yolo = false;
+          timeout = 120;
+          stream = false;
+        } in
+        let result = execute ~sw ~proc_mgr ~clock args in
+        if result.returncode = 0 then result.response
+        else failwith (Printf.sprintf "LLM call failed: %s" result.response)
+      in
+
+      (* Helper: parse "server.tool" format *)
+      let split_tool_name name =
+        match String.index_opt name '.' with
+        | None -> None
+        | Some idx ->
+            let server = String.sub name 0 idx in
+            let tool_len = String.length name - idx - 1 in
+            if server = "" || tool_len <= 0 then None
+            else Some (server, String.sub name (idx + 1) tool_len)
+      in
+
+      (* Create tool_exec adapter: ~name:string -> ~args:Yojson.Safe.t -> Yojson.Safe.t *)
+      let tool_exec ~name ~args:tool_args =
+        let node_timeout = timeout in
+        match split_tool_name name with
+        | Some (server_name, tool_name) ->
+            let output = call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments:tool_args ~timeout:node_timeout in
+            (try Yojson.Safe.from_string output with _ -> `String output)
+        | None ->
+            (* Direct tool execution *)
+            let result = match name with
+              | "gemini" ->
+                  let parsed = parse_gemini_args tool_args in
+                  execute ~sw ~proc_mgr ~clock parsed
+              | "claude-cli" | "claude" ->
+                  let parsed = parse_claude_args tool_args in
+                  execute ~sw ~proc_mgr ~clock parsed
+              | "codex" ->
+                  let parsed = parse_codex_args tool_args in
+                  execute ~sw ~proc_mgr ~clock parsed
+              | "ollama" ->
+                  let parsed = parse_ollama_args tool_args in
+                  execute ~sw ~proc_mgr ~clock parsed
+              | _ ->
+                  { model = name; returncode = 1; response = Printf.sprintf "Unknown tool: %s" name; extra = [] }
+            in
+            if result.returncode = 0 then
+              (try Yojson.Safe.from_string result.response with _ -> `String result.response)
+            else
+              `Assoc [("error", `String result.response)]
+      in
+
+      (* Create tasks from chain if provided, otherwise empty *)
+      let tasks = match chain with
+        | Some chain_json ->
+            (try
+              let open Yojson.Safe.Util in
+              let nodes = chain_json |> member "nodes" |> to_list in
+              List.mapi (fun i node ->
+                let title = node |> member "id" |> to_string_option |> Option.value ~default:(Printf.sprintf "task-%d" i) in
+                Chain_composer.{
+                  task_id = Printf.sprintf "task-%03d" (i + 1);
+                  title;
+                  description = Some (Yojson.Safe.to_string node);
+                  priority = i + 1;
+                  status = "todo";
+                  assignee = None;
+                  metadata = [];
+                }
+              ) nodes
+            with _ -> [])
+        | None -> []
+      in
+
+      (* Run orchestration *)
+      (match Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks with
+      | Ok result ->
+          let metrics_json = match result.final_metrics with
+            | Some m -> Chain_evaluator.chain_metrics_to_yojson m |> Yojson.Safe.to_string
+            | None -> "null"
+          in
+          let verification_json = match result.verification with
+            | Some v -> Chain_evaluator.verification_result_to_yojson v |> Yojson.Safe.to_string
+            | None -> "null"
+          in
+          { model = "chain.orchestrate";
+            returncode = if result.success then 0 else 1;
+            response = result.summary;
+            extra = [
+              ("success", string_of_bool result.success);
+              ("total_replans", string_of_int result.total_replans);
+              ("metrics", metrics_json);
+              ("verification", verification_json);
+            ]; }
+      | Error err ->
+          let error_msg = match err with
+            | Chain_orchestrator_eio.DesignFailed msg -> Printf.sprintf "Design failed: %s" msg
+            | Chain_orchestrator_eio.CompileFailed msg -> Printf.sprintf "Compile failed: %s" msg
+            | Chain_orchestrator_eio.ExecutionFailed msg -> Printf.sprintf "Execution failed: %s" msg
+            | Chain_orchestrator_eio.VerificationFailed msg -> Printf.sprintf "Verification failed: %s" msg
+            | Chain_orchestrator_eio.MaxReplansExceeded -> "Max replans exceeded"
+            | Chain_orchestrator_eio.Timeout -> "Orchestration timeout"
+          in
+          { model = "chain.orchestrate";
+            returncode = 1;
+            response = error_msg;
+            extra = [("error_type", Yojson.Safe.to_string (Chain_orchestrator_eio.orchestration_error_to_yojson err))]; })
 
 (** {1 Convenience Wrappers} *)
 
@@ -1149,7 +1265,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   | "ollama" ->
                       let args = parse_ollama_args args in
                       execute ~sw ~proc_mgr ~clock args
-                  | "ollama-list" ->
+                  | "ollama_list" ->
                       let args = parse_ollama_list_args args in
                       execute ~sw ~proc_mgr ~clock args
                   | _ ->
