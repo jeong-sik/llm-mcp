@@ -55,13 +55,13 @@ Chain DSL 스펙: docs/CHAIN_RFC.md (실용 오케스트레이션 DSL 및 예시
         "id": "ollama_gate",
         "type": "gate",
         "condition": "backend == 'ollama'",
-        "node": { "id": "ollama", "type": "llm", "model": "ollama", "prompt": "{{input}}" }
+        "then": { "id": "ollama", "type": "llm", "model": "ollama", "prompt": "{{input}}" }
       },
       {
         "id": "claude_gate",
         "type": "gate",
         "condition": "backend == 'claude'",
-        "node": { "id": "claude", "type": "llm", "model": "claude", "prompt": "{{input}}" }
+        "then": { "id": "claude", "type": "llm", "model": "claude", "prompt": "{{input}}" }
       }
     ],
     "output": "claude_gate"
@@ -148,15 +148,15 @@ let quorum = Presets.Quorum.create ~sw ~required:2 [
     "id": "quorum_review",
     "nodes": [
       {
-        "id": "fanout",
-        "type": "fanout",
-        "branches": [
+        "id": "vote",
+        "type": "quorum",
+        "required": 2,
+        "nodes": [
           { "id": "g", "type": "llm", "model": "gemini", "prompt": "Review: {{input}}" },
           { "id": "c", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" },
           { "id": "x", "type": "llm", "model": "codex", "prompt": "Review: {{input}}" }
         ]
-      },
-      { "id": "vote", "type": "quorum", "required": 2, "nodes": ["g", "c", "x"] }
+      }
     ],
     "output": "vote"
   }
@@ -201,7 +201,7 @@ let gated = Presets.Gate.feature_flag
         "id": "gate",
         "type": "gate",
         "condition": "feature_flag('experimental_review')",
-        "node": { "id": "review", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" }
+        "then": { "id": "review", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" }
       }
     ],
     "output": "gate"
@@ -254,24 +254,30 @@ let layered = Presets.Layered.create ~sw [
     "id": "layered_review",
     "nodes": [
       {
-        "id": "fast",
-        "type": "fanout",
-        "branches": [
-          { "id": "format", "type": "llm", "model": "gemini", "prompt": "Format: {{input}}" },
-          { "id": "required", "type": "llm", "model": "gemini", "prompt": "Required fields: {{input}}" }
+        "id": "layered",
+        "type": "pipeline",
+        "nodes": [
+          {
+            "id": "fast",
+            "type": "fanout",
+            "branches": [
+              { "id": "format", "type": "llm", "model": "gemini", "prompt": "Format: {{input}}" },
+              { "id": "required", "type": "llm", "model": "gemini", "prompt": "Required fields: {{input}}" }
+            ]
+          },
+          {
+            "id": "medium",
+            "type": "fanout",
+            "branches": [
+              { "id": "db", "type": "tool", "name": "db-check", "args": {} },
+              { "id": "rules", "type": "llm", "model": "claude", "prompt": "Rules: {{input}}" }
+            ]
+          },
+          { "id": "slow", "type": "llm", "model": "codex", "prompt": "LLM deep check: {{input}}" }
         ]
-      },
-      {
-        "id": "medium",
-        "type": "fanout",
-        "branches": [
-          { "id": "db", "type": "tool", "name": "db-check", "args": {} },
-          { "id": "rules", "type": "llm", "model": "claude", "prompt": "Rules: {{input}}" }
-        ]
-      },
-      { "id": "slow", "type": "llm", "model": "codex", "prompt": "LLM deep check: {{input}}" }
+      }
     ],
-    "output": "slow"
+    "output": "layered"
   }
 }
 ```
@@ -316,15 +322,15 @@ let diamond = Presets.Diamond.create ~sw
     "id": "diamond_review",
     "nodes": [
       {
-        "id": "fanout",
-        "type": "fanout",
-        "branches": [
+        "id": "merge",
+        "type": "merge",
+        "strategy": "weighted_average",
+        "nodes": [
           { "id": "grammar", "type": "llm", "model": "gemini", "prompt": "Grammar: {{input}}" },
           { "id": "factual", "type": "llm", "model": "claude", "prompt": "Factual: {{input}}" },
           { "id": "style", "type": "llm", "model": "codex", "prompt": "Style: {{input}}" }
         ]
-      },
-      { "id": "merge", "type": "merge", "strategy": "weighted_average", "nodes": ["grammar", "factual", "style"] }
+      }
     ],
     "output": "merge"
   }

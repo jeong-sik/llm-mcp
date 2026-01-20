@@ -65,6 +65,8 @@ flowchart LR
 }
 ```
 
+v0.1에서는 `inputs`를 직접 파싱하지 않고, LLM 프롬프트의 `{{ref}}`에서 의존성을 추출한다.
+
 ### 노드 타입과 의도
 
 - llm: 모델 호출
@@ -177,14 +179,14 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
     "id": "meta_orchestrator",
     "nodes": [
       {
-        "id": "orchs",
-        "type": "fanout",
-        "branches": [
+        "id": "merge",
+        "type": "merge",
+        "strategy": "concat",
+        "nodes": [
           { "id": "orch_a", "type": "subgraph", "graph": { "id": "a", "nodes": [ ... ], "output": "a_out" } },
           { "id": "orch_b", "type": "chain_ref", "ref": "review_orch_v1" }
         ]
-      },
-      { "id": "merge", "type": "merge", "strategy": "concat", "nodes": ["orch_a", "orch_b"] }
+      }
     ],
     "output": "merge"
   }
@@ -212,15 +214,15 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
     "id": "quorum_review",
     "nodes": [
       {
-        "id": "fanout",
-        "type": "fanout",
-        "branches": [
+        "id": "vote",
+        "type": "quorum",
+        "required": 2,
+        "nodes": [
           { "id": "g", "type": "llm", "model": "gemini", "prompt": "Review: {{input}}" },
           { "id": "c", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" },
           { "id": "x", "type": "llm", "model": "codex", "prompt": "Review: {{input}}" }
         ]
-      },
-      { "id": "vote", "type": "quorum", "required": 2, "nodes": ["g", "c", "x"] }
+      }
     ],
     "output": "vote"
   }
@@ -250,7 +252,7 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
         "id": "gate",
         "type": "gate",
         "condition": "branch_coverage >= 0.95",
-        "node": { "id": "done", "type": "llm", "model": "gemini", "prompt": "Summarize results: {{coverage.output}}" }
+        "then": { "id": "done", "type": "llm", "model": "gemini", "prompt": "Summarize results: {{coverage.output}}" }
       }
     ],
     "output": "gate"
@@ -277,7 +279,7 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
         "id": "decide",
         "type": "bind",
         "func": "score_or_rescope",
-        "node": { "id": "score_node", "type": "map", "func": "normalize", "node": { "id": "score_raw", "type": "llm", "model": "gemini", "prompt": "Analyze: {{score.output}}" } }
+        "inner": { "id": "score_node", "type": "map", "func": "normalize", "inner": { "id": "score_raw", "type": "llm", "model": "gemini", "prompt": "Analyze: {{score.output}}" } }
       }
     ],
     "output": "decide"

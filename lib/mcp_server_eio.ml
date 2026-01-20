@@ -207,22 +207,26 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let name = params |> member "name" |> to_string in
   let arguments = params |> member "arguments" in
 
-  (* Parse arguments based on tool *)
-  let args : Types.tool_args = match name with
-    | "gemini" -> Tools_eio.parse_gemini_args arguments
-    | "claude-cli" -> Tools_eio.parse_claude_args arguments
-    | "codex" -> Tools_eio.parse_codex_args arguments
-    | "ollama" -> Tools_eio.parse_ollama_args arguments
-    | "ollama-list" -> Tools_eio.parse_ollama_list_args arguments
-    | "chain.run" -> Tool_parsers.parse_chain_run_args arguments
-    | "chain.validate" -> Tool_parsers.parse_chain_validate_args arguments
-    | _ -> failwith (sprintf "Unknown tool: %s" name)
-  in
-
   (* Execute via direct Eio call *)
   let result =
     try
-      Tools_eio.execute ~sw ~proc_mgr ~clock args
+      match name with
+      | "chain.run" ->
+          let (chain_json, trace, timeout) = Tools_eio.parse_chain_run_args arguments in
+          Tools_eio.execute_chain ~sw ~proc_mgr ~clock ~chain_json ~trace ~timeout
+      | "chain.validate" ->
+          let chain_json = Tools_eio.parse_chain_validate_args arguments in
+          Tools_eio.validate_chain ~chain_json
+      | _ ->
+          let args : Types.tool_args = match name with
+            | "gemini" -> Tools_eio.parse_gemini_args arguments
+            | "claude-cli" -> Tools_eio.parse_claude_args arguments
+            | "codex" -> Tools_eio.parse_codex_args arguments
+            | "ollama" -> Tools_eio.parse_ollama_args arguments
+            | "ollama-list" -> Tools_eio.parse_ollama_list_args arguments
+            | _ -> failwith (sprintf "Unknown tool: %s" name)
+          in
+          Tools_eio.execute ~sw ~proc_mgr ~clock args
     with exn ->
       { Types.model = "error";
         returncode = 1;

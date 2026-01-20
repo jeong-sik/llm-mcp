@@ -22,6 +22,8 @@ let parse_claude_args = Tool_parsers.parse_claude_args
 let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
+let parse_chain_run_args = Tool_parsers.parse_chain_run_args
+let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -895,3 +897,126 @@ let execute_ollama_agentic_with_env ~sw ~env ~tools ?external_mcp_url ?on_turn a
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   execute_ollama_agentic ~sw ~proc_mgr ~clock ~tools ?external_mcp_url ?on_turn args
+
+(* ============================================================================
+   Chain Engine - Workflow Orchestration DSL Execution
+   ============================================================================ *)
+
+(** Execute a chain DSL definition *)
+let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~timeout =
+  match Chain_parser.parse_chain chain_json with
+  | Error msg ->
+      {
+        model = "chain.run";
+        returncode = -1;
+        response = sprintf "Chain parse error: %s" msg;
+        extra = [("error", "parse_error")];
+      }
+  | Ok chain ->
+      (match Chain_compiler.compile chain with
+      | Error msg ->
+          {
+            model = "chain.run";
+            returncode = -1;
+            response = sprintf "Chain compile error: %s" msg;
+            extra = [("error", "compile_error")];
+          }
+      | Ok plan ->
+          let exec_fn ~model ~prompt =
+            match model with
+            | "stub" | "mock" ->
+                Ok (sprintf "[%s]%s" model prompt)
+            | "gemini" ->
+                let args = Gemini {
+                  prompt;
+                  model = "gemini-3-pro-preview";
+                  thinking_level = High;
+                  yolo = false;
+                  timeout;
+                  stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | "claude" ->
+                let working_directory =
+                  Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp"
+                in
+                let args = Claude {
+                  prompt;
+                  model = "opus";
+                  ultrathink = true;
+                  system_prompt = None;
+                  output_format = Text;
+                  allowed_tools = [];
+                  working_directory;
+                  timeout;
+                  stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | "codex" ->
+                let args = Codex {
+                  prompt;
+                  model = "gpt-5.2-codex";
+                  reasoning_effort = RXhigh;
+                  sandbox = WorkspaceWrite;
+                  working_directory = None;
+                  timeout;
+                  stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | _ ->
+                let args = Ollama {
+                  prompt;
+                  model;
+                  system_prompt = None;
+                  temperature = 0.7;
+                  timeout;
+                  stream = false;
+                  tools = None;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+          in
+          let result = Chain_executor_eio.execute ~sw ~clock ~timeout ~trace ~exec_fn plan in
+          {
+            model = sprintf "chain.run (%s)" chain.Chain_types.id;
+            returncode = (if result.success then 0 else -1);
+            response = result.output;
+            extra = [
+              ("chain_id", chain.Chain_types.id);
+              ("duration_ms", string_of_int result.duration_ms);
+              ("trace", if trace then "enabled" else "disabled");
+            ];
+          })
+
+(** Validate a chain DSL definition without executing *)
+let validate_chain ~(chain_json : Yojson.Safe.t) =
+  match Chain_parser.parse_chain chain_json with
+  | Error msg ->
+      {
+        model = "chain.validate";
+        returncode = -1;
+        response = sprintf "Parse error: %s" msg;
+        extra = [("valid", "false"); ("error_type", "parse")];
+      }
+  | Ok chain ->
+      (match Chain_compiler.compile chain with
+      | Error msg ->
+          {
+            model = "chain.validate";
+            returncode = -1;
+            response = sprintf "Compile error: %s" msg;
+            extra = [("valid", "false"); ("error_type", "compile")];
+          }
+      | Ok _plan ->
+          {
+            model = "chain.validate";
+            returncode = 0;
+            response = sprintf "Chain '%s' is valid" chain.Chain_types.id;
+            extra = [
+              ("valid", "true");
+              ("chain_id", chain.Chain_types.id);
+            ];
+          })
