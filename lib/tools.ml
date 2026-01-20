@@ -46,21 +46,26 @@ let call_external_mcp ~server_name ~tool_name ~arguments ~timeout =
               try
                 let json = Yojson.Safe.from_string json_str in
                 let open Yojson.Safe.Util in
-                let content = json |> member "result" |> member "content" in
-                match content with
-                | `List items ->
-                    let texts = List.filter_map (fun item ->
-                      match item |> member "type" |> to_string_option with
-                      | Some "text" -> item |> member "text" |> to_string_option
-                      | _ -> None
-                    ) items in
-                    Lwt.return (String.concat "\n" texts)
-                | _ -> Lwt.return json_str
+                let result = json |> member "result" in
+                let error = json |> member "error" in
+                if error <> `Null then
+                  let msg = try error |> member "message" |> to_string
+                            with _ -> "Unknown error" in
+                  Lwt.return (Printf.sprintf "Error: %s" msg)
+                else
+                  let content = result |> member "content" in
+                  match content with
+                  | `List items ->
+                      let texts = List.filter_map (fun item ->
+                        match item |> member "type" |> to_string_option with
+                        | Some "text" -> item |> member "text" |> to_string_option
+                        | _ -> None
+                      ) items in
+                      Lwt.return (String.concat "\n" texts)
+                  | _ -> Lwt.return json_str
               with _ -> Lwt.return r.stdout
 
-(* Call an external MCP tool via stdio (subprocess) - SHELL INJECTION SAFE
-   Uses direct process spawn with argv array, no shell involved.
-   Fixed based on MAGI Trinity decision: Option C (Process module with argv list) *)
+(* Call an external MCP tool via stdio (subprocess) - SHELL INJECTION SAFE *)
 let call_stdio_mcp ~server_name ~command ~args ~tool_name ~arguments ~timeout =
   let request_body = `Assoc [
     ("jsonrpc", `String "2.0");
@@ -73,8 +78,7 @@ let call_stdio_mcp ~server_name ~command ~args ~tool_name ~arguments ~timeout =
   ] |> Yojson.Safe.to_string in
 
   let open Lwt.Syntax in
-  (* Use run_command_with_stdin - passes argv directly, NO SHELL *)
-  let effective_timeout = min timeout 60 in  (* Cap stdio timeout at 60s *)
+  let effective_timeout = min timeout 60 in
   let* result = Cli_runner.run_command_with_stdin
     ~timeout:effective_timeout
     ~stdin_data:request_body
@@ -90,23 +94,28 @@ let call_stdio_mcp ~server_name ~command ~args ~tool_name ~arguments ~timeout =
       if r.exit_code <> 0 then
         Lwt.return (Printf.sprintf "Error: stdio MCP call exited with code %d: %s" r.exit_code r.stderr)
       else
-        (* Parse JSON-RPC response *)
         try
           let json = Yojson.Safe.from_string r.stdout in
           let open Yojson.Safe.Util in
-          let content = json |> member "result" |> member "content" in
-          match content with
-          | `List items ->
-              let texts = List.filter_map (fun item ->
-                match item |> member "type" |> to_string_option with
-                | Some "text" -> item |> member "text" |> to_string_option
-                | _ -> None
-              ) items in
-              Lwt.return (String.concat "\n" texts)
-          | _ ->
-              (* Try direct result *)
-              let result_str = json |> member "result" |> to_string_option in
-              Lwt.return (Option.value result_str ~default:r.stdout)
+          let result = json |> member "result" in
+          let error = json |> member "error" in
+          if error <> `Null then
+            let msg = try error |> member "message" |> to_string
+                      with _ -> "Unknown error" in
+            Lwt.return (Printf.sprintf "Error: %s" msg)
+          else
+            let content = result |> member "content" in
+            match content with
+            | `List items ->
+                let texts = List.filter_map (fun item ->
+                  match item |> member "type" |> to_string_option with
+                  | Some "text" -> item |> member "text" |> to_string_option
+                  | _ -> None
+                ) items in
+                Lwt.return (String.concat "\n" texts)
+            | _ ->
+                let result_str = result |> to_string_option in
+                Lwt.return (Option.value result_str ~default:r.stdout)
         with _ -> Lwt.return r.stdout
 
 (* Unified MCP call - routes to HTTP or stdio based on server config *)
@@ -116,17 +125,14 @@ let call_mcp ~server_name ~tool_name ~arguments ~timeout =
   | Some config ->
       match config.server_type, config.url, config.command with
       | "http", Some _url, _ ->
-          (* Use HTTP endpoint *)
           call_external_mcp ~server_name ~tool_name ~arguments ~timeout
       | _, _, Some cmd ->
-          (* Use stdio subprocess *)
           call_stdio_mcp ~server_name ~command:cmd ~args:config.args ~tool_name ~arguments ~timeout
       | _ ->
           Lwt.return (Printf.sprintf "Error: MCP server '%s' has no valid URL or command" server_name)
 
-(** {1 Re-exports from Tool_parsers (Pure, no Lwt)} *)
+(** {1 Tool Parsers Re-exports} *)
 
-(* Pure functions - from Tool_parsers module *)
 let parse_gemini_args = Tool_parsers.parse_gemini_args
 let parse_claude_args = Tool_parsers.parse_claude_args
 let parse_codex_args = Tool_parsers.parse_codex_args
@@ -140,12 +146,10 @@ let parse_ollama_response = Tool_parsers.parse_ollama_response
 let parse_ollama_chunk = Tool_parsers.parse_ollama_chunk
 let clean_codex_output = Tool_parsers.clean_codex_output
 
-(* Ollama helpers *)
 let thinking_prompt_prefix = Tool_parsers.thinking_prompt_prefix
 let tool_schema_to_ollama_tool = Tool_parsers.tool_schema_to_ollama_tool
 let tool_calls_to_json = Tool_parsers.tool_calls_to_json
 
-(* Gemini error handling - from Types module *)
 let classify_gemini_error = Types.classify_gemini_error
 let is_recoverable_gemini_error = Types.is_recoverable_gemini_error
 let string_of_gemini_error = Types.string_of_gemini_error
@@ -153,7 +157,6 @@ let string_of_gemini_error = Types.string_of_gemini_error
 let execute_ollama_streaming ~on_token args =
   let open Lwt.Syntax in
   let open Cli_runner in
-  (* Build command and get model info based on tool type *)
   let (cmd_list, model_name, extra_base, has_tools, err_msg) = match args with
     | Ollama { model; temperature; tools; timeout = _; _ } ->
         let has_tools = match tools with Some l when List.length l > 0 -> true | _ -> false in
@@ -182,7 +185,6 @@ let execute_ollama_streaming ~on_token args =
         let accumulated_tool_calls = ref [] in
         let on_line line =
           if has_tools then
-            (* Parse chat API response (with tools support) *)
             match Ollama_parser.parse_chat_chunk line with
             | Ok (token, tool_calls, _done) ->
                 Buffer.add_string full_response token;
@@ -190,7 +192,6 @@ let execute_ollama_streaming ~on_token args =
                 on_token token
             | Error _ -> Lwt.return_unit
           else
-            (* Parse generate API response (no tools) *)
             match parse_ollama_chunk line with
             | Ok (token, _done) ->
                 Buffer.add_string full_response token;
@@ -219,31 +220,13 @@ let execute_ollama_streaming ~on_token args =
               response = Printf.sprintf "Error: %s" msg;
               extra = extra_base; }
       end
-(** {1 Lwt-specific execution functions} *)
 
-(** Default retry configuration for Gemini errors *)
-let default_max_retries = 2
-let default_base_delay = 1.0  (* seconds *)
+(** {1 Gemini with Resilience} *)
 
-(** Calculate exponential backoff delay: base * 2^attempt *)
-let exponential_backoff ~base_delay attempt =
-  base_delay *. (Float.pow 2.0 (Float.of_int attempt))
+let gemini_breaker = Resilience.create_circuit_breaker ~name:"gemini_cli_lwt" ~failure_threshold:3 ()
 
-(** Execute Gemini with automatic retry for recoverable errors.
-
-    Implements exponential backoff retry for:
-    - FunctionCallSyncError: Known Gemini CLI bug, retry with fresh request
-    - RateLimitError: API quota, retry after delay
-
-    Non-recoverable errors (ContextTooLongError, AuthenticationError) are
-    returned immediately without retry.
-
-    @param max_retries Maximum retry attempts (default: 2)
-    @param base_delay Initial delay in seconds (default: 1.0)
-*)
 let execute_gemini_with_retry
-    ?(max_retries = default_max_retries)
-    ?(base_delay = default_base_delay)
+    ?(max_retries = 2)
     ~model ~thinking_level ~timeout ~args () : tool_result Lwt.t =
   let open Lwt.Syntax in
   let open Cli_runner in
@@ -252,79 +235,45 @@ let execute_gemini_with_retry
 
   match build_gemini_cmd args with
   | Error err ->
-      let extra = [
-        ("thinking_level", string_of_thinking_level thinking_level);
-        ("thinking_prompt_applied", string_of_bool thinking_applied);
-        ("invalid_args", "true");
-      ] in
       Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-        returncode = -1;
-        response = err;
-        extra; }
+        returncode = -1; response = err; extra = [("invalid_args", "true")]; }
   | Ok cmd_list ->
       let cmd = List.hd cmd_list in
       let cmd_args = List.tl cmd_list in
-      let rec attempt n =
+      let policy = { Resilience.default_policy with max_attempts = max_retries + 1 } in
+      
+      let op () =
         let* result = run_command ~timeout cmd cmd_args in
         match result with
         | Ok r ->
-        let response = get_output r in
-        (* Check for Gemini-specific errors in response *)
-        (match classify_gemini_error response with
-        | Some error when is_recoverable_gemini_error error && n < max_retries ->
-            (* Recoverable error - retry with backoff *)
-            let delay = exponential_backoff ~base_delay n in
-            let _error_name = string_of_gemini_error error in  (* For future logging *)
-            let* () = Lwt_unix.sleep delay in
-            (* Retry with fresh request *)
-            attempt (n + 1)
-        | Some error ->
-            (* Non-recoverable error or max retries reached *)
-            let error_name = string_of_gemini_error error in
-            let extra = [
-              ("thinking_level", string_of_thinking_level thinking_level);
-              ("thinking_prompt_applied", string_of_bool thinking_applied);
-              ("gemini_error", error_name);
-              ("retry_attempts", string_of_int n);
-              ("recoverable", string_of_bool (is_recoverable_gemini_error error));
-            ] in
-            Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-              returncode = (if r.exit_code = 0 then 1 else r.exit_code);  (* Force error code *)
-              response;
-              extra; }
-        | None ->
-            (* Success - no error detected *)
-            let extra = [
-              ("thinking_level", string_of_thinking_level thinking_level);
-              ("thinking_prompt_applied", string_of_bool thinking_applied);
-            ] @ (if n > 0 then [("retry_attempts", string_of_int n)] else [])
-            in
-            Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-              returncode = r.exit_code;
-              response;
-              extra; })
-        | Error (Timeout t) ->
-            let extra = [
-              ("thinking_level", string_of_thinking_level thinking_level);
-              ("thinking_prompt_applied", string_of_bool thinking_applied);
-              ("retry_attempts", string_of_int n);
-            ] in
-            Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-              returncode = -1;
-              response = Printf.sprintf "Timeout after %ds" t;
-              extra; }
-        | Error (ProcessError msg) ->
-            let extra = [
-              ("thinking_level", string_of_thinking_level thinking_level);
-              ("thinking_prompt_applied", string_of_bool thinking_applied);
-              ("retry_attempts", string_of_int n);
-            ] in
-            Lwt.return { model = Printf.sprintf "gemini (%s)" model;
-              returncode = -1;
-              response = Printf.sprintf "Error: %s" msg;
-              extra; }
+            let response = get_output r in
+            (match classify_gemini_error response with
+            | Some error when is_recoverable_gemini_error error ->
+                Lwt.return (Result.Error (string_of_gemini_error error))
+            | _ -> Lwt.return (Result.Ok (r.exit_code, response)))
+        | Error (Timeout t) -> Lwt.return (Result.Error (Printf.sprintf "Timeout after %ds" t))
+        | Error (ProcessError msg) -> Lwt.return (Result.Error (Printf.sprintf "Error: %s" msg))
       in
-      attempt 0
+      
+      let* result = Resilience.with_retry_lwt
+        ~policy ~circuit_breaker:(Some gemini_breaker) ~op_name:"gemini_call_lwt" op in
+      
+      match result with
+      | Success (Ok (exit_code, response)) ->
+          let extra = [
+            ("thinking_level", string_of_thinking_level thinking_level);
+            ("thinking_prompt_applied", string_of_bool thinking_applied);
+          ] in
+          Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
+      | Success (Error err) ->
+          Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = err; extra = [] }
+      | CircuitOpen ->
+          Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
+      | Exhausted { attempts; last_error } ->
+          Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; 
+            response = Printf.sprintf "Exhausted after %d attempts: %s" attempts last_error; extra = [] }
+      | TimedOut _ ->
+          Lwt.return { model = Printf.sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
 
 (** Execute a tool and return result *)
 let execute args : tool_result Lwt.t =
@@ -333,16 +282,13 @@ let execute args : tool_result Lwt.t =
 
   match args with
   | Gemini { model; thinking_level; timeout; _ } ->
-      (* Use retry-enabled Gemini execution *)
       execute_gemini_with_retry ~model ~thinking_level ~timeout ~args ()
 
   | Claude { model; ultrathink; working_directory; timeout; _ } ->
       (match build_claude_cmd args with
       | Error err ->
           Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
-            returncode = -1;
-            response = err;
-            extra = [("ultrathink", string_of_bool ultrathink); ("invalid_args", "true")]; }
+            returncode = -1; response = err; extra = []; }
       | Ok cmd_list ->
           let cmd = List.hd cmd_list in
           let cmd_args = List.tl cmd_list in
@@ -350,27 +296,20 @@ let execute args : tool_result Lwt.t =
           (match result with
           | Ok r ->
               Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
-                returncode = r.exit_code;
-                response = get_output r;
+                returncode = r.exit_code; response = get_output r;
                 extra = [("ultrathink", string_of_bool ultrathink)]; }
           | Error (Timeout t) ->
               Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
-                returncode = -1;
-                response = Printf.sprintf "Timeout after %ds" t;
-                extra = [("ultrathink", string_of_bool ultrathink)]; }
+                returncode = -1; response = Printf.sprintf "Timeout after %ds" t; extra = []; }
           | Error (ProcessError msg) ->
               Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
-                returncode = -1;
-                response = Printf.sprintf "Error: %s" msg;
-                extra = [("ultrathink", string_of_bool ultrathink)]; }))
+                returncode = -1; response = Printf.sprintf "Error: %s" msg; extra = []; }))
 
   | Codex { model; reasoning_effort; timeout; _ } ->
       (match build_codex_cmd args with
       | Error err ->
           Lwt.return { model = Printf.sprintf "codex (%s)" model;
-            returncode = -1;
-            response = err;
-            extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort); ("invalid_args", "true")]; }
+            returncode = -1; response = err; extra = []; }
       | Ok cmd_list ->
           let cmd = List.hd cmd_list in
           let cmd_args = List.tl cmd_list in
@@ -378,28 +317,20 @@ let execute args : tool_result Lwt.t =
           (match result with
           | Ok r ->
               Lwt.return { model = Printf.sprintf "codex (%s)" model;
-                returncode = r.exit_code;
-                response = clean_codex_output (get_output r);
+                returncode = r.exit_code; response = clean_codex_output (get_output r);
                 extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
           | Error (Timeout t) ->
               Lwt.return { model = Printf.sprintf "codex (%s)" model;
-                returncode = -1;
-                response = Printf.sprintf "Timeout after %ds" t;
-                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
+                returncode = -1; response = Printf.sprintf "Timeout after %ds" t; extra = []; }
           | Error (ProcessError msg) ->
               Lwt.return { model = Printf.sprintf "codex (%s)" model;
-                returncode = -1;
-                response = Printf.sprintf "Error: %s" msg;
-                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }))
+                returncode = -1; response = Printf.sprintf "Error: %s" msg; extra = []; }))
 
   | Ollama { model; temperature; timeout; _ } ->
-      (* Use REST API via curl for reliability *)
       (match build_ollama_curl_cmd args with
       | Error err ->
           Lwt.return { model = Printf.sprintf "ollama (%s)" model;
-            returncode = -1;
-            response = err;
-            extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true"); ("invalid_args", "true")]; }
+            returncode = -1; response = err; extra = []; }
       | Ok cmd_list ->
           let cmd = List.hd cmd_list in
           let cmd_args = List.tl cmd_list in
@@ -415,28 +346,21 @@ let execute args : tool_result Lwt.t =
                 then 0 else -1
               in
               Lwt.return { model = Printf.sprintf "ollama (%s)" model;
-                returncode;
-                response;
+                returncode; response;
                 extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }
           | Error (Timeout t) ->
               Lwt.return { model = Printf.sprintf "ollama (%s)" model;
-                returncode = -1;
-                response = Printf.sprintf "Timeout after %ds" t;
-                extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }
+                returncode = -1; response = Printf.sprintf "Timeout after %ds" t; extra = []; }
           | Error (ProcessError msg) ->
               Lwt.return { model = Printf.sprintf "ollama (%s)" model;
-                returncode = -1;
-                response = Printf.sprintf "Error: %s" msg;
-                extra = [("temperature", Printf.sprintf "%.1f" temperature); ("local", "true")]; }))
+                returncode = -1; response = Printf.sprintf "Error: %s" msg; extra = []; }))
 
   | OllamaList ->
-      (* Run ollama list and parse output to JSON *)
       let cmd = "ollama" in
       let cmd_args = ["list"] in
       let* result = run_command ~timeout:30 cmd cmd_args in
       (match result with
       | Ok r ->
-          (* Parse ollama list output into JSON array *)
           let lines =
             String.split_on_char '\n' r.stdout
             |> List.filter (fun line -> String.length (String.trim line) > 0)
@@ -451,7 +375,6 @@ let execute args : tool_result Lwt.t =
           in
           let models = data_lines
             |> List.filter_map (fun line ->
-                (* Parse: "model:tag    id    size    modified" *)
                 let parts = String.split_on_char '\t' line in
                 let parts = List.concat_map (String.split_on_char ' ') parts in
                 let parts = List.filter (fun s -> String.length s > 0) parts in
@@ -467,56 +390,28 @@ let execute args : tool_result Lwt.t =
           in
           let json = `List models in
           Lwt.return { model = "ollama_list";
-            returncode = 0;
-            response = Yojson.Safe.to_string json;
+            returncode = 0; response = Yojson.Safe.to_string json;
             extra = [("count", string_of_int (List.length models))]; }
       | Error (Timeout t) ->
           Lwt.return { model = "ollama_list";
-            returncode = -1;
-            response = Printf.sprintf "Timeout after %ds" t;
-            extra = []; }
+            returncode = -1; response = Printf.sprintf "Timeout after %ds" t; extra = []; }
       | Error (ProcessError msg) ->
           Lwt.return { model = "ollama_list";
-            returncode = -1;
-            response = Printf.sprintf "Error: %s" msg;
-            extra = []; })
+            returncode = -1; response = Printf.sprintf "Error: %s" msg; extra = []; })
 
-(** Execute a tool and format result based on response_format.
-
-    This is the main entry point for LLM-to-LLM communication where
-    token efficiency matters. The format parameter controls output:
-    - Verbose: Full JSON (human readable, for debugging)
-    - Compact: DSL format "RES|OK|G3|150|result" (~70% token savings)
-    - Binary: Base64-encoded compact (for high-volume scenarios)
-*)
+(** Format results *)
 let execute_formatted ~(format : response_format) args : string Lwt.t =
   let open Lwt.Syntax in
   let* result = execute args in
   Lwt.return (format_tool_result ~format result)
 
-(** Execute with default Verbose format (backwards compatible) *)
 let execute_verbose args : string Lwt.t =
   execute_formatted ~format:Verbose args
 
-(** Execute with Compact format (for MAGI inter-agent communication) *)
 let execute_compact args : string Lwt.t =
   execute_formatted ~format:Compact args
 
-(** Execute Ollama with agentic tool calling loop.
-
-    When tools are provided, this uses Agent_loop to:
-    1. Send prompt to Ollama with tool definitions
-    2. Execute any tool_calls from Ollama's response
-    3. Send tool results back to Ollama
-    4. Repeat until no more tool_calls or max_turns reached
-
-    This enables tool-capable models (devstral, qwen3, llama3.3)
-    to use MCP tools natively through llm-mcp.
-
-    @param tools MCP tool schemas for function calling
-    @param external_mcp_url URL of external MCP server for tool execution
-    @param on_turn Callback for each turn (turn number, prompt)
-*)
+(** Ollama agentic loop *)
 let execute_ollama_agentic
     ~(tools : Types.tool_schema list)
     ?(external_mcp_url : string option = None)
@@ -524,47 +419,26 @@ let execute_ollama_agentic
     args : tool_result Lwt.t =
   let open Lwt.Syntax in
   match args with
-  | Ollama { model; prompt; system_prompt; temperature; timeout = _; stream = _; tools = _ } ->
+  | Ollama { model; prompt; system_prompt; temperature; _ } ->
       let system = match system_prompt with
         | Some s -> s
         | None -> "You are a helpful assistant with access to tools."
       in
       let* result = Agent_loop.run
-        ~model
-        ~prompt
-        ~system_prompt:system
-        ~temperature
-        ~max_turns:10
-        ~external_mcp_url
-        ~tools
-        ~on_turn
-        ()
+        ~model ~prompt ~system_prompt:system ~temperature ~max_turns:10
+        ~external_mcp_url ~tools ~on_turn ()
       in
       (match result with
       | Ok response ->
           Lwt.return {
             model = Printf.sprintf "ollama (%s) [agentic]" model;
-            returncode = 0;
-            response;
-            extra = [
-              ("temperature", Printf.sprintf "%.1f" temperature);
-              ("local", "true");
-              ("agentic", "true");
-              ("tools_count", string_of_int (List.length tools));
-            ];
+            returncode = 0; response;
+            extra = [("agentic", "true"); ("tools_count", string_of_int (List.length tools))];
           }
       | Error err ->
           Lwt.return {
             model = Printf.sprintf "ollama (%s) [agentic]" model;
-            returncode = -1;
-            response = Printf.sprintf "Agent loop error: %s" err;
-            extra = [
-              ("temperature", Printf.sprintf "%.1f" temperature);
-              ("local", "true");
-              ("agentic", "true");
-              ("error", "true");
-            ];
+            returncode = -1; response = Printf.sprintf "Agent loop error: %s" err;
+            extra = [("agentic", "true"); ("error", "true")];
           })
-  | _ ->
-      (* Non-Ollama args: fall back to regular execute *)
-      execute args
+  | _ -> execute args
