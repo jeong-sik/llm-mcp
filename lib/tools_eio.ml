@@ -22,6 +22,8 @@ let parse_claude_args = Tool_parsers.parse_claude_args
 let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
+let parse_chain_run_args = Tool_parsers.parse_chain_run_args
+let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -468,9 +470,32 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           | Ok plan ->
               (* Use chain's global timeout for all nodes *)
               let node_timeout = parsed_chain.Chain_types.config.Chain_types.timeout in
+              let starts_with ~prefix s =
+                let prefix_len = String.length prefix in
+                String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+              in
+              let split_tool_name name =
+                match String.index_opt name '.' with
+                | None -> None
+                | Some idx ->
+                    let server = String.sub name 0 idx in
+                    let tool_len = String.length name - idx - 1 in
+                    if server = "" || tool_len <= 0 then None
+                    else Some (server, String.sub name (idx + 1) tool_len)
+              in
               (* Create exec_fn that routes to appropriate LLM *)
               let exec_fn ~model ~prompt =
                 let args = match String.lowercase_ascii model with
+                  | "stub" | "mock" ->
+                      (* Stub model for tests and local smoke runs *)
+                      Types.Gemini {
+                        prompt;
+                        model = "stub";
+                        thinking_level = Types.Low;
+                        yolo = false;
+                        timeout = node_timeout;
+                        stream = false;
+                      }
                   | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
                       Types.Gemini {
                         prompt;
@@ -524,14 +549,53 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         stream = false;
                       }
                 in
-                let result = execute ~sw ~proc_mgr ~clock args in
-                if result.returncode = 0 then Ok result.response
-                else Error result.response
+                match args with
+                | Types.Gemini { model = "stub"; _ } ->
+                    Ok (Printf.sprintf "[stub]%s" prompt)
+                | _ ->
+                    let result = execute ~sw ~proc_mgr ~clock args in
+                    if result.returncode = 0 then Ok result.response
+                    else Error result.response
+              in
+              let tool_exec ~name ~args =
+                match split_tool_name name with
+                | Some (server_name, tool_name) ->
+                    let output =
+                      call_mcp ~sw ~proc_mgr ~clock
+                        ~server_name ~tool_name ~arguments:args ~timeout:node_timeout
+                    in
+                    if starts_with ~prefix:"Error:" output then Error output else Ok output
+                | None ->
+                    let result =
+                      match name with
+                      | "gemini" ->
+                          let args = parse_gemini_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "claude-cli" ->
+                          let args = parse_claude_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "codex" ->
+                          let args = parse_codex_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "ollama" ->
+                          let args = parse_ollama_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "ollama-list" ->
+                          let args = parse_ollama_list_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | _ ->
+                          { Types.model = "chain.tool";
+                            returncode = -1;
+                            response = sprintf "Unknown tool: %s" name;
+                            extra = [("tool", name)];
+                          }
+                    in
+                    if result.returncode = 0 then Ok result.response else Error result.response
               in
               (* Input is passed directly to executor for first node injection *)
               let _ = input in  (* Will be used by executor *)
               let result = Chain_executor_eio.execute
-                ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn plan
+                ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec plan
               in
               { model = "chain.run";
                 returncode = if result.Chain_types.success then 0 else -1;
@@ -895,3 +959,174 @@ let execute_ollama_agentic_with_env ~sw ~env ~tools ?external_mcp_url ?on_turn a
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let clock = Eio.Stdenv.clock env in
   execute_ollama_agentic ~sw ~proc_mgr ~clock ~tools ?external_mcp_url ?on_turn args
+
+(* ============================================================================
+   Chain Engine - Workflow Orchestration DSL Execution
+   ============================================================================ *)
+
+(** Execute a chain DSL definition *)
+let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~timeout =
+  match Chain_parser.parse_chain chain_json with
+  | Error msg ->
+      {
+        model = "chain.run";
+        returncode = -1;
+        response = sprintf "Chain parse error: %s" msg;
+        extra = [("error", "parse_error")];
+      }
+  | Ok chain ->
+      (match Chain_compiler.compile chain with
+      | Error msg ->
+          {
+            model = "chain.run";
+            returncode = -1;
+            response = sprintf "Chain compile error: %s" msg;
+            extra = [("error", "compile_error")];
+          }
+      | Ok plan ->
+          let starts_with ~prefix s =
+            let prefix_len = String.length prefix in
+            String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+          in
+          let split_tool_name name =
+            match String.index_opt name '.' with
+            | None -> None
+            | Some idx ->
+                let server = String.sub name 0 idx in
+                let tool_len = String.length name - idx - 1 in
+                if server = "" || tool_len <= 0 then None
+                else Some (server, String.sub name (idx + 1) tool_len)
+          in
+          let exec_fn ~model ~prompt =
+            match model with
+            | "stub" | "mock" ->
+                Ok (sprintf "[%s]%s" model prompt)
+            | "gemini" ->
+                let args = Gemini {
+                  prompt;
+                  model = "gemini-3-pro-preview";
+                  thinking_level = High;
+                  yolo = false;
+                  timeout;
+                  stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | "claude" ->
+                let working_directory =
+                  Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp"
+                in
+                let args = Claude {
+                  prompt;
+                  model = "opus";
+                  ultrathink = true;
+                  system_prompt = None;
+                  output_format = Text;
+                  allowed_tools = [];
+                  working_directory;
+                  timeout;
+                  stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | "codex" ->
+                let args = Codex {
+                  prompt;
+                  model = "gpt-5.2-codex";
+                  reasoning_effort = RXhigh;
+                  sandbox = WorkspaceWrite;
+                  working_directory = None;
+                  timeout;
+                  stream = false;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+            | _ ->
+                let args = Ollama {
+                  prompt;
+                  model;
+                  system_prompt = None;
+                  temperature = 0.7;
+                  timeout;
+                  stream = false;
+                  tools = None;
+                } in
+                let result = execute ~sw ~proc_mgr ~clock args in
+                if result.returncode = 0 then Ok result.response else Error result.response
+          in
+          let tool_exec ~name ~args =
+            match split_tool_name name with
+            | Some (server_name, tool_name) ->
+                let output =
+                  call_mcp ~sw ~proc_mgr ~clock
+                    ~server_name ~tool_name ~arguments:args ~timeout
+                in
+                if starts_with ~prefix:"Error:" output then Error output else Ok output
+            | None ->
+                let result =
+                  match name with
+                  | "gemini" ->
+                      let args = parse_gemini_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "claude-cli" ->
+                      let args = parse_claude_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "codex" ->
+                      let args = parse_codex_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "ollama" ->
+                      let args = parse_ollama_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "ollama-list" ->
+                      let args = parse_ollama_list_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | _ ->
+                      { Types.model = "chain.tool";
+                        returncode = -1;
+                        response = sprintf "Unknown tool: %s" name;
+                        extra = [("tool", name)];
+                      }
+                in
+                if result.returncode = 0 then Ok result.response else Error result.response
+          in
+          let result = Chain_executor_eio.execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec plan in
+          {
+            model = sprintf "chain.run (%s)" chain.Chain_types.id;
+            returncode = (if result.success then 0 else -1);
+            response = result.output;
+            extra = [
+              ("chain_id", chain.Chain_types.id);
+              ("duration_ms", string_of_int result.duration_ms);
+              ("trace", if trace then "enabled" else "disabled");
+            ];
+          })
+
+(** Validate a chain DSL definition without executing *)
+let validate_chain ~(chain_json : Yojson.Safe.t) =
+  match Chain_parser.parse_chain chain_json with
+  | Error msg ->
+      {
+        model = "chain.validate";
+        returncode = -1;
+        response = sprintf "Parse error: %s" msg;
+        extra = [("valid", "false"); ("error_type", "parse")];
+      }
+  | Ok chain ->
+      (match Chain_compiler.compile chain with
+      | Error msg ->
+          {
+            model = "chain.validate";
+            returncode = -1;
+            response = sprintf "Compile error: %s" msg;
+            extra = [("valid", "false"); ("error_type", "compile")];
+          }
+      | Ok _plan ->
+          {
+            model = "chain.validate";
+            returncode = 0;
+            response = sprintf "Chain '%s' is valid" chain.Chain_types.id;
+            extra = [
+              ("valid", "true");
+              ("chain_id", chain.Chain_types.id);
+            ];
+          })

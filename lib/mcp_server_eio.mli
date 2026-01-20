@@ -59,6 +59,16 @@ val extract_session_id : Yojson.Safe.t option -> (string * string) list -> strin
 
 module Http = Http_server_eio
 
+(** Handle a JSON-RPC request (used by tests and local dispatch). *)
+val handle_request :
+  sw:Eio.Switch.t ->
+  proc_mgr:'pm Eio.Process.mgr ->
+  clock:'clock Eio.Time.clock ->
+  store:session_store ->
+  headers:(string * string) list ->
+  string ->
+  string option * Yojson.Safe.t
+
 (** Run the Eio HTTP server.
     Requires an Eio switch and environment with net, clock, and process_mgr. *)
 val run : sw:Eio.Switch.t ->

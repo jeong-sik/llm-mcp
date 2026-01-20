@@ -61,6 +61,16 @@
  (name test_mcp_server_eio)
  (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main))
 
+; Chain Engine Eio tests
+(test
+ (name test_chain_engine_eio)
+ (libraries llm_mcp.eio llm_mcp.common eio eio_main))
+
+; Chain MCP integration tests
+(test
+ (name test_chain_mcp_eio)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main))
+
 ; Tool_parsers pure function tests (NO Lwt, NO Eio)
 (test
  (name test_tool_parsers)

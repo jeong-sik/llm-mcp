@@ -506,46 +506,34 @@ Use this to discover which models are available before calling the ollama tool.|
   ];
 }
 
-(** Chain DSL - Execute orchestrated LLM workflows *)
+(* ============================================================================
+   Chain Engine Schemas - Workflow Orchestration DSL
+   ============================================================================ *)
+
 let chain_run_schema : tool_schema = {
   name = "chain.run";
   description = {|Execute a Chain DSL workflow.
 
-Chain Engine enables orchestrated multi-LLM workflows with:
-- 11 node types: llm, tool, pipeline, fanout, quorum, gate, subgraph, chain_ref, map, bind, merge
-- DAG-based parallel execution with Eio Fibers
-- Category theory abstractions (Functor/Monad/Monoid)
-
-Example chain:
-{
-  "id": "magi_consensus",
-  "nodes": [
-    { "id": "casper", "type": "llm", "model": "gemini", "prompt": "Analyze: {{input}}" },
-    { "id": "balthasar", "type": "llm", "model": "claude", "prompt": "Review: {{input}}" },
-    { "id": "consensus", "type": "quorum", "required": 2, "nodes": ["casper", "balthasar"] }
-  ],
-  "output": "consensus"
-}
-
 Parameters:
-- chain: Chain definition (JSON object with nodes, output, optional config)
-- input: Initial input string for the chain
-- trace: Enable execution tracing (default: false)|};
+- chain: Chain DSL JSON (required)
+- trace: Enable execution trace (default: false)
+- timeout: Overall timeout in seconds (default: 300)|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
       ("chain", `Assoc [
         ("type", `String "object");
-        ("description", `String "Chain definition with nodes, output, and optional config");
-      ]);
-      ("input", `Assoc [
-        ("type", `String "string");
-        ("description", `String "Initial input for the chain");
+        ("description", `String "Chain DSL definition with nodes and output");
       ]);
       ("trace", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable execution tracing");
+        ("description", `String "Enable execution trace");
         ("default", `Bool false);
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Overall timeout in seconds");
+        ("default", `Int 300);
       ]);
     ]);
     ("required", `List [`String "chain"]);
@@ -556,28 +544,29 @@ let chain_validate_schema : tool_schema = {
   name = "chain.validate";
   description = {|Validate a Chain DSL definition without executing it.
 
-Checks:
-- JSON structure validity
-- Node type correctness
-- Cycle detection in DAG
-- Depth limit compliance
-- Output node existence
-- Duplicate ID detection
-
-Returns validation result with any errors found.|};
+Parameters:
+- chain: Chain DSL JSON to validate (required)|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
       ("chain", `Assoc [
         ("type", `String "object");
-        ("description", `String "Chain definition to validate");
+        ("description", `String "Chain DSL definition to validate");
       ]);
     ]);
     ("required", `List [`String "chain"]);
   ];
 }
 
-let all_schemas = [gemini_schema; claude_schema; codex_schema; ollama_schema; ollama_list_schema; chain_run_schema; chain_validate_schema]
+let all_schemas = [
+  gemini_schema;
+  claude_schema;
+  codex_schema;
+  ollama_schema;
+  ollama_list_schema;
+  chain_run_schema;
+  chain_validate_schema;
+]
 
 (* ============================================================================
    Compact Protocol v0.1 - LLM-to-LLM Communication
