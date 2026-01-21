@@ -568,10 +568,10 @@ let test_build_context_prompt () =
   add_message ctx ~role:"user" ~content:"hello" ~iteration:1;
   add_message ctx ~role:"assistant" ~content:"hi" ~iteration:1;
   let prompt = build_context_prompt ctx in
-  Alcotest.(check bool) "contains Recent History" true (String.length prompt > 0);
-  Alcotest.(check bool) "contains user message" true
-    (String.length (Str.search_forward (Str.regexp "user") prompt 0 |> ignore; prompt) > 0 || true);
-  Alcotest.(check bool) "contains hello" true
+  Alcotest.(check bool) "prompt not empty" true (String.length prompt > 0);
+  Alcotest.(check bool) "contains user role" true
+    (try let _ = Str.search_forward (Str.regexp "user") prompt 0 in true with Not_found -> false);
+  Alcotest.(check bool) "contains hello content" true
     (try let _ = Str.search_forward (Str.regexp "hello") prompt 0 in true with Not_found -> false)
 
 (* ============================================================================
