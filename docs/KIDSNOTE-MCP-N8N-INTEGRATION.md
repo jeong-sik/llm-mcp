@@ -44,9 +44,17 @@ Kidsnote-MCP는 AI 워크플로우를 정의하는 **프로토콜**입니다. JS
 
 [Mermaid Live Editor에서 편집](https://mermaid.live/edit)
 
-### 2. Use Case: 키즈노트 피드백 분석
+### 2. Use Case: 키즈노트 피드백 파이프라인 (트리거 포함)
 
-![Use Case](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIElucHV0WyLtgqTspojrhbjtirgg7ZS865Oc67CxIOyGjOyKpCJdCiAgICAgICAgUmV2aWV3WyLwn5OxIOyVseyKpO2GoOyWtCDrpqzrt7A8YnIvPu2Vmeu2gOuqqCDtj4nqsIAiXQogICAgICAgIENTWyLwn5KsIENTIOusuOydmDxici8+7ISg7IOd64uYL+2Vmeu2gOuqqCJdCiAgICAgICAgU2xhY2tbIvCfk6IgU2xhY2s8YnIvPuuCtOu2gCDtlLzrk5zrsLEiXQogICAgZW5kCiAgICAKICAgIHN1YmdyYXBoIEtpZHNub3RlTUNQWyJLaWRzbm90ZS1NQ1Ag7JuM7YGs7ZSM66Gc7JqwIl0KICAgICAgICBDb2xsZWN0WyLsiJjsp5EiXQogICAgICAgIENsYXNzaWZ5WyLrtoTrpZg8YnIvPuyVjOumvOyepS/stpzqsrAv6riJ7IudIl0KICAgICAgICBBbmFseXplWyLrtoTshJ0iXQogICAgICAgIFByaW9yaXRpemVbIuyasOyEoOyInOychCJdCiAgICAgICAgQ29sbGVjdCAtLT4gQ2xhc3NpZnkgLS0+IEFuYWx5emUgLS0+IFByaW9yaXRpemUKICAgIGVuZAogICAgCiAgICBzdWJncmFwaCBPdXRwdXRbIuqysOqzvOusvCJdCiAgICAgICAgUmVwb3J0WyLwn5OKIOyduOyCrOydtO2KuCDrpqztj6ztirgiXQogICAgICAgIEpJUkFbIvCfjqsgSklSQSDti7DsvJMiXQogICAgICAgIENvbmZsdWVuY2VbIvCfk50g6riw7ZqNIOusuOyEnCJdCiAgICBlbmQKICAgIAogICAgUmV2aWV3ICYgQ1MgJiBTbGFjayAtLT4gQ29sbGVjdAogICAgUHJpb3JpdGl6ZSAtLT4gUmVwb3J0ICYgSklSQSAmIENvbmZsdWVuY2UK)
+![Use Case](https://mermaid.ink/img/Z3JhcGggTFIKICAgIHN1YmdyYXBoIFRyaWdnZXJbIuKPsCDtirjrpqzqsbAiXQogICAgICAgIFQxWyLrp6TsnbwgOeyLnCJdCiAgICAgICAgVDJbIlNsYWNrIOydtOuypO2KuCJdCiAgICAgICAgVDNbIuyVseyKpO2GoOyWtCDsi6Dqt5zrpqzrt7AiXQogICAgZW5kCiAgICAKICAgIHN1YmdyYXBoIENvbGxlY3RbIvCfk6Ug7IiY7KeRIl0KICAgICAgICBBMVsi7JWx66as67ewIl0KICAgICAgICBBMlsiQ1PrrLjsnZgiXQogICAgICAgIEEzWyLtlLzrk5zrsLEiXQogICAgZW5kCiAgICAKICAgIHN1YmdyYXBoIFByb2Nlc3NbIvCfpJYgS2lkc25vdGUtTUNQIl0KICAgICAgICBCMVsi67aE66WYIl0KICAgICAgICBCMlsi67aE7ISdIl0KICAgICAgICBCMSAtLT4gQjIKICAgIGVuZAogICAgCiAgICBzdWJncmFwaCBPdXRbIvCfk6Qg67Cw7Y+sIl0KICAgICAgICBDMVsiSklSQSJdCiAgICAgICAgQzJbIldpa2kiXQogICAgICAgIEMzWyJTbGFjayJdCiAgICBlbmQKICAgIAogICAgVDEgJiBUMiAmIFQzIC0tPnwi7JqU7J2065WFISJ8IEExICYgQTIgJiBBMwogICAgQTEgJiBBMiAmIEEzIC0tPiBCMQogICAgQjIgLS0+IEMxICYgQzIgJiBDMwo=)
+
+**트리거 역할 분담:**
+| 역할 | 담당 | 설명 |
+|------|------|------|
+| **트리거** | cron / webhook / n8n | "언제 시작할지" 결정 |
+| **수집** | API 호출 | 앱스토어, Zendesk, Slack 데이터 |
+| **처리** | Kidsnote-MCP | AI 분류/분석 |
+| **배포** | API 호출 | JIRA, Wiki, Slack 결과 전달 |
 
 ## Kidsnote-MCP 예시
 
