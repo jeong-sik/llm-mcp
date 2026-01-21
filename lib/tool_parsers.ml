@@ -137,6 +137,12 @@ let parse_chain_to_mermaid_args (json : Yojson.Safe.t) : tool_args =
   let chain = json |> member "chain" in
   ChainToMermaid { chain }
 
+(** Parse JSON arguments for chain.visualize tool *)
+let parse_chain_visualize_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let chain = json |> member "chain" in
+  ChainVisualize { chain }
+
 (** Parse JSON arguments for chain.orchestrate tool *)
 let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in

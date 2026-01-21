@@ -651,42 +651,52 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Fallback _ -> "fallback"
   | Race _ -> "race"
 
-(** Convert a node_type to Mermaid node text (prompt/description) *)
+(** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
   match nt with
-  | Llm { prompt; _ } -> if prompt = "{{input}}" then "" else prompt
-  | Tool { name; _ } -> Printf.sprintf "Run %s" name
-  | Quorum { required; nodes } ->
-      Printf.sprintf "%d/%d must agree" required (max (List.length nodes) required)
-  | Gate { condition; _ } -> condition
+  | Llm { model; prompt; tools; _ } ->
+      let prompt_escaped = Str.global_replace (Str.regexp {|"|}) {|'|} prompt in
+      let base = Printf.sprintf "LLM:%s \"%s\"" model prompt_escaped in
+      (match tools with
+       | Some (`List ts) when ts <> [] ->
+           let tool_names = List.filter_map (function
+             | `String s -> Some s
+             | `Assoc l -> (match List.assoc_opt "name" l with
+                 | Some (`String n) -> Some n | _ -> None)
+             | _ -> None) ts in
+           if tool_names <> [] then Printf.sprintf "%s +%s" base (String.concat "," tool_names)
+           else base
+       | _ -> base)
+  | Tool { name; args } ->
+      (match args with
+       | `Null -> Printf.sprintf "Tool:%s" name
+       | json -> Printf.sprintf "Tool:%s %s" name (Yojson.Safe.to_string json))
+  | Quorum { required; _ } -> Printf.sprintf "Quorum:%d" required
+  | Gate { condition; _ } -> Printf.sprintf "Gate:%s" condition
   | Merge { strategy; _ } ->
-      (match strategy with
-       | First -> "Take first"
-       | Last -> "Take last"
-       | Concat -> "Combine all"
-       | WeightedAvg -> "Weighted average"
-       | Custom s -> s)
-  | Pipeline nodes -> Printf.sprintf "Sequence of %d" (List.length nodes)
-  | Fanout nodes -> Printf.sprintf "Parallel %d" (List.length nodes)
-  | Map { func; _ } -> func
-  | Bind { func; _ } -> func
-  | ChainRef ref_id -> ref_id
+      let s = match strategy with
+        | First -> "first" | Last -> "last" | Concat -> "concat"
+        | WeightedAvg -> "weighted_avg" | Custom s -> s
+      in Printf.sprintf "Merge:%s" s
+  | Pipeline _ -> "Pipeline"  (* children handled separately *)
+  | Fanout _ -> "Fanout"      (* children handled separately *)
+  | Map { func; _ } -> Printf.sprintf "Map:%s" func
+  | Bind { func; _ } -> Printf.sprintf "Bind:%s" func
+  | ChainRef ref_id -> Printf.sprintf "Ref:%s" ref_id
   | Subgraph sub -> sub.id
   | Threshold { metric; operator; value; _ } ->
-      let op_str = match operator with
-        | Gt -> ">" | Gte -> ">=" | Lt -> "<" | Lte -> "<=" | Eq -> "=" | Neq -> "!="
-      in
-      Printf.sprintf "%s %s %.2f" metric op_str value
-  | GoalDriven { goal_metric; goal_value; max_iterations; _ } ->
-      Printf.sprintf "Goal: %s >= %.2f (max %d)" goal_metric goal_value max_iterations
-  | Evaluator { candidates; scoring_func; select_strategy; _ } ->
-      let strategy_str = match select_strategy with
-        | Best -> "best"
-        | Worst -> "worst"
-        | AboveThreshold t -> Printf.sprintf ">%.2f" t
-        | WeightedRandom -> "weighted"
-      in
-      Printf.sprintf "Eval %d via %s (%s)" (List.length candidates) scoring_func strategy_str
+      let op = match operator with
+        | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
+      in Printf.sprintf "Threshold:%s:%s:%.2f" metric op value
+  | GoalDriven { goal_metric; goal_operator; goal_value; max_iterations; _ } ->
+      let op = match goal_operator with
+        | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
+      in Printf.sprintf "GoalDriven:%s:%s:%.2f:%d" goal_metric op goal_value max_iterations
+  | Evaluator { scoring_func; select_strategy; _ } ->
+      let s = match select_strategy with
+        | Best -> "best" | Worst -> "worst" | WeightedRandom -> "weighted"
+        | AboveThreshold t -> Printf.sprintf "above:%.2f" t
+      in Printf.sprintf "Evaluator:%s:%s" scoring_func s
   | Retry { max_attempts; backoff; _ } ->
       let backoff_str = match backoff with
         | Constant s -> Printf.sprintf "const %.1fs" s
@@ -750,3 +760,65 @@ let round_trip (text : string) : (string, string) result =
   match parse_chain text with
   | Error e -> Error e
   | Ok chain -> Ok (chain_to_mermaid chain)
+
+(** ASCII visualization of chain graph (terminal-friendly) *)
+let chain_to_ascii (chain : chain) : string =
+  let buf = Buffer.create 256 in
+  let dir = chain.config.direction in
+
+  (* Build adjacency map: source -> targets *)
+  let adj = Hashtbl.create 16 in
+  List.iter (fun (node : node) ->
+    List.iter (fun (src, _) ->
+      let targets = match Hashtbl.find_opt adj src with Some l -> l | None -> [] in
+      Hashtbl.replace adj src (node.id :: targets)
+    ) node.input_mapping
+  ) chain.nodes;
+
+  (* Find root nodes (no incoming edges) *)
+  let all_targets = Hashtbl.fold (fun _ targets acc -> targets @ acc) adj [] in
+  let roots = List.filter (fun (n : node) -> not (List.mem n.id all_targets)) chain.nodes in
+
+  (* Node display *)
+  let node_str (n : node) =
+    let icon = match n.node_type with
+      | Llm _ -> "🤖" | Tool _ -> "🔧" | Quorum _ -> "🗳️"
+      | Gate _ -> "🚦" | Merge _ -> "🔀" | Pipeline _ -> "▶️"
+      | Fanout _ -> "⚡" | ChainRef _ -> "🔗" | GoalDriven _ -> "🎯"
+      | Evaluator _ -> "⚖️" | Threshold _ -> "📊"
+      | Map _ -> "📍" | Bind _ -> "🔄" | Subgraph _ -> "📦"
+      | Retry _ -> "🔁" | Fallback _ -> "🛟" | Race _ -> "🏁"
+    in
+    let text = node_type_to_text n.node_type in
+    let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in
+    Printf.sprintf "%s %s: %s" icon n.id short_text
+  in
+
+  (* Recursive tree print *)
+  let rec print_tree prefix is_last node_id =
+    let connector = if is_last then "└── " else "├── " in
+    let node = List.find_opt (fun (n : node) -> n.id = node_id) chain.nodes in
+    (match node with
+     | Some n -> Buffer.add_string buf (Printf.sprintf "%s%s%s\n" prefix connector (node_str n))
+     | None -> Buffer.add_string buf (Printf.sprintf "%s%s[%s]\n" prefix connector node_id));
+    let child_prefix = prefix ^ (if is_last then "    " else "│   ") in
+    let children = match Hashtbl.find_opt adj node_id with Some l -> l | None -> [] in
+    let n = List.length children in
+    List.iteri (fun i child ->
+      print_tree child_prefix (i = n - 1) child
+    ) children
+  in
+
+  (* Header *)
+  let dir_str = match dir with LR -> "→" | RL -> "←" | TB -> "↓" | BT -> "↑" in
+  Buffer.add_string buf (Printf.sprintf "╔══ Chain: %s (%s) ══╗\n" chain.id dir_str);
+  Buffer.add_string buf (Printf.sprintf "║ Nodes: %d │ Output: %s\n" (List.length chain.nodes) chain.output);
+  Buffer.add_string buf "╚════════════════════════════╝\n\n";
+
+  (* Print from each root *)
+  let n_roots = List.length roots in
+  List.iteri (fun i (root : node) ->
+    print_tree "" (i = n_roots - 1) root.id
+  ) roots;
+
+  Buffer.contents buf

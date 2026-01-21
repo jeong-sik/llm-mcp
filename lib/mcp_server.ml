@@ -172,6 +172,7 @@ let starts_with ~prefix s =
         (match chain with Some c -> String.length (Yojson.Safe.to_string c) | None -> 0)
     | ChainToMermaid { chain = _ } -> 0
     | ChainValidate { chain = _; mermaid = _ } -> 0
+    | ChainVisualize { chain = _ } -> 0
     | ChainList -> 0
     | ChainOrchestrate { goal; _ } -> String.length goal
 let split_once s ch =
@@ -319,6 +320,7 @@ let handle_call_tool ~wants_stream id params =
     | Types.ChainRun _ -> false  (* Chains don't stream in Lwt mode *)
     | Types.ChainValidate _ -> false
     | Types.ChainToMermaid _ -> false
+    | Types.ChainVisualize _ -> false
     | Types.ChainList -> false
     | Types.ChainOrchestrate _ -> false  (* Orchestration not available in Lwt mode *)
   in
