@@ -831,8 +831,160 @@ let test_registry_json_export_import () =
   | Error e -> Alcotest.fail e
 
 (* ============================================================================
+   Self-Recursion Tests (Nested Evaluation Nodes)
+   ============================================================================ *)
+
+(** Test: Threshold inside Threshold (nested conditional evaluation) *)
+let test_nested_threshold () =
+  let inner_llm = make_llm_node ~id:"inner_llm" ~model:"gemini"
+    ~prompt:"Inner LLM" () in
+  let inner_threshold = make_threshold ~id:"inner_threshold"
+    ~metric:"confidence" ~operator:Gte ~value:0.7 ~input_node:inner_llm () in
+  let outer_llm = make_llm_node ~id:"outer_llm" ~model:"claude"
+    ~prompt:"Outer LLM" () in
+  let outer_threshold = make_threshold ~id:"outer_threshold"
+    ~metric:"accuracy" ~operator:Gte ~value:0.9
+    ~input_node:outer_llm
+    ~on_pass:inner_threshold
+    ~on_fail:inner_llm () in
+  (* Verify structure *)
+  Alcotest.(check string) "outer id" "outer_threshold" outer_threshold.id;
+  match outer_threshold.node_type with
+  | Threshold { on_pass = Some pass_node; _ } ->
+      Alcotest.(check string) "on_pass is inner threshold" "inner_threshold" pass_node.id;
+      (match pass_node.node_type with
+       | Threshold { input_node; _ } ->
+           Alcotest.(check string) "nested input_node" "inner_llm" input_node.id
+       | _ -> Alcotest.fail "Expected nested Threshold node")
+  | _ -> Alcotest.fail "Expected Threshold node"
+
+(** Test: Evaluator inside Evaluator (nested candidate evaluation) *)
+let test_nested_evaluator () =
+  let llm1 = make_llm_node ~id:"llm1" ~model:"gemini" ~prompt:"Candidate 1" () in
+  let llm2 = make_llm_node ~id:"llm2" ~model:"claude" ~prompt:"Candidate 2" () in
+  let inner_evaluator = make_evaluator ~id:"inner_eval"
+    ~candidates:[llm1; llm2]
+    ~scoring_func:"llm_judge"
+    ~select_strategy:Best () in
+  let llm3 = make_llm_node ~id:"llm3" ~model:"codex" ~prompt:"Candidate 3" () in
+  let outer_evaluator = make_evaluator ~id:"outer_eval"
+    ~candidates:[inner_evaluator; llm3]
+    ~scoring_func:"regex_match"
+    ~scoring_prompt:"Select the best output"
+    ~select_strategy:(AboveThreshold 0.8)
+    ~min_score:0.5 () in
+  (* Verify structure *)
+  Alcotest.(check string) "outer id" "outer_eval" outer_evaluator.id;
+  match outer_evaluator.node_type with
+  | Evaluator { candidates; scoring_func; _ } ->
+      Alcotest.(check int) "2 candidates" 2 (List.length candidates);
+      Alcotest.(check string) "scoring_func" "regex_match" scoring_func;
+      let first_candidate = List.hd candidates in
+      (match first_candidate.node_type with
+       | Evaluator { candidates = inner_candidates; _ } ->
+           Alcotest.(check int) "inner has 2 candidates" 2 (List.length inner_candidates)
+       | _ -> Alcotest.fail "Expected nested Evaluator node")
+  | _ -> Alcotest.fail "Expected Evaluator node"
+
+(** Test: Deep nesting (GoalDriven > Threshold > Evaluator > LLM) *)
+let test_deep_nesting () =
+  (* Layer 1: LLM nodes *)
+  let llm_fast = make_llm_node ~id:"llm_fast" ~model:"gemini" ~prompt:"Fast model" () in
+  let llm_accurate = make_llm_node ~id:"llm_accurate" ~model:"claude" ~prompt:"Accurate model" () in
+
+  (* Layer 2: Evaluator selects best LLM *)
+  let evaluator = make_evaluator ~id:"evaluator"
+    ~candidates:[llm_fast; llm_accurate]
+    ~scoring_func:"llm_judge"
+    ~select_strategy:Best () in
+
+  (* Layer 3: Threshold gates the evaluator *)
+  let threshold = make_threshold ~id:"threshold"
+    ~metric:"confidence" ~operator:Gte ~value:0.8
+    ~input_node:evaluator
+    ~on_fail:llm_fast () in
+
+  (* Layer 4: GoalDriven iterates with threshold *)
+  let goal_driven = make_goal_driven ~id:"goal_driven"
+    ~goal_metric:"coverage" ~goal_operator:Gte ~goal_value:0.95
+    ~action_node:threshold
+    ~measure_func:"parse_json"
+    ~max_iterations:10
+    ~strategy_hints:[("below_50", "fast"); ("above_50", "accurate")] () in
+
+  (* Verify deep structure *)
+  Alcotest.(check string) "top level is goal_driven" "goal_driven" goal_driven.id;
+  match goal_driven.node_type with
+  | GoalDriven { action_node; max_iterations; strategy_hints; _ } ->
+      Alcotest.(check int) "max_iterations" 10 max_iterations;
+      Alcotest.(check int) "2 strategy hints" 2 (List.length strategy_hints);
+      Alcotest.(check string) "action is threshold" "threshold" action_node.id;
+      (match action_node.node_type with
+       | Threshold { input_node; on_fail; _ } ->
+           Alcotest.(check string) "input is evaluator" "evaluator" input_node.id;
+           (match input_node.node_type with
+            | Evaluator { candidates; _ } ->
+                Alcotest.(check int) "evaluator has 2 candidates" 2 (List.length candidates)
+            | _ -> Alcotest.fail "Expected Evaluator inside Threshold");
+           (match on_fail with
+            | Some fallback -> Alcotest.(check string) "fallback is llm_fast" "llm_fast" fallback.id
+            | None -> Alcotest.fail "Expected on_fail node")
+       | _ -> Alcotest.fail "Expected Threshold inside GoalDriven")
+  | _ -> Alcotest.fail "Expected GoalDriven node"
+
+(** Test: Parse nested evaluation chain from JSON *)
+let test_parse_nested_evaluation_chain () =
+  let json_str = {|{
+    "id": "nested_eval_chain",
+    "nodes": [{
+      "id": "goal_runner",
+      "type": "goal_driven",
+      "goal_metric": "success_rate",
+      "goal_operator": ">=",
+      "goal_value": 0.9,
+      "max_iterations": 5,
+      "measure_func": "exec_test",
+      "strategy_hints": {"below_30": "exploration", "above_70": "exploitation"},
+      "action_node": {
+        "id": "evaluator_inside",
+        "type": "evaluator",
+        "candidates": [
+          {"id": "cand1", "type": "llm", "model": "gemini", "prompt": "Generate code"},
+          {"id": "cand2", "type": "llm", "model": "claude", "prompt": "Generate code"}
+        ],
+        "scoring_func": "llm_judge",
+        "select_strategy": "best"
+      }
+    }],
+    "output": "goal_runner"
+  }|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "nested_eval_chain" chain.id;
+      Alcotest.(check int) "1 top-level node" 1 (List.length chain.nodes);
+      let goal_node = List.hd chain.nodes in
+      (match goal_node.node_type with
+       | GoalDriven { action_node; max_iterations; _ } ->
+           Alcotest.(check int) "max_iterations" 5 max_iterations;
+           (match action_node.node_type with
+            | Evaluator { candidates; scoring_func; _ } ->
+                Alcotest.(check int) "2 candidates" 2 (List.length candidates);
+                Alcotest.(check string) "scoring_func" "llm_judge" scoring_func
+            | _ -> Alcotest.fail "Expected Evaluator inside GoalDriven")
+       | _ -> Alcotest.fail "Expected GoalDriven node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(* ============================================================================
    Test Suite
    ============================================================================ *)
+
+let recursion_tests = [
+  "nested_threshold", `Quick, test_nested_threshold;
+  "nested_evaluator", `Quick, test_nested_evaluator;
+  "deep_nesting", `Quick, test_deep_nesting;
+  "parse_nested_evaluation_chain", `Quick, test_parse_nested_evaluation_chain;
+]
 
 let types_tests = [
   "default_config", `Quick, test_default_config;
@@ -888,4 +1040,5 @@ let () =
     "Chain Parser", parser_tests;
     "Chain Compiler", compiler_tests;
     "Chain Registry", registry_tests;
+    "Self-Recursion", recursion_tests;
   ]

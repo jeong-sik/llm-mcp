@@ -283,7 +283,7 @@ let decompress_with_dict (dict : t) (data : string) : (string, string) result =
 (** Directory for pre-trained dictionaries *)
 let dict_dir () : string =
   let me_root = try Sys.getenv "ME_ROOT" with Not_found -> Sys.getenv "HOME" ^ "/me" in
-  Filename.concat me_root "features/llm-mcp/data/dicts"
+  Filename.concat me_root "workspace/yousleepwhen/llm-mcp/data/dicts"
 
 (** Load pre-trained dictionary for content type *)
 let load_for_type (content_type : content_type) : t option =
