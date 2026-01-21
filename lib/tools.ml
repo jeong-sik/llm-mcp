@@ -463,6 +463,25 @@ let execute args : tool_result Lwt.t =
               ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
             ]; })
 
+  | ChainVisualize { chain } ->
+      (* Convert Chain AST to ASCII visualization *)
+      (match Chain_parser.parse_chain chain with
+      | Error msg ->
+          Lwt.return { model = "chain.visualize";
+            returncode = -1;
+            response = Printf.sprintf "Parse error: %s" msg;
+            extra = [("stage", "parse")]; }
+      | Ok parsed_chain ->
+          let ascii_text = Chain_mermaid_parser.chain_to_ascii parsed_chain in
+          Lwt.return { model = "chain.visualize";
+            returncode = 0;
+            response = ascii_text;
+            extra = [
+              ("chain_id", parsed_chain.Chain_types.id);
+              ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
+              ("output", parsed_chain.Chain_types.output);
+            ]; })
+
   | ChainList ->
       let ids = Chain_registry.list_ids () in
       let response = String.concat ", " ids in

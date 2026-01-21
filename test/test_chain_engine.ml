@@ -575,6 +575,129 @@ let test_make_evaluator () =
   | _ -> Alcotest.fail "Expected Evaluator node"
 
 (* ============================================================================
+   Resilience Node Tests
+   ============================================================================ *)
+
+let test_make_retry () =
+  let inner = make_llm_node ~id:"inner" ~model:"gemini" ~prompt:"test" () in
+  let retry = make_retry ~id:"retrier" ~node:inner ~max_attempts:3
+    ~backoff:(Exponential 2.0) ~retry_on:["timeout"; "rate_limit"] () in
+  Alcotest.(check string) "id" "retrier" retry.id;
+  match retry.node_type with
+  | Retry { node; max_attempts; backoff; retry_on } ->
+      Alcotest.(check string) "inner node id" "inner" node.id;
+      Alcotest.(check int) "max_attempts" 3 max_attempts;
+      Alcotest.(check bool) "backoff is exponential" true
+        (match backoff with Exponential _ -> true | _ -> false);
+      Alcotest.(check int) "retry_on count" 2 (List.length retry_on)
+  | _ -> Alcotest.fail "Expected Retry node"
+
+let test_make_fallback () =
+  let primary = make_llm_node ~id:"primary" ~model:"gemini" ~prompt:"fast" () in
+  let fb1 = make_llm_node ~id:"fb1" ~model:"claude" ~prompt:"accurate" () in
+  let fb2 = make_llm_node ~id:"fb2" ~model:"codex" ~prompt:"fallback" () in
+  let fallback = make_fallback ~id:"fb_chain" ~primary ~fallbacks:[fb1; fb2] in
+  Alcotest.(check string) "id" "fb_chain" fallback.id;
+  match fallback.node_type with
+  | Fallback { primary; fallbacks } ->
+      Alcotest.(check string) "primary id" "primary" primary.id;
+      Alcotest.(check int) "fallbacks count" 2 (List.length fallbacks)
+  | _ -> Alcotest.fail "Expected Fallback node"
+
+let test_make_race () =
+  let n1 = make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"fast" () in
+  let n2 = make_llm_node ~id:"n2" ~model:"claude" ~prompt:"fast" () in
+  let race = make_race ~id:"racer" ~nodes:[n1; n2] ~timeout:5.0 () in
+  Alcotest.(check string) "id" "racer" race.id;
+  match race.node_type with
+  | Race { nodes; timeout } ->
+      Alcotest.(check int) "nodes count" 2 (List.length nodes);
+      Alcotest.(check bool) "timeout present" true (Option.is_some timeout);
+      Alcotest.(check (option (float 0.01))) "timeout value" (Some 5.0) timeout
+  | _ -> Alcotest.fail "Expected Race node"
+
+let test_parse_retry_chain () =
+  let json = Yojson.Safe.from_string retry_chain_json in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "retry_llm" chain.id;
+      Alcotest.(check int) "nodes count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      Alcotest.(check string) "node id" "retrier" node.id;
+      (match node.node_type with
+       | Retry { node = inner; max_attempts; retry_on; _ } ->
+           Alcotest.(check string) "inner node id" "llm_call" inner.id;
+           Alcotest.(check int) "max_attempts" 3 max_attempts;
+           Alcotest.(check (list string)) "retry_on" ["timeout"; "rate_limit"] retry_on
+       | _ -> Alcotest.fail "Expected Retry node type")
+  | Error e -> Alcotest.fail ("Parse error: " ^ e)
+
+let test_parse_fallback_chain () =
+  let json = Yojson.Safe.from_string fallback_chain_json in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "resilient_api" chain.id;
+      let node = List.hd chain.nodes in
+      Alcotest.(check string) "node id" "fallback_chain" node.id;
+      (match node.node_type with
+       | Fallback { primary; fallbacks } ->
+           Alcotest.(check string) "primary id" "fast_llm" primary.id;
+           Alcotest.(check int) "fallbacks count" 2 (List.length fallbacks);
+           Alcotest.(check string) "first fallback" "accurate_llm" (List.hd fallbacks).id
+       | _ -> Alcotest.fail "Expected Fallback node type")
+  | Error e -> Alcotest.fail ("Parse error: " ^ e)
+
+let test_parse_race_chain () =
+  let json = Yojson.Safe.from_string race_chain_json in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "fast_response" chain.id;
+      let node = List.hd chain.nodes in
+      Alcotest.(check string) "node id" "racer" node.id;
+      (match node.node_type with
+       | Race { nodes; timeout } ->
+           Alcotest.(check int) "nodes count" 2 (List.length nodes);
+           Alcotest.(check bool) "timeout present" true (Option.is_some timeout);
+           Alcotest.(check (option (float 0.01))) "timeout value" (Some 5.0) timeout
+       | _ -> Alcotest.fail "Expected Race node type")
+  | Error e -> Alcotest.fail ("Parse error: " ^ e)
+
+let test_backoff_strategies () =
+  (* Test all backoff parsing variants *)
+  let test_json backoff_str expected_name =
+    let json = Yojson.Safe.from_string (Printf.sprintf {|
+      {
+        "id": "test",
+        "nodes": [{
+          "id": "r",
+          "type": "retry",
+          "max_attempts": 2,
+          "backoff": "%s",
+          "node": {"id": "inner", "type": "llm", "model": "gemini", "prompt": "x"}
+        }],
+        "output": "r"
+      }
+    |} backoff_str) in
+    match parse_chain json with
+    | Ok chain ->
+        let node = List.hd chain.nodes in
+        (match node.node_type with
+         | Retry { backoff; _ } ->
+             let actual = match backoff with
+               | Constant _ -> "constant"
+               | Exponential _ -> "exponential"
+               | Linear _ -> "linear"
+               | Jitter _ -> "jitter"
+             in
+             Alcotest.(check string) ("backoff " ^ backoff_str) expected_name actual
+         | _ -> Alcotest.fail "Expected Retry")
+    | Error e -> Alcotest.fail ("Parse error: " ^ e)
+  in
+  test_json "exponential:2.0" "exponential";
+  test_json "constant:1.5" "constant";
+  test_json "linear:0.5" "linear"
+
+(* ============================================================================
    Conversation Context Tests (relay_models rotation)
    ============================================================================ *)
 
@@ -1192,6 +1315,10 @@ let types_tests = [
   "make_goal_driven", `Quick, test_make_goal_driven;
   "make_goal_driven_conversational", `Quick, test_make_goal_driven_conversational;
   "make_evaluator", `Quick, test_make_evaluator;
+  (* Resilience node type helpers *)
+  "make_retry", `Quick, test_make_retry;
+  "make_fallback", `Quick, test_make_fallback;
+  "make_race", `Quick, test_make_race;
 ]
 
 let parser_tests = [
@@ -1209,6 +1336,11 @@ let parser_tests = [
   "parse_threshold_chain", `Quick, test_parse_threshold_chain;
   "parse_goal_driven_chain", `Quick, test_parse_goal_driven_chain;
   "parse_evaluator_chain", `Quick, test_parse_evaluator_chain;
+  (* Resilience node parsers *)
+  "parse_retry_chain", `Quick, test_parse_retry_chain;
+  "parse_fallback_chain", `Quick, test_parse_fallback_chain;
+  "parse_race_chain", `Quick, test_parse_race_chain;
+  "backoff_strategies", `Quick, test_backoff_strategies;
 ]
 
 let compiler_tests = [

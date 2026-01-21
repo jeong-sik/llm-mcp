@@ -113,6 +113,9 @@ type tool_args =
   | ChainToMermaid of {
       chain : Yojson.Safe.t;         (* Chain definition to convert - required *)
     }
+  | ChainVisualize of {
+      chain : Yojson.Safe.t;         (* Chain definition to visualize - required *)
+    }
   | ChainOrchestrate of {
       goal : string;                       (* Goal description for the orchestration *)
       chain : Yojson.Safe.t option;        (* Initial chain definition (optional) *)
@@ -610,6 +613,29 @@ Returns: Mermaid flowchart text that can be rendered or edited visually.|};
   ];
 }
 
+let chain_visualize_schema : tool_schema = {
+  name = "chain.visualize";
+  description = {|Generate ASCII visualization of a Chain DSL graph (terminal-friendly).
+
+Parameters:
+- chain: Chain DSL JSON to visualize (required)
+
+Returns: ASCII tree representation with:
+- Node types indicated by emojis (🤖 LLM, 🔧 Tool, 🗳️ Quorum, etc.)
+- Tree structure showing data flow
+- Header with chain ID, direction, node count, and output|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("chain", `Assoc [
+        ("type", `String "object");
+        ("description", `String "Chain DSL definition to visualize");
+      ]);
+    ]);
+    ("required", `List [`String "chain"]);
+  ];
+}
+
 let chain_list_schema : tool_schema = {
   name = "chain.list";
   description = "List all registered chains in the registry.";
@@ -688,6 +714,7 @@ let all_schemas = [
   chain_validate_schema;
   chain_list_schema;
   chain_to_mermaid_schema;
+  chain_visualize_schema;
   chain_orchestrate_schema;
 ]
 

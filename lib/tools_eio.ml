@@ -25,6 +25,7 @@ let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
 let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let parse_chain_to_mermaid_args = Tool_parsers.parse_chain_to_mermaid_args
+let parse_chain_visualize_args = Tool_parsers.parse_chain_visualize_args
 let parse_chain_orchestrate_args = Tool_parsers.parse_chain_orchestrate_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
@@ -722,6 +723,25 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             extra = [
               ("chain_id", parsed_chain.Chain_types.id);
               ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
+            ]; })
+
+  | ChainVisualize { chain } ->
+      (* Parse JSON to Chain AST, then convert to ASCII visualization *)
+      (match Chain_parser.parse_chain chain with
+      | Error msg ->
+          { model = "chain.visualize";
+            returncode = -1;
+            response = sprintf "Parse error: %s" msg;
+            extra = [("stage", "parse")]; }
+      | Ok parsed_chain ->
+          let ascii_text = Chain_mermaid_parser.chain_to_ascii parsed_chain in
+          { model = "chain.visualize";
+            returncode = 0;
+            response = ascii_text;
+            extra = [
+              ("chain_id", parsed_chain.Chain_types.id);
+              ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
+              ("output", parsed_chain.Chain_types.output);
             ]; })
 
   | ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
