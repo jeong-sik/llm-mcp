@@ -7,8 +7,6 @@
       echo "정한길이 드럼작업한다고 X4 빌려감" | person_lookup
 *)
 
-open Lwt.Syntax
-
 (** Korean particles to strip (2-char first, then 1-char) *)
 let particles_2 = ["에게"; "한테"; "에서"; "부터"; "까지"; "처럼"; "보다"; "라고"; "이랑"; "이형"; "이누나"; "이언니"; "이오빠"]
 let particles_1 = ["이"; "가"; "을"; "를"; "은"; "는"; "의"; "에"; "와"; "과"; "도"; "만"; "로"; "야"; "형"; "씨"; "님"]
@@ -118,8 +116,8 @@ let extract_korean_names text =
   (* Deduplicate *)
   List.sort_uniq String.compare filtered
 
-(** Lookup person by name in Neo4j using Bolt protocol *)
-let lookup_person conn name =
+(** Lookup person by name in Neo4j using Bolt protocol (Eio) *)
+let lookup_person ~clock conn name =
   (* Exact match first *)
   let exact_query = {|
     MATCH (p:Person)
@@ -130,10 +128,10 @@ let lookup_person conn name =
   |} in
 
   let params = `Assoc [("name", `String name)] in
-  let* result = Neo4j_bolt.Bolt.query conn ~cypher:exact_query ~params () in
+  let result = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher:exact_query ~params () in
 
   match result with
-  | Error _ -> Lwt.return None
+  | Error _ -> None
   | Ok json ->
       let open Yojson.Safe.Util in
       try
@@ -148,12 +146,12 @@ let lookup_person conn name =
               RETURN p, collect(DISTINCT group.name) as groups
               LIMIT 1
             |} in
-            let* partial_result = Neo4j_bolt.Bolt.query conn ~cypher:partial_query ~params () in
+            let partial_result = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher:partial_query ~params () in
             match partial_result with
-            | Error _ -> Lwt.return None
+            | Error _ -> None
             | Ok pjson ->
                 let precords = pjson |> member "records" |> to_list in
-                if List.length precords = 0 then Lwt.return None
+                if List.length precords = 0 then None
                 else begin
                   (* records[0] = [[person, groups]] *)
                   let outer_row = List.hd precords |> to_list in
@@ -166,10 +164,10 @@ let lookup_person conn name =
                   let groups = try List.nth inner_row 1 |> to_list |> List.filter_map (fun g ->
                     try Some (to_string g) with _ -> None
                   ) with _ -> [] in
-                  Lwt.return (Some (props, groups))
+                  Some (props, groups)
                 end
           end
-          else Lwt.return None
+          else None
         end
         else begin
           (* records[0] = [[person, groups]] *)
@@ -183,9 +181,9 @@ let lookup_person conn name =
           let groups = try List.nth inner_row 1 |> to_list |> List.filter_map (fun g ->
             try Some (to_string g) with _ -> None
           ) with _ -> [] in
-          Lwt.return (Some (props, groups))
+          Some (props, groups)
         end
-      with _ -> Lwt.return None
+      with _ -> None
 
 (** Format person context for output *)
 let format_person_context person groups =
@@ -244,8 +242,8 @@ let format_person_context person groups =
 
   Buffer.contents buf
 
-(** Main function *)
-let main () =
+(** Main function (Eio) *)
+let main ~sw ~net ~clock =
   (* Read from stdin *)
   let user_message =
     let buf = Buffer.create 256 in
@@ -260,47 +258,42 @@ let main () =
   in
 
   let message = String.trim user_message in
-  if String.length message = 0 then begin
-    print_endline "{}";
-    Lwt.return ()
-  end else begin
+  if String.length message = 0 then
+    print_endline "{}"
+  else begin
     (* Extract Korean names *)
     let names = extract_korean_names message in
-    if List.length names = 0 then begin
-      print_endline "{}";
-      Lwt.return ()
-    end else begin
-      (* Connect to Neo4j *)
-      let* conn_result = Neo4j_bolt.Bolt.connect () in
-      match conn_result with
+    if List.length names = 0 then
+      print_endline "{}"
+    else begin
+      (* Connect to Neo4j using Eio *)
+      let config = Neo4j_bolt_eio.Bolt.default_config in
+      match Neo4j_bolt_eio.Bolt.connect ~sw ~net ~clock ~config () with
       | Error e ->
           prerr_endline (Printf.sprintf "[person-lookup] Neo4j connection failed: %s"
-            (Neo4j_bolt.Bolt.error_to_string e));
+            (Neo4j_bolt_eio.Bolt.error_to_string e));
           prerr_endline (Printf.sprintf "[person-lookup] Extracted names: %s"
             (String.concat ", " names));
-          print_endline "{}";
-          Lwt.return ()
+          print_endline "{}"
       | Ok conn ->
           (* Lookup each name *)
           let results = ref [] in
-          let* () = Lwt_list.iter_s (fun name ->
-            let* person_opt = lookup_person conn name in
-            (match person_opt with
-             | Some (person, groups) ->
-                 results := (name, person, groups) :: !results
-             | None -> ());
-            Lwt.return ()
-          ) names in
+          List.iter (fun name ->
+            let person_opt = lookup_person ~clock conn name in
+            match person_opt with
+            | Some (person, groups) ->
+                results := (name, person, groups) :: !results
+            | None -> ()
+          ) names;
 
           (* Close connection *)
-          let* () = Neo4j_bolt.Bolt.close conn in
+          Neo4j_bolt_eio.Bolt.close conn;
 
           (* Format output *)
           if List.length !results = 0 then begin
             prerr_endline (Printf.sprintf "[person-lookup] No matches found for: %s"
               (String.concat ", " names));
-            print_endline "{}";
-            Lwt.return ()
+            print_endline "{}"
           end else begin
             let context_parts = List.map (fun (_, person, groups) ->
               format_person_context person groups
@@ -312,10 +305,14 @@ let main () =
               ("names", `List (List.map (fun (n, _, _) -> `String n) !results));
               ("context", `String context);
             ] in
-            print_endline (Yojson.Safe.to_string output);
-            Lwt.return ()
+            print_endline (Yojson.Safe.to_string output)
           end
     end
   end
 
-let () = Lwt_main.run (main ())
+let () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  main ~sw ~net ~clock

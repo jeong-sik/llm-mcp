@@ -395,6 +395,25 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
   | `GET, "/" ->
       Response.text "🐫 llm-mcp (OCaml Eio) MCP 2025-11-25 server" reqd
 
+  (* Chain stats endpoint for monitoring dashboard *)
+  | `GET, "/chain/stats" ->
+      let stats = Chain_stats.compute () in
+      let body = Yojson.Safe.to_string (Chain_stats.to_json stats) in
+      Response.json body reqd
+
+  (* Chain status endpoint for currently running chains *)
+  | `GET, "/chain/status" ->
+      let status = Chain_telemetry.get_running_chains () in
+      let body = Yojson.Safe.to_string (`List (List.map (fun (id, started, progress) ->
+        `Assoc [
+          ("chain_id", `String id);
+          ("started_at", `Float started);
+          ("progress", `Float progress);
+          ("elapsed_sec", `Float (Unix.gettimeofday () -. started));
+        ]
+      ) status)) in
+      Response.json body reqd
+
   | `GET, "/mcp" ->
       handle_get_mcp ~clock headers reqd
 
@@ -524,6 +543,8 @@ let port_arg =
   Arg.(value & opt int 8932 & info ["port"; "p"] ~docv:"PORT" ~doc)
 
 let main host port =
+  (* Enable chain stats collection *)
+  Chain_stats.enable ();
   let config = { default_config with host; port } in
   start_server config
 

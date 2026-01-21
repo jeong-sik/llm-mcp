@@ -42,8 +42,8 @@
  (public_name person-lookup)
  (package llm_mcp)
  (modules person_lookup)
- (libraries lwt lwt.unix neo4j_bolt yojson)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio yojson)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name memory_retriever)
@@ -100,8 +100,8 @@
  (public_name neo4j-health)
  (package llm_mcp)
  (modules neo4j_health)
- (libraries lwt lwt.unix neo4j_bolt yojson)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name doctor)
