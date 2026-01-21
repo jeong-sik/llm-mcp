@@ -647,6 +647,9 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Threshold { metric; _ } -> Printf.sprintf "threshold_%s" metric
   | GoalDriven { goal_metric; _ } -> Printf.sprintf "goal_%s" goal_metric
   | Evaluator { scoring_func; _ } -> Printf.sprintf "eval_%s" scoring_func
+  | Retry { max_attempts; _ } -> Printf.sprintf "retry_%d" max_attempts
+  | Fallback _ -> "fallback"
+  | Race _ -> "race"
 
 (** Convert a node_type to Mermaid node text (prompt/description) *)
 let node_type_to_text (nt : node_type) : string =
@@ -684,6 +687,19 @@ let node_type_to_text (nt : node_type) : string =
         | WeightedRandom -> "weighted"
       in
       Printf.sprintf "Eval %d via %s (%s)" (List.length candidates) scoring_func strategy_str
+  | Retry { max_attempts; backoff; _ } ->
+      let backoff_str = match backoff with
+        | Constant s -> Printf.sprintf "const %.1fs" s
+        | Exponential b -> Printf.sprintf "exp %.1fx" b
+        | Linear b -> Printf.sprintf "linear %.1fx" b
+        | Jitter (min_s, max_s) -> Printf.sprintf "jitter %.1f-%.1fs" min_s max_s
+      in
+      Printf.sprintf "Retry %dx (%s)" max_attempts backoff_str
+  | Fallback { fallbacks; _ } ->
+      Printf.sprintf "Fallback with %d alternatives" (List.length fallbacks)
+  | Race { nodes; timeout; _ } ->
+      let timeout_str = match timeout with Some t -> Printf.sprintf " (%.1fs)" t | None -> "" in
+      Printf.sprintf "Race %d%s" (List.length nodes) timeout_str
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -691,6 +707,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Llm _ | Tool _ -> ("[", "]")
   | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ -> ("{", "}")
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | GoalDriven _ -> ("[[", "]]")
+  | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
 let chain_to_mermaid (chain : chain) : string =

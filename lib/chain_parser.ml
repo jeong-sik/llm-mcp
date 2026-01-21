@@ -339,6 +339,36 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       in
       Ok (Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score })
 
+  (* Resilience Nodes *)
+  | "retry" ->
+      let* inner_node = parse_node (json |> member "node") in
+      let max_attempts = try json |> member "max_attempts" |> to_int with _ -> 3 in
+      let backoff = try
+        match json |> member "backoff" with
+        | `String s -> (match String.split_on_char ':' s with
+            | ["exponential"; v] -> Exponential (float_of_string v)
+            | ["constant"; v] -> Constant (float_of_string v)
+            | ["linear"; v] -> Linear (float_of_string v)
+            | _ -> Exponential 1.0)
+        | `Float f -> Exponential f
+        | _ -> Exponential 1.0
+        with _ -> Exponential 1.0
+      in
+      let retry_on = try json |> member "retry_on" |> to_list |> List.map to_string with _ -> [] in
+      Ok (Retry { node = inner_node; max_attempts; backoff; retry_on })
+
+  | "fallback" ->
+      let* primary = parse_node (json |> member "primary") in
+      let* fallbacks = parse_nodes (try json |> member "fallbacks" |> to_list with _ -> []) in
+      Ok (Fallback { primary; fallbacks })
+
+  | "race" ->
+      let* nodes = parse_nodes (try json |> member "nodes" |> to_list with _ -> []) in
+      let timeout = try Some (json |> member "timeout" |> to_float)
+        with _ -> try Some (float_of_int (json |> member "timeout" |> to_int)) with _ -> None
+      in
+      Ok (Race { nodes; timeout })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 

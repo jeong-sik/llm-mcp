@@ -75,7 +75,15 @@ type select_strategy =
   | WeightedRandom    (** Random selection weighted by scores *)
 [@@deriving yojson]
 
-(** The 13 supported node types *)
+(** Backoff strategy for Retry node *)
+type backoff_strategy =
+  | Constant of float         (** Fixed delay between retries (seconds) *)
+  | Exponential of float      (** Exponential backoff: base * 2^attempt *)
+  | Linear of float           (** Linear backoff: base * attempt *)
+  | Jitter of float * float   (** Random between min and max *)
+[@@deriving yojson]
+
+(** The 17 supported node types (including 3 resilience nodes) *)
 type node_type =
   | Llm of {
       model : string;     (** Model name: gemini, claude, codex, ollama:* *)
@@ -137,6 +145,21 @@ type node_type =
       scoring_prompt : string option;  (** Prompt for LLM judge scoring *)
       select_strategy : select_strategy;  (** Selection strategy *)
       min_score : float option;    (** Minimum score threshold (fails if none meet it) *)
+    }
+  (* Resilience Nodes *)
+  | Retry of {
+      node : node;                   (** Node to retry on failure *)
+      max_attempts : int;            (** Maximum retry attempts *)
+      backoff : backoff_strategy;    (** Delay strategy between retries *)
+      retry_on : string list;        (** Error patterns to retry on (empty = all) *)
+    }
+  | Fallback of {
+      primary : node;                (** Primary node to try first *)
+      fallbacks : node list;         (** Fallback nodes tried in order *)
+    }
+  | Race of {
+      nodes : node list;             (** Nodes to race (first wins) *)
+      timeout : float option;        (** Optional timeout for stragglers *)
     }
 [@@deriving yojson]
 
@@ -222,6 +245,9 @@ let node_type_name = function
   | Threshold _ -> "threshold"
   | GoalDriven _ -> "goal_driven"
   | Evaluator _ -> "evaluator"
+  | Retry _ -> "retry"
+  | Fallback _ -> "fallback"
+  | Race _ -> "race"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ~prompt ?timeout ?tools () =
@@ -260,6 +286,18 @@ let make_goal_driven ~id ~goal_metric ~goal_operator ~goal_value
 (** Helper: Create an evaluator node *)
 let make_evaluator ~id ~candidates ~scoring_func ?scoring_prompt ~select_strategy ?min_score () =
   { id; node_type = Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score }; input_mapping = [] }
+
+(** Helper: Create a retry node with backoff *)
+let make_retry ~id ~node ~max_attempts ?(backoff = Exponential 1.0) ?(retry_on = []) () =
+  { id; node_type = Retry { node; max_attempts; backoff; retry_on }; input_mapping = [] }
+
+(** Helper: Create a fallback chain *)
+let make_fallback ~id ~primary ~fallbacks =
+  { id; node_type = Fallback { primary; fallbacks }; input_mapping = [] }
+
+(** Helper: Create a race node (first result wins) *)
+let make_race ~id ~nodes ?timeout () =
+  { id; node_type = Race { nodes; timeout }; input_mapping = [] }
 
 (** {1 Batch Execution Types - Phase 5} *)
 
