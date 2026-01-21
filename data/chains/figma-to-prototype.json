@@ -1,0 +1,139 @@
+{
+  "id": "figma-to-prototype",
+  "name": "Figma to Prototype Generator",
+  "description": "Figma 디자인에서 iOS/Android/Web 프로토타입 코드 생성",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "parse-figma-url",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": { "url": "{{input.figma_url}}" }
+      },
+      "output_key": "figma_meta"
+    },
+    {
+      "id": "get-design-structure",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}",
+          "node_id": "{{figma_meta.node_id}}"
+        }
+      },
+      "depends_on": ["parse-figma-url"],
+      "output_key": "design_structure"
+    },
+    {
+      "id": "extract-dsl",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}",
+          "node_id": "{{figma_meta.node_id}}",
+          "depth": 3
+        }
+      },
+      "depends_on": ["parse-figma-url"],
+      "output_key": "figma_dsl"
+    },
+    {
+      "id": "analyze-components",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Analyze this Figma DSL and identify:\n1. Component hierarchy\n2. Reusable components\n3. Design tokens (colors, spacing, typography)\n4. Layout patterns (flex, grid, absolute)\n\nFigma DSL:\n{{figma_dsl}}\n\nOutput JSON: {\"components\": [...], \"tokens\": {...}, \"patterns\": [...]}"
+      },
+      "depends_on": ["extract-dsl"],
+      "output_key": "component_analysis"
+    },
+    {
+      "id": "generate-web",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Generate React + Tailwind code for this Figma design.\n\nDesign Structure:\n{{design_structure}}\n\nComponent Analysis:\n{{component_analysis}}\n\nRequirements:\n- TypeScript\n- Functional components\n- Tailwind CSS (no inline styles)\n- Responsive (mobile-first)\n- Extract colors to CSS variables\n\nOutput complete React component code."
+      },
+      "depends_on": ["analyze-components", "get-design-structure"],
+      "output_key": "web_code"
+    },
+    {
+      "id": "generate-ios",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Generate SwiftUI code for this Figma design.\n\nDesign Structure:\n{{design_structure}}\n\nComponent Analysis:\n{{component_analysis}}\n\nRequirements:\n- SwiftUI (iOS 16+)\n- @ViewBuilder patterns\n- Preview provider\n- SF Symbols where appropriate\n- Dynamic Type support\n\nOutput complete SwiftUI View code."
+      },
+      "depends_on": ["analyze-components", "get-design-structure"],
+      "output_key": "ios_code"
+    },
+    {
+      "id": "generate-android",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Generate Jetpack Compose code for this Figma design.\n\nDesign Structure:\n{{design_structure}}\n\nComponent Analysis:\n{{component_analysis}}\n\nRequirements:\n- Kotlin + Jetpack Compose\n- Material3 theme\n- @Preview annotations\n- Modifier patterns\n- State hoisting\n\nOutput complete Composable function code."
+      },
+      "depends_on": ["analyze-components", "get-design-structure"],
+      "output_key": "android_code"
+    },
+    {
+      "id": "generate-flutter",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Generate Flutter/Dart code for this Figma design.\n\nDesign Structure:\n{{design_structure}}\n\nComponent Analysis:\n{{component_analysis}}\n\nRequirements:\n- Flutter 3.x\n- StatelessWidget/StatefulWidget\n- Theme.of(context) for styling\n- Responsive with MediaQuery\n- Extract to separate widgets\n\nOutput complete Flutter Widget code."
+      },
+      "depends_on": ["analyze-components", "get-design-structure"],
+      "output_key": "flutter_code"
+    },
+    {
+      "id": "merge-outputs",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Compile the generated prototypes into a structured report.\n\n## Web (React + Tailwind)\n{{web_code}}\n\n## iOS (SwiftUI)\n{{ios_code}}\n\n## Android (Jetpack Compose)\n{{android_code}}\n\n## Flutter\n{{flutter_code}}\n\nCreate a markdown report with:\n1. Overview of the design\n2. Shared design tokens (colors, spacing)\n3. Platform-specific code blocks\n4. Implementation notes per platform\n5. Known limitations/TODOs"
+      },
+      "depends_on": ["generate-web", "generate-ios", "generate-android", "generate-flutter"],
+      "output_key": "final_report"
+    }
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL (e.g., https://www.figma.com/file/xxx/Design?node-id=1-2)"
+      },
+      "platforms": {
+        "type": "array",
+        "items": { "type": "string", "enum": ["web", "ios", "android", "flutter"] },
+        "default": ["web", "ios", "android"],
+        "description": "Target platforms to generate"
+      }
+    },
+    "required": ["figma_url"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "final_report": { "type": "string" },
+      "web_code": { "type": "string" },
+      "ios_code": { "type": "string" },
+      "android_code": { "type": "string" },
+      "flutter_code": { "type": "string" }
+    }
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["figma", "prototype", "code-generation", "multi-platform"],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.35
+  }
+}
