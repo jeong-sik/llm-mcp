@@ -104,6 +104,14 @@
  (preprocess (pps lwt_ppx)))
 
 (executable
+ (name doctor)
+ (public_name llm-mcp-doctor)
+ (package llm_mcp)
+ (modules doctor)
+ (libraries lwt lwt.unix neo4j_bolt yojson)
+ (preprocess (pps lwt_ppx)))
+
+(executable
  (name subagent_logger)
  (public_name subagent-logger)
  (package llm_mcp)
