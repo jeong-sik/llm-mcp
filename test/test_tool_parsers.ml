@@ -72,7 +72,7 @@ let test_parse_claude_defaults () =
   match Tool_parsers.parse_claude_args json with
   | Claude c ->
       check string "default model" "opus" c.model;
-      check bool "default long_context" true c.long_context;  (* default without budget_mode *)
+      check bool "default long_context" false c.long_context;  (* default: false to avoid API charges *)
       check int "default timeout" 300 c.timeout;
       check bool "default stream" true c.stream;  (* default is true *)
       check string "prompt" "Hello Claude" c.prompt

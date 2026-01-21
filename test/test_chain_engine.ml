@@ -11,6 +11,7 @@ open Chain_types
 open Chain_parser
 open Chain_compiler
 open Chain_registry
+open Chain_executor_eio
 
 (* ============================================================================
    Test Fixtures
@@ -439,14 +440,34 @@ let test_make_goal_driven () =
   Alcotest.(check string) "id" "coverage_goal" goal_driven.id;
   match goal_driven.node_type with
   | GoalDriven { goal_metric; goal_operator; goal_value; action_node;
-                 measure_func; max_iterations; strategy_hints } ->
+                 measure_func; max_iterations; strategy_hints;
+                 conversational; relay_models } ->
       Alcotest.(check string) "goal_metric" "coverage" goal_metric;
       Alcotest.(check bool) "goal_operator is Gte" true (goal_operator = Gte);
       Alcotest.(check (float 0.001)) "goal_value" 0.9 goal_value;
       Alcotest.(check string) "action_node id" "gen_test" action_node.id;
       Alcotest.(check string) "measure_func" "exec_test" measure_func;
       Alcotest.(check int) "max_iterations" 10 max_iterations;
-      Alcotest.(check int) "strategy_hints count" 2 (List.length strategy_hints)
+      Alcotest.(check int) "strategy_hints count" 2 (List.length strategy_hints);
+      (* Default values for new fields *)
+      Alcotest.(check bool) "conversational default" false conversational;
+      Alcotest.(check int) "relay_models default empty" 0 (List.length relay_models)
+  | _ -> Alcotest.fail "Expected GoalDriven node"
+
+let test_make_goal_driven_conversational () =
+  let action_node = make_llm_node ~id:"gen_code" ~model:"gemini" ~prompt:"generate code" () in
+  let goal_driven = make_goal_driven ~id:"iterative_coding"
+    ~goal_metric:"score" ~goal_operator:Gte ~goal_value:0.95
+    ~action_node ~measure_func:"parse_float" ~max_iterations:5
+    ~conversational:true
+    ~relay_models:["gemini"; "claude"; "codex"] () in
+  Alcotest.(check string) "id" "iterative_coding" goal_driven.id;
+  match goal_driven.node_type with
+  | GoalDriven { conversational; relay_models; _ } ->
+      Alcotest.(check bool) "conversational enabled" true conversational;
+      Alcotest.(check int) "relay_models count" 3 (List.length relay_models);
+      Alcotest.(check string) "first model" "gemini" (List.hd relay_models);
+      Alcotest.(check string) "last model" "codex" (List.nth relay_models 2)
   | _ -> Alcotest.fail "Expected GoalDriven node"
 
 let test_make_evaluator () =
@@ -634,7 +655,7 @@ let test_parse_goal_driven_chain () =
       let goal_node = List.find (fun (n : node) -> n.id = "test_gen") chain.nodes in
       (match goal_node.node_type with
        | GoalDriven { goal_metric; goal_operator; goal_value; action_node;
-                      measure_func; max_iterations; strategy_hints } ->
+                      measure_func; max_iterations; strategy_hints; _ } ->
            Alcotest.(check string) "goal_metric" "coverage" goal_metric;
            Alcotest.(check bool) "goal_operator is Gte" true (goal_operator = Gte);
            Alcotest.(check (float 0.001)) "goal_value" 0.90 goal_value;
@@ -997,6 +1018,7 @@ let types_tests = [
   (* Evaluation node type helpers *)
   "make_threshold", `Quick, test_make_threshold;
   "make_goal_driven", `Quick, test_make_goal_driven;
+  "make_goal_driven_conversational", `Quick, test_make_goal_driven_conversational;
   "make_evaluator", `Quick, test_make_evaluator;
 ]
 
@@ -1033,6 +1055,7 @@ let registry_tests = [
   "registry_stats", `Quick, test_registry_stats;
   "registry_json_export_import", `Quick, test_registry_json_export_import;
 ]
+
 
 let () =
   Alcotest.run "Chain Engine" [
