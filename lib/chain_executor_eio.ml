@@ -54,6 +54,26 @@ type iteration_ctx = {
   strategy: string option;  (** Current strategy hint if any *)
 }
 
+(** A single message in conversation history *)
+type conv_message = {
+  role: string;       (** "user" | "assistant" | "system" *)
+  content: string;    (** Message content *)
+  model: string;      (** Model that generated this (for assistant messages) *)
+  iteration: int;     (** Which iteration this belongs to *)
+}
+
+(** Conversation context for maintaining history across iterations *)
+type conversation_ctx = {
+  mutable history: conv_message list;   (** Accumulated messages (newest first) *)
+  mutable current_model: string;        (** Currently active model *)
+  mutable model_index: int;             (** Index in model rotation *)
+  models: string list;                  (** Available models for rotation *)
+  token_threshold: int;                 (** Threshold to trigger summarization *)
+  window_size: int;                     (** Keep last N messages without summarizing *)
+  mutable total_tokens: int;            (** Estimated total tokens used *)
+  mutable summaries: string list;       (** Previous conversation summaries *)
+}
+
 (** Context passed through execution *)
 type exec_context = {
   outputs: (string, string) Hashtbl.t;      (** Node outputs by ID *)
@@ -62,6 +82,7 @@ type exec_context = {
   trace_enabled: bool;                       (** Whether to record traces *)
   timeout: int;                              (** Overall timeout in seconds *)
   mutable iteration_ctx: iteration_ctx option;  (** Iteration context for GoalDriven *)
+  mutable conversation: conversation_ctx option; (** Conversation context for conversational mode *)
 }
 
 (** Create a new execution context *)
@@ -72,6 +93,7 @@ let make_context ~start_time ~trace_enabled ~timeout = {
   trace_enabled;
   timeout;
   iteration_ctx = None;
+  conversation = None;
 }
 
 (** {1 Trace Helpers} *)
@@ -203,6 +225,172 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
   in
   map json
 
+(** {1 Iteration Variable Substitution} *)
+
+(** Substitute iteration-aware variables in prompt
+    Supports:
+    - {{iteration}} - current iteration number (1-based)
+    - {{max_iterations}} - maximum iterations allowed
+    - {{progress}} - current progress toward goal (0.0 to 1.0+)
+    - {{last_value}} - last measured metric value
+    - {{goal_value}} - target goal value
+    - {{strategy}} - current strategy hint (or "default")
+    - {{linear:start,end}} - linear interpolation based on progress
+    - {{step:v1,v2,v3,...}} - step function based on iteration
+*)
+let substitute_iteration_vars (prompt : string) (iter_ctx : iteration_ctx option) : string =
+  match iter_ctx with
+  | None -> prompt
+  | Some ctx ->
+      let replace_var s var_name replacement =
+        let pattern = "{{" ^ var_name ^ "}}" in
+        let buf = Buffer.create (String.length s) in
+        let rec replace start =
+          match String.index_from_opt s start '{' with
+          | None -> Buffer.add_substring buf s start (String.length s - start)
+          | Some i ->
+              if i + String.length pattern <= String.length s &&
+                 String.sub s i (String.length pattern) = pattern then begin
+                Buffer.add_substring buf s start (i - start);
+                Buffer.add_string buf replacement;
+                replace (i + String.length pattern)
+              end else begin
+                (* Pattern didn't match - add content from start to i+1 and continue *)
+                Buffer.add_substring buf s start (i - start + 1);
+                replace (i + 1)
+              end
+        in
+        replace 0;
+        Buffer.contents buf
+      in
+      (* Basic variable substitution *)
+      let result = prompt in
+      let result = replace_var result "iteration" (string_of_int ctx.iteration) in
+      let result = replace_var result "max_iterations" (string_of_int ctx.max_iterations) in
+      let result = replace_var result "progress" (Printf.sprintf "%.2f" ctx.progress) in
+      let result = replace_var result "last_value" (Printf.sprintf "%.2f" ctx.last_value) in
+      let result = replace_var result "goal_value" (Printf.sprintf "%.2f" ctx.goal_value) in
+      let result = replace_var result "strategy" (Option.value ctx.strategy ~default:"default") in
+
+      (* Linear interpolation: {{linear:start,end}} *)
+      let linear_regex = Str.regexp "{{linear:\\([0-9.]+\\),\\([0-9.]+\\)}}" in
+      let result = Str.global_substitute linear_regex (fun s ->
+        try
+          let start_val = float_of_string (Str.matched_group 1 s) in
+          let end_val = float_of_string (Str.matched_group 2 s) in
+          let t = float_of_int (ctx.iteration - 1) /. float_of_int (max 1 (ctx.max_iterations - 1)) in
+          let interpolated = start_val +. (end_val -. start_val) *. t in
+          Printf.sprintf "%.2f" interpolated
+        with _ -> Str.matched_string s
+      ) result in
+
+      (* Step function: {{step:v1,v2,v3,...}} *)
+      let step_regex = Str.regexp "{{step:\\([^}]+\\)}}" in
+      let result = Str.global_substitute step_regex (fun s ->
+        try
+          let values_str = Str.matched_group 1 s in
+          let values = String.split_on_char ',' values_str in
+          let idx = min (ctx.iteration - 1) (List.length values - 1) in
+          List.nth values (max 0 idx) |> String.trim
+        with _ -> Str.matched_string s
+      ) result in
+
+      result
+
+(** {1 Conversational Mode Helpers} *)
+
+(** Estimate token count from string (rough: ~4 chars per token) *)
+let estimate_tokens (s : string) : int = (String.length s + 3) / 4
+
+(** Estimate total tokens in conversation *)
+let estimate_conversation_tokens (conv : conversation_ctx) : int =
+  List.fold_left (fun acc msg -> acc + estimate_tokens msg.content) 0 conv.history
+  + List.fold_left (fun acc s -> acc + estimate_tokens s) 0 conv.summaries
+
+(** Create default conversation context *)
+let make_conversation_ctx ?(models=["gemini"; "claude"; "codex"])
+                          ?(token_threshold=6000)
+                          ?(window_size=10) () : conversation_ctx = {
+  history = [];
+  current_model = (match models with m :: _ -> m | [] -> "gemini");
+  model_index = 0;
+  models;
+  token_threshold;
+  window_size;
+  total_tokens = 0;
+  summaries = [];
+}
+
+(** Add a message to conversation history *)
+let add_message (conv : conversation_ctx) ~role ~content ~iteration : unit =
+  let msg = { role; content; model = conv.current_model; iteration } in
+  conv.history <- msg :: conv.history;
+  conv.total_tokens <- conv.total_tokens + estimate_tokens content
+
+(** Rotate to next model in the list *)
+let rotate_model (conv : conversation_ctx) : unit =
+  if List.length conv.models > 1 then begin
+    conv.model_index <- (conv.model_index + 1) mod List.length conv.models;
+    conv.current_model <- List.nth conv.models conv.model_index
+  end
+
+(** Check if summarization is needed *)
+let needs_summarization (conv : conversation_ctx) : bool =
+  conv.total_tokens > conv.token_threshold &&
+  List.length conv.history > conv.window_size
+
+(** Build context prompt from conversation history *)
+let build_context_prompt (conv : conversation_ctx) : string =
+  let summary_section = match conv.summaries with
+    | [] -> ""
+    | sums -> "## Previous Context Summary\n" ^ String.concat "\n---\n" sums ^ "\n\n"
+  in
+  let history_section =
+    let recent = List.rev conv.history in
+    String.concat "\n" (List.map (fun msg ->
+      Printf.sprintf "[%s (%s, iter %d)]: %s"
+        msg.role msg.model msg.iteration msg.content
+    ) recent)
+  in
+  summary_section ^ "## Recent History\n" ^ history_section
+
+(** Summarize history using LLM and compress context *)
+let summarize_history ~exec_fn (conv : conversation_ctx) : string =
+  (* Keep only recent messages for window *)
+  let to_summarize, to_keep =
+    let rec split n acc = function
+      | [] -> (List.rev acc, [])
+      | rest when n <= 0 -> (List.rev acc, rest)
+      | h :: t -> split (n - 1) (h :: acc) t
+    in
+    split (List.length conv.history - conv.window_size) [] (List.rev conv.history)
+  in
+  let history_text = String.concat "\n" (List.map (fun msg ->
+    Printf.sprintf "[%s]: %s" msg.role msg.content
+  ) to_summarize) in
+
+  let summary_prompt = Printf.sprintf
+    "Summarize this conversation context concisely, preserving key decisions, progress, and important information:\n\n%s\n\nProvide a brief summary (under 500 words):"
+    history_text
+  in
+  (* Use current model for summarization *)
+  let summary = match exec_fn ~model:conv.current_model ~prompt:summary_prompt ?tools:None () with
+    | Ok s -> s
+    | Error _ -> "Previous context (summarization failed)"
+  in
+  (* Update conversation state *)
+  conv.summaries <- conv.summaries @ [summary];
+  conv.history <- to_keep;
+  conv.total_tokens <- estimate_conversation_tokens conv;
+  summary
+
+(** Maybe summarize and rotate model if needed *)
+let maybe_summarize_and_rotate ~exec_fn (conv : conversation_ctx) : unit =
+  if needs_summarization conv then begin
+    let _ = summarize_history ~exec_fn conv in
+    rotate_model conv
+  end
+
 (** {1 Node Execution} *)
 
 (** Type of execution function callback *)
@@ -217,9 +405,11 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
   | Llm { model; prompt; timeout = _; tools } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
+      (* Apply iteration variable substitution if in GoalDriven context *)
+      let final_prompt = substitute_iteration_vars resolved_prompt ctx.iteration_ctx in
       record_start ctx node.id;
       let start = Unix.gettimeofday () in
-      let result = exec_fn ~model ~prompt:resolved_prompt ?tools () in
+      let result = exec_fn ~model ~prompt:final_prompt ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
@@ -282,9 +472,9 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Threshold { metric; operator; value; input_node; on_pass; on_fail } ->
       execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~metric ~operator ~value ~input_node ~on_pass ~on_fail
-  | GoalDriven { goal_metric; goal_operator; goal_value; action_node; measure_func; max_iterations; strategy_hints } ->
+  | GoalDriven { goal_metric; goal_operator; goal_value; action_node; measure_func; max_iterations; strategy_hints; conversational; relay_models } ->
       execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec node
-        ~goal_metric ~goal_operator ~goal_value ~action_node ~measure_func ~max_iterations ~strategy_hints
+        ~goal_metric ~goal_operator ~goal_value ~action_node ~measure_func ~max_iterations ~strategy_hints ~conversational ~relay_models
   | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
       execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~candidates ~scoring_func ~scoring_prompt ~select_strategy ~min_score
@@ -628,9 +818,18 @@ and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 (** Execute goal-driven iterative node - repeat until goal is met *)
 and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~goal_metric ~goal_operator ~goal_value ~action_node ~measure_func
-    ~max_iterations ~strategy_hints : (string, string) result =
+    ~max_iterations ~strategy_hints ~conversational ~relay_models : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
+
+  (* Initialize conversation context if conversational mode is enabled *)
+  let _conv_ctx =
+    if conversational then
+      let models = if relay_models = [] then ["gemini"; "claude"; "codex"] else relay_models in
+      Some (make_conversation_ctx ~models ())
+    else
+      None
+  in
 
   (* Get strategy hint based on current progress *)
   let get_strategy_hint current_value =
@@ -695,13 +894,27 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
   let rec iterate iteration last_value =
     if iteration > max_iterations then begin
+      ctx.iteration_ctx <- None;  (* Clear iteration context on completion *)
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       record_complete ctx parent.id ~duration_ms ~success:false;
       Error (Printf.sprintf "Goal not achieved after %d iterations (last value: %.2f, target: %.2f)"
                max_iterations last_value goal_value)
     end else begin
-      (* Log current strategy if hints are provided *)
-      let _current_strategy = get_strategy_hint last_value in
+      (* Get current strategy hint *)
+      let current_strategy = get_strategy_hint last_value in
+
+      (* Calculate progress toward goal *)
+      let progress = last_value /. (max 0.001 goal_value) in
+
+      (* Set iteration context for variable substitution in prompts *)
+      ctx.iteration_ctx <- Some {
+        iteration;
+        max_iterations;
+        progress;
+        last_value;
+        goal_value;
+        strategy = current_strategy;
+      };
 
       (* Execute the action node *)
       match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec action_node with
@@ -726,6 +939,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                  | Neq -> abs_float (v -. goal_value) >= 0.001
                in
                if goal_met then begin
+                 ctx.iteration_ctx <- None;  (* Clear iteration context on completion *)
                  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
                  record_complete ctx parent.id ~duration_ms ~success:true;
                  Hashtbl.add ctx.outputs parent.id output;

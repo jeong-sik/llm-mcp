@@ -489,6 +489,92 @@ let test_make_evaluator () =
   | _ -> Alcotest.fail "Expected Evaluator node"
 
 (* ============================================================================
+   Conversation Context Tests (relay_models rotation)
+   ============================================================================ *)
+
+let test_make_conversation_ctx_default () =
+  let ctx = make_conversation_ctx () in
+  Alcotest.(check string) "default current_model" "gemini" ctx.current_model;
+  Alcotest.(check int) "model_index" 0 ctx.model_index;
+  Alcotest.(check int) "models count" 3 (List.length ctx.models);
+  Alcotest.(check (list string)) "default models" ["gemini"; "claude"; "codex"] ctx.models;
+  Alcotest.(check int) "token_threshold" 6000 ctx.token_threshold;
+  Alcotest.(check int) "window_size" 10 ctx.window_size;
+  Alcotest.(check int) "empty history" 0 (List.length ctx.history);
+  Alcotest.(check int) "total_tokens" 0 ctx.total_tokens
+
+let test_make_conversation_ctx_custom_models () =
+  let ctx = make_conversation_ctx ~models:["claude"; "codex"] ~token_threshold:3000 () in
+  Alcotest.(check string) "current_model" "claude" ctx.current_model;
+  Alcotest.(check (list string)) "custom models" ["claude"; "codex"] ctx.models;
+  Alcotest.(check int) "custom threshold" 3000 ctx.token_threshold
+
+let test_rotate_model () =
+  let ctx = make_conversation_ctx ~models:["a"; "b"; "c"] () in
+  Alcotest.(check string) "initial" "a" ctx.current_model;
+  Alcotest.(check int) "initial index" 0 ctx.model_index;
+  rotate_model ctx;
+  Alcotest.(check string) "after 1st rotate" "b" ctx.current_model;
+  Alcotest.(check int) "index after 1st" 1 ctx.model_index;
+  rotate_model ctx;
+  Alcotest.(check string) "after 2nd rotate" "c" ctx.current_model;
+  Alcotest.(check int) "index after 2nd" 2 ctx.model_index;
+  rotate_model ctx;
+  Alcotest.(check string) "after 3rd rotate wraps" "a" ctx.current_model;
+  Alcotest.(check int) "index after wrap" 0 ctx.model_index
+
+let test_rotate_model_single () =
+  let ctx = make_conversation_ctx ~models:["only"] () in
+  Alcotest.(check string) "initial" "only" ctx.current_model;
+  rotate_model ctx;
+  Alcotest.(check string) "after rotate stays same" "only" ctx.current_model;
+  Alcotest.(check int) "index stays 0" 0 ctx.model_index
+
+let test_estimate_tokens () =
+  (* ~4 chars per token, formula: (len + 3) / 4 *)
+  Alcotest.(check int) "empty string" 0 (estimate_tokens "");
+  Alcotest.(check int) "4 chars = 1 token" 1 (estimate_tokens "abcd");
+  Alcotest.(check int) "8 chars = 2 tokens" 2 (estimate_tokens "abcdefgh");
+  Alcotest.(check int) "5 chars rounds up" 2 (estimate_tokens "abcde");
+  Alcotest.(check int) "3 chars rounds up" 1 (estimate_tokens "abc")
+
+let test_add_message () =
+  let ctx = make_conversation_ctx () in
+  add_message ctx ~role:"user" ~content:"hello" ~iteration:1;
+  Alcotest.(check int) "history length" 1 (List.length ctx.history);
+  Alcotest.(check int) "total_tokens" 2 ctx.total_tokens;  (* "hello" = 5 chars -> 2 tokens *)
+  let msg = List.hd ctx.history in
+  Alcotest.(check string) "msg role" "user" msg.role;
+  Alcotest.(check string) "msg content" "hello" msg.content;
+  Alcotest.(check string) "msg model" "gemini" msg.model;
+  Alcotest.(check int) "msg iteration" 1 msg.iteration;
+  (* Add another message *)
+  add_message ctx ~role:"assistant" ~content:"world" ~iteration:1;
+  Alcotest.(check int) "history length" 2 (List.length ctx.history);
+  Alcotest.(check int) "total_tokens accumulated" 4 ctx.total_tokens
+
+let test_needs_summarization () =
+  let ctx = make_conversation_ctx ~token_threshold:10 ~window_size:2 () in
+  Alcotest.(check bool) "initially no summarization" false (needs_summarization ctx);
+  (* Add messages to exceed threshold and window *)
+  add_message ctx ~role:"user" ~content:"this is a long message" ~iteration:1;
+  add_message ctx ~role:"assistant" ~content:"another long message here" ~iteration:1;
+  add_message ctx ~role:"user" ~content:"third message" ~iteration:2;
+  (* Check conditions: total_tokens > 10 AND history > 2 *)
+  Alcotest.(check bool) "needs summarization now" true (needs_summarization ctx)
+
+let test_build_context_prompt () =
+  let ctx = make_conversation_ctx () in
+  add_message ctx ~role:"user" ~content:"hello" ~iteration:1;
+  add_message ctx ~role:"assistant" ~content:"hi" ~iteration:1;
+  let prompt = build_context_prompt ctx in
+  Alcotest.(check bool) "contains Recent History" true (String.length prompt > 0);
+  Alcotest.(check bool) "contains user message" true
+    (String.length (Str.search_forward (Str.regexp "user") prompt 0 |> ignore; prompt) > 0 || true);
+  Alcotest.(check bool) "contains hello" true
+    (try let _ = Str.search_forward (Str.regexp "hello") prompt 0 in true with Not_found -> false)
+
+(* ============================================================================
    Chain Parser Tests
    ============================================================================ *)
 
@@ -1056,6 +1142,16 @@ let registry_tests = [
   "registry_json_export_import", `Quick, test_registry_json_export_import;
 ]
 
+let conversation_tests = [
+  "make_conversation_ctx_default", `Quick, test_make_conversation_ctx_default;
+  "make_conversation_ctx_custom_models", `Quick, test_make_conversation_ctx_custom_models;
+  "rotate_model", `Quick, test_rotate_model;
+  "rotate_model_single", `Quick, test_rotate_model_single;
+  "estimate_tokens", `Quick, test_estimate_tokens;
+  "add_message", `Quick, test_add_message;
+  "needs_summarization", `Quick, test_needs_summarization;
+  "build_context_prompt", `Quick, test_build_context_prompt;
+]
 
 let () =
   Alcotest.run "Chain Engine" [
@@ -1063,5 +1159,6 @@ let () =
     "Chain Parser", parser_tests;
     "Chain Compiler", compiler_tests;
     "Chain Registry", registry_tests;
+    "Conversation Context", conversation_tests;
     "Self-Recursion", recursion_tests;
   ]

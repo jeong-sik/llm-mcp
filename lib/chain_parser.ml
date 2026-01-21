@@ -301,9 +301,18 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
           |> List.map (fun (k, v) -> (k, to_string v))
         with _ -> []
       in
+      let conversational =
+        try json |> member "conversational" |> to_bool
+        with _ -> false
+      in
+      let relay_models =
+        try json |> member "relay_models" |> to_list |> List.map to_string
+        with _ -> []
+      in
       Ok (GoalDriven {
         goal_metric; goal_operator; goal_value;
-        action_node; measure_func; max_iterations; strategy_hints
+        action_node; measure_func; max_iterations; strategy_hints;
+        conversational; relay_models
       })
 
   | "evaluator" ->

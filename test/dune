@@ -76,10 +76,10 @@
  (name test_tool_parsers)
  (libraries llm_mcp.common alcotest))
 
-; Chain Engine tests (types, parser, compiler, registry)
+; Chain Engine tests (types, parser, compiler, registry, conversation context)
 (test
  (name test_chain_engine)
- (libraries llm_mcp.common alcotest))
+ (libraries llm_mcp.common llm_mcp.eio alcotest eio eio_main str))
 
 ; Mermaid Parser tests (executable documentation)
 (test

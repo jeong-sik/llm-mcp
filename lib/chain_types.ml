@@ -128,6 +128,8 @@ type node_type =
       measure_func : string;       (** Metric measurement function: "exec_test", "call_api", "parse_json" *)
       max_iterations : int;        (** Maximum iteration count *)
       strategy_hints : (string * string) list;  (** Strategy hints: [("below_50", "fast"), ("above_50", "accurate")] *)
+      conversational : bool;       (** Enable conversational mode with context accumulation *)
+      relay_models : string list;  (** Models to rotate through: ["gemini"; "claude"; "codex"] *)
     }
   | Evaluator of {
       candidates : node list;      (** Candidate nodes to evaluate *)
@@ -247,10 +249,12 @@ let make_threshold ~id ~metric ~operator ~value ~input_node ?on_pass ?on_fail ()
 
 (** Helper: Create a goal-driven iterative node *)
 let make_goal_driven ~id ~goal_metric ~goal_operator ~goal_value
-    ~action_node ~measure_func ~max_iterations ?(strategy_hints=[]) () =
+    ~action_node ~measure_func ~max_iterations ?(strategy_hints=[])
+    ?(conversational=false) ?(relay_models=[]) () =
   { id; node_type = GoalDriven {
       goal_metric; goal_operator; goal_value;
-      action_node; measure_func; max_iterations; strategy_hints
+      action_node; measure_func; max_iterations; strategy_hints;
+      conversational; relay_models
     }; input_mapping = [] }
 
 (** Helper: Create an evaluator node *)
