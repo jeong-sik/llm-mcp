@@ -80,7 +80,7 @@ let test_operator_gt () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* Response 0.5 should NOT pass (need > 0.5), response 0.6 should pass *)
   let responses = ["value: 0.5"; "value: 0.6"] in
@@ -124,7 +124,7 @@ let test_operator_lt () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* 0.2 fails, 0.1 fails (not <), 0.05 passes *)
   let responses = ["error_rate: 0.2"; "error_rate: 0.1"; "error_rate: 0.05"] in
@@ -168,7 +168,7 @@ let test_operator_eq () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* 0.9 fails, 1.1 fails, 1.0 passes *)
   let responses = ["status: 0.9"; "status: 1.1"; "status: 1.0"] in
@@ -212,7 +212,7 @@ let test_operator_neq () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* 0.0 fails, 0.0 fails, 42.0 passes *)
   let responses = ["code: 0.0"; "code: 0"; "code: 42"] in
@@ -256,7 +256,7 @@ let test_operator_lte () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* 200 fails, 100 passes (equal is ok) *)
   let responses = ["latency: 200"; "latency: 100"] in
@@ -304,7 +304,7 @@ let test_max_iterations_reached () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* All responses below target *)
   let responses = ["value: 0.1"; "value: 0.2"; "value: 0.3"] in
@@ -349,7 +349,7 @@ let test_single_iteration () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   let responses = ["value: 0.9"] in  (* Pass on first try *)
 
@@ -396,7 +396,7 @@ let test_relay_models_rotation () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   let responses = ["value: 0.1"; "value: 0.2"; "value: 0.3"; "value: 0.95"] in
 
@@ -451,7 +451,7 @@ let test_conversational_mode () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   let responses = ["First attempt. score: 0.3"; "Improved. score: 0.6"; "Final. score: 0.95"] in
 
@@ -502,7 +502,7 @@ let test_measure_func_parse_json () =
     input_mapping = []
   } in
 
-  let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
   (* JSON responses with accuracy field *)
   let responses = [
@@ -564,7 +564,7 @@ let test_mermaid_operators_roundtrip () =
       input_mapping = []
     } in
 
-    let chain = { id = "test"; nodes = [action; goal]; output = "goal"; config = default_config } in
+    let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
     let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain in
 
