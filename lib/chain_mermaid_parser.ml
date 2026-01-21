@@ -68,8 +68,97 @@ type mermaid_graph = {
   edges : mermaid_edge list;
 }
 
+(** Metadata extracted from lossless comments *)
+type mermaid_meta = {
+  chain_id : string option;
+  chain_output : string option;
+  chain_timeout : int option;
+  chain_trace : bool option;
+  chain_max_depth : int option;
+  node_input_mappings : (string, (string * string) list) Hashtbl.t;
+}
+
 (** Helper: trim whitespace *)
 let trim s = String.trim s
+
+(** Create empty metadata *)
+let empty_meta () : mermaid_meta = {
+  chain_id = None;
+  chain_output = None;
+  chain_timeout = None;
+  chain_trace = None;
+  chain_max_depth = None;
+  node_input_mappings = Hashtbl.create 16;
+}
+
+(** Parse input_mapping from JSON: [[k1,v1],[k2,v2]] -> [(k1,v1);(k2,v2)] *)
+let parse_input_mapping_json (json : Yojson.Safe.t) : (string * string) list =
+  match json with
+  | `List pairs ->
+      List.filter_map (fun pair ->
+        match pair with
+        | `List [`String k; `String v] -> Some (k, v)
+        | _ -> None
+      ) pairs
+  | _ -> []
+
+(** Parse @chain metadata comment: %% @chain {"id":"...","output":"...",...} *)
+let parse_chain_meta (json_str : string) (meta : mermaid_meta) : mermaid_meta =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc fields ->
+        let get_string key = match List.assoc_opt key fields with Some (`String s) -> Some s | _ -> None in
+        let get_int key = match List.assoc_opt key fields with Some (`Int i) -> Some i | _ -> None in
+        let get_bool key = match List.assoc_opt key fields with Some (`Bool b) -> Some b | _ -> None in
+        {
+          meta with
+          chain_id = (match get_string "id" with Some v -> Some v | None -> meta.chain_id);
+          chain_output = (match get_string "output" with Some v -> Some v | None -> meta.chain_output);
+          chain_timeout = (match get_int "timeout" with Some v -> Some v | None -> meta.chain_timeout);
+          chain_trace = (match get_bool "trace" with Some v -> Some v | None -> meta.chain_trace);
+          chain_max_depth = (match get_int "max_depth" with Some v -> Some v | None -> meta.chain_max_depth);
+        }
+    | _ -> meta
+  with _ -> meta
+
+(** Parse @node:id metadata comment: %% @node:mynode {"input_mapping":[[k,v],...]} *)
+let parse_node_meta (node_id : string) (json_str : string) (meta : mermaid_meta) : mermaid_meta =
+  try
+    let json = Yojson.Safe.from_string json_str in
+    match json with
+    | `Assoc fields ->
+        (match List.assoc_opt "input_mapping" fields with
+        | Some mapping_json ->
+            let mapping = parse_input_mapping_json mapping_json in
+            Hashtbl.replace meta.node_input_mappings node_id mapping;
+            meta
+        | None -> meta)
+    | _ -> meta
+  with _ -> meta
+
+(** Parse metadata from a comment line: %% @chain {...} or %% @node:id {...} *)
+let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
+  let line = trim line in
+  (* Check for %% prefix *)
+  if String.length line < 2 || String.sub line 0 2 <> "%%" then meta
+  else
+    let rest = trim (String.sub line 2 (String.length line - 2)) in
+    (* Check for @chain or @node: *)
+    if String.length rest >= 7 && String.sub rest 0 7 = "@chain " then
+      let json_str = String.sub rest 7 (String.length rest - 7) in
+      parse_chain_meta json_str meta
+    else if String.length rest >= 6 && String.sub rest 0 6 = "@node:" then
+      (* Extract node_id and JSON *)
+      let after_prefix = String.sub rest 6 (String.length rest - 6) in
+      (* Find space between node_id and JSON *)
+      (match String.index_opt after_prefix ' ' with
+      | Some idx ->
+          let node_id = String.sub after_prefix 0 idx in
+          let json_str = String.sub after_prefix (idx + 1) (String.length after_prefix - idx - 1) in
+          parse_node_meta node_id json_str meta
+      | None -> meta)
+    else meta
 
 (* Pre-compiled regexes for better performance and reliability *)
 (* Support both plain [text] and quoted ["text"] syntax *)
@@ -435,7 +524,8 @@ let join_multiline_brackets (lines : string list) : string list =
   process [] [] 0 lines
 
 (** Parse full Mermaid graph text *)
-let parse_mermaid_text (text : string) : (mermaid_graph, string) result =
+(** Parse Mermaid text with metadata extraction (for lossless roundtrip) *)
+let parse_mermaid_text_with_meta (text : string) : ((mermaid_graph * mermaid_meta), string) result =
   (* First join multiline bracket content *)
   let raw_lines = String.split_on_char '\n' text |> List.map trim in
   let lines = join_multiline_brackets raw_lines in
@@ -444,11 +534,16 @@ let parse_mermaid_text (text : string) : (mermaid_graph, string) result =
   let direction = ref "LR" in
   let nodes = Hashtbl.create 16 in
   let edges = ref [] in
+  let meta = ref (empty_meta ()) in
 
   List.iter (fun line ->
     let line = trim line in
-    (* Skip empty lines and comments *)
-    if line = "" || (String.length line > 0 && line.[0] = '%') then ()
+    (* Handle comments - extract metadata first, then skip *)
+    if line = "" then ()
+    else if String.length line > 0 && line.[0] = '%' then begin
+      (* Try to extract metadata from comment *)
+      meta := parse_meta_comment line !meta
+    end
     (* Parse graph direction *)
     else if String.length line >= 5 && String.sub line 0 5 = "graph" then begin
       let rest = trim (String.sub line 5 (String.length line - 5)) in
@@ -481,11 +576,17 @@ let parse_mermaid_text (text : string) : (mermaid_graph, string) result =
     end
   ) lines;
 
-  Ok {
+  Ok ({
     direction = !direction;
     nodes = Hashtbl.fold (fun _ node acc -> node :: acc) nodes [];
     edges = !edges;
-  }
+  }, !meta)
+
+(** Parse full Mermaid graph text (backward compatible, discards metadata) *)
+let parse_mermaid_text (text : string) : (mermaid_graph, string) result =
+  match parse_mermaid_text_with_meta text with
+  | Ok (graph, _meta) -> Ok graph
+  | Error e -> Error e
 
 (** Build dependency graph from edges *)
 let build_dependency_graph (edges : mermaid_edge list) : (string, string list) Hashtbl.t =
@@ -612,6 +713,113 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
         config = { default_config with direction = direction_of_string graph.direction };
       }
 
+(** Convert Mermaid graph to Chain AST with metadata (for lossless roundtrip) *)
+let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (meta : mermaid_meta) : (chain, string) result =
+  let deps = build_dependency_graph graph.edges in
+
+  (* Convert each mermaid node to chain node *)
+  let node_map = Hashtbl.create 16 in
+  let convert_result = ref (Ok ()) in
+
+  List.iter (fun mnode ->
+    match !convert_result with
+    | Error _ -> ()
+    | Ok () ->
+        let parse_result =
+          let content = trim mnode.content in
+          let uses_old_syntax =
+            (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
+            (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
+            (String.length content > 4 && String.sub content 0 4 = "Ref:") ||
+            (String.length content > 7 && String.sub content 0 7 = "Quorum:") ||
+            (String.length content > 5 && String.sub content 0 5 = "Gate:") ||
+            (String.length content > 6 && String.sub content 0 6 = "Merge:") ||
+            (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
+            (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
+            (String.length content > 4 && String.sub content 0 4 = "Map:") ||
+            (String.length content > 5 && String.sub content 0 5 = "Bind:")
+          in
+          if uses_old_syntax then
+            parse_node_content mnode.shape mnode.content
+          else
+            infer_type_from_id mnode.id mnode.shape mnode.content
+        in
+        match parse_result with
+        | Error e -> convert_result := Error e
+        | Ok node_type ->
+            let node_type = match node_type with
+              | Quorum { required; nodes = _ } ->
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let input_nodes = List.map (fun input_id ->
+                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                  ) input_ids in
+                  Quorum { required; nodes = input_nodes }
+              | Merge { strategy; nodes = _ } ->
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let input_nodes = List.map (fun input_id ->
+                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                  ) input_ids in
+                  Merge { strategy; nodes = input_nodes }
+              | other -> other
+            in
+            (* Use metadata input_mapping if available, otherwise infer from deps *)
+            let input_mapping =
+              match Hashtbl.find_opt meta.node_input_mappings mnode.id with
+              | Some mapping -> mapping  (* Use metadata - preserves original keys! *)
+              | None ->
+                  (* Fall back to inferred mapping *)
+                  match Hashtbl.find_opt deps mnode.id with
+                  | Some inputs -> List.map (fun inp -> (inp, inp)) inputs
+                  | None -> []
+            in
+            let node = { id = mnode.id; node_type; input_mapping } in
+            Hashtbl.replace node_map mnode.id node
+  ) graph.nodes;
+
+  match !convert_result with
+  | Error e -> Error e
+  | Ok () ->
+      let nodes = Hashtbl.fold (fun _ node acc -> node :: acc) node_map [] in
+
+      (* Use metadata output if available, otherwise find output node *)
+      let output_nodes = find_output_nodes graph in
+      let output = match meta.chain_output with
+        | Some out -> out  (* Use metadata *)
+        | None ->
+            match output_nodes with
+            | [single] -> single
+            | first :: _ -> first
+            | [] ->
+                match List.rev graph.nodes with
+                | last :: _ -> last.id
+                | [] -> "output"
+      in
+
+      (* Use metadata chain_id if available *)
+      let final_id = match meta.chain_id with
+        | Some mid -> mid
+        | None -> id
+      in
+
+      (* Build config with metadata values *)
+      let config = {
+        default_config with
+        direction = direction_of_string graph.direction;
+        timeout = (match meta.chain_timeout with Some t -> t | None -> default_config.timeout);
+        trace = (match meta.chain_trace with Some t -> t | None -> default_config.trace);
+        max_depth = (match meta.chain_max_depth with Some d -> d | None -> default_config.max_depth);
+      } in
+
+      Ok { id = final_id; nodes; output; config }
+
 (** Main entry point: Parse Mermaid text into Chain *)
 let parse_chain (text : string) : (chain, string) result =
   match parse_mermaid_text text with
@@ -623,6 +831,23 @@ let parse_chain_with_id ~id (text : string) : (chain, string) result =
   match parse_mermaid_text text with
   | Error e -> Error e
   | Ok graph -> mermaid_to_chain ~id graph
+
+(** Parse Mermaid text into Chain with metadata (lossless roundtrip)
+
+    This function preserves all metadata embedded in Mermaid comments:
+    - %% @chain {"id":"...", "output":"...", "timeout":300, "trace":true, "max_depth":4}
+    - %% @node:nodeid {"input_mapping":[["key1","val1"],["key2","val2"]]}
+
+    Usage:
+      let mermaid = chain_to_mermaid ~lossless:true chain in
+      match parse_mermaid_to_chain ~id:"fallback_id" mermaid with
+      | Ok chain2 -> (* chain2 is identical to chain *)
+      | Error e -> ...
+*)
+let parse_mermaid_to_chain ?(id = "mermaid_chain") (text : string) : (chain, string) result =
+  match parse_mermaid_text_with_meta text with
+  | Error e -> Error e
+  | Ok (graph, meta) -> mermaid_to_chain_with_meta ~id graph meta
 
 (* ═══════════════════════════════════════════════════════════════════
    REVERSE DIRECTION: Chain AST → Mermaid

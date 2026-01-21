@@ -106,3 +106,8 @@
 (executable
  (name test_resilience_mermaid)
  (libraries llm_mcp))
+
+; Lossless Roundtrip tests (JSON ↔ Mermaid with metadata)
+(test
+ (name test_lossless_roundtrip)
+ (libraries llm_mcp.common alcotest))
