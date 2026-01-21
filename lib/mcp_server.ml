@@ -599,7 +599,7 @@ let run_stdio () =
   loop ~session_opt:None
 
 (** Health check response *)
-let server_version = "0.2.0"
+let server_version = "0.2.1"
 
 let health_response () =
   Yojson.Safe.to_string (`Assoc [
