@@ -1,6 +1,6 @@
 # llm-mcp 🐫
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/jeong-sik/llm-mcp)
+[![Version](https://img.shields.io/badge/version-0.2.3-blue.svg)](https://github.com/jeong-sik/llm-mcp)
 [![OCaml](https://img.shields.io/badge/OCaml-5.x-orange.svg)](https://ocaml.org/)
 [![MCP](https://img.shields.io/badge/MCP-2025--11--25-blue.svg)](https://spec.modelcontextprotocol.io/)
 [![Status](https://img.shields.io/badge/status-Production%20Ready-green.svg)]()
