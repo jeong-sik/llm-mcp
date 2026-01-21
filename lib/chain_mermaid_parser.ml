@@ -931,7 +931,22 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
   match !convert_result with
   | Error e -> Error e
   | Ok () ->
-      let nodes = Hashtbl.fold (fun _ node acc -> node :: acc) node_map [] in
+      let nodes_raw = Hashtbl.fold (fun _ node acc -> node :: acc) node_map [] in
+
+      (* Post-process: Resolve GoalDriven action_node from ChainRef to actual node *)
+      let nodes = List.map (fun (node : node) ->
+        match node.node_type with
+        | GoalDriven gd ->
+            let action_node_id = gd.action_node.id in
+            (match Hashtbl.find_opt node_map action_node_id with
+             | Some actual_node ->
+                 (* Replace ChainRef placeholder with actual node *)
+                 { node with node_type = GoalDriven { gd with action_node = actual_node } }
+             | None ->
+                 (* Keep original if not found (will error at runtime) *)
+                 node)
+        | _ -> node
+      ) nodes_raw in
 
       (* Use metadata output if available, otherwise find output node *)
       let output_nodes = find_output_nodes graph in
