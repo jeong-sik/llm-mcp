@@ -322,6 +322,206 @@ let stats = Chain_registry.stats ()
 }
 ```
 
+## Example: PO Feature Spec Pipeline (Designer + Dev Context)
+
+Product Owner가 디자이너 에셋과 개발 정보를 병렬 수집 후, 통합 분석하여 기능 명세를 생성하는 파이프라인:
+
+```json
+{
+  "id": "po_feature_spec_pipeline",
+  "nodes": [
+    {
+      "id": "gather_context",
+      "type": "fanout",
+      "nodes": [
+        {
+          "id": "designer_assets",
+          "type": "pipeline",
+          "nodes": [
+            {
+              "id": "fetch_figma",
+              "type": "tool",
+              "name": "figma_get_node_summary",
+              "args": { "file_key": "{{figma_file_key}}", "node_id": "{{figma_node_id}}" }
+            },
+            {
+              "id": "analyze_design",
+              "type": "llm",
+              "model": "gemini",
+              "prompt": "Analyze this Figma design and extract:\n1. UI components used\n2. User flow\n3. Interaction patterns\n4. Accessibility considerations\n\nDesign DSL:\n{{fetch_figma.output}}"
+            }
+          ]
+        },
+        {
+          "id": "dev_context",
+          "type": "pipeline",
+          "nodes": [
+            {
+              "id": "fetch_jira",
+              "type": "tool",
+              "name": "jira_get_issue",
+              "args": { "issue_key": "{{jira_issue_key}}" }
+            },
+            {
+              "id": "fetch_related_code",
+              "type": "tool",
+              "name": "grep_codebase",
+              "args": { "pattern": "{{feature_keyword}}", "path": "src/" }
+            },
+            {
+              "id": "analyze_tech",
+              "type": "llm",
+              "model": "codex",
+              "prompt": "Analyze technical context:\n\nJIRA Issue:\n{{fetch_jira.output}}\n\nRelated Code:\n{{fetch_related_code.output}}\n\nExtract:\n1. Existing API endpoints\n2. Data models involved\n3. Technical constraints\n4. Estimated complexity"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "merge_context",
+      "type": "merge",
+      "strategy": "concat",
+      "nodes": [
+        { "id": "d_ref", "type": "chain_ref", "ref": "designer_assets" },
+        { "id": "t_ref", "type": "chain_ref", "ref": "dev_context" }
+      ]
+    },
+    {
+      "id": "generate_spec",
+      "type": "goal_driven",
+      "goal_metric": "completeness",
+      "goal_operator": "gte",
+      "goal_value": 0.85,
+      "max_iterations": 5,
+      "measure_func": "llm_judge",
+      "conversational": true,
+      "relay_models": ["claude", "gemini"],
+      "strategy_hints": {
+        "below_50": "expand_scope",
+        "above_50": "refine_details"
+      },
+      "action_node": {
+        "id": "spec_writer",
+        "type": "llm",
+        "model": "claude",
+        "prompt": "## Feature Specification Writer (Iteration {{iteration}}/{{max_iterations}})\n\nStrategy: {{strategy}}\nCurrent completeness: {{progress}}\n\n### Context\n{{merge_context.output}}\n\n### Task\nGenerate a comprehensive feature specification including:\n1. User Stories (Given/When/Then)\n2. Acceptance Criteria\n3. Technical Requirements\n4. API Contract (if applicable)\n5. Edge Cases & Error Handling\n6. Testing Checklist\n\n{{step:Focus on core user stories first,Add technical requirements,Refine edge cases,Final polish}}"
+      }
+    },
+    {
+      "id": "review_spec",
+      "type": "evaluator",
+      "candidates": [
+        {
+          "id": "po_review",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "As a Product Owner, review this spec for business value and user impact:\n\n{{generate_spec.output}}\n\nScore 0.0-1.0 and provide feedback."
+        },
+        {
+          "id": "dev_review",
+          "type": "llm",
+          "model": "codex",
+          "prompt": "As a Senior Developer, review this spec for technical feasibility:\n\n{{generate_spec.output}}\n\nScore 0.0-1.0 and flag any implementation concerns."
+        }
+      ],
+      "scoring_func": "llm_judge",
+      "scoring_prompt": "Evaluate this review for thoroughness and actionable feedback",
+      "select_strategy": "all",
+      "min_score": 0.7
+    }
+  ],
+  "output": "review_spec",
+  "config": {
+    "max_depth": 5,
+    "max_concurrency": 3,
+    "timeout": 900,
+    "trace": true
+  }
+}
+```
+
+### Pipeline Flow Visualization
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  PO Feature Spec Pipeline                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────┐          ┌─────────────┐                   │
+│  │ Figma MCP   │          │  JIRA API   │                   │
+│  │ (Designer)  │          │   (Dev)     │                   │
+│  └──────┬──────┘          └──────┬──────┘                   │
+│         │                        │                           │
+│         ▼                        ▼                           │
+│  ┌─────────────┐          ┌─────────────┐                   │
+│  │ Gemini      │          │  Codex      │   ← Parallel      │
+│  │ Design      │          │  Tech       │     Analysis      │
+│  │ Analysis    │          │  Analysis   │                   │
+│  └──────┬──────┘          └──────┬──────┘                   │
+│         │                        │                           │
+│         └──────────┬─────────────┘                          │
+│                    ▼                                         │
+│            ┌─────────────┐                                  │
+│            │   Merge     │   ← Context Fusion               │
+│            │  (concat)   │                                  │
+│            └──────┬──────┘                                  │
+│                   │                                          │
+│                   ▼                                          │
+│  ┌─────────────────────────────────────────────┐           │
+│  │         GoalDriven Spec Writer              │           │
+│  │  ┌─────────────────────────────────────┐   │           │
+│  │  │ Iteration 1: Core user stories      │   │           │
+│  │  │ Iteration 2: Technical requirements │   │  ← Auto   │
+│  │  │ Iteration 3: Edge cases            │   │    Refine  │
+│  │  │ Iteration 4: Final polish          │   │           │
+│  │  └─────────────────────────────────────┘   │           │
+│  │  Model Relay: Claude → Gemini → Claude     │           │
+│  └──────────────────┬──────────────────────────┘           │
+│                     │                                        │
+│                     ▼                                        │
+│       ┌─────────────────────────────┐                       │
+│       │      Evaluator (2/2)        │   ← Dual Review       │
+│       │  ┌─────────┐ ┌─────────┐   │                       │
+│       │  │PO Review│ │Dev Review│   │                       │
+│       │  │(Gemini) │ │ (Codex) │   │                       │
+│       │  └─────────┘ └─────────┘   │                       │
+│       └─────────────────────────────┘                       │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Key Features Demonstrated
+
+| Feature | Usage |
+|---------|-------|
+| **Fanout** | Designer + Dev 정보 병렬 수집 |
+| **Tool Nodes** | Figma MCP, JIRA API, Grep 통합 |
+| **Merge** | 컨텍스트 통합 |
+| **GoalDriven** | 85% 완성도까지 반복 개선 |
+| **Conversational** | 모델 간 컨텍스트 릴레이 |
+| **Iteration Vars** | `{{iteration}}`, `{{strategy}}`, `{{step:...}}` |
+| **Evaluator** | PO + Dev 동시 리뷰 |
+
+### Iteration Variables in Action
+
+```
+Iteration 1: "Focus on core user stories first"
+  → strategy: "expand_scope" (below 50%)
+
+Iteration 2: "Add technical requirements"
+  → strategy: "expand_scope" (at 45%)
+
+Iteration 3: "Refine edge cases"
+  → strategy: "refine_details" (at 65%)
+
+Iteration 4: "Final polish"
+  → strategy: "refine_details" (at 80%)
+
+Iteration 5: Goal achieved (85%+)
+  → Context summarized, relayed to Gemini
+```
+
 ## Module Overview
 
 | Module | Purpose |

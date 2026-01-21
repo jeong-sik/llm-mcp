@@ -188,7 +188,90 @@ let test_depth_limit () =
   | Ok _ -> failwith "compile should fail on depth limit"
   | Error _ -> Printf.printf "[OK] depth limit enforced\n%!"
 
+(** Test iteration variable substitution *)
+let test_iteration_vars () =
+  let open Chain_executor_eio in
+  (* Test with no context *)
+  let prompt1 = "Iteration {{iteration}} of {{max_iterations}}" in
+  let result1 = substitute_iteration_vars prompt1 None in
+  assert (result1 = prompt1);  (* No change when no context *)
+  Printf.printf "[OK] iteration vars - no context\n%!";
+
+  (* Test with context *)
+  let ctx = {
+    iteration = 3;
+    max_iterations = 10;
+    progress = 0.45;
+    last_value = 45.0;
+    goal_value = 100.0;
+    strategy = Some "exploration";
+  } in
+  let prompt2 = "Iteration {{iteration}} of {{max_iterations}}, progress: {{progress}}" in
+  let result2 = substitute_iteration_vars prompt2 (Some ctx) in
+  assert (result2 = "Iteration 3 of 10, progress: 0.45");
+  Printf.printf "[OK] iteration vars - basic substitution\n%!";
+
+  (* Test linear interpolation *)
+  let prompt3 = "Temperature: {{linear:0.1,0.9}}" in
+  let result3 = substitute_iteration_vars prompt3 (Some ctx) in
+  (* iteration=3, max=10, t = (3-1)/(10-1) = 2/9 ≈ 0.222
+     interpolated = 0.1 + (0.9-0.1)*0.222 ≈ 0.28 *)
+  let _ = result3 in  (* Just verify it doesn't crash *)
+  Printf.printf "[OK] iteration vars - linear interpolation\n%!";
+
+  (* Test step function *)
+  let prompt4 = "Phase: {{step:init,explore,exploit,refine}}" in
+  let result4 = substitute_iteration_vars prompt4 (Some ctx) in
+  assert (result4 = "Phase: exploit");  (* iteration 3 -> index 2 -> "exploit" *)
+  Printf.printf "[OK] iteration vars - step function\n%!";
+
+  (* Test strategy variable *)
+  let prompt5 = "Using strategy: {{strategy}}" in
+  let result5 = substitute_iteration_vars prompt5 (Some ctx) in
+  assert (result5 = "Using strategy: exploration");
+  Printf.printf "[OK] iteration vars - strategy\n%!"
+
+(** Test conversation context helpers *)
+let test_conversation_helpers () =
+  let open Chain_executor_eio in
+  (* Create context *)
+  let conv = make_conversation_ctx ~models:["gemini"; "claude"] ~token_threshold:100 ~window_size:3 () in
+  assert (conv.current_model = "gemini");
+  assert (conv.model_index = 0);
+  Printf.printf "[OK] conversation ctx - creation\n%!";
+
+  (* Add messages *)
+  add_message conv ~role:"user" ~content:"Hello" ~iteration:1;
+  add_message conv ~role:"assistant" ~content:"Hi there!" ~iteration:1;
+  assert (List.length conv.history = 2);
+  Printf.printf "[OK] conversation ctx - add messages\n%!";
+
+  (* Token estimation *)
+  let tokens = estimate_tokens "Hello, world!" in
+  assert (tokens > 0);
+  Printf.printf "[OK] conversation ctx - token estimation\n%!";
+
+  (* Model rotation *)
+  rotate_model conv;
+  assert (conv.current_model = "claude");
+  assert (conv.model_index = 1);
+  rotate_model conv;
+  assert (conv.current_model = "gemini");  (* Wraps around *)
+  Printf.printf "[OK] conversation ctx - model rotation\n%!";
+
+  (* Build context prompt *)
+  let prompt = build_context_prompt conv in
+  assert (String.length prompt > 0);
+  Printf.printf "[OK] conversation ctx - build prompt\n%!"
+
 let () =
+  (* Unit tests (no Eio) *)
+  test_iteration_vars ();
+  test_conversation_helpers ();
+  test_compile_duplicate_ids ();
+  Printf.printf "\n";
+
+  (* Eio-based tests *)
   Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
     Eio.Switch.run @@ fun sw ->
@@ -199,5 +282,4 @@ let () =
       test_parallel_levels_2x2x2 ();
       test_cycle_detection ();
       test_depth_limit ();
-    test_compile_duplicate_ids ();
     Printf.printf "\n✅ Chain Engine tests passed\n%!"
