@@ -68,6 +68,12 @@ The Chain Engine applies category theory principles to create mathematically sou
 | `map` | Output transformation | Functor.map |
 | `bind` | Dynamic routing | Monad.bind |
 | `merge` | Combine parallel results | Monoid.concat |
+| `threshold` | Quality gate | Conditional execution |
+| `goal_driven` | Iterative improvement | Loop until goal |
+| `evaluator` | Score and select best | Multi-candidate selection |
+| `retry` | Retry on failure | Backoff strategies |
+| `fallback` | Try alternatives | Primary → fallbacks |
+| `race` | Parallel race | First result wins |
 
 ## DSL Syntax
 
@@ -225,6 +231,132 @@ For combining results from parallel nodes:
   "type": "merge",
   "strategy": "weighted_average",
   "nodes": [...]
+}
+```
+
+### Resilience Nodes
+
+The Chain Engine provides three resilience patterns for building fault-tolerant workflows:
+
+#### Retry Node
+
+Retry a node on failure with configurable backoff strategies:
+
+```json
+{
+  "id": "retrier",
+  "type": "retry",
+  "max_attempts": 3,
+  "backoff": "exponential:2.0",
+  "retry_on": ["timeout", "rate_limit"],
+  "node": {
+    "id": "api_call",
+    "type": "llm",
+    "model": "gemini",
+    "prompt": "Process: {{input}}"
+  }
+}
+```
+
+**Backoff Strategies:**
+| Strategy | Format | Description |
+|----------|--------|-------------|
+| Exponential | `exponential:2.0` | Delay = base × 2^attempt |
+| Constant | `constant:1.5` | Fixed 1.5s delay |
+| Linear | `linear:0.5` | Delay = base × attempt |
+
+#### Fallback Node
+
+Try primary node first, then fallbacks in order on failure:
+
+```json
+{
+  "id": "resilient_api",
+  "type": "fallback",
+  "primary": {
+    "id": "fast_llm",
+    "type": "llm",
+    "model": "gemini",
+    "prompt": "Quick answer: {{input}}"
+  },
+  "fallbacks": [
+    {
+      "id": "accurate_llm",
+      "type": "llm",
+      "model": "claude",
+      "prompt": "Detailed answer: {{input}}"
+    },
+    {
+      "id": "local_llm",
+      "type": "llm",
+      "model": "ollama:qwen",
+      "prompt": "Fallback answer: {{input}}"
+    }
+  ]
+}
+```
+
+#### Race Node
+
+Execute nodes in parallel, return first successful result:
+
+```json
+{
+  "id": "fastest_response",
+  "type": "race",
+  "timeout": 5.0,
+  "nodes": [
+    {
+      "id": "gemini_fast",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Answer quickly: {{input}}"
+    },
+    {
+      "id": "claude_fast",
+      "type": "llm",
+      "model": "claude",
+      "prompt": "Answer quickly: {{input}}"
+    }
+  ]
+}
+```
+
+### Resilience Patterns in Practice
+
+**Example: Robust API Integration**
+
+```json
+{
+  "id": "robust_llm_chain",
+  "nodes": [
+    {
+      "id": "with_retry_and_fallback",
+      "type": "retry",
+      "max_attempts": 2,
+      "backoff": "exponential:1.0",
+      "retry_on": ["rate_limit"],
+      "node": {
+        "id": "fallback_chain",
+        "type": "fallback",
+        "primary": {
+          "id": "fast",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "{{input}}"
+        },
+        "fallbacks": [
+          {
+            "id": "backup",
+            "type": "llm",
+            "model": "claude",
+            "prompt": "{{input}}"
+          }
+        ]
+      }
+    }
+  ],
+  "output": "with_retry_and_fallback"
 }
 ```
 
