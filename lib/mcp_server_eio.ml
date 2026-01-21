@@ -221,6 +221,8 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "chain.visualize" -> Tools_eio.parse_chain_visualize_args arguments
     | "chain.convert" -> Tools_eio.parse_chain_convert_args arguments
     | "chain.orchestrate" -> Tools_eio.parse_chain_orchestrate_args arguments
+    | "gh_pr_diff" -> Tools_eio.parse_gh_pr_diff_args arguments
+    | "slack_post" -> Tools_eio.parse_slack_post_args arguments
     | _ -> failwith (sprintf "Unknown tool: %s" name)
   in
 
@@ -486,6 +488,46 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 ("count", `Int (List.length (match sessions_json with `List l -> l | _ -> [])));
                 ("sessions", sessions_json);
               ]) in
+              Http.Response.json body reqd
+
+          (* SSE streaming endpoint for MCP Streamable HTTP *)
+          | (`GET, "/sse") ->
+              let session_id = List.assoc_opt "mcp-session-id" headers
+                |> Option.value ~default:(generate_session_id ()) in
+              let protocol_version = List.assoc_opt "mcp-protocol-version" headers
+                |> Option.value ~default:"2024-11-05" in
+              Http.Response.sse_stream ~session_id ~protocol_version reqd ~on_write:(fun body ->
+                (* Register for shutdown notifications *)
+                let client_id = Http.register_sse_client body in
+                (* Send initial connection event *)
+                Http.send_sse_event body ~event:"open" ~data:(sprintf
+                  {|{"session_id":"%s","protocol_version":"%s","message":"SSE connection established"}|}
+                  session_id protocol_version);
+                (* Keep connection alive with heartbeats until closed *)
+                let rec heartbeat_loop n =
+                  Eio.Time.sleep clock 30.0;  (* 30s heartbeat interval *)
+                  if Http.sse_client_count () > 0 then begin
+                    Http.send_sse_event_with_id body ~id:n ~event:"heartbeat"
+                      ~data:(sprintf {|{"timestamp":%f}|} (Unix.gettimeofday ()));
+                    heartbeat_loop (n + 1)
+                  end
+                in
+                (* Run heartbeat in background fiber *)
+                Eio.Fiber.fork ~sw (fun () ->
+                  try heartbeat_loop 1 with _ -> ());
+                (* The connection stays open - httpun manages the lifecycle *)
+                (* Unregister when connection closes (on_eof from client) *)
+                Eio.Fiber.fork ~sw (fun () ->
+                  Eio.Time.sleep clock 3600.0;  (* 1h max connection time *)
+                  Http.unregister_sse_client client_id;
+                  try Httpun.Body.Writer.close body with _ -> ()
+                )
+              )
+
+          (* Chain stats endpoint for monitoring *)
+          | (`GET, "/chain/stats") ->
+              let stats = Chain_stats.compute () in
+              let body = Yojson.Safe.to_string (Chain_stats.to_json stats) in
               Http.Response.json body reqd
 
           (* MCP JSON-RPC endpoint *)

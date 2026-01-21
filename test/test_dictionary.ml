@@ -61,7 +61,7 @@ let test_content_type_roundtrip () =
 (* Test dictionary creation (minimal - no actual training) *)
 let test_train_insufficient_samples () =
   let samples = ["a"; "b"; "c"] in
-  let result = Dictionary.train ~samples ~content_type:Dictionary.Mixed in
+  let result = Dictionary.train ~samples ~content_type:Dictionary.Mixed () in
   match result with
   | Error msg -> Alcotest.(check bool) "error mentions samples" true (String.length msg > 0)
   | Ok _ -> Alcotest.fail "should fail with insufficient samples"

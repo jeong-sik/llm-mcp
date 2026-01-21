@@ -118,7 +118,7 @@ let () =
 
   (* Train dictionary *)
   Printf.printf "Training dictionary (type=%s)...\n%!" type_str;
-  match Llm_mcp.Dictionary.train ~samples ~content_type with
+  match Llm_mcp.Dictionary.train ~samples ~content_type () with
   | Error e ->
       Printf.eprintf "Training failed: %s\n" e;
       exit 1

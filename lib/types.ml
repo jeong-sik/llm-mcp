@@ -131,6 +131,15 @@ type tool_args =
       verify_on_complete : bool;           (* Run LLM verification on completion *)
       orchestrator_model : string;         (* LLM model for Design/Verify: gemini, claude, codex, ollama, stub *)
     }
+  | GhPrDiff of {
+      repo : string;                       (* Repository in owner/name format *)
+      pr_number : int;                     (* Pull Request number *)
+    }
+  | SlackPost of {
+      channel : string;                    (* Slack channel ID or name *)
+      text : string;                       (* Message text to post *)
+      thread_ts : string option;           (* Thread timestamp for reply (optional) *)
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -755,6 +764,63 @@ Parameters:
   ];
 }
 
+(** External tool: GitHub PR diff *)
+let gh_pr_diff_schema : tool_schema = {
+  name = "gh_pr_diff";
+  description = {|Fetch GitHub Pull Request diff using gh CLI.
+
+Parameters:
+- repo: Repository in owner/name format (e.g., "jeong-sik/llm-mcp")
+- pr_number: Pull Request number (integer)
+
+Returns the diff text that can be used for code review analysis.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("repo", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Repository in owner/name format");
+      ]);
+      ("pr_number", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Pull Request number");
+      ]);
+    ]);
+    ("required", `List [`String "repo"; `String "pr_number"]);
+  ];
+}
+
+(** External tool: Post message to Slack channel *)
+let slack_post_schema : tool_schema = {
+  name = "slack_post";
+  description = {|Post a message to a Slack channel.
+
+Parameters:
+- channel: Slack channel ID or name (e.g., "#general" or "C01234567")
+- text: Message text to post
+- thread_ts: Optional thread timestamp for reply (threaded message)
+
+Requires SLACK_BOT_TOKEN environment variable.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("channel", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Slack channel ID or name");
+      ]);
+      ("text", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Message text to post");
+      ]);
+      ("thread_ts", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Thread timestamp for reply (optional)");
+      ]);
+    ]);
+    ("required", `List [`String "channel"; `String "text"]);
+  ];
+}
+
 let all_schemas = [
   gemini_schema;
   claude_schema;
@@ -768,6 +834,8 @@ let all_schemas = [
   chain_to_mermaid_schema;
   chain_visualize_schema;
   chain_orchestrate_schema;
+  gh_pr_diff_schema;
+  slack_post_schema;
 ]
 
 (* ============================================================================

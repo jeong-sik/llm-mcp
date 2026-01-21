@@ -583,6 +583,25 @@ let execute args : tool_result Lwt.t =
       in
       Lwt.return result
 
+  | GhPrDiff { repo; pr_number } ->
+      (* External tool: only available in Eio mode *)
+      Lwt.return {
+        model = "gh_pr_diff";
+        returncode = -1;
+        response = Printf.sprintf "gh_pr_diff is only available in Eio mode. Requested: %s#%d" repo pr_number;
+        extra = [("error", "eio_only"); ("repo", repo); ("pr_number", string_of_int pr_number)];
+      }
+
+  | SlackPost { channel; text; thread_ts } ->
+      (* External tool: only available in Eio mode *)
+      let _ = thread_ts in (* suppress unused variable warning *)
+      Lwt.return {
+        model = "slack_post";
+        returncode = -1;
+        response = Printf.sprintf "slack_post is only available in Eio mode. Requested: channel=%s" channel;
+        extra = [("error", "eio_only"); ("channel", channel); ("text", text)];
+      }
+
 (** Format results *)
 let execute_formatted ~(format : response_format) args : string Lwt.t =
   let open Lwt.Syntax in
