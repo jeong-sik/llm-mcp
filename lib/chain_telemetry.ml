@@ -85,6 +85,60 @@ let next_sub_id = ref 0
 let subscribers : (subscription_id, event_handler) Hashtbl.t = Hashtbl.create 16
 let subscribers_mutex = Mutex.create ()
 
+(** {1 Running Chains Tracking} *)
+
+(** Running chain info: (chain_id, started_at, progress) *)
+type running_chain_info = {
+  chain_id: string;
+  started_at: float;
+  mutable progress: float;  (** 0.0 to 1.0 *)
+  mutable nodes_completed: int;
+  total_nodes: int;
+}
+
+let running_chains : (string, running_chain_info) Hashtbl.t = Hashtbl.create 16
+let running_chains_mutex = Mutex.create ()
+
+(** Register a chain as running *)
+let register_running_chain ~chain_id ~total_nodes =
+  Mutex.lock running_chains_mutex;
+  let info = {
+    chain_id;
+    started_at = Unix.gettimeofday ();
+    progress = 0.0;
+    nodes_completed = 0;
+    total_nodes;
+  } in
+  Hashtbl.replace running_chains chain_id info;
+  Mutex.unlock running_chains_mutex
+
+(** Update chain progress *)
+let update_chain_progress ~chain_id ~nodes_completed =
+  Mutex.lock running_chains_mutex;
+  (match Hashtbl.find_opt running_chains chain_id with
+   | Some info ->
+       info.nodes_completed <- nodes_completed;
+       info.progress <- if info.total_nodes > 0
+         then float_of_int nodes_completed /. float_of_int info.total_nodes
+         else 0.0
+   | None -> ());
+  Mutex.unlock running_chains_mutex
+
+(** Unregister a completed chain *)
+let unregister_running_chain ~chain_id =
+  Mutex.lock running_chains_mutex;
+  Hashtbl.remove running_chains chain_id;
+  Mutex.unlock running_chains_mutex
+
+(** Get all running chains *)
+let get_running_chains () : (string * float * float) list =
+  Mutex.lock running_chains_mutex;
+  let chains = Hashtbl.fold (fun _id info acc ->
+    (info.chain_id, info.started_at, info.progress) :: acc
+  ) running_chains [] in
+  Mutex.unlock running_chains_mutex;
+  chains
+
 (** Generate next subscription ID *)
 let gen_sub_id () =
   let id = !next_sub_id in

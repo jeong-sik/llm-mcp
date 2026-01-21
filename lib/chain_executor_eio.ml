@@ -99,13 +99,44 @@ let make_context ~start_time ~trace_enabled ~timeout = {
 (** {1 Trace Helpers} *)
 
 let add_trace ctx node_id event =
+  (* Record to local trace *)
   if ctx.trace_enabled then
     let entry = {
       timestamp = Unix.gettimeofday () -. ctx.start_time;
       node_id;
       event;
     } in
-    ctx.traces := entry :: !(ctx.traces)
+    ctx.traces := entry :: !(ctx.traces);
+  (* Also emit to global telemetry for stats collection *)
+  (match event with
+   | ChainStart { chain_id } ->
+       Chain_telemetry.emit (Chain_telemetry.chain_start ~chain_id ~nodes:0)
+   | ChainComplete { chain_id; success = _ } ->
+       let duration_ms = int_of_float ((Unix.gettimeofday () -. ctx.start_time) *. 1000.0) in
+       Chain_telemetry.emit (Chain_telemetry.ChainComplete {
+         Chain_telemetry.complete_chain_id = chain_id;
+         complete_duration_ms = duration_ms;
+         complete_tokens = Chain_category.Token_monoid.empty;
+         nodes_executed = 0;
+         nodes_skipped = 0;
+       })
+   | NodeStart ->
+       Chain_telemetry.emit (Chain_telemetry.node_start ~node_id ~node_type:"unknown" ())
+   | NodeComplete { duration_ms; success } ->
+       Chain_telemetry.emit (Chain_telemetry.node_complete
+         ~node_id
+         ~duration_ms
+         ~tokens:Chain_category.Token_monoid.empty
+         ~verdict:(if success then Chain_category.Pass "" else Chain_category.Fail "")
+         ~confidence:1.0
+         ())
+   | NodeError msg ->
+       Chain_telemetry.emit (Chain_telemetry.Error {
+         Chain_telemetry.error_node_id = node_id;
+         error_message = msg;
+         error_retries = 0;
+         error_timestamp = Unix.gettimeofday ();
+       }))
 
 let record_start ctx node_id =
   add_trace ctx node_id NodeStart

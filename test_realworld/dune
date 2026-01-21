@@ -1,0 +1,3 @@
+(executable
+ (name goaldriven_realworld)
+ (libraries llm_mcp str))
