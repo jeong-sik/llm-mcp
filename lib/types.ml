@@ -72,7 +72,7 @@ type tool_args =
   | Claude of {
       prompt : string;
       model : string;
-      ultrathink : bool;
+      long_context : bool;
       system_prompt : string option;
       output_format : output_format;
       allowed_tools : string list;
@@ -286,24 +286,25 @@ Parameters:
 
 let claude_schema : tool_schema = {
   name = "claude-cli";
-  description = {|Run Claude Code CLI in print mode (-p) with Opus 4.5 + ultrathink.
+  description = {|Run Claude Code CLI in print mode (-p).
 
 Use cases:
 - Delegate tasks to another Claude instance (BALTHASAR in MAGI)
 - Get a fresh perspective without current context
-- Deep reasoning tasks with extended thinking
 - Run Claude with different system prompts
 
 Parameters:
 - prompt: The prompt to send
 - model: Model alias (default: opus for Opus 4.5)
-- ultrathink: Enable extended thinking (default: true)
+- long_context: Enable 1M context window beta (default: false, requires API key)
 - budget_mode: Token-saving defaults (optional)
 - system_prompt: Custom system prompt (optional)
 - output_format: text, json, or stream-json (default: text)
 - allowed_tools: List of allowed tools (optional)
 - working_directory: Directory for Claude to work in
-- timeout: Timeout in seconds (default: 300)|};
+- timeout: Timeout in seconds (default: 300)
+
+Note: long_context=true uses API key (charges apply), false uses Max subscription.|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -316,10 +317,10 @@ Parameters:
         ("description", `String "Model alias");
         ("default", `String "opus");
       ]);
-      ("ultrathink", `Assoc [
+      ("long_context", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable extended thinking mode");
-        ("default", `Bool true);
+        ("description", `String "Enable 1M context window (requires API key, charges apply)");
+        ("default", `Bool false);
       ]);
       ("budget_mode", `Assoc [
         ("type", `String "boolean");
@@ -839,7 +840,7 @@ let status_code_of_int = function
 (** Compact flags - parsed from string like "T2B500Y" *)
 type compact_flags = {
   thinking : int option;      (* T0, T1, T2 *)
-  ultrathink : bool;          (* U1 *)
+  long_context : bool;        (* L1 - 1M context beta *)
   reasoning : int option;     (* R0-R3 *)
   sandbox : int option;       (* S0-S2 *)
   budget : int option;        (* B{n} *)
@@ -848,7 +849,7 @@ type compact_flags = {
 
 let empty_flags = {
   thinking = None;
-  ultrathink = false;
+  long_context = false;
   reasoning = None;
   sandbox = None;
   budget = None;
@@ -866,9 +867,9 @@ let parse_flags s =
       | 'T' when i + 1 < len ->
           let v = Char.code s.[i+1] - Char.code '0' in
           parse (i+2) { acc with thinking = Some v }
-      | 'U' when i + 1 < len ->
+      | 'L' | 'U' when i + 1 < len ->  (* L = long_context, U = legacy ultrathink *)
           let v = s.[i+1] = '1' in
-          parse (i+2) { acc with ultrathink = v }
+          parse (i+2) { acc with long_context = v }
       | 'R' when i + 1 < len ->
           let v = Char.code s.[i+1] - Char.code '0' in
           parse (i+2) { acc with reasoning = Some v }
@@ -891,7 +892,7 @@ let parse_flags s =
 let flags_to_string f =
   let parts = [] in
   let parts = match f.thinking with Some v -> Printf.sprintf "T%d" v :: parts | None -> parts in
-  let parts = if f.ultrathink then "U1" :: parts else parts in
+  let parts = if f.long_context then "L1" :: parts else parts in
   let parts = match f.reasoning with Some v -> Printf.sprintf "R%d" v :: parts | None -> parts in
   let parts = match f.sandbox with Some v -> Printf.sprintf "S%d" v :: parts | None -> parts in
   let parts = match f.budget with Some v -> Printf.sprintf "B%d" v :: parts | None -> parts in

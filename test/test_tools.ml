@@ -60,7 +60,7 @@ let test_parse_claude_args () =
   let json = `Assoc [
     ("prompt", `String "Hello, Claude!");
     ("model", `String "sonnet");
-    ("ultrathink", `Bool false);
+    ("long_context", `Bool false);
     ("system_prompt", `String "You are helpful.");
     ("output_format", `String "json");
     ("allowed_tools", `List [`String "Read"; `String "Write"]);
@@ -69,10 +69,10 @@ let test_parse_claude_args () =
     ("stream", `Bool true);
   ] in
   match parse_claude_args json with
-  | Claude { prompt; model; ultrathink; system_prompt; output_format; allowed_tools; working_directory; timeout; stream } ->
+  | Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream } ->
       check string "prompt" "Hello, Claude!" prompt;
       check string "model" "sonnet" model;
-      check bool "ultrathink" false ultrathink;
+      check bool "long_context" false long_context;
       check (option string) "system_prompt" (Some "You are helpful.") system_prompt;
       check string "output_format" "json" (string_of_output_format output_format);
       check (list string) "allowed_tools" ["Read"; "Write"] allowed_tools;
@@ -88,10 +88,10 @@ let test_parse_claude_args_defaults () =
   ] in
   let expected_wd = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
   match parse_claude_args json with
-  | Claude { prompt; model; ultrathink; system_prompt; output_format; allowed_tools; working_directory; timeout; stream } ->
+  | Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream } ->
       check string "prompt" "Test prompt" prompt;
       check string "model default" "opus" model;
-      check bool "ultrathink default" true ultrathink;
+      check bool "long_context default" true long_context;
       check (option string) "system_prompt default" None system_prompt;
       check string "output_format default" "text" (string_of_output_format output_format);
       check (list string) "allowed_tools default" [] allowed_tools;
@@ -108,8 +108,8 @@ let test_parse_claude_args_budget_mode () =
     ("budget_mode", `Bool true);
   ] in
   match parse_claude_args json with
-  | Claude { ultrathink; _ } ->
-      check bool "ultrathink budget" false ultrathink
+  | Claude { long_context; _ } ->
+      check bool "long_context budget" false long_context
   | _ -> fail "Expected Claude args"
 
 (** Test Codex argument parsing *)
@@ -199,7 +199,7 @@ let test_build_claude_cmd () =
   let args = Claude {
     prompt = "Test prompt";
     model = "opus";
-    ultrathink = false;
+    long_context = false;
     system_prompt = None;
     output_format = Text;
     allowed_tools = [];
@@ -213,13 +213,13 @@ let test_build_claude_cmd () =
   check bool "contains -p" true (List.mem "-p" cmd);
   check bool "contains --model" true (List.mem "--model" cmd);
   check bool "contains opus" true (List.mem "opus" cmd);
-  check bool "no betas (ultrathink=false)" false (List.mem "--betas" cmd)
+  check bool "no betas (long_context=false)" false (List.mem "--betas" cmd)
 
-let test_build_claude_cmd_ultrathink () =
+let test_build_claude_cmd_long_context () =
   let args = Claude {
     prompt = "Test prompt";
     model = "opus";
-    ultrathink = true;
+    long_context = true;
     system_prompt = Some "Be helpful";
     output_format = Json;
     allowed_tools = ["Read"; "Write"];
@@ -228,7 +228,7 @@ let test_build_claude_cmd_ultrathink () =
     stream = false;
   } in
   let cmd = unwrap_cmd "build_claude_cmd" (build_claude_cmd args) in
-  check bool "contains --betas (ultrathink)" true (List.mem "--betas" cmd);
+  check bool "contains --betas (long_context)" true (List.mem "--betas" cmd);
   check bool "contains --system-prompt" true (List.mem "--system-prompt" cmd);
   check bool "contains --output-format" true (List.mem "--output-format" cmd);
   check bool "contains json" true (List.mem "json" cmd);
@@ -325,7 +325,7 @@ let () =
     ];
     "build_claude_cmd", [
       test_case "basic" `Quick test_build_claude_cmd;
-      test_case "ultrathink + options" `Quick test_build_claude_cmd_ultrathink;
+      test_case "long_context + options" `Quick test_build_claude_cmd_long_context;
     ];
     "build_codex_cmd", [
       test_case "basic" `Quick test_build_codex_cmd;

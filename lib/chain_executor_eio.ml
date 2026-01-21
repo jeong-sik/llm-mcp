@@ -71,6 +71,7 @@ let make_context ~start_time ~trace_enabled ~timeout = {
   start_time;
   trace_enabled;
   timeout;
+  iteration_ctx = None;
 }
 
 (** {1 Trace Helpers} *)
