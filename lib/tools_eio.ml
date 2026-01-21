@@ -313,13 +313,13 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   | Gemini { model; thinking_level; timeout; _ } ->
       execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~args ()
 
-  | Claude { model; ultrathink; working_directory = _; timeout; _ } ->
+  | Claude { model; long_context; working_directory = _; timeout; _ } ->
       (match build_claude_cmd args with
       | Error err ->
           { model = sprintf "claude-cli (%s)" model;
             returncode = -1;
             response = err;
-            extra = [("ultrathink", string_of_bool ultrathink); ("invalid_args", "true")]; }
+            extra = [("long_context", string_of_bool long_context); ("invalid_args", "true")]; }
       | Ok cmd_list ->
           let cmd = List.hd cmd_list in
           let cmd_args = List.tl cmd_list in
@@ -329,17 +329,17 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               { model = sprintf "claude-cli (%s)" model;
                 returncode = r.exit_code;
                 response = get_output r;
-                extra = [("ultrathink", string_of_bool ultrathink)]; }
+                extra = [("long_context", string_of_bool long_context)]; }
           | Error (Timeout t) ->
               { model = sprintf "claude-cli (%s)" model;
                 returncode = -1;
                 response = sprintf "Timeout after %ds" t;
-                extra = [("ultrathink", string_of_bool ultrathink)]; }
+                extra = [("long_context", string_of_bool long_context)]; }
           | Error (ProcessError msg) ->
               { model = sprintf "claude-cli (%s)" model;
                 returncode = -1;
                 response = sprintf "Error: %s" msg;
-                extra = [("ultrathink", string_of_bool ultrathink)]; })
+                extra = [("long_context", string_of_bool long_context)]; })
 
   | Codex { model; reasoning_effort; timeout; _ } ->
       (match build_codex_cmd args with
@@ -536,7 +536,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       Types.Claude {
                         prompt;
                         model;
-                        ultrathink = true;
+                        long_context = true;
                         system_prompt = None;
                         output_format = Types.Text;
                         allowed_tools = [];
@@ -759,7 +759,7 @@ This chain will execute the goal using a stub model.|}
             let args = Types.Claude {
               prompt;
               model = "sonnet";
-              ultrathink = false;
+              long_context = false;
               system_prompt = Some "You are a chain orchestrator. Design, analyze, and verify workflows.";
               output_format = Types.Text;
               allowed_tools = [];
@@ -1309,7 +1309,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 let args = Claude {
                   prompt;
                   model = "opus";
-                  ultrathink = true;
+                  long_context = true;
                   system_prompt = None;
                   output_format = Text;
                   allowed_tools = [];

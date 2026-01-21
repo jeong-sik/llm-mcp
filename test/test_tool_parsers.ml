@@ -72,7 +72,7 @@ let test_parse_claude_defaults () =
   match Tool_parsers.parse_claude_args json with
   | Claude c ->
       check string "default model" "opus" c.model;
-      check bool "default ultrathink" true c.ultrathink;  (* default without budget_mode *)
+      check bool "default long_context" true c.long_context;  (* default without budget_mode *)
       check int "default timeout" 300 c.timeout;
       check bool "default stream" true c.stream;  (* default is true *)
       check string "prompt" "Hello Claude" c.prompt
@@ -82,7 +82,7 @@ let test_parse_claude_custom_values () =
   let json = `Assoc [
     ("prompt", `String "Test");
     ("model", `String "sonnet");
-    ("ultrathink", `Bool false);
+    ("long_context", `Bool false);
     ("system_prompt", `String "You are a helpful assistant");
     ("output_format", `String "json");
     ("timeout", `Int 120);
@@ -91,7 +91,7 @@ let test_parse_claude_custom_values () =
   match Tool_parsers.parse_claude_args json with
   | Claude c ->
       check string "custom model" "sonnet" c.model;
-      check bool "ultrathink false" false c.ultrathink;
+      check bool "long_context false" false c.long_context;
       check (option string) "system prompt" (Some "You are a helpful assistant") c.system_prompt;
       check int "custom timeout" 120 c.timeout;
       check bool "stream true" true c.stream;
@@ -261,7 +261,7 @@ let test_build_claude_cmd () =
   let args = Claude {
     prompt = "Hello";
     model = "sonnet";
-    ultrathink = false;
+    long_context = false;
     system_prompt = None;
     output_format = Text;
     allowed_tools = [];
@@ -279,11 +279,11 @@ let test_build_claude_cmd () =
       check bool "has model flag" true (List.mem "--model" cmd_list)
   | Error e -> fail ("build_claude_cmd failed: " ^ e)
 
-let test_build_claude_cmd_with_ultrathink () =
+let test_build_claude_cmd_with_long_context () =
   let args = Claude {
     prompt = "Test";
     model = "opus";
-    ultrathink = true;
+    long_context = true;
     system_prompt = Some "Be helpful";
     output_format = Json;
     allowed_tools = ["Read"; "Write"];
@@ -293,7 +293,7 @@ let test_build_claude_cmd_with_ultrathink () =
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->
-      (* ultrathink is implemented via --betas flag *)
+      (* long_context is implemented via --betas flag *)
       check bool "has betas flag" true (List.mem "--betas" cmd_list);
       check bool "has output format" true (List.mem "--output-format" cmd_list);
       check bool "has json format" true (List.mem "json" cmd_list)
@@ -423,7 +423,7 @@ let () =
 
     "build_claude_cmd", [
       test_case "basic" `Quick test_build_claude_cmd;
-      test_case "with ultrathink" `Quick test_build_claude_cmd_with_ultrathink;
+      test_case "with long_context" `Quick test_build_claude_cmd_with_long_context;
     ];
 
     "build_codex_cmd", [

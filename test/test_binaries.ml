@@ -749,7 +749,7 @@ let test_status_code_roundtrip () =
 let test_parse_flags_empty () =
   let flags = parse_flags "" in
   check (option int) "no thinking" None flags.thinking;
-  check bool "no ultrathink" false flags.ultrathink;
+  check bool "no long_context" false flags.long_context;
   check (option int) "no reasoning" None flags.reasoning;
   check (option int) "no sandbox" None flags.sandbox;
   check (option int) "no budget" None flags.budget;
@@ -758,7 +758,7 @@ let test_parse_flags_empty () =
 let test_parse_flags_complex () =
   let flags = parse_flags "T2U1R3S1B500Y" in
   check (option int) "thinking T2" (Some 2) flags.thinking;
-  check bool "ultrathink on" true flags.ultrathink;
+  check bool "long_context on" true flags.long_context;
   check (option int) "reasoning R3" (Some 3) flags.reasoning;
   check (option int) "sandbox S1" (Some 1) flags.sandbox;
   check (option int) "budget 500" (Some 500) flags.budget;
@@ -767,7 +767,7 @@ let test_parse_flags_complex () =
 let test_parse_flags_partial () =
   let flags = parse_flags "T1B200" in
   check (option int) "thinking T1" (Some 1) flags.thinking;
-  check bool "no ultrathink" false flags.ultrathink;
+  check bool "no long_context" false flags.long_context;
   check (option int) "no reasoning" None flags.reasoning;
   check (option int) "no sandbox" None flags.sandbox;
   check (option int) "budget 200" (Some 200) flags.budget;

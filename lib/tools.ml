@@ -316,7 +316,7 @@ let execute args : tool_result Lwt.t =
   | Gemini { model; thinking_level; timeout; _ } ->
       execute_gemini_with_retry ~model ~thinking_level ~timeout ~args ()
 
-  | Claude { model; ultrathink; working_directory; timeout; _ } ->
+  | Claude { model; long_context; working_directory; timeout; _ } ->
       (match build_claude_cmd args with
       | Error err ->
           Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
@@ -329,7 +329,7 @@ let execute args : tool_result Lwt.t =
           | Ok r ->
               Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
                 returncode = r.exit_code; response = get_output r;
-                extra = [("ultrathink", string_of_bool ultrathink)]; }
+                extra = [("long_context", string_of_bool long_context)]; }
           | Error (Timeout t) ->
               Lwt.return { model = Printf.sprintf "claude-cli (%s)" model;
                 returncode = -1; response = Printf.sprintf "Timeout after %ds" t; extra = []; }

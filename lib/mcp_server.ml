@@ -104,7 +104,7 @@ let client_wants_streaming params =
 (** MCP Server capabilities - version-aware *)
 let server_info = `Assoc [
   ("name", `String "llm-mcp");
-  ("version", `String "0.2.0");
+  ("version", `String "0.2.1");
 ]
 
 let capabilities_for_version ~include_experimental version =

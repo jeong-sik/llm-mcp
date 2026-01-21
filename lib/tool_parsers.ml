@@ -35,10 +35,12 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
   let model = json |> member "model" |> to_string_option |> Option.value ~default:"opus" in
-  let budget_mode = budget_mode_value json in
-  let ultrathink =
-    json |> member "ultrathink" |> to_bool_option
-    |> Option.value ~default:(not budget_mode) in
+  (* long_context enables 1M context beta (requires API key, charges apply)
+     Also support legacy "ultrathink" parameter for backwards compatibility *)
+  let long_context =
+    match json |> member "long_context" |> to_bool_option with
+    | Some v -> v
+    | None -> json |> member "ultrathink" |> to_bool_option |> Option.value ~default:false in
   let system_prompt = json |> member "system_prompt" |> to_string_option in
   let output_format =
     json |> member "output_format" |> to_string_option
@@ -52,7 +54,7 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
     |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  Claude { prompt; model; ultrathink; system_prompt; output_format; allowed_tools; working_directory; timeout; stream }
+  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream }
 
 (** Parse JSON arguments for Codex tool *)
 let parse_codex_args (json : Yojson.Safe.t) : tool_args =
@@ -187,16 +189,13 @@ let build_gemini_cmd args =
 (** Build Claude CLI command *)
 let build_claude_cmd args =
   match args with
-  | Claude { prompt; model; ultrathink; system_prompt; output_format; allowed_tools; _ } ->
+  | Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; _ } ->
       let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
       let wrapper = me_root ^ "/workspace/yousleepwhen/llm-mcp/scripts/claude-wrapper.sh" in
       let cmd = [wrapper; "-p"; "--model"; model] in
-      (* --betas flag triggers API key usage instead of Max subscription
-         Skip it when CLAUDE_USE_MAX_SUBSCRIPTION=1 is set *)
-      let use_max = Sys.getenv_opt "CLAUDE_USE_MAX_SUBSCRIPTION"
-                    |> Option.map (fun v -> v = "1" || v = "true")
-                    |> Option.value ~default:false in
-      let cmd = if ultrathink && not use_max then
+      (* --betas context-1m enables 1M context but requires API key (charges apply)
+         Only add when explicitly requested via long_context=true *)
+      let cmd = if long_context then
         cmd @ ["--betas"; "context-1m-2025-08-07"]
       else cmd in
       let cmd = cmd @ ["--settings"; {|{"disableAllHooks": true}|}] in
