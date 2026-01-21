@@ -351,6 +351,27 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
             | ["linear"; v] -> Linear (float_of_string v)
             | _ -> Exponential 1.0)
         | `Float f -> Exponential f
+        | `Assoc _ as obj ->
+            (* Handle JSON object format from chain_to_json *)
+            let typ = try obj |> member "type" |> to_string with _ -> "exponential" in
+            (match typ with
+             | "constant" ->
+                 let secs = try obj |> member "seconds" |> to_float
+                   with _ -> try float_of_int (obj |> member "seconds" |> to_int) with _ -> 1.0 in
+                 Constant secs
+             | "exponential" ->
+                 let base = try obj |> member "base" |> to_float
+                   with _ -> try float_of_int (obj |> member "base" |> to_int) with _ -> 2.0 in
+                 Exponential base
+             | "linear" ->
+                 let base = try obj |> member "base" |> to_float
+                   with _ -> try float_of_int (obj |> member "base" |> to_int) with _ -> 1.0 in
+                 Linear base
+             | "jitter" ->
+                 let min_s = try obj |> member "min" |> to_float with _ -> 0.5 in
+                 let max_s = try obj |> member "max" |> to_float with _ -> 2.0 in
+                 Jitter (min_s, max_s)
+             | _ -> Exponential 2.0)
         | _ -> Exponential 1.0
         with _ -> Exponential 1.0
       in
@@ -426,3 +447,205 @@ let validate_chain (c : Chain_types.chain) : (unit, string) result =
             check_dups (id :: seen) rest
     in
     check_dups [] node_ids
+
+(* ============================================================================
+   Chain to JSON Serializer (for JSON <-> Mermaid round-trip)
+   ============================================================================ *)
+
+(** Serialize merge strategy to string *)
+let merge_strategy_to_string = function
+  | First -> "first"
+  | Last -> "last"
+  | Concat -> "concat"
+  | WeightedAvg -> "weighted_average"
+  | Custom s -> "custom:" ^ s
+
+(** Serialize threshold operator to string *)
+let threshold_op_to_string = function
+  | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
+
+(** Serialize select strategy to JSON *)
+let select_strategy_to_json = function
+  | Best -> `String "best"
+  | Worst -> `String "worst"
+  | WeightedRandom -> `String "weighted_random"
+  | AboveThreshold f -> `Assoc [("above_threshold", `Float f)]
+
+(** Serialize backoff strategy to JSON *)
+let backoff_to_json = function
+  | Constant s -> `Assoc [("type", `String "constant"); ("seconds", `Float s)]
+  | Exponential b -> `Assoc [("type", `String "exponential"); ("base", `Float b)]
+  | Linear b -> `Assoc [("type", `String "linear"); ("base", `Float b)]
+  | Jitter (min_s, max_s) -> `Assoc [("type", `String "jitter"); ("min", `Float min_s); ("max", `Float max_s)]
+
+(** Serialize config to JSON *)
+let config_to_json (cfg : chain_config) : Yojson.Safe.t =
+  `Assoc [
+    ("max_depth", `Int cfg.max_depth);
+    ("max_concurrency", `Int cfg.max_concurrency);
+    ("timeout", `Int cfg.timeout);
+    ("trace", `Bool cfg.trace);
+  ]
+
+(** Serialize node to JSON *)
+let rec node_to_json (n : node) : Yojson.Safe.t =
+  let base = [("id", `String n.id)] in
+  let input_mapping =
+    if n.input_mapping = [] then []
+    else [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
+  in
+  let type_fields = match n.node_type with
+    | Llm { model; prompt; timeout; tools } ->
+        let fields = [
+          ("type", `String "llm");
+          ("model", `String model);
+          ("prompt", `String prompt);
+        ] in
+        let fields = match timeout with
+          | Some t -> fields @ [("timeout", `Int t)]
+          | None -> fields
+        in
+        let fields = match tools with
+          | Some t -> fields @ [("tools", t)]
+          | None -> fields
+        in
+        fields
+
+    | Tool { name; args } ->
+        [("type", `String "tool"); ("name", `String name); ("args", args)]
+
+    | Pipeline nodes ->
+        [("type", `String "pipeline"); ("nodes", `List (List.map node_to_json nodes))]
+
+    | Fanout nodes ->
+        [("type", `String "fanout"); ("nodes", `List (List.map node_to_json nodes))]
+
+    | Quorum { required; nodes } ->
+        [
+          ("type", `String "quorum");
+          ("required", `Int required);
+          ("nodes", `List (List.map node_to_json nodes));
+        ]
+
+    | Gate { condition; then_node; else_node } ->
+        let fields = [
+          ("type", `String "gate");
+          ("condition", `String condition);
+          ("then", node_to_json then_node);
+        ] in
+        (match else_node with
+         | Some en -> fields @ [("else", node_to_json en)]
+         | None -> fields)
+
+    | Subgraph c ->
+        [("type", `String "subgraph"); ("graph", chain_to_json_inner c)]
+
+    | ChainRef ref_id ->
+        [("type", `String "chain_ref"); ("ref", `String ref_id)]
+
+    | Map { func; inner } ->
+        [("type", `String "map"); ("func", `String func); ("inner", node_to_json inner)]
+
+    | Bind { func; inner } ->
+        [("type", `String "bind"); ("func", `String func); ("inner", node_to_json inner)]
+
+    | Merge { strategy; nodes } ->
+        [
+          ("type", `String "merge");
+          ("strategy", `String (merge_strategy_to_string strategy));
+          ("nodes", `List (List.map node_to_json nodes));
+        ]
+
+    | Threshold { metric; operator; value; input_node; on_pass; on_fail } ->
+        let fields = [
+          ("type", `String "threshold");
+          ("metric", `String metric);
+          ("operator", `String (threshold_op_to_string operator));
+          ("value", `Float value);
+          ("input", node_to_json input_node);
+        ] in
+        let fields = match on_pass with Some n -> fields @ [("on_pass", node_to_json n)] | None -> fields in
+        let fields = match on_fail with Some n -> fields @ [("on_fail", node_to_json n)] | None -> fields in
+        fields
+
+    | GoalDriven { goal_metric; goal_operator; goal_value; action_node;
+                    measure_func; max_iterations; strategy_hints; conversational; relay_models } ->
+        let fields = [
+          ("type", `String "goal_driven");
+          ("goal_metric", `String goal_metric);
+          ("goal_operator", `String (threshold_op_to_string goal_operator));
+          ("goal_value", `Float goal_value);
+          ("action", node_to_json action_node);
+          ("measure_func", `String measure_func);
+          ("max_iterations", `Int max_iterations);
+          ("conversational", `Bool conversational);
+        ] in
+        let fields = if strategy_hints = [] then fields
+          else fields @ [("strategy_hints", `Assoc (List.map (fun (k, v) -> (k, `String v)) strategy_hints))]
+        in
+        let fields = if relay_models = [] then fields
+          else fields @ [("relay_models", `List (List.map (fun s -> `String s) relay_models))]
+        in
+        fields
+
+    | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
+        let fields = [
+          ("type", `String "evaluator");
+          ("candidates", `List (List.map node_to_json candidates));
+          ("scoring_func", `String scoring_func);
+          ("select_strategy", select_strategy_to_json select_strategy);
+        ] in
+        let fields = match scoring_prompt with
+          | Some p -> fields @ [("scoring_prompt", `String p)]
+          | None -> fields
+        in
+        let fields = match min_score with
+          | Some s -> fields @ [("min_score", `Float s)]
+          | None -> fields
+        in
+        fields
+
+    | Retry { node = inner; max_attempts; backoff; retry_on } ->
+        [
+          ("type", `String "retry");
+          ("node", node_to_json inner);
+          ("max_attempts", `Int max_attempts);
+          ("backoff", backoff_to_json backoff);
+          ("retry_on", `List (List.map (fun s -> `String s) retry_on));
+        ]
+
+    | Fallback { primary; fallbacks } ->
+        [
+          ("type", `String "fallback");
+          ("primary", node_to_json primary);
+          ("fallbacks", `List (List.map node_to_json fallbacks));
+        ]
+
+    | Race { nodes; timeout } ->
+        let fields = [
+          ("type", `String "race");
+          ("nodes", `List (List.map node_to_json nodes));
+        ] in
+        (match timeout with
+         | Some t -> fields @ [("timeout", `Float t)]
+         | None -> fields)
+  in
+  `Assoc (base @ type_fields @ input_mapping)
+
+(** Serialize chain to JSON (inner) *)
+and chain_to_json_inner (c : chain) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String c.id);
+    ("nodes", `List (List.map node_to_json c.nodes));
+    ("output", `String c.output);
+    ("config", config_to_json c.config);
+  ]
+
+(** Main entry point: Serialize chain to JSON *)
+let chain_to_json (c : chain) : Yojson.Safe.t = chain_to_json_inner c
+
+(** Serialize chain to JSON string (pretty-printed) *)
+let chain_to_json_string ?(pretty=true) (c : chain) : string =
+  let json = chain_to_json c in
+  if pretty then Yojson.Safe.pretty_to_string json
+  else Yojson.Safe.to_string json

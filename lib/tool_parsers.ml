@@ -143,6 +143,15 @@ let parse_chain_visualize_args (json : Yojson.Safe.t) : tool_args =
   let chain = json |> member "chain" in
   ChainVisualize { chain }
 
+(** Parse JSON arguments for chain.convert tool *)
+let parse_chain_convert_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let from_format = json |> member "from" |> to_string in
+  let to_format = json |> member "to" |> to_string in
+  let input = json |> member "input" in
+  let pretty = try json |> member "pretty" |> to_bool with _ -> true in
+  ChainConvert { from_format; to_format; input; pretty }
+
 (** Parse JSON arguments for chain.orchestrate tool *)
 let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in

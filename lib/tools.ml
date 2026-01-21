@@ -482,6 +482,54 @@ let execute args : tool_result Lwt.t =
               ("output", parsed_chain.Chain_types.output);
             ]; })
 
+  | ChainConvert { from_format; to_format; input; pretty } ->
+      (* Bidirectional conversion between JSON and Mermaid formats *)
+      let result = match (from_format, to_format) with
+        | ("json", "mermaid") ->
+            (* JSON -> Mermaid *)
+            (match Chain_parser.parse_chain input with
+            | Error msg ->
+                { model = "chain.convert";
+                  returncode = -1;
+                  response = Printf.sprintf "JSON parse error: %s" msg;
+                  extra = [("from", "json"); ("to", "mermaid"); ("stage", "parse")]; }
+            | Ok chain ->
+                let mermaid = Chain_mermaid_parser.chain_to_mermaid chain in
+                { model = "chain.convert";
+                  returncode = 0;
+                  response = mermaid;
+                  extra = [("from", "json"); ("to", "mermaid"); ("chain_id", chain.Chain_types.id)]; })
+        | ("mermaid", "json") ->
+            (* Mermaid -> JSON *)
+            let mermaid_str = match input with
+              | `String s -> s
+              | _ -> Yojson.Safe.to_string input
+            in
+            (match Chain_mermaid_parser.parse_chain mermaid_str with
+            | Error msg ->
+                { model = "chain.convert";
+                  returncode = -1;
+                  response = Printf.sprintf "Mermaid parse error: %s" msg;
+                  extra = [("from", "mermaid"); ("to", "json"); ("stage", "parse")]; }
+            | Ok chain ->
+                let json_str = Chain_parser.chain_to_json_string ~pretty chain in
+                { model = "chain.convert";
+                  returncode = 0;
+                  response = json_str;
+                  extra = [("from", "mermaid"); ("to", "json"); ("chain_id", chain.Chain_types.id)]; })
+        | (f, t) when f = t ->
+            { model = "chain.convert";
+              returncode = -1;
+              response = Printf.sprintf "Same format conversion not useful: %s -> %s" f t;
+              extra = [("from", f); ("to", t)]; }
+        | (f, t) ->
+            { model = "chain.convert";
+              returncode = -1;
+              response = Printf.sprintf "Unsupported conversion: %s -> %s (supported: json <-> mermaid)" f t;
+              extra = [("from", f); ("to", t)]; }
+      in
+      Lwt.return result
+
   | ChainList ->
       let ids = Chain_registry.list_ids () in
       let response = String.concat ", " ids in

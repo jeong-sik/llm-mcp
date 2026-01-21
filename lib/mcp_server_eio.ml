@@ -219,6 +219,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "chain.list" -> Types.ChainList
     | "chain.to_mermaid" -> Tools_eio.parse_chain_to_mermaid_args arguments
     | "chain.visualize" -> Tools_eio.parse_chain_visualize_args arguments
+    | "chain.convert" -> Tools_eio.parse_chain_convert_args arguments
     | "chain.orchestrate" -> Tools_eio.parse_chain_orchestrate_args arguments
     | _ -> failwith (sprintf "Unknown tool: %s" name)
   in

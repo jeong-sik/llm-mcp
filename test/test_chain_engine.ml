@@ -1302,6 +1302,137 @@ let recursion_tests = [
   "parse_nested_evaluation_chain", `Quick, test_parse_nested_evaluation_chain;
 ]
 
+(* ============================================================================
+   JSON <-> Mermaid Round-trip Tests
+   ============================================================================ *)
+
+(** Test chain_to_json serializer for simple chain *)
+let test_chain_to_json_simple () =
+  let chain = {
+    id = "json_test";
+    nodes = [
+      make_llm_node ~id:"analyze" ~model:"gemini" ~prompt:"Analyze: {{input}}" ();
+    ];
+    output = "analyze";
+    config = default_config;
+  } in
+  let json = chain_to_json chain in
+  (* Parse it back *)
+  match parse_chain json with
+  | Ok parsed ->
+      Alcotest.(check string) "id preserved" chain.id parsed.id;
+      Alcotest.(check string) "output preserved" chain.output parsed.output;
+      Alcotest.(check int) "node count" 1 (List.length parsed.nodes)
+  | Error e -> Alcotest.fail (Printf.sprintf "Failed to parse serialized JSON: %s" e)
+
+(** Test chain_to_json for resilience nodes *)
+let test_chain_to_json_resilience () =
+  let inner = make_llm_node ~id:"api" ~model:"gemini" ~prompt:"call API" () in
+  let retry_node = {
+    id = "retry_api";
+    node_type = Retry {
+      node = inner;
+      max_attempts = 3;
+      backoff = Exponential 2.0;
+      retry_on = ["timeout"; "rate_limit"];
+    };
+    input_mapping = [];
+  } in
+  let chain = {
+    id = "resilience_test";
+    nodes = [retry_node];
+    output = "retry_api";
+    config = default_config;
+  } in
+  let json = chain_to_json chain in
+  match parse_chain json with
+  | Ok parsed ->
+      Alcotest.(check string) "id preserved" chain.id parsed.id;
+      let node = List.hd parsed.nodes in
+      (match node.node_type with
+       | Retry { max_attempts; backoff; retry_on; _ } ->
+           Alcotest.(check int) "max_attempts" 3 max_attempts;
+           (match backoff with
+            | Exponential b -> Alcotest.(check (float 0.01)) "backoff base" 2.0 b
+            | _ -> Alcotest.fail "expected Exponential backoff");
+           Alcotest.(check int) "retry_on count" 2 (List.length retry_on)
+       | _ -> Alcotest.fail "expected Retry node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Failed to parse: %s" e)
+
+(** Test chain_to_json for complex pipeline *)
+let test_chain_to_json_pipeline () =
+  let chain = {
+    id = "pipeline_test";
+    nodes = [
+      {
+        id = "pipeline";
+        node_type = Pipeline [
+          make_llm_node ~id:"step1" ~model:"gemini" ~prompt:"step 1" ();
+          make_llm_node ~id:"step2" ~model:"claude" ~prompt:"step 2" ();
+        ];
+        input_mapping = [];
+      }
+    ];
+    output = "pipeline";
+    config = default_config;
+  } in
+  let json = chain_to_json chain in
+  match parse_chain json with
+  | Ok parsed ->
+      Alcotest.(check string) "id" chain.id parsed.id;
+      let node = List.hd parsed.nodes in
+      (match node.node_type with
+       | Pipeline nodes -> Alcotest.(check int) "pipeline steps" 2 (List.length nodes)
+       | _ -> Alcotest.fail "expected Pipeline node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Failed to parse: %s" e)
+
+(** Test Mermaid -> JSON conversion (via chain_to_json) *)
+let test_mermaid_to_json () =
+  let mermaid = {|
+graph LR
+    A[LLM:gemini "Analyze input"] --> B[LLM:claude "Refine"]
+    A --> C[LLM:codex "Generate code"]
+    B --> D{Quorum:2}
+    C --> D
+|} in
+  match Chain_mermaid_parser.parse_chain mermaid with
+  | Ok chain ->
+      let json = chain_to_json chain in
+      (* Verify we can parse it back *)
+      (match parse_chain json with
+       | Ok reparsed ->
+           Alcotest.(check int) "node count preserved" (List.length chain.nodes) (List.length reparsed.nodes);
+           Alcotest.(check string) "output preserved" chain.output reparsed.output
+       | Error e -> Alcotest.fail (Printf.sprintf "Failed to reparse: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Failed to parse Mermaid: %s" e)
+
+(** Test chain_to_json_string pretty printing *)
+let test_chain_to_json_string () =
+  let chain = {
+    id = "string_test";
+    nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
+    output = "n1";
+    config = default_config;
+  } in
+  let pretty = chain_to_json_string ~pretty:true chain in
+  let compact = chain_to_json_string ~pretty:false chain in
+  Alcotest.(check bool) "pretty has newlines" true (String.contains pretty '\n');
+  Alcotest.(check bool) "compact has no newlines" false (String.contains compact '\n');
+  (* Both should be valid JSON *)
+  (try
+    let _ = Yojson.Safe.from_string pretty in
+    let _ = Yojson.Safe.from_string compact in
+    ()
+  with _ -> Alcotest.fail "Invalid JSON output")
+
+let roundtrip_tests = [
+  "chain_to_json_simple", `Quick, test_chain_to_json_simple;
+  "chain_to_json_resilience", `Quick, test_chain_to_json_resilience;
+  "chain_to_json_pipeline", `Quick, test_chain_to_json_pipeline;
+  "mermaid_to_json", `Quick, test_mermaid_to_json;
+  "chain_to_json_string", `Quick, test_chain_to_json_string;
+]
+
 let types_tests = [
   "default_config", `Quick, test_default_config;
   "node_type_name", `Quick, test_node_type_name;
@@ -1379,4 +1510,5 @@ let () =
     "Chain Registry", registry_tests;
     "Conversation Context", conversation_tests;
     "Self-Recursion", recursion_tests;
+    "JSON-Mermaid Roundtrip", roundtrip_tests;
   ]

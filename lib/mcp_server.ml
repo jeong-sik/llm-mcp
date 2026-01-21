@@ -173,6 +173,7 @@ let starts_with ~prefix s =
     | ChainToMermaid { chain = _ } -> 0
     | ChainValidate { chain = _; mermaid = _ } -> 0
     | ChainVisualize { chain = _ } -> 0
+    | ChainConvert { input; _ } -> String.length (Yojson.Safe.to_string input)
     | ChainList -> 0
     | ChainOrchestrate { goal; _ } -> String.length goal
 let split_once s ch =
@@ -321,6 +322,7 @@ let handle_call_tool ~wants_stream id params =
     | Types.ChainValidate _ -> false
     | Types.ChainToMermaid _ -> false
     | Types.ChainVisualize _ -> false
+    | Types.ChainConvert _ -> false
     | Types.ChainList -> false
     | Types.ChainOrchestrate _ -> false  (* Orchestration not available in Lwt mode *)
   in
@@ -597,10 +599,13 @@ let run_stdio () =
   loop ~session_opt:None
 
 (** Health check response *)
+let server_version = "0.2.0"
+
 let health_response () =
   Yojson.Safe.to_string (`Assoc [
     ("status", `String "ok");
     ("server", `String "llm-mcp");
+    ("version", `String server_version);
     ("transport", `String "http");
     ("language", `String "ocaml");
   ])

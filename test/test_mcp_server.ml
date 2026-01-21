@@ -45,7 +45,7 @@ let test_handle_list_tools () =
       let id = json |> member "id" |> to_int in
       let tools = json |> member "result" |> member "tools" |> to_list in
       Alcotest.(check int) "id matches" 2 id;
-      Alcotest.(check int) "has 10 tools" 10 (List.length tools);  (* gemini, claude-cli, codex, ollama, ollama_list, chain.* *)
+      Alcotest.(check int) "has 12 tools" 12 (List.length tools);  (* gemini, claude-cli, codex, ollama, ollama_list, chain.* *)
       let tool_names = List.map (fun t -> t |> member "name" |> to_string) tools in
       Alcotest.(check bool) "gemini exists" true (List.mem "gemini" tool_names);
       Alcotest.(check bool) "claude-cli exists" true (List.mem "claude-cli" tool_names);
