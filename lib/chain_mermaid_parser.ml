@@ -68,6 +68,15 @@ type mermaid_graph = {
   edges : mermaid_edge list;
 }
 
+(** GoalDriven node metadata *)
+type goaldriven_meta = {
+  gd_action_node_id : string option;
+  gd_measure_func : string option;
+  gd_strategy_hints : (string * string) list;
+  gd_conversational : bool;
+  gd_relay_models : string list;
+}
+
 (** Metadata extracted from lossless comments *)
 type mermaid_meta = {
   chain_id : string option;
@@ -76,6 +85,7 @@ type mermaid_meta = {
   chain_trace : bool option;
   chain_max_depth : int option;
   node_input_mappings : (string, (string * string) list) Hashtbl.t;
+  node_goaldriven_meta : (string, goaldriven_meta) Hashtbl.t;
 }
 
 (** Helper: trim whitespace *)
@@ -98,6 +108,7 @@ let empty_meta () : mermaid_meta = {
   chain_trace = None;
   chain_max_depth = None;
   node_input_mappings = Hashtbl.create 16;
+  node_goaldriven_meta = Hashtbl.create 16;
 }
 
 (** Parse input_mapping from JSON: [[k1,v1],[k2,v2]] -> [(k1,v1);(k2,v2)] *)
@@ -137,12 +148,47 @@ let parse_node_meta (node_id : string) (json_str : string) (meta : mermaid_meta)
     let json = Yojson.Safe.from_string json_str in
     match json with
     | `Assoc fields ->
+        (* Parse input_mapping *)
         (match List.assoc_opt "input_mapping" fields with
         | Some mapping_json ->
             let mapping = parse_input_mapping_json mapping_json in
-            Hashtbl.replace meta.node_input_mappings node_id mapping;
-            meta
-        | None -> meta)
+            Hashtbl.replace meta.node_input_mappings node_id mapping
+        | None -> ());
+
+        (* Parse GoalDriven-specific fields *)
+        let get_string key = match List.assoc_opt key fields with
+          | Some (`String s) -> Some s | _ -> None in
+        let get_bool key = match List.assoc_opt key fields with
+          | Some (`Bool b) -> b | _ -> false in
+        let get_string_list key = match List.assoc_opt key fields with
+          | Some (`List items) ->
+              List.filter_map (function `String s -> Some s | _ -> None) items
+          | _ -> [] in
+        let get_string_pairs key = match List.assoc_opt key fields with
+          | Some (`List items) ->
+              List.filter_map (function
+                | `List [`String k; `String v] -> Some (k, v)
+                | _ -> None) items
+          | _ -> [] in
+
+        let action_node_id = get_string "action_node_id" in
+        let measure_func = get_string "measure_func" in
+        let strategy_hints = get_string_pairs "strategy_hints" in
+        let conversational = get_bool "conversational" in
+        let relay_models = get_string_list "relay_models" in
+
+        (* Only store if any GoalDriven field is present *)
+        if action_node_id <> None || measure_func <> None ||
+           strategy_hints <> [] || conversational || relay_models <> [] then
+          Hashtbl.replace meta.node_goaldriven_meta node_id {
+            gd_action_node_id = action_node_id;
+            gd_measure_func = measure_func;
+            gd_strategy_hints = strategy_hints;
+            gd_conversational = conversational;
+            gd_relay_models = relay_models;
+          };
+
+        meta
     | _ -> meta
   with _ -> meta
 
@@ -836,6 +882,36 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                     { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
                   ) input_ids in
                   Merge { strategy; nodes = input_nodes }
+              | GoalDriven gd ->
+                  (* Apply metadata if available *)
+                  (match Hashtbl.find_opt meta.node_goaldriven_meta mnode.id with
+                  | Some gd_meta ->
+                      (* Build action_node from metadata or edges *)
+                      let action_node_id = match gd_meta.gd_action_node_id with
+                        | Some id -> id
+                        | None ->
+                            (* Fall back to first edge source *)
+                            match Hashtbl.find_opt deps mnode.id with
+                            | Some (id :: _) -> id
+                            | _ -> "_placeholder"
+                      in
+                      let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
+                      GoalDriven {
+                        gd with
+                        action_node;
+                        measure_func = (match gd_meta.gd_measure_func with Some f -> f | None -> gd.measure_func);
+                        strategy_hints = if gd_meta.gd_strategy_hints <> [] then gd_meta.gd_strategy_hints else gd.strategy_hints;
+                        conversational = gd_meta.gd_conversational;
+                        relay_models = if gd_meta.gd_relay_models <> [] then gd_meta.gd_relay_models else gd.relay_models;
+                      }
+                  | None ->
+                      (* No metadata, use first edge as action_node *)
+                      let action_node_id = match Hashtbl.find_opt deps mnode.id with
+                        | Some (id :: _) -> id
+                        | _ -> "_placeholder"
+                      in
+                      let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
+                      GoalDriven { gd with action_node })
               | other -> other
             in
             (* Use metadata input_mapping if available, otherwise infer from deps *)
@@ -1067,9 +1143,36 @@ let input_mapping_to_json (mapping : (string * string) list) : Yojson.Safe.t =
 
 (** Serialize node metadata to JSON (for lossless roundtrip) *)
 let node_meta_to_json (node : node) : Yojson.Safe.t option =
+  (* Build list of fields to preserve *)
+  let fields = ref [] in
+
+  (* Always include input_mapping if non-empty *)
+  if node.input_mapping <> [] then
+    fields := ("input_mapping", input_mapping_to_json node.input_mapping) :: !fields;
+
+  (* For GoalDriven nodes, include additional fields *)
+  (match node.node_type with
+  | GoalDriven { action_node; measure_func; strategy_hints; conversational; relay_models; _ } ->
+      (* action_node reference *)
+      fields := ("action_node_id", `String action_node.id) :: !fields;
+      (* measure_func *)
+      if measure_func <> "default" then
+        fields := ("measure_func", `String measure_func) :: !fields;
+      (* strategy_hints *)
+      if strategy_hints <> [] then
+        fields := ("strategy_hints", `List (List.map (fun (k, v) ->
+          `List [`String k; `String v]) strategy_hints)) :: !fields;
+      (* conversational *)
+      if conversational then
+        fields := ("conversational", `Bool true) :: !fields;
+      (* relay_models *)
+      if relay_models <> [] then
+        fields := ("relay_models", `List (List.map (fun m -> `String m) relay_models)) :: !fields
+  | _ -> ());
+
   (* Only emit if there's something to preserve *)
-  if node.input_mapping = [] then None
-  else Some (`Assoc [("input_mapping", input_mapping_to_json node.input_mapping)])
+  if !fields = [] then None
+  else Some (`Assoc !fields)
 
 (** Serialize chain config to JSON (for lossless roundtrip) *)
 let config_meta_to_json (chain : chain) : Yojson.Safe.t =
