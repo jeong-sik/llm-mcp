@@ -101,3 +101,4 @@
  (name test_mz_chain)
  (modules test_mz_chain)
  (libraries llm_mcp.eio llm_mcp.common eio eio_main))
+(executable (name test_roundtrip_demo) (libraries llm_mcp.common))

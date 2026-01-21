@@ -478,6 +478,16 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
       execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~candidates ~scoring_func ~scoring_prompt ~select_strategy ~min_score
+  (* Resilience Nodes *)
+  | Retry { node = inner_node; max_attempts; backoff; retry_on } ->
+      execute_retry ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~inner_node ~max_attempts ~backoff ~retry_on
+  | Fallback { primary; fallbacks } ->
+      execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~primary ~fallbacks
+  | Race { nodes = race_nodes; timeout } ->
+      execute_race ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~nodes:race_nodes ~timeout
 
 (** Execute nodes in sequence (internal helper, no output storage) *)
 and execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (string, string) result =
@@ -1079,6 +1089,121 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           Ok output
     end
   end
+
+(* ════════════════════════════════════════════════════════════════════════════
+   Resilience Nodes Implementation
+   ════════════════════════════════════════════════════════════════════════════ *)
+
+(** Calculate backoff delay in seconds *)
+and calculate_backoff_delay (strategy : Chain_types.backoff_strategy) (attempt : int) : float =
+  match strategy with
+  | Chain_types.Constant secs -> secs
+  | Chain_types.Exponential base -> base *. (2.0 ** float_of_int attempt)
+  | Chain_types.Linear base -> base *. float_of_int (attempt + 1)
+  | Chain_types.Jitter (min_sec, max_sec) ->
+      min_sec +. Random.float (max_sec -. min_sec)
+
+(** Check if error matches retry patterns *)
+and should_retry (retry_on : string list) (error_msg : string) : bool =
+  match retry_on with
+  | [] -> true
+  | patterns ->
+      List.exists (fun pattern ->
+        try
+          let regex = Str.regexp_case_fold pattern in
+          Str.search_forward regex error_msg 0 >= 0
+        with _ -> String.sub error_msg 0 (min (String.length pattern) (String.length error_msg)) = pattern
+      ) patterns
+
+(** Execute retry node - retry on failure with backoff *)
+and execute_retry ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~inner_node ~max_attempts ~backoff ~retry_on : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+  let rec attempt n last_error =
+    if n > max_attempts then begin
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      record_error ctx parent.id (Printf.sprintf "Max retries (%d) exceeded: %s" max_attempts last_error);
+      Error (Printf.sprintf "Max retries (%d) exceeded: %s" max_attempts last_error)
+    end else begin
+      if n > 1 then Eio.Time.sleep clock (calculate_backoff_delay backoff (n - 2));
+      match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner_node with
+      | Ok output ->
+          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          record_complete ctx parent.id ~duration_ms ~success:true;
+          Hashtbl.add ctx.outputs parent.id output;
+          Ok output
+      | Error msg ->
+          if should_retry retry_on msg then attempt (n + 1) msg
+          else begin
+            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            record_complete ctx parent.id ~duration_ms ~success:false;
+            record_error ctx parent.id msg;
+            Error msg
+          end
+    end
+  in
+  attempt 1 ""
+
+(** Execute fallback node - try primary, then fallbacks in order *)
+and execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~primary ~fallbacks : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+  let rec try_nodes nodes errors =
+    match nodes with
+    | [] ->
+        let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+        let msg = Printf.sprintf "All fallbacks failed: %s" (String.concat "; " (List.rev errors)) in
+        record_complete ctx parent.id ~duration_ms ~success:false;
+        record_error ctx parent.id msg;
+        Error msg
+    | node :: rest ->
+        match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
+        | Ok output ->
+            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            record_complete ctx parent.id ~duration_ms ~success:true;
+            Hashtbl.add ctx.outputs parent.id output;
+            Ok output
+        | Error msg ->
+            try_nodes rest ((node.id ^ ": " ^ msg) :: errors)
+  in
+  try_nodes (primary :: fallbacks) []
+
+(** Execute race node - run all in parallel, first result wins *)
+and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~nodes ~timeout : (string, string) result =
+  ignore timeout;
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+  let winner = ref None in
+  let winner_mutex = Eio.Mutex.create () in
+  let all_errors = ref [] in
+  Eio.Fiber.all (List.map (fun (node : node) ->
+    fun () ->
+      let already_won = Eio.Mutex.use_rw winner_mutex ~protect:true (fun () -> Option.is_some !winner) in
+      if not already_won then begin
+        match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
+        | Ok output ->
+            Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
+              if Option.is_none !winner then winner := Some (node.id, output))
+        | Error msg ->
+            Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
+              all_errors := (node.id ^ ": " ^ msg) :: !all_errors)
+      end
+  ) nodes);
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  match !winner with
+  | Some (winner_id, output) ->
+      record_complete ctx parent.id ~duration_ms ~success:true;
+      Hashtbl.add ctx.outputs parent.id (Printf.sprintf "[winner: %s] %s" winner_id output);
+      Ok output
+  | None ->
+      let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      record_error ctx parent.id msg;
+      Error msg
 
 (** {1 Execution Steps} *)
 

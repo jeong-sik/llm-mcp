@@ -318,6 +318,92 @@ let evaluator_chain_json = {|
 }
 |}
 
+(** Retry chain JSON - retry on failure with exponential backoff *)
+let retry_chain_json = {|
+{
+  "id": "retry_llm",
+  "nodes": [
+    {
+      "id": "retrier",
+      "type": "retry",
+      "max_attempts": 3,
+      "backoff": "exponential:2.0",
+      "retry_on": ["timeout", "rate_limit"],
+      "node": {
+        "id": "llm_call",
+        "type": "llm",
+        "model": "gemini",
+        "prompt": "Process: {{input}}"
+      }
+    }
+  ],
+  "output": "retrier"
+}
+|}
+
+(** Fallback chain JSON - try primary, then fallbacks in order *)
+let fallback_chain_json = {|
+{
+  "id": "resilient_api",
+  "nodes": [
+    {
+      "id": "fallback_chain",
+      "type": "fallback",
+      "primary": {
+        "id": "fast_llm",
+        "type": "llm",
+        "model": "gemini",
+        "prompt": "Quick answer: {{input}}"
+      },
+      "fallbacks": [
+        {
+          "id": "accurate_llm",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "Detailed answer: {{input}}"
+        },
+        {
+          "id": "local_llm",
+          "type": "llm",
+          "model": "ollama:qwen",
+          "prompt": "Fallback answer: {{input}}"
+        }
+      ]
+    }
+  ],
+  "output": "fallback_chain"
+}
+|}
+
+(** Race chain JSON - parallel execution, first result wins *)
+let race_chain_json = {|
+{
+  "id": "fast_response",
+  "nodes": [
+    {
+      "id": "racer",
+      "type": "race",
+      "timeout": 5.0,
+      "nodes": [
+        {
+          "id": "gemini_fast",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "Answer quickly: {{input}}"
+        },
+        {
+          "id": "claude_fast",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "Answer quickly: {{input}}"
+        }
+      ]
+    }
+  ],
+  "output": "racer"
+}
+|}
+
 (* ============================================================================
    Chain Types Tests
    ============================================================================ *)
