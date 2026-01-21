@@ -33,6 +33,15 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         List.concat_map collect_nested_dependencies c.Chain_types.nodes
     | Chain_types.Map { inner; _ } | Chain_types.Bind { inner; _ } ->
         collect_nested_dependencies inner
+    | Chain_types.Threshold { input_node; on_pass; on_fail; _ } ->
+        let input_deps = collect_nested_dependencies input_node in
+        let pass_deps = match on_pass with Some n -> collect_nested_dependencies n | None -> [] in
+        let fail_deps = match on_fail with Some n -> collect_nested_dependencies n | None -> [] in
+        input_deps @ pass_deps @ fail_deps
+    | Chain_types.GoalDriven { action_node; _ } ->
+        collect_nested_dependencies action_node
+    | Chain_types.Evaluator { candidates; _ } ->
+        List.concat_map collect_nested_dependencies candidates
     | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _ ->
         []
   in
@@ -162,6 +171,15 @@ let rec calculate_depth (node : Chain_types.node) : int =
       1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 c.Chain_types.nodes
   | Chain_types.Map { inner; _ } | Chain_types.Bind { inner; _ } ->
       1 + calculate_depth inner
+  | Chain_types.Threshold { input_node; on_pass; on_fail; _ } ->
+      let input_depth = calculate_depth input_node in
+      let pass_depth = Option.fold ~none:0 ~some:calculate_depth on_pass in
+      let fail_depth = Option.fold ~none:0 ~some:calculate_depth on_fail in
+      1 + max input_depth (max pass_depth fail_depth)
+  | Chain_types.GoalDriven { action_node; _ } ->
+      1 + calculate_depth action_node
+  | Chain_types.Evaluator { candidates; _ } ->
+      1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 candidates
 
 (** Main entry point: Compile chain to execution plan *)
 let compile (c : Chain_types.chain) : (Chain_types.execution_plan, string) result =

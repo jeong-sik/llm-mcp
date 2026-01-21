@@ -1,7 +1,7 @@
 (** Chain Types - Core type definitions for Chain DSL
 
     This module defines the fundamental types for the Chain Engine:
-    - node_type: The 11 supported node types (Llm, Tool, Pipeline, etc.)
+    - node_type: The 12 supported node types (Llm, Tool, Pipeline, Threshold, etc.)
     - node: A single execution unit with id and type
     - chain: A complete chain definition with nodes and config
     - chain_result: The result of chain execution
@@ -57,7 +57,25 @@ type merge_strategy =
   | Custom of string  (** Custom merge function name *)
 [@@deriving yojson]
 
-(** The 11 supported node types *)
+(** Threshold comparison operators *)
+type threshold_op =
+  | Gt   (** > greater than *)
+  | Gte  (** >= greater than or equal *)
+  | Lt   (** < less than *)
+  | Lte  (** <= less than or equal *)
+  | Eq   (** = equal *)
+  | Neq  (** != not equal *)
+[@@deriving yojson]
+
+(** Selection strategy for Evaluator node *)
+type select_strategy =
+  | Best              (** Select highest score *)
+  | Worst             (** Select lowest score (for debugging) *)
+  | AboveThreshold of float  (** First candidate above threshold *)
+  | WeightedRandom    (** Random selection weighted by scores *)
+[@@deriving yojson]
+
+(** The 13 supported node types *)
 type node_type =
   | Llm of {
       model : string;     (** Model name: gemini, claude, codex, ollama:* *)
@@ -93,6 +111,30 @@ type node_type =
   | Merge of {
       strategy : merge_strategy;
       nodes : node list;
+    }
+  | Threshold of {
+      metric : string;           (** Metric name: "confidence", "coverage", "latency", "score" *)
+      operator : threshold_op;   (** Comparison operator *)
+      value : float;             (** Threshold value *)
+      input_node : node;         (** Node to get value from *)
+      on_pass : node option;     (** Execute if condition passes *)
+      on_fail : node option;     (** Execute if condition fails *)
+    }
+  | GoalDriven of {
+      goal_metric : string;        (** Target metric: "coverage", "score", "success_rate" *)
+      goal_operator : threshold_op; (** Comparison operator for goal condition *)
+      goal_value : float;          (** Target value to achieve *)
+      action_node : node;          (** Node to execute repeatedly *)
+      measure_func : string;       (** Metric measurement function: "exec_test", "call_api", "parse_json" *)
+      max_iterations : int;        (** Maximum iteration count *)
+      strategy_hints : (string * string) list;  (** Strategy hints: [("below_50", "fast"), ("above_50", "accurate")] *)
+    }
+  | Evaluator of {
+      candidates : node list;      (** Candidate nodes to evaluate *)
+      scoring_func : string;       (** Scoring function: "llm_judge", "regex_match", "json_schema", "custom" *)
+      scoring_prompt : string option;  (** Prompt for LLM judge scoring *)
+      select_strategy : select_strategy;  (** Selection strategy *)
+      min_score : float option;    (** Minimum score threshold (fails if none meet it) *)
     }
 [@@deriving yojson]
 
@@ -175,6 +217,9 @@ let node_type_name = function
   | Map _ -> "map"
   | Bind _ -> "bind"
   | Merge _ -> "merge"
+  | Threshold _ -> "threshold"
+  | GoalDriven _ -> "goal_driven"
+  | Evaluator _ -> "evaluator"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ~prompt ?timeout ?tools () =
@@ -195,6 +240,22 @@ let make_fanout ~id nodes =
 (** Helper: Create a quorum node *)
 let make_quorum ~id ~required nodes =
   { id; node_type = Quorum { required; nodes }; input_mapping = [] }
+
+(** Helper: Create a threshold node *)
+let make_threshold ~id ~metric ~operator ~value ~input_node ?on_pass ?on_fail () =
+  { id; node_type = Threshold { metric; operator; value; input_node; on_pass; on_fail }; input_mapping = [] }
+
+(** Helper: Create a goal-driven iterative node *)
+let make_goal_driven ~id ~goal_metric ~goal_operator ~goal_value
+    ~action_node ~measure_func ~max_iterations ?(strategy_hints=[]) () =
+  { id; node_type = GoalDriven {
+      goal_metric; goal_operator; goal_value;
+      action_node; measure_func; max_iterations; strategy_hints
+    }; input_mapping = [] }
+
+(** Helper: Create an evaluator node *)
+let make_evaluator ~id ~candidates ~scoring_func ?scoring_prompt ~select_strategy ?min_score () =
+  { id; node_type = Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score }; input_mapping = [] }
 
 (** {1 Batch Execution Types - Phase 5} *)
 

@@ -259,6 +259,31 @@ graph LR
       Alcotest.(check string) "ref id" "my_reusable_chain" ref_id
   | _ -> Alcotest.fail "expected ChainRef"
 
+let test_tools_flag () =
+  (* +tools flag enables Ollama tool calling interop *)
+  (* Syntax: [LLM:model "prompt" +tools] - flag OUTSIDE quotes *)
+  let mermaid = {|
+graph LR
+    A[LLM:ollama "Use tools" +tools] --> B[LLM:gemini "No tools"]
+  |} in
+  let chain = check_ok "parse tools flag" (parse_chain mermaid) in
+  Alcotest.(check int) "two nodes" 2 (List.length chain.nodes);
+  let node_a = find_node "A" chain.nodes in
+  let node_b = find_node "B" chain.nodes in
+  (* A should have tools = Some [] *)
+  (match node_a.node_type with
+   | Llm { model; prompt; tools; _ } ->
+       Alcotest.(check string) "model A" "ollama" model;
+       Alcotest.(check string) "prompt A" "Use tools" prompt;
+       Alcotest.(check bool) "A has tools" true (Option.is_some tools)
+   | _ -> Alcotest.fail "expected Llm node A");
+  (* B should have tools = None *)
+  (match node_b.node_type with
+   | Llm { model; tools; _ } ->
+       Alcotest.(check string) "model B" "gemini" model;
+       Alcotest.(check bool) "B has no tools" true (Option.is_none tools)
+   | _ -> Alcotest.fail "expected Llm node B")
+
 (* ============================================================================
    Test Suite
    ============================================================================ *)
@@ -287,6 +312,7 @@ let edge_case_tests = [
   "plain text node", `Quick, test_plain_text_node;
   "comments ignored", `Quick, test_comments_ignored;
   "flowchart keyword", `Quick, test_flowchart_keyword;
+  "+tools flag (Ollama interop)", `Quick, test_tools_flag;
 ]
 
 let error_tests = [

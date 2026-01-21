@@ -23,6 +23,31 @@ let parse_merge_strategy = function
       Ok (Custom (String.sub s 7 (String.length s - 7)))
   | s -> Error (Printf.sprintf "Unknown merge strategy: %s" s)
 
+(** Parse threshold comparison operator from string *)
+let parse_threshold_op = function
+  | "gt" | ">" -> Ok Gt
+  | "gte" | ">=" -> Ok Gte
+  | "lt" | "<" -> Ok Lt
+  | "lte" | "<=" -> Ok Lte
+  | "eq" | "=" | "==" -> Ok Eq
+  | "neq" | "!=" | "<>" -> Ok Neq
+  | s -> Error (Printf.sprintf "Unknown threshold operator: %s" s)
+
+(** Parse selection strategy from string/JSON *)
+let parse_select_strategy json =
+  match json with
+  | `String "best" -> Ok Best
+  | `String "worst" -> Ok Worst
+  | `String "weighted_random" -> Ok WeightedRandom
+  | `Assoc [("above_threshold", `Float f)] -> Ok (AboveThreshold f)
+  | `Assoc [("above_threshold", `Int i)] -> Ok (AboveThreshold (float_of_int i))
+  | `String s when String.length s > 16 && String.sub s 0 16 = "above_threshold:" ->
+      (try
+        let threshold = float_of_string (String.sub s 16 (String.length s - 16)) in
+        Ok (AboveThreshold threshold)
+      with _ -> Error (Printf.sprintf "Invalid threshold value in: %s" s))
+  | other -> Error (Printf.sprintf "Unknown select strategy: %s" (Yojson.Safe.to_string other))
+
 (** Extract input mappings from prompt template *)
 let extract_input_mappings (prompt : string) : (string * string) list =
   let regex = Str.regexp "{{\\([^}]+\\)}}" in
@@ -222,6 +247,88 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       in
       let* nodes = parse_nodes nodes_json in
       Ok (Merge { strategy; nodes })
+
+  | "threshold" ->
+      let* metric = require_string json "metric" in
+      let* operator_str = require_string json "operator" in
+      let* operator = parse_threshold_op operator_str in
+      let value =
+        try json |> member "value" |> to_float
+        with _ ->
+          try float_of_int (json |> member "value" |> to_int)
+          with _ -> 0.0
+      in
+      let input_json = json |> member "input_node" in
+      let* input_node = parse_node input_json in
+      let on_pass =
+        try
+          let pass_json = json |> member "on_pass" in
+          match parse_node pass_json with
+          | Ok n -> Some n
+          | Error _ -> None
+        with _ -> None
+      in
+      let on_fail =
+        try
+          let fail_json = json |> member "on_fail" in
+          match parse_node fail_json with
+          | Ok n -> Some n
+          | Error _ -> None
+        with _ -> None
+      in
+      Ok (Threshold { metric; operator; value; input_node; on_pass; on_fail })
+
+  | "goal_driven" ->
+      let* goal_metric = require_string json "goal_metric" in
+      let* goal_operator_str = require_string json "goal_operator" in
+      let* goal_operator = parse_threshold_op goal_operator_str in
+      let goal_value =
+        try json |> member "goal_value" |> to_float
+        with _ ->
+          try float_of_int (json |> member "goal_value" |> to_int)
+          with _ -> 0.0
+      in
+      let action_json = json |> member "action_node" in
+      let* action_node = parse_node action_json in
+      let* measure_func = require_string json "measure_func" in
+      let max_iterations =
+        try json |> member "max_iterations" |> to_int
+        with _ -> 10
+      in
+      let strategy_hints =
+        try
+          json |> member "strategy_hints" |> to_assoc
+          |> List.map (fun (k, v) -> (k, to_string v))
+        with _ -> []
+      in
+      Ok (GoalDriven {
+        goal_metric; goal_operator; goal_value;
+        action_node; measure_func; max_iterations; strategy_hints
+      })
+
+  | "evaluator" ->
+      let candidates_json =
+        try json |> member "candidates" |> to_list
+        with _ -> []
+      in
+      let* candidates = parse_nodes candidates_json in
+      let* scoring_func = require_string json "scoring_func" in
+      let scoring_prompt =
+        try Some (json |> member "scoring_prompt" |> to_string)
+        with _ -> None
+      in
+      let select_strategy_json =
+        try json |> member "select_strategy"
+        with _ -> `String "best"
+      in
+      let* select_strategy = parse_select_strategy select_strategy_json in
+      let min_score =
+        try Some (json |> member "min_score" |> to_float)
+        with _ ->
+          try Some (float_of_int (json |> member "min_score" |> to_int))
+          with _ -> None
+      in
+      Ok (Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score })
 
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
