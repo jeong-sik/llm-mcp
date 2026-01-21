@@ -33,10 +33,24 @@ type content_type =
   | Markdown    (** Documentation, prose *)
   | Mixed       (** General LLM output *)
 
+(** Model type for cross-model optimization
+    Based on cross_model_validation.json findings:
+    - Same-model: 88-95% compression
+    - Cross-model: 36.9% avg degradation
+    - Universal: trained on all models, ~65-75% compression (balanced)
+*)
+type model_type =
+  | Claude      (** Anthropic Claude responses *)
+  | GPT         (** OpenAI GPT responses *)
+  | Gemini      (** Google Gemini responses *)
+  | Llama       (** Meta Llama/local LLM responses *)
+  | Universal   (** Mixed training from all models - recommended for multi-agent *)
+
 (** Trained dictionary *)
 type t = {
   dict_id: string;
   content_type: content_type;
+  model_type: model_type;  (** NEW: Model-specific optimization *)
   dict_data: string;  (** Raw dictionary bytes *)
   sample_count: int;
   created_at: float;
@@ -81,9 +95,55 @@ let content_type_of_string = function
   | "markdown" -> Markdown
   | _ -> Mixed
 
+(** {2 Model Type Detection} *)
+
+let string_of_model_type = function
+  | Claude -> "claude"
+  | GPT -> "gpt"
+  | Gemini -> "gemini"
+  | Llama -> "llama"
+  | Universal -> "universal"
+
+let model_type_of_string = function
+  | "claude" -> Claude
+  | "gpt" | "openai" -> GPT
+  | "gemini" | "google" -> Gemini
+  | "llama" | "meta" | "local" -> Llama
+  | "universal" | "mixed" | _ -> Universal
+
+(** Detect model type from response patterns.
+    Based on observed response characteristics:
+    - Claude: "I'll help", "Let me", structured thinking
+    - GPT: "Certainly!", "I'd be happy", numbered lists
+    - Gemini: "Here's", concise, technical focus
+    - Llama: Variable, often mirrors Claude/GPT patterns
+*)
+let detect_model_type (data : string) : model_type =
+  let len = String.length data in
+  if len < 20 then Universal
+  else
+    let sample = String.sub data 0 (min 200 len) |> String.lowercase_ascii in
+    (* Claude patterns *)
+    if contains_substring sample "i'll help" ||
+       contains_substring sample "let me " ||
+       contains_substring sample "<thinking>" then Claude
+    (* GPT patterns *)
+    else if contains_substring sample "certainly!" ||
+            contains_substring sample "i'd be happy" ||
+            contains_substring sample "here's what" then GPT
+    (* Gemini patterns *)
+    else if contains_substring sample "here's " ||
+            contains_substring sample "the answer is" then Gemini
+    (* Default to Universal for multi-agent compatibility *)
+    else Universal
+
 (** {1 Dictionary I/O} *)
 
-(** Load dictionary from file *)
+(** Load dictionary from file.
+    Supports both v1 (legacy) and v2 (with model_type) formats.
+    - v1: "ZDCT|v1|json|100|1736697600.0"
+    - v2: "ZDCT|v2|json|claude|100|1736697600.0"
+*)
 let load (path : string) : (t, string) result =
   try
     let ic = open_in_bin path in
@@ -94,13 +154,24 @@ let load (path : string) : (t, string) result =
     let idx = String.index data '\n' in
     let meta = String.sub data 0 idx in
     let dict_data = String.sub data (idx + 1) (len - idx - 1) in
-    (* Parse: "ZDCT|v1|json|100|1736697600.0" *)
     let parts = String.split_on_char '|' meta in
     match parts with
+    (* v2 format with model_type *)
+    | [m; v; ct; mt; sc; ca] when m = magic && v = "v2" ->
+        Ok {
+          dict_id = Filename.basename path;
+          content_type = content_type_of_string ct;
+          model_type = model_type_of_string mt;
+          dict_data;
+          sample_count = int_of_string sc;
+          created_at = float_of_string ca;
+        }
+    (* v1 legacy format - default to Universal model *)
     | [m; v; ct; sc; ca] when m = magic && v = "v1" ->
         Ok {
           dict_id = Filename.basename path;
           content_type = content_type_of_string ct;
+          model_type = Universal;  (* Legacy dicts work for all models *)
           dict_data;
           sample_count = int_of_string sc;
           created_at = float_of_string ca;
@@ -110,14 +181,15 @@ let load (path : string) : (t, string) result =
   | Sys_error e -> Error e
   | _ -> Error ("Failed to load dictionary: " ^ path)
 
-(** Save dictionary to file *)
+(** Save dictionary to file (v2 format with model_type) *)
 let save (dict : t) (path : string) : (unit, string) result =
   try
     let oc = open_out_bin path in
-    (* Write metadata header *)
-    Printf.fprintf oc "%s|v%d|%s|%d|%.1f\n"
-      magic version
+    (* v2 format: ZDCT|v2|content_type|model_type|sample_count|created_at *)
+    Printf.fprintf oc "%s|v2|%s|%s|%d|%.1f\n"
+      magic
       (string_of_content_type dict.content_type)
+      (string_of_model_type dict.model_type)
       dict.sample_count
       dict.created_at;
     output_string oc dict.dict_data;
@@ -131,9 +203,10 @@ let save (dict : t) (path : string) : (unit, string) result =
     Requires zstd CLI for training (OCaml bindings don't expose dict training).
     @param samples List of sample strings
     @param content_type Type of content for labeling
+    @param model_type Model type (default: Universal for multi-agent compatibility)
     @return Trained dictionary or error
 *)
-let train ~(samples : string list) ~(content_type : content_type) : (t, string) result =
+let train ~(samples : string list) ~(content_type : content_type) ?(model_type = Universal) () : (t, string) result =
   let sample_count = List.length samples in
   if sample_count < min_samples then
     Error (Printf.sprintf "Need at least %d samples, got %d" min_samples sample_count)
@@ -166,14 +239,29 @@ let train ~(samples : string list) ~(content_type : content_type) : (t, string) 
         Sys.remove dict_path;
         (try Unix.rmdir temp_dir with _ -> ());
         Ok {
-          dict_id = Printf.sprintf "dict_%s_%d" (string_of_content_type content_type) sample_count;
+          dict_id = Printf.sprintf "dict_%s_%s_%d"
+            (string_of_content_type content_type)
+            (string_of_model_type model_type)
+            sample_count;
           content_type;
+          model_type;
           dict_data;
           sample_count;
           created_at = Unix.gettimeofday ();
         }
       with e ->
         Error (Printf.sprintf "Failed to read trained dict: %s" (Printexc.to_string e))
+
+(** Train Universal dictionary from multiple model samples.
+    Recommended for multi-agent scenarios (MASC).
+    Expected compression: 65-75% (balanced across models)
+*)
+let train_universal ~(claude_samples : string list) ~(gpt_samples : string list)
+    ~(gemini_samples : string list) ~(llama_samples : string list)
+    ~(content_type : content_type) : (t, string) result =
+  (* Mix samples from all models *)
+  let all_samples = claude_samples @ gpt_samples @ gemini_samples @ llama_samples in
+  train ~samples:all_samples ~content_type ~model_type:Universal ()
 
 (** {1 Dictionary Compression/Decompression} *)
 

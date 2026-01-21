@@ -176,6 +176,8 @@ let starts_with ~prefix s =
     | ChainConvert { input; _ } -> String.length (Yojson.Safe.to_string input)
     | ChainList -> 0
     | ChainOrchestrate { goal; _ } -> String.length goal
+    | GhPrDiff { repo; _ } -> String.length repo  (* External tool *)
+    | SlackPost { text; _ } -> String.length text  (* External tool *)
 let split_once s ch =
   match String.index_opt s ch with
   | None -> (s, None)
@@ -325,6 +327,8 @@ let handle_call_tool ~wants_stream id params =
     | Types.ChainConvert _ -> false
     | Types.ChainList -> false
     | Types.ChainOrchestrate _ -> false  (* Orchestration not available in Lwt mode *)
+    | Types.GhPrDiff _ -> false  (* External tools don't stream *)
+    | Types.SlackPost _ -> false  (* External tools don't stream *)
   in
   let wants_keepalive = wants_stream || stream_requested in
 

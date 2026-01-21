@@ -183,6 +183,21 @@ let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_a
   in
   ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete; orchestrator_model }
 
+(** Parse JSON arguments for gh_pr_diff tool *)
+let parse_gh_pr_diff_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let repo = json |> member "repo" |> to_string in
+  let pr_number = json |> member "pr_number" |> to_int in
+  GhPrDiff { repo; pr_number }
+
+(** Parse JSON arguments for slack_post tool *)
+let parse_slack_post_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let channel = json |> member "channel" |> to_string in
+  let text = json |> member "text" |> to_string in
+  let thread_ts = json |> member "thread_ts" |> to_string_option in
+  SlackPost { channel; text; thread_ts }
+
 (** {1 Command Builders} *)
 
 (** Build thinking prompt prefix based on thinking level *)
