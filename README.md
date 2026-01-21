@@ -136,7 +136,7 @@ Or for HTTP mode (recommended):
 
 Budget defaults:
 - Gemini: `thinking_level = "low"`
-- Claude: `ultrathink = false`
+- Claude: `long_context = false` (always false by default, budget_mode has no effect)
 - Codex: `reasoning_effort = "medium"`
 - **Response format**: `compact` (when budget_mode=true)
 
@@ -265,7 +265,7 @@ Run Claude Code CLI (BALTHASAR in MAGI)
 {
   "prompt": "Explain this code",
   "model": "opus",
-  "ultrathink": true,
+  "long_context": false,
   "budget_mode": false,
   "system_prompt": null,
   "output_format": "text",
@@ -274,6 +274,18 @@ Run Claude Code CLI (BALTHASAR in MAGI)
   "timeout": 300
 }
 ```
+
+#### ⚠️ long_context와 비용
+
+| 설정 | 동작 | 비용 |
+|------|------|------|
+| `long_context: false` (기본) | Max 구독 사용 | **무료** ✅ |
+| `long_context: true` | API 키 사용 (1M 컨텍스트) | **유료** 💰 |
+
+> **주의**: `long_context: true`는 Claude CLI의 `--betas context-1m-2025-08-07` 플래그를 활성화하며,
+> 이는 **API 키 전용 기능**입니다. Max 구독이 있어도 API 키로 과금됩니다.
+>
+> 대용량 컨텍스트(200K+ 토큰)가 필요할 때만 `long_context: true`를 사용하세요.
 
 ### codex
 Run OpenAI Codex CLI (MELCHIOR in MAGI)

@@ -91,7 +91,7 @@ let test_parse_claude_args_defaults () =
   | Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream } ->
       check string "prompt" "Test prompt" prompt;
       check string "model default" "opus" model;
-      check bool "long_context default" true long_context;
+      check bool "long_context default" false long_context;  (* default: false to avoid API charges *)
       check (option string) "system_prompt default" None system_prompt;
       check string "output_format default" "text" (string_of_output_format output_format);
       check (list string) "allowed_tools default" [] allowed_tools;

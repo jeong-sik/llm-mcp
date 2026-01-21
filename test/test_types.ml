@@ -57,7 +57,7 @@ let test_tool_result_to_yojson () =
 
 (** Test all_schemas contains expected tools *)
 let test_all_schemas () =
-  check int "should have 5 schemas" 5 (List.length all_schemas);  (* gemini, claude, codex, ollama, ollama_list *)
+  check int "should have 10 schemas" 10 (List.length all_schemas);  (* gemini, claude, codex, ollama, ollama_list, chain_* *)
   let names = List.map (fun (s : tool_schema) -> s.name) all_schemas in
   check bool "gemini exists" true (List.mem "gemini" names);
   check bool "claude-cli exists" true (List.mem "claude-cli" names);
@@ -81,7 +81,7 @@ let test_claude_schema () =
   let open Yojson.Safe.Util in
   let props = claude_schema.input_schema |> member "properties" in
   check bool "has prompt" true (props |> member "prompt" |> to_option Fun.id <> None);
-  check bool "has ultrathink" true (props |> member "ultrathink" |> to_option Fun.id <> None);
+  check bool "has long_context" true (props |> member "long_context" |> to_option Fun.id <> None);
   check bool "has allowed_tools" true (props |> member "allowed_tools" |> to_option Fun.id <> None)
 
 (** Test codex_schema structure *)
