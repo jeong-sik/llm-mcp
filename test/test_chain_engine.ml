@@ -209,6 +209,114 @@ let subgraph_chain_json = {|
 }
 |}
 
+(** Threshold chain JSON - conditional branching based on metric *)
+let threshold_chain_json = {|
+{
+  "id": "quality_gate",
+  "nodes": [
+    {
+      "id": "analyze",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Analyze quality of: {{input}}"
+    },
+    {
+      "id": "quality_check",
+      "type": "threshold",
+      "metric": "confidence",
+      "operator": ">=",
+      "value": 0.8,
+      "input_node": {
+        "id": "scorer",
+        "type": "llm",
+        "model": "claude",
+        "prompt": "Score this from 0-1: {{analyze.output}}"
+      },
+      "on_pass": {
+        "id": "accept",
+        "type": "llm",
+        "model": "gemini",
+        "prompt": "Summarize accepted result: {{scorer.output}}"
+      },
+      "on_fail": {
+        "id": "retry",
+        "type": "llm",
+        "model": "codex",
+        "prompt": "Improve and retry: {{scorer.output}}"
+      }
+    }
+  ],
+  "output": "quality_check"
+}
+|}
+
+(** GoalDriven chain JSON - iterative execution until goal achieved *)
+let goal_driven_chain_json = {|
+{
+  "id": "coverage_goal",
+  "nodes": [
+    {
+      "id": "test_gen",
+      "type": "goal_driven",
+      "goal_metric": "coverage",
+      "goal_operator": ">=",
+      "goal_value": 0.90,
+      "action_node": {
+        "id": "generate_test",
+        "type": "llm",
+        "model": "codex",
+        "prompt": "Generate tests for uncovered code: {{input}}"
+      },
+      "measure_func": "exec_test",
+      "max_iterations": 10,
+      "strategy_hints": {
+        "below_50": "fast",
+        "above_50": "accurate"
+      }
+    }
+  ],
+  "output": "test_gen"
+}
+|}
+
+(** Evaluator chain JSON - score candidates and select best *)
+let evaluator_chain_json = {|
+{
+  "id": "solution_picker",
+  "nodes": [
+    {
+      "id": "evaluator",
+      "type": "evaluator",
+      "candidates": [
+        {
+          "id": "fast_solution",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "Fast solution: {{input}}"
+        },
+        {
+          "id": "accurate_solution",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "Accurate solution: {{input}}"
+        },
+        {
+          "id": "creative_solution",
+          "type": "llm",
+          "model": "codex",
+          "prompt": "Creative solution: {{input}}"
+        }
+      ],
+      "scoring_func": "llm_judge",
+      "scoring_prompt": "Score 0-1 for correctness and clarity",
+      "select_strategy": "best",
+      "min_score": 0.7
+    }
+  ],
+  "output": "evaluator"
+}
+|}
+
 (* ============================================================================
    Chain Types Tests
    ============================================================================ *)
@@ -221,7 +329,7 @@ let test_default_config () =
 
 let test_node_type_name () =
   Alcotest.(check string) "llm" "llm"
-    (node_type_name (Llm { model = "test"; prompt = "test"; timeout = None }));
+    (node_type_name (Llm { model = "test"; prompt = "test"; timeout = None; tools = None }));
   Alcotest.(check string) "tool" "tool"
     (node_type_name (Tool { name = "test"; args = `Null }));
   Alcotest.(check string) "pipeline" "pipeline"
@@ -247,10 +355,11 @@ let test_make_llm_node () =
   let node = make_llm_node ~id:"test" ~model:"gemini" ~prompt:"hello" () in
   Alcotest.(check string) "id" "test" node.id;
   match node.node_type with
-  | Llm { model; prompt; timeout } ->
+  | Llm { model; prompt; timeout; tools } ->
       Alcotest.(check string) "model" "gemini" model;
       Alcotest.(check string) "prompt" "hello" prompt;
-      Alcotest.(check (option int)) "timeout" None timeout
+      Alcotest.(check (option int)) "timeout" None timeout;
+      ignore tools  (* tools field added for Ollama interop *)
   | _ -> Alcotest.fail "Expected Llm node"
 
 let test_make_pipeline () =
@@ -304,6 +413,59 @@ let test_chain_json_roundtrip () =
       Alcotest.(check string) "output" chain.output parsed.output;
       Alcotest.(check int) "nodes" (List.length chain.nodes) (List.length parsed.nodes)
   | Error e -> Alcotest.fail e
+
+let test_make_threshold () =
+  let input_node = make_llm_node ~id:"scorer" ~model:"claude" ~prompt:"score" () in
+  let on_pass = make_llm_node ~id:"accept" ~model:"gemini" ~prompt:"accept" () in
+  let threshold = make_threshold ~id:"quality_gate" ~metric:"confidence"
+    ~operator:Gte ~value:0.8 ~input_node ~on_pass () in
+  Alcotest.(check string) "id" "quality_gate" threshold.id;
+  match threshold.node_type with
+  | Threshold { metric; operator; value; input_node; on_pass; on_fail } ->
+      Alcotest.(check string) "metric" "confidence" metric;
+      Alcotest.(check bool) "operator is Gte" true (operator = Gte);
+      Alcotest.(check (float 0.001)) "value" 0.8 value;
+      Alcotest.(check string) "input_node id" "scorer" input_node.id;
+      Alcotest.(check bool) "on_pass present" true (Option.is_some on_pass);
+      Alcotest.(check bool) "on_fail absent" true (Option.is_none on_fail)
+  | _ -> Alcotest.fail "Expected Threshold node"
+
+let test_make_goal_driven () =
+  let action_node = make_llm_node ~id:"gen_test" ~model:"codex" ~prompt:"generate" () in
+  let goal_driven = make_goal_driven ~id:"coverage_goal"
+    ~goal_metric:"coverage" ~goal_operator:Gte ~goal_value:0.9
+    ~action_node ~measure_func:"exec_test" ~max_iterations:10
+    ~strategy_hints:[("below_50", "fast"); ("above_50", "accurate")] () in
+  Alcotest.(check string) "id" "coverage_goal" goal_driven.id;
+  match goal_driven.node_type with
+  | GoalDriven { goal_metric; goal_operator; goal_value; action_node;
+                 measure_func; max_iterations; strategy_hints } ->
+      Alcotest.(check string) "goal_metric" "coverage" goal_metric;
+      Alcotest.(check bool) "goal_operator is Gte" true (goal_operator = Gte);
+      Alcotest.(check (float 0.001)) "goal_value" 0.9 goal_value;
+      Alcotest.(check string) "action_node id" "gen_test" action_node.id;
+      Alcotest.(check string) "measure_func" "exec_test" measure_func;
+      Alcotest.(check int) "max_iterations" 10 max_iterations;
+      Alcotest.(check int) "strategy_hints count" 2 (List.length strategy_hints)
+  | _ -> Alcotest.fail "Expected GoalDriven node"
+
+let test_make_evaluator () =
+  let candidates = [
+    make_llm_node ~id:"fast" ~model:"gemini" ~prompt:"fast" ();
+    make_llm_node ~id:"accurate" ~model:"claude" ~prompt:"accurate" ();
+    make_llm_node ~id:"creative" ~model:"codex" ~prompt:"creative" ();
+  ] in
+  let evaluator = make_evaluator ~id:"picker" ~candidates ~scoring_func:"llm_judge"
+    ~scoring_prompt:"Score 0-1" ~select_strategy:Best ~min_score:0.7 () in
+  Alcotest.(check string) "id" "picker" evaluator.id;
+  match evaluator.node_type with
+  | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
+      Alcotest.(check int) "candidates" 3 (List.length candidates);
+      Alcotest.(check string) "scoring_func" "llm_judge" scoring_func;
+      Alcotest.(check bool) "scoring_prompt present" true (Option.is_some scoring_prompt);
+      Alcotest.(check bool) "select_strategy is Best" true (select_strategy = Best);
+      Alcotest.(check bool) "min_score present" true (Option.is_some min_score)
+  | _ -> Alcotest.fail "Expected Evaluator node"
 
 (* ============================================================================
    Chain Parser Tests
@@ -445,6 +607,65 @@ let test_parse_missing_output () =
   | Ok _ -> Alcotest.fail "Should have failed on missing output"
   | Error _ -> ()
 
+let test_parse_threshold_chain () =
+  let json = Yojson.Safe.from_string threshold_chain_json in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "id" "quality_gate" chain.id;
+      Alcotest.(check int) "nodes" 2 (List.length chain.nodes);
+      let threshold_node = List.find (fun (n : node) -> n.id = "quality_check") chain.nodes in
+      (match threshold_node.node_type with
+       | Threshold { metric; operator; value; input_node; on_pass; on_fail } ->
+           Alcotest.(check string) "metric" "confidence" metric;
+           Alcotest.(check bool) "operator is Gte" true (operator = Gte);
+           Alcotest.(check (float 0.001)) "value" 0.8 value;
+           Alcotest.(check string) "input_node id" "scorer" input_node.id;
+           Alcotest.(check bool) "on_pass present" true (Option.is_some on_pass);
+           Alcotest.(check bool) "on_fail present" true (Option.is_some on_fail)
+       | _ -> Alcotest.fail "Expected Threshold node")
+  | Error e -> Alcotest.fail e
+
+let test_parse_goal_driven_chain () =
+  let json = Yojson.Safe.from_string goal_driven_chain_json in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "id" "coverage_goal" chain.id;
+      Alcotest.(check int) "nodes" 1 (List.length chain.nodes);
+      let goal_node = List.find (fun (n : node) -> n.id = "test_gen") chain.nodes in
+      (match goal_node.node_type with
+       | GoalDriven { goal_metric; goal_operator; goal_value; action_node;
+                      measure_func; max_iterations; strategy_hints } ->
+           Alcotest.(check string) "goal_metric" "coverage" goal_metric;
+           Alcotest.(check bool) "goal_operator is Gte" true (goal_operator = Gte);
+           Alcotest.(check (float 0.001)) "goal_value" 0.90 goal_value;
+           Alcotest.(check string) "action_node id" "generate_test" action_node.id;
+           Alcotest.(check string) "measure_func" "exec_test" measure_func;
+           Alcotest.(check int) "max_iterations" 10 max_iterations;
+           Alcotest.(check int) "strategy_hints count" 2 (List.length strategy_hints)
+       | _ -> Alcotest.fail "Expected GoalDriven node")
+  | Error e -> Alcotest.fail e
+
+let test_parse_evaluator_chain () =
+  let json = Yojson.Safe.from_string evaluator_chain_json in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "id" "solution_picker" chain.id;
+      Alcotest.(check int) "nodes" 1 (List.length chain.nodes);
+      let eval_node = List.find (fun (n : node) -> n.id = "evaluator") chain.nodes in
+      (match eval_node.node_type with
+       | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
+           Alcotest.(check int) "candidates" 3 (List.length candidates);
+           Alcotest.(check string) "scoring_func" "llm_judge" scoring_func;
+           Alcotest.(check bool) "scoring_prompt present" true (Option.is_some scoring_prompt);
+           Alcotest.(check bool) "select_strategy is Best" true (select_strategy = Best);
+           Alcotest.(check bool) "min_score present" true (Option.is_some min_score);
+           (* Check min_score value *)
+           (match min_score with
+            | Some v -> Alcotest.(check (float 0.001)) "min_score value" 0.7 v
+            | None -> Alcotest.fail "min_score should be present")
+       | _ -> Alcotest.fail "Expected Evaluator node")
+  | Error e -> Alcotest.fail e
+
 (* ============================================================================
    Chain Compiler Tests
    ============================================================================ *)
@@ -465,11 +686,11 @@ let test_compile_pipeline_topological_order () =
   let chain = {
     id = "topo_test";
     nodes = [
-      { id = "c"; node_type = Llm { model = "gemini"; prompt = "c"; timeout = None };
+      { id = "c"; node_type = Llm { model = "gemini"; prompt = "c"; timeout = None; tools = None };
         input_mapping = [("input", "{{b.output}}")] };
-      { id = "a"; node_type = Llm { model = "gemini"; prompt = "a"; timeout = None };
+      { id = "a"; node_type = Llm { model = "gemini"; prompt = "a"; timeout = None; tools = None };
         input_mapping = [] };
-      { id = "b"; node_type = Llm { model = "claude"; prompt = "b"; timeout = None };
+      { id = "b"; node_type = Llm { model = "claude"; prompt = "b"; timeout = None; tools = None };
         input_mapping = [("input", "{{a.output}}")] };
     ];
     output = "c";
@@ -621,6 +842,10 @@ let types_tests = [
   "make_quorum", `Quick, test_make_quorum;
   "merge_strategy_json", `Quick, test_merge_strategy_json;
   "chain_json_roundtrip", `Quick, test_chain_json_roundtrip;
+  (* Evaluation node type helpers *)
+  "make_threshold", `Quick, test_make_threshold;
+  "make_goal_driven", `Quick, test_make_goal_driven;
+  "make_evaluator", `Quick, test_make_evaluator;
 ]
 
 let parser_tests = [
@@ -634,6 +859,10 @@ let parser_tests = [
   "parse_input_mapping", `Quick, test_parse_input_mapping;
   "parse_invalid_json", `Quick, test_parse_invalid_json;
   "parse_missing_output", `Quick, test_parse_missing_output;
+  (* Evaluation node parsers *)
+  "parse_threshold_chain", `Quick, test_parse_threshold_chain;
+  "parse_goal_driven_chain", `Quick, test_parse_goal_driven_chain;
+  "parse_evaluator_chain", `Quick, test_parse_evaluator_chain;
 ]
 
 let compiler_tests = [

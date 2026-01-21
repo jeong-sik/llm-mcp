@@ -189,9 +189,14 @@ let build_claude_cmd args =
   match args with
   | Claude { prompt; model; ultrathink; system_prompt; output_format; allowed_tools; _ } ->
       let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-      let wrapper = me_root ^ "/features/llm-mcp/scripts/claude-wrapper.sh" in
+      let wrapper = me_root ^ "/workspace/yousleepwhen/llm-mcp/scripts/claude-wrapper.sh" in
       let cmd = [wrapper; "-p"; "--model"; model] in
-      let cmd = if ultrathink then
+      (* --betas flag triggers API key usage instead of Max subscription
+         Skip it when CLAUDE_USE_MAX_SUBSCRIPTION=1 is set *)
+      let use_max = Sys.getenv_opt "CLAUDE_USE_MAX_SUBSCRIPTION"
+                    |> Option.map (fun v -> v = "1" || v = "true")
+                    |> Option.value ~default:false in
+      let cmd = if ultrathink && not use_max then
         cmd @ ["--betas"; "context-1m-2025-08-07"]
       else cmd in
       let cmd = cmd @ ["--settings"; {|{"disableAllHooks": true}|}] in

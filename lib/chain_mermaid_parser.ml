@@ -10,7 +10,8 @@
     ┌─────────────────────────────┬─────────────────────────────────────┐
     │ Mermaid Syntax              │ Chain AST Type                      │
     ├─────────────────────────────┼─────────────────────────────────────┤
-    │ [LLM:model "prompt"]        │ Llm { model; prompt }               │
+    │ [LLM:model "prompt"]        │ Llm { model; prompt; tools=None }   │
+    │ [LLM:model "prompt" +tools] │ Llm { model; prompt; tools=Some[] } │
     │ [Tool:name]                 │ Tool { name; args }                 │
     │ [[Ref:chain_id]]            │ ChainRef chain_id                   │
     │ {Quorum:N}                  │ Quorum { required = N; nodes }      │
@@ -97,6 +98,28 @@ let strip_quotes s =
   else
     s
 
+(** Extract +tools flag from content. Returns (content_without_flag, has_tools) *)
+let extract_tools_flag (s : string) : (string * bool) =
+  let s = trim s in
+  (* Check for +tools at end of string *)
+  let tools_suffix = "+tools" in
+  let suffix_len = String.length tools_suffix in
+  let len = String.length s in
+  if len > suffix_len then
+    let end_part = String.sub s (len - suffix_len) suffix_len in
+    if end_part = tools_suffix then
+      let content = trim (String.sub s 0 (len - suffix_len)) in
+      (content, true)
+    else
+      (s, false)
+  else
+    (s, false)
+
+(** Make tools value based on flag: Some [] for tools-enabled, None otherwise *)
+let make_tools_value (has_tools : bool) : Yojson.Safe.t option =
+  if has_tools then Some (`List [])
+  else None
+
 (** Infer node type from node ID and shape *)
 let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]) (text : string)
     : (node_type, string) result =
@@ -147,11 +170,13 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
       let tool_content_re = Str.regexp_case_fold {|^tool:\([a-z0-9_-]+\)[ \n\t]*\(.*\)$|} in
 
       if Str.string_match llm_content_re text 0 then
-        (* Explicit LLM syntax in content: llm:model\nprompt *)
+        (* Explicit LLM syntax in content: llm:model\nprompt or llm:model\nprompt +tools *)
         let model = String.lowercase_ascii (Str.matched_group 1 text) in
-        let prompt = trim (Str.matched_group 2 text) in
-        let prompt = if prompt = "" then "{{input}}" else prompt in
-        Ok (Llm { model; prompt; timeout = None })
+        let raw_prompt = trim (Str.matched_group 2 text) in
+        let (prompt_clean, has_tools) = extract_tools_flag raw_prompt in
+        let prompt = if prompt_clean = "" then "{{input}}" else prompt_clean in
+        let tools = make_tools_value has_tools in
+        Ok (Llm { model; prompt; timeout = None; tools })
       else if Str.string_match tool_content_re text 0 then
         (* Explicit Tool syntax in content: tool:name\nargs *)
         let name = Str.matched_group 1 text in
@@ -173,14 +198,19 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
             String.length id_lower >= String.length m &&
             String.sub id_lower 0 (String.length m) = m
           ) llm_models in
-          Ok (Llm { model; prompt = if text = "" then "{{input}}" else text; timeout = None })
+          let (text_clean, has_tools) = extract_tools_flag text in
+          let prompt = if text_clean = "" then "{{input}}" else text_clean in
+          let tools = make_tools_value has_tools in
+          Ok (Llm { model; prompt; timeout = None; tools })
         else if List.mem id_lower known_tools then
           Ok (Tool { name = id; args = `Null })
         else
           (* Default: treat as LLM with "gemini" default model, text as prompt *)
           (* If ID is short (1-2 chars) or generic, use text as prompt *)
-          let prompt = if text = "" then id else text in
-          Ok (Llm { model = "gemini"; prompt; timeout = None })
+          let (text_clean, has_tools) = extract_tools_flag text in
+          let prompt = if text_clean = "" then id else text_clean in
+          let tools = make_tools_value has_tools in
+          Ok (Llm { model = "gemini"; prompt; timeout = None; tools })
 
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
@@ -291,25 +321,38 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, or Merge:strategy, got: %s" content)
 
   | `Rect ->
-      (* [LLM:model "prompt"] or [Tool:name] *)
-      if String.length content > 4 && String.sub content 0 4 = "LLM:" then
-        let rest = String.sub content 4 (String.length content - 4) in
+      (* [LLM:model "prompt"] or [LLM:model "prompt" +tools] or [Tool:name] *)
+      (* First extract +tools flag from end of content *)
+      let (content_clean, has_tools) = extract_tools_flag content in
+      let tools = make_tools_value has_tools in
+      if String.length content_clean > 4 && String.sub content_clean 0 4 = "LLM:" then
+        let rest = String.sub content_clean 4 (String.length content_clean - 4) in
         (* Parse: model "prompt" or just model *)
         if Str.string_match quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; prompt = trim prompt; timeout = None })
+          Ok (Llm { model = trim model; prompt = trim prompt; timeout = None; tools })
         else if Str.string_match simple_model_re rest 0 then
           let model = Str.matched_group 1 rest in
-          Ok (Llm { model = trim model; prompt = "{{input}}"; timeout = None })
+          Ok (Llm { model = trim model; prompt = "{{input}}"; timeout = None; tools })
         else
           Error (Printf.sprintf "Invalid LLM format: %s" content)
-      else if String.length content > 5 && String.sub content 0 5 = "Tool:" then
-        let name = trim (String.sub content 5 (String.length content - 5)) in
-        Ok (Tool { name; args = `Assoc [] })
+      else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
+        let rest = String.sub content_clean 5 (String.length content_clean - 5) in
+        (* Parse: name "args" or just name (same pattern as LLM) *)
+        if Str.string_match quote_re rest 0 then
+          let name = trim (Str.matched_group 1 rest) in
+          let args_str = trim (Str.matched_group 2 rest) in
+          (* Create args with "input" key holding the args string *)
+          Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
+        else if Str.string_match simple_model_re rest 0 then
+          let name = trim (Str.matched_group 1 rest) in
+          Ok (Tool { name; args = `Assoc [] })
+        else
+          Error (Printf.sprintf "Invalid Tool format: %s" content)
       else
         (* Default: treat as LLM with content as prompt, model = gemini *)
-        Ok (Llm { model = "gemini"; prompt = content; timeout = None })
+        Ok (Llm { model = "gemini"; prompt = content_clean; timeout = None; tools })
 
 (** Parse edge line: A --> B or A & B --> C *)
 let parse_edge_line (line : string) : mermaid_edge list =
@@ -535,7 +578,9 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
             let input_mapping =
               match Hashtbl.find_opt deps mnode.id with
               | Some inputs ->
-                  List.map (fun inp -> (inp, Printf.sprintf "{{%s.output}}" inp)) inputs
+                  (* Map: key (for substitution pattern {{key}}) -> node_id (for ctx.outputs lookup)
+                     Note: Don't wrap in {{}} - resolve_inputs expects plain node_id *)
+                  List.map (fun inp -> (inp, inp)) inputs
               | None -> []
             in
             let node = { id = mnode.id; node_type; input_mapping } in
@@ -599,6 +644,9 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Bind { func; _ } -> Printf.sprintf "bind_%s" func
   | ChainRef ref_id -> Printf.sprintf "ref_%s" ref_id
   | Subgraph _ -> fallback
+  | Threshold { metric; _ } -> Printf.sprintf "threshold_%s" metric
+  | GoalDriven { goal_metric; _ } -> Printf.sprintf "goal_%s" goal_metric
+  | Evaluator { scoring_func; _ } -> Printf.sprintf "eval_%s" scoring_func
 
 (** Convert a node_type to Mermaid node text (prompt/description) *)
 let node_type_to_text (nt : node_type) : string =
@@ -621,13 +669,28 @@ let node_type_to_text (nt : node_type) : string =
   | Bind { func; _ } -> func
   | ChainRef ref_id -> ref_id
   | Subgraph sub -> sub.id
+  | Threshold { metric; operator; value; _ } ->
+      let op_str = match operator with
+        | Gt -> ">" | Gte -> ">=" | Lt -> "<" | Lte -> "<=" | Eq -> "=" | Neq -> "!="
+      in
+      Printf.sprintf "%s %s %.2f" metric op_str value
+  | GoalDriven { goal_metric; goal_value; max_iterations; _ } ->
+      Printf.sprintf "Goal: %s >= %.2f (max %d)" goal_metric goal_value max_iterations
+  | Evaluator { candidates; scoring_func; select_strategy; _ } ->
+      let strategy_str = match select_strategy with
+        | Best -> "best"
+        | Worst -> "worst"
+        | AboveThreshold t -> Printf.sprintf ">%.2f" t
+        | WeightedRandom -> "weighted"
+      in
+      Printf.sprintf "Eval %d via %s (%s)" (List.length candidates) scoring_func strategy_str
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
   match nt with
   | Llm _ | Tool _ -> ("[", "]")
-  | Quorum _ | Gate _ | Merge _ -> ("{", "}")
-  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ -> ("[[", "]]")
+  | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ -> ("{", "}")
+  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | GoalDriven _ -> ("[[", "]]")
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
 let chain_to_mermaid (chain : chain) : string =

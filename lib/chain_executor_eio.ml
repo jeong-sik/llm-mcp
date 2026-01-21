@@ -267,6 +267,15 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Map { func; inner } -> execute_map ctx ~sw ~clock ~exec_fn ~tool_exec node ~func inner
   | Bind { func; inner } -> execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec node ~func inner
   | Merge { strategy; nodes } -> execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec node ~strategy nodes
+  | Threshold { metric; operator; value; input_node; on_pass; on_fail } ->
+      execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~metric ~operator ~value ~input_node ~on_pass ~on_fail
+  | GoalDriven { goal_metric; goal_operator; goal_value; action_node; measure_func; max_iterations; strategy_hints } ->
+      execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~goal_metric ~goal_operator ~goal_value ~action_node ~measure_func ~max_iterations ~strategy_hints
+  | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
+      execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~candidates ~scoring_func ~scoring_prompt ~select_strategy ~min_score
 
 (** Execute nodes in sequence (internal helper, no output storage) *)
 and execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (string, string) result =
@@ -334,31 +343,38 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
     Error msg
   end
 
-(** Execute N/K quorum (require N successes from K nodes) *)
+(** Execute N/K quorum (require N successes from K nodes)
+
+    In Mermaid DAG: J1 --> V{Quorum:2}, J2 --> V, J3 --> V
+    - J1, J2, J3 execute BEFORE V (topological order)
+    - V aggregates already-computed outputs from ctx.outputs
+    - If nodes are ChainRef placeholders, look up in ctx.outputs instead of executing
+*)
 and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~required (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
+  let _ = (sw, clock, exec_fn, tool_exec) in  (* suppress unused warnings *)
 
-  (* Track successes and failures *)
+  (* Collect results from already-executed nodes or ChainRef lookups *)
   let successes = ref [] in
   let failures = ref [] in
-  let mutex = Eio.Mutex.create () in
-  let done_promise, done_resolver = Eio.Promise.create () in
 
-  (* Early termination when quorum reached *)
-  Eio.Fiber.all (List.map (fun node ->
-    fun () ->
-      if Eio.Promise.is_resolved done_promise then () else
-      let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
-      Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-        match result with
-        | Ok output -> successes := (node.id, output) :: !successes
-        | Error msg -> failures := (node.id, msg) :: !failures
-      );
-      (* Check if quorum reached *)
-      if List.length !successes >= required then
-        (try Eio.Promise.resolve done_resolver () with _ -> ())
-  ) nodes);
+  List.iter (fun (node : node) ->
+    (* For ChainRef nodes (created by mermaid parser for Quorum inputs),
+       look up the referenced node's output in ctx.outputs *)
+    let result = match node.node_type with
+      | ChainRef ref_id ->
+          (match Hashtbl.find_opt ctx.outputs ref_id with
+           | Some output -> Ok output
+           | None -> Error (Printf.sprintf "Input node '%s' not yet executed" ref_id))
+      | _ ->
+          (* For non-ChainRef nodes, try to execute (backward compat) *)
+          execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
+    in
+    match result with
+    | Ok output -> successes := (node.id, output) :: !successes
+    | Error msg -> failures := (node.id, msg) :: !failures
+  ) nodes;
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
 
@@ -489,13 +505,22 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
 
-  (* Execute all nodes in parallel *)
+  (* Execute all nodes in parallel, handling ChainRef nodes specially *)
   let results = ref [] in
   let mutex = Eio.Mutex.create () in
 
-  Eio.Fiber.all (List.map (fun node ->
+  Eio.Fiber.all (List.map (fun (node : node) ->
     fun () ->
-      let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
+      (* For ChainRef nodes, look up in ctx.outputs instead of executing *)
+      let result = match node.node_type with
+        | ChainRef ref_id ->
+            (match Hashtbl.find_opt ctx.outputs ref_id with
+             | Some output -> Ok output
+             | None -> Error (Printf.sprintf "Input node '%s' not yet executed" ref_id))
+        | _ ->
+            (* For non-ChainRef nodes, execute normally *)
+            execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
+      in
       Eio.Mutex.use_rw mutex ~protect:true (fun () ->
         results := (node.id, result) :: !results
       )
@@ -529,6 +554,302 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
     record_complete ctx parent.id ~duration_ms ~success:true;
     Hashtbl.add ctx.outputs parent.id merged;
     Ok merged
+  end
+
+(** Execute threshold node - conditional branching based on metric value *)
+and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~metric ~operator ~value ~input_node ~on_pass ~on_fail : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* First, execute the input node to get the value *)
+  match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec input_node with
+  | Error msg ->
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      Error (Printf.sprintf "Threshold input node failed: %s" msg)
+  | Ok input_output ->
+      (* Extract numeric value from output based on metric *)
+      let extracted_value = match metric with
+        | "confidence" | "score" | "coverage" | "latency" ->
+            (* Try to parse a float from the output *)
+            (try Some (float_of_string (String.trim input_output))
+             with _ -> None)
+        | _ -> None
+      in
+      (match extracted_value with
+       | None ->
+           let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+           record_complete ctx parent.id ~duration_ms ~success:false;
+           Error (Printf.sprintf "Could not extract metric '%s' from output" metric)
+       | Some v ->
+           (* Compare value against threshold *)
+           let passes = match operator with
+             | Gt -> v > value
+             | Gte -> v >= value
+             | Lt -> v < value
+             | Lte -> v <= value
+             | Eq -> v = value
+             | Neq -> v <> value
+           in
+           (* Execute appropriate branch *)
+           let branch_result =
+             if passes then
+               match on_pass with
+               | Some n -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec n
+               | None -> Ok input_output  (* No pass branch, return input *)
+             else
+               match on_fail with
+               | Some n -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec n
+               | None -> Ok input_output  (* No fail branch, return input *)
+           in
+           let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+           (match branch_result with
+            | Ok output ->
+                record_complete ctx parent.id ~duration_ms ~success:true;
+                Hashtbl.add ctx.outputs parent.id output;
+                Ok output
+            | Error msg ->
+                record_complete ctx parent.id ~duration_ms ~success:false;
+                Error msg))
+
+(** Execute goal-driven iterative node - repeat until goal is met *)
+and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~goal_metric ~goal_operator ~goal_value ~action_node ~measure_func
+    ~max_iterations ~strategy_hints : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* Get strategy hint based on current progress *)
+  let get_strategy_hint current_value =
+    (* strategy_hints format: [("below_50", "fast"), ("above_50", "accurate")] *)
+    let pct = (current_value /. goal_value) *. 100.0 in
+    List.find_opt (fun (condition, _) ->
+      match String.split_on_char '_' condition with
+      | ["below"; n] -> (try pct < float_of_string n with _ -> false)
+      | ["above"; n] -> (try pct >= float_of_string n with _ -> false)
+      | _ -> false
+    ) strategy_hints
+    |> Option.map snd
+  in
+
+  (* Measure metric from output using measure_func *)
+  let measure output =
+    match measure_func with
+    | "parse_float" | "parse_json" ->
+        (* Direct float parsing from output *)
+        (try Some (float_of_string (String.trim output))
+         with _ ->
+           (* Try JSON extraction *)
+           try
+             let json = Yojson.Safe.from_string output in
+             let open Yojson.Safe.Util in
+             Some (json |> member goal_metric |> to_float)
+           with _ -> None)
+    | "exec_test" ->
+        (* For test execution: extract coverage/pass rate from output *)
+        (* Expected format: "coverage: 0.85" or JSON with metric field *)
+        let regex = Str.regexp (goal_metric ^ "[: ]+\\([0-9.]+\\)") in
+        (try
+          let _ = Str.search_forward regex output 0 in
+          Some (float_of_string (Str.matched_group 1 output))
+        with Not_found ->
+          try Some (float_of_string (String.trim output))
+          with _ -> None)
+    | "call_api" ->
+        (* For API calls: expect JSON response with metric *)
+        (try
+          let json = Yojson.Safe.from_string output in
+          let open Yojson.Safe.Util in
+          Some (json |> member goal_metric |> to_float)
+        with _ -> None)
+    | "llm_judge" ->
+        (* Use LLM to assess the metric *)
+        let prompt = Printf.sprintf
+          "Evaluate the following output for '%s' metric. Return ONLY a number between 0.0 and 1.0:\n\n%s"
+          goal_metric output
+        in
+        (match exec_fn ~model:"gemini" ~prompt ~timeout:30 with
+         | Ok score_str ->
+             (try Some (float_of_string (String.trim score_str))
+              with _ -> None)
+         | Error _ -> None)
+    | _ ->
+        (* Default: try to extract any float *)
+        (try Some (float_of_string (String.trim output))
+         with _ -> None)
+  in
+
+  let rec iterate iteration last_value =
+    if iteration > max_iterations then begin
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      Error (Printf.sprintf "Goal not achieved after %d iterations (last value: %.2f, target: %.2f)"
+               max_iterations last_value goal_value)
+    end else begin
+      (* Log current strategy if hints are provided *)
+      let _current_strategy = get_strategy_hint last_value in
+
+      (* Execute the action node *)
+      match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec action_node with
+      | Error msg ->
+          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          record_complete ctx parent.id ~duration_ms ~success:false;
+          Error (Printf.sprintf "Iteration %d failed: %s" iteration msg)
+      | Ok output ->
+          (* Measure the metric *)
+          (match measure output with
+           | None ->
+               (* Can't measure, keep trying with same last_value *)
+               iterate (iteration + 1) last_value
+           | Some v ->
+               (* Check if goal is met *)
+               let goal_met = match goal_operator with
+                 | Gt -> v > goal_value
+                 | Gte -> v >= goal_value
+                 | Lt -> v < goal_value
+                 | Lte -> v <= goal_value
+                 | Eq -> abs_float (v -. goal_value) < 0.001
+                 | Neq -> abs_float (v -. goal_value) >= 0.001
+               in
+               if goal_met then begin
+                 let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+                 record_complete ctx parent.id ~duration_ms ~success:true;
+                 Hashtbl.add ctx.outputs parent.id output;
+                 Ok output
+               end else
+                 iterate (iteration + 1) v)
+    end
+  in
+  iterate 1 0.0
+
+(** Execute evaluator node - score candidates and select based on strategy *)
+and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~candidates ~scoring_func ~scoring_prompt ~select_strategy ~min_score : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* Execute all candidates in parallel *)
+  let results = ref [] in
+  let mutex = Eio.Mutex.create () in
+
+  Eio.Fiber.all (List.map (fun (candidate : node) ->
+    fun () ->
+      let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec candidate in
+      Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+        results := (candidate.id, result) :: !results
+      )
+  ) candidates);
+
+  (* Helper: LLM-based scoring using exec_fn *)
+  let llm_score output =
+    let prompt = match scoring_prompt with
+      | Some p -> Printf.sprintf "%s\n\nCandidate output:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
+      | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
+    in
+    match exec_fn ~model:"gemini" ~prompt ~timeout:30 with
+    | Ok score_str ->
+        (* Extract float from response *)
+        let cleaned = String.trim score_str in
+        (try
+          let score = float_of_string cleaned in
+          min 1.0 (max 0.0 score)  (* Clamp to [0, 1] *)
+        with _ ->
+          (* Try to find a number in the response *)
+          let regex = Str.regexp "[0-9]+\\.[0-9]+" in
+          try
+            let _ = Str.search_forward regex cleaned 0 in
+            let found = Str.matched_string cleaned in
+            min 1.0 (max 0.0 (float_of_string found))
+          with Not_found -> 0.5)  (* Fallback *)
+    | Error _ -> 0.5  (* Fallback on error *)
+  in
+
+  (* Score each successful result *)
+  let scored = List.filter_map (fun (id, r) ->
+    match r with
+    | Error _ -> None
+    | Ok output ->
+        (* Score based on scoring_func *)
+        let score = match scoring_func with
+          | "regex_match" ->
+              (* Simple: longer output = higher score (placeholder) *)
+              float_of_int (String.length output) /. 1000.0
+          | "json_schema" ->
+              (* Check if valid JSON, bonus for more complete structure *)
+              (try
+                let json = Yojson.Safe.from_string output in
+                let depth = ref 0 in
+                let rec count_depth = function
+                  | `Assoc fields ->
+                      incr depth;
+                      List.iter (fun (_, v) -> count_depth v) fields
+                  | `List items ->
+                      incr depth;
+                      List.iter count_depth items
+                  | _ -> ()
+                in
+                count_depth json;
+                min 1.0 (0.5 +. (float_of_int !depth *. 0.1))
+               with _ -> 0.0)
+          | "llm_judge" ->
+              (* Use LLM to score the output *)
+              llm_score output
+          | "custom" | _ ->
+              (* For custom, try to parse score from output metadata *)
+              (try
+                let json = Yojson.Safe.from_string output in
+                let open Yojson.Safe.Util in
+                json |> member "score" |> to_float
+               with _ -> 0.5)
+        in
+        Some (id, output, score)
+  ) !results in
+
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+
+  if scored = [] then begin
+    record_complete ctx parent.id ~duration_ms ~success:false;
+    Error "No candidates succeeded"
+  end else begin
+    (* Filter by min_score if specified *)
+    let filtered = match min_score with
+      | None -> scored
+      | Some threshold -> List.filter (fun (_, _, s) -> s >= threshold) scored
+    in
+    if filtered = [] then begin
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      Error (Printf.sprintf "No candidates met minimum score %.2f" (Option.value min_score ~default:0.0))
+    end else begin
+      (* Select based on strategy *)
+      let selected = match select_strategy with
+        | Best ->
+            List.fold_left (fun best (id, out, sc) ->
+              match best with
+              | None -> Some (id, out, sc)
+              | Some (_, _, best_sc) -> if sc > best_sc then Some (id, out, sc) else best
+            ) None filtered
+        | Worst ->
+            List.fold_left (fun worst (id, out, sc) ->
+              match worst with
+              | None -> Some (id, out, sc)
+              | Some (_, _, worst_sc) -> if sc < worst_sc then Some (id, out, sc) else worst
+            ) None filtered
+        | AboveThreshold t ->
+            List.find_opt (fun (_, _, sc) -> sc >= t) filtered
+        | WeightedRandom ->
+            (* Simplified: just pick first (proper impl would use weighted random) *)
+            Some (List.hd filtered)
+      in
+      match selected with
+      | None ->
+          record_complete ctx parent.id ~duration_ms ~success:false;
+          Error "Selection strategy returned no result"
+      | Some (_, output, _) ->
+          record_complete ctx parent.id ~duration_ms ~success:true;
+          Hashtbl.add ctx.outputs parent.id output;
+          Ok output
+    end
   end
 
 (** {1 Execution Steps} *)

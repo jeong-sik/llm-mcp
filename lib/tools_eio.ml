@@ -492,7 +492,26 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     else Some (server, String.sub name (idx + 1) tool_len)
               in
               (* Create exec_fn that routes to appropriate LLM *)
-              let exec_fn ~model ~prompt =
+              let exec_fn ~model ~prompt ?tools () =
+                (* Convert Yojson.Safe.t tools to tool_schema list option *)
+                let parsed_tools = match tools with
+                  | None -> None
+                  | Some json ->
+                      let open Yojson.Safe.Util in
+                      match json with
+                      | `List items ->
+                          let schemas = List.filter_map (fun item ->
+                            try
+                              Some {
+                                Types.name = item |> member "name" |> to_string;
+                                description = item |> member "description" |> to_string;
+                                input_schema = item |> member "input_schema";
+                              }
+                            with _ -> None
+                          ) items in
+                          if schemas = [] then None else Some schemas
+                      | _ -> None
+                in
                 let args = match String.lowercase_ascii model with
                   | "stub" | "mock" ->
                       (* Stub model for tests and local smoke runs *)
@@ -513,7 +532,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         timeout = node_timeout;
                         stream = false;
                       }
-                  | "claude" | "opus" | "opus-4" | "sonnet" ->
+                  | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
                       Types.Claude {
                         prompt;
                         model;
@@ -544,7 +563,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         temperature = 0.7;
                         timeout = node_timeout;
                         stream = false;
-                        tools = None;
+                        tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
                   | m when String.length m > 7 && String.sub m 0 7 = "ollama:" ->
                       let ollama_model = String.sub m 7 (String.length m - 7) in
@@ -555,7 +574,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         temperature = 0.7;
                         timeout = node_timeout;
                         stream = false;
-                        tools = None;
+                        tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
                   | _ ->
                       (* Default to Gemini for unknown models *)
@@ -602,6 +621,14 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "ollama_list" ->
                           let args = parse_ollama_list_args args in
                           execute ~sw ~proc_mgr ~clock args
+                      | "echo" ->
+                          (* Simple echo tool for testing *)
+                          let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
+                                      with _ -> Yojson.Safe.to_string args in
+                          { Types.model = "echo"; returncode = 0; response = input; extra = [] }
+                      | "identity" ->
+                          (* Identity tool: returns args unchanged *)
+                          { Types.model = "identity"; returncode = 0; response = Yojson.Safe.to_string args; extra = [] }
                       | _ ->
                           { Types.model = "chain.tool";
                             returncode = -1;
@@ -759,7 +786,7 @@ This chain will execute the goal using a stub model.|}
         | "ollama" ->
             let args = Types.Ollama {
               prompt;
-              model = "qwen3:32b";
+              model = "devstral";
               system_prompt = Some "You are a chain orchestrator. Design, analyze, and verify workflows.";
               temperature = 0.7;
               timeout = 120;
@@ -816,6 +843,14 @@ This chain will execute the goal using a stub model.|}
               | "ollama" ->
                   let parsed = parse_ollama_args tool_args in
                   execute ~sw ~proc_mgr ~clock parsed
+              | "echo" ->
+                  (* Simple echo tool for testing: returns the input args as a string *)
+                  let input = try tool_args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
+                              with _ -> Yojson.Safe.to_string tool_args in
+                  { model = "echo"; returncode = 0; response = input; extra = [] }
+              | "identity" ->
+                  (* Identity tool: returns args unchanged *)
+                  { model = "identity"; returncode = 0; response = Yojson.Safe.to_string tool_args; extra = [] }
               | _ ->
                   { model = name; returncode = 1; response = Printf.sprintf "Unknown tool: %s" name; extra = [] }
             in
@@ -1233,7 +1268,26 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 if server = "" || tool_len <= 0 then None
                 else Some (server, String.sub name (idx + 1) tool_len)
           in
-          let exec_fn ~model ~prompt =
+          let exec_fn ~model ~prompt ?tools () =
+            (* Convert Yojson.Safe.t tools to tool_schema list option *)
+            let parsed_tools = match tools with
+              | None -> None
+              | Some json ->
+                  let open Yojson.Safe.Util in
+                  match json with
+                  | `List items ->
+                      let schemas = List.filter_map (fun item ->
+                        try
+                          Some {
+                            Types.name = item |> member "name" |> to_string;
+                            description = item |> member "description" |> to_string;
+                            input_schema = item |> member "input_schema";
+                          }
+                        with _ -> None
+                      ) items in
+                      if schemas = [] then None else Some schemas
+                  | _ -> None
+            in
             match model with
             | "stub" | "mock" ->
                 Ok (sprintf "[%s]%s" model prompt)
@@ -1286,7 +1340,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   temperature = 0.7;
                   timeout;
                   stream = false;
-                  tools = None;
+                  tools = parsed_tools;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
@@ -1298,7 +1352,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   temperature = 0.7;
                   timeout;
                   stream = false;
-                  tools = None;
+                  tools = parsed_tools;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
@@ -1329,6 +1383,14 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   | "ollama_list" ->
                       let args = parse_ollama_list_args args in
                       execute ~sw ~proc_mgr ~clock args
+                  | "echo" ->
+                      (* Simple echo tool for testing *)
+                      let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
+                                  with _ -> Yojson.Safe.to_string args in
+                      { Types.model = "echo"; returncode = 0; response = input; extra = [] }
+                  | "identity" ->
+                      (* Identity tool: returns args unchanged *)
+                      { Types.model = "identity"; returncode = 0; response = Yojson.Safe.to_string args; extra = [] }
                   | _ ->
                       { Types.model = "chain.tool";
                         returncode = -1;

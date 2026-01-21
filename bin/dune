@@ -393,3 +393,17 @@
  (package llm_mcp)
  (modules quote_agent)
  (libraries llm_mcp llm_mcp.agent_core_eio eio_main unix str))
+
+(executable
+ (name chain_dashboard)
+ (public_name chain-dashboard)
+ (package llm_mcp)
+ (modules chain_dashboard)
+ (libraries llm_mcp unix))
+
+(executable
+ (name chain_dashboard_web)
+ (public_name chain-dashboard-web)
+ (package llm_mcp)
+ (modules chain_dashboard_web)
+ (libraries llm_mcp llm_mcp.eio eio eio_main yojson))
