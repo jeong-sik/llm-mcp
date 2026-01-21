@@ -81,6 +81,15 @@ type mermaid_meta = {
 (** Helper: trim whitespace *)
 let trim s = String.trim s
 
+(** Helper: strip surrounding quotes from content *)
+let strip_quotes s =
+  let s = trim s in
+  let len = String.length s in
+  if len >= 2 && (s.[0] = '"' || s.[0] = '\'') && s.[len-1] = s.[0] then
+    String.sub s 1 (len - 2)
+  else
+    s
+
 (** Create empty metadata *)
 let empty_meta () : mermaid_meta = {
   chain_id = None;
@@ -178,15 +187,6 @@ let llm_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"
 (** Known tool names *)
 let known_tools = ["eslint"; "tsc"; "prettier"; "jest"; "vitest"; "cargo"; "dune"; "make"; "npm"; "yarn"; "pnpm"]
 
-(** Strip surrounding quotes from text if present *)
-let strip_quotes s =
-  let s = trim s in
-  let len = String.length s in
-  if len >= 2 && s.[0] = '"' && s.[len-1] = '"' then
-    String.sub s 1 (len - 2)
-  else
-    s
-
 (** Extract +tools flag from content. Returns (content_without_flag, has_tools) *)
 let extract_tools_flag (s : string) : (string * bool) =
   let s = trim s in
@@ -228,6 +228,42 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
         Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] }; else_node = None })
       else if String.length id_lower >= 6 && String.sub id_lower 0 6 = "merge_" then
         Ok (Merge { strategy = Concat; nodes = [] })
+      else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "goal_" then
+        (* goal_metric node with text: "op:value:max_iter" e.g. "gte:0.90:10" *)
+        let metric = String.sub id 5 (String.length id - 5) in
+        let goal_text_re = Str.regexp {|^\([a-z]+\):\([0-9.]+\):\([0-9]+\)$|} in
+        if Str.string_match goal_text_re text 0 then
+          let op_str = Str.matched_group 1 text in
+          let value = float_of_string (Str.matched_group 2 text) in
+          let max_iter = int_of_string (Str.matched_group 3 text) in
+          let operator = match op_str with
+            | "gt" -> Gt | "gte" -> Gte | "lt" -> Lt | "lte" -> Lte | "eq" -> Eq | "neq" -> Neq
+            | _ -> Gte
+          in
+          Ok (GoalDriven {
+            goal_metric = metric;
+            goal_operator = operator;
+            goal_value = value;
+            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] };
+            measure_func = "default";
+            max_iterations = max_iter;
+            strategy_hints = [];
+            conversational = false;
+            relay_models = [];
+          })
+        else
+          (* Fallback: use default values if text doesn't match pattern *)
+          Ok (GoalDriven {
+            goal_metric = metric;
+            goal_operator = Gte;
+            goal_value = 0.9;
+            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] };
+            measure_func = "default";
+            max_iterations = 10;
+            strategy_hints = [];
+            conversational = false;
+            relay_models = [];
+          })
       else
         (* Default diamond: try to parse old syntax or default to Quorum *)
         (try
@@ -406,8 +442,36 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         in
         (* Merge nodes need their inputs filled in later from edges *)
         Ok (Merge { strategy; nodes = [] })
+      else if String.length content > 11 && String.sub content 0 11 = "GoalDriven:" then
+        (* {GoalDriven:metric:op:value:max_iter} - e.g., {GoalDriven:coverage:gte:0.90:10} *)
+        let rest = String.sub content 11 (String.length content - 11) in
+        (* Format: metric:op:value:max_iter *)
+        let goaldriven_re = Str.regexp {|^\([a-z_]+\):\([a-z]+\):\([0-9.]+\):\([0-9]+\)$|} in
+        if Str.string_match goaldriven_re rest 0 then
+          let metric = Str.matched_group 1 rest in
+          let op_str = Str.matched_group 2 rest in
+          let value = float_of_string (Str.matched_group 3 rest) in
+          let max_iter = int_of_string (Str.matched_group 4 rest) in
+          let operator = match op_str with
+            | "gt" -> Gt | "gte" -> Gte | "lt" -> Lt | "lte" -> Lte | "eq" -> Eq | "neq" -> Neq
+            | _ -> Gte  (* default *)
+          in
+          (* action_node is placeholder, filled from edges later *)
+          Ok (GoalDriven {
+            goal_metric = metric;
+            goal_operator = operator;
+            goal_value = value;
+            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] };
+            measure_func = "default";
+            max_iterations = max_iter;
+            strategy_hints = [];
+            conversational = false;
+            relay_models = [];
+          })
+        else
+          Error (Printf.sprintf "Invalid GoalDriven format (expected metric:op:value:max_iter): %s" content)
       else
-        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, or Merge:strategy, got: %s" content)
+        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, or GoalDriven:..., got: %s" content)
 
   | `Rect ->
       (* [LLM:model "prompt"] or [LLM:model "prompt" +tools] or [Tool:name] *)
@@ -630,7 +694,8 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
         (* Try new inference-based parsing first, fall back to old explicit syntax *)
         let parse_result =
           (* Check if content uses old explicit syntax (LLM:, Tool:, Ref:, etc.) *)
-          let content = trim mnode.content in
+          (* Strip surrounding quotes that may be added by chain_to_mermaid *)
+          let content = strip_quotes mnode.content in
           let uses_old_syntax =
             (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
             (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
@@ -641,12 +706,13 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
             (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
             (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
             (String.length content > 4 && String.sub content 0 4 = "Map:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Bind:")
+            (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
+            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:")
           in
           if uses_old_syntax then
-            parse_node_content mnode.shape mnode.content
+            parse_node_content mnode.shape content
           else
-            infer_type_from_id mnode.id mnode.shape mnode.content
+            infer_type_from_id mnode.id mnode.shape content
         in
         match parse_result with
         | Error e -> convert_result := Error e
@@ -726,7 +792,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
     | Error _ -> ()
     | Ok () ->
         let parse_result =
-          let content = trim mnode.content in
+          (* Strip surrounding quotes that may be added by chain_to_mermaid *)
+          let content = strip_quotes mnode.content in
           let uses_old_syntax =
             (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
             (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
@@ -737,12 +804,13 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
             (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
             (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
             (String.length content > 4 && String.sub content 0 4 = "Map:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Bind:")
+            (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
+            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:")
           in
           if uses_old_syntax then
-            parse_node_content mnode.shape mnode.content
+            parse_node_content mnode.shape content
           else
-            infer_type_from_id mnode.id mnode.shape mnode.content
+            infer_type_from_id mnode.id mnode.shape content
         in
         match parse_result with
         | Error e -> convert_result := Error e
@@ -944,8 +1012,8 @@ let node_type_to_text (nt : node_type) : string =
 let node_type_to_shape (nt : node_type) : string * string =
   match nt with
   | Llm _ | Tool _ -> ("[", "]")
-  | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ -> ("{", "}")
-  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | GoalDriven _ -> ("[[", "]]")
+  | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ -> ("{", "}")
+  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
 
@@ -1036,9 +1104,10 @@ let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
   if styled then Buffer.add_string buf mermaid_class_defs;
 
   (* Build edge map: target -> sources *)
+  (* input_mapping is (param_name, source_node_id) - we need source_node_id for edges *)
   let edges = Hashtbl.create 16 in
   List.iter (fun (node : node) ->
-    List.iter (fun (src, _) ->
+    List.iter (fun (_, src) ->
       let existing = match Hashtbl.find_opt edges node.id with
         | Some l -> l
         | None -> []
@@ -1078,9 +1147,10 @@ let chain_to_ascii (chain : chain) : string =
   let dir = chain.config.direction in
 
   (* Build adjacency map: source -> targets *)
+  (* input_mapping is (param_name, source_node_id) - we need source_node_id for edges *)
   let adj = Hashtbl.create 16 in
   List.iter (fun (node : node) ->
-    List.iter (fun (src, _) ->
+    List.iter (fun (_, src) ->
       let targets = match Hashtbl.find_opt adj src with Some l -> l | None -> [] in
       Hashtbl.replace adj src (node.id :: targets)
     ) node.input_mapping
