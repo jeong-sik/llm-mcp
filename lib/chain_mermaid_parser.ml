@@ -768,10 +768,44 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
-let chain_to_mermaid ?(styled=true) (chain : chain) : string =
+(** Serialize input_mapping to JSON for metadata comment *)
+let input_mapping_to_json (mapping : (string * string) list) : Yojson.Safe.t =
+  `List (List.map (fun (k, v) -> `List [`String k; `String v]) mapping)
+
+(** Serialize node metadata to JSON (for lossless roundtrip) *)
+let node_meta_to_json (node : node) : Yojson.Safe.t option =
+  (* Only emit if there's something to preserve *)
+  if node.input_mapping = [] then None
+  else Some (`Assoc [("input_mapping", input_mapping_to_json node.input_mapping)])
+
+(** Serialize chain config to JSON (for lossless roundtrip) *)
+let config_meta_to_json (chain : chain) : Yojson.Safe.t =
+  `Assoc [
+    ("id", `String chain.id);
+    ("output", `String chain.output);
+    ("timeout", `Int chain.config.timeout);
+    ("trace", `Bool chain.config.trace);
+    ("max_depth", `Int chain.config.max_depth);
+  ]
+
+let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
   let buf = Buffer.create 256 in
   let dir = direction_to_string chain.config.direction in
   Buffer.add_string buf (Printf.sprintf "graph %s\n" dir);
+
+  (* Lossless mode: emit metadata as comments *)
+  if lossless then begin
+    let config_json = Yojson.Safe.to_string (config_meta_to_json chain) in
+    Buffer.add_string buf (Printf.sprintf "    %%%% @chain %s\n" config_json);
+    (* Emit node metadata *)
+    List.iter (fun (node : node) ->
+      match node_meta_to_json node with
+      | None -> ()
+      | Some meta ->
+          let meta_json = Yojson.Safe.to_string meta in
+          Buffer.add_string buf (Printf.sprintf "    %%%% @node:%s %s\n" node.id meta_json)
+    ) chain.nodes
+  end;
 
   (* Add classDef styles if styled=true *)
   if styled then Buffer.add_string buf mermaid_class_defs;

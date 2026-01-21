@@ -133,7 +133,7 @@ let make_error ~id code message =
 
 let server_info = {
   P.name = "llm-mcp-eio";
-  version = "0.2.1";
+  version = Version.version;
 }
 
 let capabilities = {
@@ -270,7 +270,7 @@ let handle_read_resource id params =
   | "llm-mcp://info" ->
       let info = `Assoc [
         ("server", `String "llm-mcp-eio");
-        ("version", `String "0.2.1");
+        ("version", `String Version.version);
         ("runtime", `String "Eio");
         ("tools", `Int (List.length Types.all_schemas));
       ] in

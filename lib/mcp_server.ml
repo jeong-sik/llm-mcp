@@ -104,7 +104,7 @@ let client_wants_streaming params =
 (** MCP Server capabilities - version-aware *)
 let server_info = `Assoc [
   ("name", `String "llm-mcp");
-  ("version", `String "0.2.1");
+  ("version", `String Version.version);
 ]
 
 let capabilities_for_version ~include_experimental version =
@@ -599,13 +599,11 @@ let run_stdio () =
   loop ~session_opt:None
 
 (** Health check response *)
-let server_version = "0.2.1"
-
 let health_response () =
   Yojson.Safe.to_string (`Assoc [
     ("status", `String "ok");
     ("server", `String "llm-mcp");
-    ("version", `String server_version);
+    ("version", `String Version.version);
     ("transport", `String "http");
     ("language", `String "ocaml");
   ])

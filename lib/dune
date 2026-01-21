@@ -7,6 +7,8 @@
  (wrapped false)
  (flags (:standard -w -69))
  (modules
+   ; Version (auto-generated from dune-project)
+   version
    ; Pure OCaml - shared between Eio and Lwt
    common
    types

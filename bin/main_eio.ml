@@ -529,7 +529,7 @@ let main host port =
 
 let cmd =
   let doc = "LLM-MCP Server (Eio) - MCP 2025-11-25" in
-  let info = Cmd.info "llm-mcp" ~version:"0.2.1" ~doc in
+  let info = Cmd.info "llm-mcp" ~version:Version.version ~doc in
   Cmd.v info Term.(const main $ host_arg $ port_arg)
 
 let () = exit (Cmd.eval cmd)
