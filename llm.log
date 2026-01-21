@@ -1,0 +1,77 @@
+🐫 llm-mcp: Loading chains from data/chains...
+🐫 llm-mcp (OCaml Eio) MCP 2025-11-25 server
+   HTTP: http://127.0.0.1:8932
+   MCP:  GET  /mcp -> SSE stream (notifications)
+         POST /mcp -> JSON-RPC requests
+   Graceful shutdown: SIGTERM/SIGINT supported
+[session] No session ID provided for tools/call
+[session] Created new session: eio-86567-1768907218407-0e55ebf3
+[session] No session ID provided for tools/call
+[session] Created new session: eio-86567-1768907231842-2b05d083
+[session] Created new session: eio-86567-1768907306052-c21646c1
+[session] Created new session: eio-86567-1768907310301-ad13f38e
+[session] Created new session: eio-86567-1768907539067-79296fc7
+[session] Created new session: eio-86567-1768907550588-1b45c1f4
+[session] Created new session: eio-86567-1768907562601-ede76b27
+[session] Created new session: eio-86567-1768907583765-4fdc133a
+[session] Created new session: eio-86567-1768907586066-1a10549a
+[session] Created new session: eio-86567-1768907592953-f88d17f4
+[session] Created new session: eio-86567-1768907615659-f2dc051a
+[session] Created new session: eio-86567-1768907617449-42180bfb
+[session] Created new session: eio-86567-1768907621360-d2e7f79f
+[session] Created new session: eio-86567-1768907626120-62f3788e
+[session] Created new session: eio-86567-1768907641189-ac7d70a5
+[session] Created new session: eio-86567-1768907731914-88cdcfe8
+[session] Created new session: eio-86567-1768907835968-9801de8a
+[session] Created new session: eio-86567-1768908043276-8ca0ab9a
+[session] Created new session: eio-86567-1768908101522-9650f550
+[session] Created new session: eio-86567-1768908104818-750d93b7
+[session] Created new session: eio-86567-1768908108618-e86fa5f3
+[session] Created new session: eio-86567-1768908111860-80d2ecaf
+[session] Created new session: eio-86567-1768908114788-1199a173
+[session] Created new session: eio-86567-1768908118177-0662bc91
+[session] Created new session: eio-86567-1768908121405-ecdec4dd
+[session] Created new session: eio-86567-1768908124780-32372bb9
+[session] Created new session: eio-86567-1768908128681-62b26d3b
+[session] Created new session: eio-86567-1768908132070-45be93b6
+[session] Created new session: eio-86567-1768908135514-3f8dc41f
+[session] Created new session: eio-86567-1768908138661-7bf28122
+[session] Created new session: eio-86567-1768908141517-1da8d63b
+[session] No session ID provided for tools/call
+[session] Created new session: eio-86567-1768908145050-d94fc2fb
+[session] Created new session: eio-86567-1768908148187-7d193b2d
+[session] Created new session: eio-86567-1768908152075-051be140
+[session] Created new session: eio-86567-1768908155751-82a0015a
+[session] Created new session: eio-86567-1768908159179-8c496670
+[session] Created new session: eio-86567-1768908162117-957a82fc
+[session] No session ID provided for tools/call
+[session] Created new session: eio-86567-1768908162649-6bd5a0f8
+[session] Created new session: eio-86567-1768908166155-e5066179
+[session] Created new session: eio-86567-1768908169642-7c3d1a9c
+[session] Created new session: eio-86567-1768908173963-aa01dc64
+[session] Created new session: eio-86567-1768908177436-7dc59392
+[session] Created new session: eio-86567-1768908180738-4985a28f
+[session] Created new session: eio-86567-1768908184175-adc79231
+[session] Created new session: eio-86567-1768908187520-ed61ebf4
+[session] Created new session: eio-86567-1768908191543-37ba8729
+[session] Created new session: eio-86567-1768908192512-c8c2d726
+[session] Created new session: eio-86567-1768908195995-527cedab
+[session] Created new session: eio-86567-1768908198685-6101cac6
+[session] Created new session: eio-86567-1768908202387-99b79f80
+[session] Created new session: eio-86567-1768908206084-00cc7799
+[session] Created new session: eio-86567-1768908212913-3166056a
+[session] Created new session: eio-86567-1768908216179-90ff2b62
+[session] Created new session: eio-86567-1768908220473-b0c00ce5
+[session] Created new session: eio-86567-1768908223883-6f913686
+[session] Created new session: eio-86567-1768908228695-3e1993bf
+[session] Created new session: eio-86567-1768908232273-a78c2750
+[session] Created new session: eio-86567-1768908236316-f8bf8441
+[session] Created new session: eio-86567-1768908239255-29127255
+[session] Created new session: eio-86567-1768908242163-c1245d17
+[session] Created new session: eio-86567-1768908243485-7d755bb3
+[session] Created new session: eio-86567-1768908246297-01a40830
+[session] Created new session: eio-86567-1768908249282-93cd90d3
+
+🐫 llm-mcp: Received SIGTERM, shutting down gracefully...
+🐫 llm-mcp: Sent shutdown notification to 12 SSE clients
+🐫 llm-mcp: Shutdown complete.

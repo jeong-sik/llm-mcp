@@ -44,6 +44,16 @@ type internal_trace = {
 
 (** {1 Execution Context} *)
 
+(** Iteration context for GoalDriven loops - enables dynamic prompt variables *)
+type iteration_ctx = {
+  iteration: int;           (** Current iteration number (1-based) *)
+  max_iterations: int;      (** Maximum iterations allowed *)
+  progress: float;          (** Current progress toward goal (0.0 to 1.0+) *)
+  last_value: float;        (** Last measured metric value *)
+  goal_value: float;        (** Target goal value *)
+  strategy: string option;  (** Current strategy hint if any *)
+}
+
 (** Context passed through execution *)
 type exec_context = {
   outputs: (string, string) Hashtbl.t;      (** Node outputs by ID *)
@@ -51,6 +61,7 @@ type exec_context = {
   start_time: float;                         (** Execution start time *)
   trace_enabled: bool;                       (** Whether to record traces *)
   timeout: int;                              (** Overall timeout in seconds *)
+  mutable iteration_ctx: iteration_ctx option;  (** Iteration context for GoalDriven *)
 }
 
 (** Create a new execution context *)
@@ -669,7 +680,8 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           "Evaluate the following output for '%s' metric. Return ONLY a number between 0.0 and 1.0:\n\n%s"
           goal_metric output
         in
-        (match exec_fn ~model:"gemini" ~prompt ~timeout:30 with
+        let result = exec_fn ~model:"gemini" ~prompt:prompt ?tools:None () in
+        (match result with
          | Ok score_str ->
              (try Some (float_of_string (String.trim score_str))
               with _ -> None)
@@ -747,7 +759,8 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       | Some p -> Printf.sprintf "%s\n\nCandidate output:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
       | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
     in
-    match exec_fn ~model:"gemini" ~prompt ~timeout:30 with
+    let result = exec_fn ~model:"gemini" ~prompt:prompt ?tools:None () in
+    match result with
     | Ok score_str ->
         (* Extract float from response *)
         let cleaned = String.trim score_str in

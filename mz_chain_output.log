@@ -1,0 +1,3 @@
+🚀 Starting 10-step MZ chain execution...
+❌ Chain failed:
+step9: Error: model 'ollama:llama3.2' not found; step5: Error: model 'ollama:llama3.2' not found; step10: Error: model 'ollama:llama3.2' not found; step7: Error: model 'ollama:llama3.2' not found; step3: Error: model 'ollama:qwen3:1.7b' not found; step6: Error: model 'ollama:qwen3:1.7b' not found; step1: Error: model 'ollama:qwen3:1.7b' not found; step2: Error: model 'ollama:qwen3:1.7b' not found; step8: Error: model 'ollama:qwen3:1.7b' not found; step4: Error: model 'ollama:qwen3:1.7b' not found
