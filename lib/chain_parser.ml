@@ -390,6 +390,23 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       in
       Ok (Race { nodes; timeout })
 
+  | "chain_exec" | "chainexec" | "meta" ->
+      (* Meta-chain: execute a dynamically generated chain *)
+      let chain_source = try json |> member "chain_source" |> to_string
+        with _ -> try json |> member "source" |> to_string
+        with _ -> "{{input}}"
+      in
+      let validate = try json |> member "validate" |> to_bool with _ -> true in
+      let max_depth = try json |> member "max_depth" |> to_int with _ -> 3 in
+      let sandbox = try json |> member "sandbox" |> to_bool with _ -> true in
+      let context_inject = try
+        json |> member "context_inject" |> to_assoc
+        |> List.map (fun (k, v) -> (k, to_string v))
+      with _ -> []
+      in
+      let pass_outputs = try json |> member "pass_outputs" |> to_bool with _ -> true in
+      Ok (ChainExec { chain_source; validate; max_depth; sandbox; context_inject; pass_outputs })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -629,6 +646,21 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         (match timeout with
          | Some t -> fields @ [("timeout", `Float t)]
          | None -> fields)
+
+    | ChainExec { chain_source; validate; max_depth; sandbox; context_inject; pass_outputs } ->
+        let base_fields = [
+          ("type", `String "chain_exec");
+          ("chain_source", `String chain_source);
+          ("validate", `Bool validate);
+          ("max_depth", `Int max_depth);
+          ("sandbox", `Bool sandbox);
+          ("pass_outputs", `Bool pass_outputs);
+        ] in
+        let inject_fields =
+          if context_inject = [] then []
+          else [("context_inject", `Assoc (List.map (fun (k, v) -> (k, `String v)) context_inject))]
+        in
+        base_fields @ inject_fields
   in
   `Assoc (base @ type_fields @ input_mapping)
 

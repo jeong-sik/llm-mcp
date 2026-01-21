@@ -650,6 +650,7 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Retry { max_attempts; _ } -> Printf.sprintf "retry_%d" max_attempts
   | Fallback _ -> "fallback"
   | Race _ -> "race"
+  | ChainExec { chain_source; _ } -> Printf.sprintf "exec_%s" (String.sub chain_source 0 (min 8 (String.length chain_source)))
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -710,6 +711,9 @@ let node_type_to_text (nt : node_type) : string =
   | Race { nodes; timeout; _ } ->
       let timeout_str = match timeout with Some t -> Printf.sprintf " (%.1fs)" t | None -> "" in
       Printf.sprintf "Race %d%s" (List.length nodes) timeout_str
+  | ChainExec { chain_source; max_depth; sandbox; _ } ->
+      let sandbox_str = if sandbox then " 🔒" else "" in
+      Printf.sprintf "Exec {{%s}} (depth:%d)%s" chain_source max_depth sandbox_str
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -718,6 +722,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ -> ("{", "}")
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | GoalDriven _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
+  | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
 
 (** Map node type to CSS class name for Mermaid styling *)
 let node_type_to_class (nt : node_type) : string =
@@ -739,6 +744,7 @@ let node_type_to_class (nt : node_type) : string =
   | Retry _ -> "retry"
   | Fallback _ -> "fallback"
   | Race _ -> "race"
+  | ChainExec _ -> "meta"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -758,6 +764,7 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
     classDef fallback fill:#e17055,stroke:#d63031,color:#fff
     classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
@@ -833,6 +840,7 @@ let chain_to_ascii (chain : chain) : string =
       | Evaluator _ -> "⚖️" | Threshold _ -> "📊"
       | Map _ -> "📍" | Bind _ -> "🔄" | Subgraph _ -> "📦"
       | Retry _ -> "🔁" | Fallback _ -> "🛟" | Race _ -> "🏁"
+      | ChainExec _ -> "🔮"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

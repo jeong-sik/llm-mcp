@@ -49,6 +49,17 @@ module Response = struct
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
+  (** 202 Accepted response for notifications (MCP Streamable HTTP) *)
+  let accepted reqd =
+    let headers = Httpun.Headers.of_list [
+      ("content-length", "0");
+      ("access-control-allow-origin", "*");
+      ("access-control-allow-methods", "GET, POST, OPTIONS");
+      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+    ] in
+    let response = Httpun.Response.create ~headers `Accepted in
+    Httpun.Reqd.respond_with_string reqd response ""
+
   let json_with_session ?(status = `OK) ~session_id ~protocol_version body reqd =
     let headers = Httpun.Headers.of_list [
       ("content-type", "application/json; charset=utf-8");

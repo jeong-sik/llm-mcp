@@ -1502,6 +1502,244 @@ let conversation_tests = [
   "build_context_prompt", `Quick, test_build_context_prompt;
 ]
 
+(* ============================================================================
+   ChainExec (Meta-Chain) Tests
+   ============================================================================ *)
+
+(** Test ChainExec JSON parsing with basic fields *)
+let test_parse_chain_exec_basic () =
+  let json_str = {|
+{
+  "id": "meta_chain",
+  "nodes": [
+    {
+      "id": "generator",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Generate a chain JSON"
+    },
+    {
+      "id": "executor",
+      "type": "chain_exec",
+      "chain_source": "{{generator}}"
+    }
+  ],
+  "output": "executor"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "meta_chain" chain.id;
+      Alcotest.(check int) "2 nodes" 2 (List.length chain.nodes);
+      let exec_node = List.nth chain.nodes 1 in
+      (match exec_node.node_type with
+       | ChainExec { chain_source; validate; max_depth; sandbox; pass_outputs; _ } ->
+           Alcotest.(check string) "chain_source" "{{generator}}" chain_source;
+           Alcotest.(check bool) "validate default true" true validate;
+           Alcotest.(check int) "max_depth default 3" 3 max_depth;
+           Alcotest.(check bool) "sandbox default true" true sandbox;
+           Alcotest.(check bool) "pass_outputs default true" true pass_outputs
+       | _ -> Alcotest.fail "Expected ChainExec node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test ChainExec JSON parsing with context injection *)
+let test_parse_chain_exec_context_inject () =
+  let json_str = {|
+{
+  "id": "meta_with_context",
+  "nodes": [
+    {
+      "id": "prepare",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Prepare context"
+    },
+    {
+      "id": "executor",
+      "type": "chain_exec",
+      "chain_source": "{{prepare}}",
+      "validate": false,
+      "max_depth": 5,
+      "sandbox": false,
+      "pass_outputs": false,
+      "context_inject": {
+        "user_input": "{{prepare}}",
+        "config_key": "some_value"
+      }
+    }
+  ],
+  "output": "executor"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      let exec_node = List.nth chain.nodes 1 in
+      (match exec_node.node_type with
+       | ChainExec { chain_source; validate; max_depth; sandbox; pass_outputs; context_inject } ->
+           Alcotest.(check string) "chain_source" "{{prepare}}" chain_source;
+           Alcotest.(check bool) "validate false" false validate;
+           Alcotest.(check int) "max_depth 5" 5 max_depth;
+           Alcotest.(check bool) "sandbox false" false sandbox;
+           Alcotest.(check bool) "pass_outputs false" false pass_outputs;
+           Alcotest.(check int) "context_inject length" 2 (List.length context_inject);
+           (* Check context_inject mappings *)
+           let find_inject key = List.assoc_opt key context_inject in
+           Alcotest.(check (option string)) "user_input mapping" (Some "{{prepare}}") (find_inject "user_input");
+           Alcotest.(check (option string)) "config_key mapping" (Some "some_value") (find_inject "config_key")
+       | _ -> Alcotest.fail "Expected ChainExec node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test ChainExec JSON serialization roundtrip *)
+let test_chain_exec_json_roundtrip () =
+  let original_json_str = {|
+{
+  "id": "roundtrip_test",
+  "nodes": [
+    {
+      "id": "gen",
+      "type": "llm",
+      "model": "claude",
+      "prompt": "Generate"
+    },
+    {
+      "id": "meta",
+      "type": "chain_exec",
+      "chain_source": "{{gen}}",
+      "validate": true,
+      "max_depth": 4,
+      "sandbox": true,
+      "pass_outputs": true,
+      "context_inject": {
+        "key1": "value1"
+      }
+    }
+  ],
+  "output": "meta"
+}
+|} in
+  let json = Yojson.Safe.from_string original_json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (* Serialize back to JSON *)
+      let serialized = chain_to_json chain in
+      (* Parse again *)
+      (match parse_chain serialized with
+       | Ok chain2 ->
+           Alcotest.(check string) "id preserved" chain.id chain2.id;
+           Alcotest.(check int) "nodes count" (List.length chain.nodes) (List.length chain2.nodes);
+           let meta1 = List.nth chain.nodes 1 in
+           let meta2 = List.nth chain2.nodes 1 in
+           (match (meta1.node_type, meta2.node_type) with
+            | ChainExec c1, ChainExec c2 ->
+                Alcotest.(check string) "chain_source" c1.chain_source c2.chain_source;
+                Alcotest.(check bool) "validate" c1.validate c2.validate;
+                Alcotest.(check int) "max_depth" c1.max_depth c2.max_depth;
+                Alcotest.(check bool) "sandbox" c1.sandbox c2.sandbox;
+                Alcotest.(check bool) "pass_outputs" c1.pass_outputs c2.pass_outputs;
+                Alcotest.(check int) "context_inject len" (List.length c1.context_inject) (List.length c2.context_inject)
+            | _ -> Alcotest.fail "Expected ChainExec nodes")
+       | Error e -> Alcotest.fail (Printf.sprintf "Roundtrip parse error: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Initial parse error: %s" e)
+
+(** Helper: check if string contains substring *)
+let string_contains haystack needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len > haystack_len then false
+  else
+    let rec check i =
+      if i > haystack_len - needle_len then false
+      else if String.sub haystack i needle_len = needle then true
+      else check (i + 1)
+    in
+    check 0
+
+(** Test ChainExec Mermaid generation *)
+let test_chain_exec_mermaid () =
+  let json_str = {|
+{
+  "id": "mermaid_test",
+  "nodes": [
+    {
+      "id": "gen",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Generate chain"
+    },
+    {
+      "id": "exec",
+      "type": "chain_exec",
+      "chain_source": "{{gen}}",
+      "max_depth": 2,
+      "sandbox": true
+    }
+  ],
+  "output": "exec"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:true chain in
+      (* Check that the mermaid output contains expected elements *)
+      Alcotest.(check bool) "contains graph directive" true (String.starts_with ~prefix:"graph" mermaid);
+      (* The node ID "exec" should be in the output with hexagon shape {{ }} *)
+      Alcotest.(check bool) "contains exec node" true (string_contains mermaid "exec{{");
+      Alcotest.(check bool) "contains meta class def" true (string_contains mermaid "classDef meta")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test ChainExec node_type_name *)
+let test_chain_exec_node_type_name () =
+  let exec_type = ChainExec {
+    chain_source = "{{input}}";
+    validate = true;
+    max_depth = 3;
+    sandbox = true;
+    context_inject = [];
+    pass_outputs = true;
+  } in
+  Alcotest.(check string) "node_type_name" "chain_exec" (node_type_name exec_type)
+
+(** Test ChainExec depth compilation *)
+let test_chain_exec_compile_depth () =
+  let json_str = {|
+{
+  "id": "depth_test",
+  "nodes": [
+    {
+      "id": "exec",
+      "type": "chain_exec",
+      "chain_source": "{{input}}",
+      "max_depth": 4
+    }
+  ],
+  "output": "exec",
+  "config": {
+    "max_depth": 10
+  }
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (match compile chain with
+       | Ok plan ->
+           (* ChainExec depth = 1 (node itself) + max_depth (4) = 5 *)
+           Alcotest.(check int) "compiled depth" 5 plan.depth
+       | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+let chain_exec_tests = [
+  "parse_chain_exec_basic", `Quick, test_parse_chain_exec_basic;
+  "parse_chain_exec_context_inject", `Quick, test_parse_chain_exec_context_inject;
+  "chain_exec_json_roundtrip", `Quick, test_chain_exec_json_roundtrip;
+  "chain_exec_mermaid", `Quick, test_chain_exec_mermaid;
+  "chain_exec_node_type_name", `Quick, test_chain_exec_node_type_name;
+  "chain_exec_compile_depth", `Quick, test_chain_exec_compile_depth;
+]
+
 let () =
   Alcotest.run "Chain Engine" [
     "Chain Types", types_tests;
@@ -1511,4 +1749,5 @@ let () =
     "Conversation Context", conversation_tests;
     "Self-Recursion", recursion_tests;
     "JSON-Mermaid Roundtrip", roundtrip_tests;
+    "ChainExec (Meta-Chain)", chain_exec_tests;
   ]

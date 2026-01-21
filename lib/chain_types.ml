@@ -161,6 +161,14 @@ type node_type =
       nodes : node list;             (** Nodes to race (first wins) *)
       timeout : float option;        (** Optional timeout for stragglers *)
     }
+  | ChainExec of {
+      chain_source : string;         (** Node ID or variable containing chain JSON *)
+      validate : bool;               (** Validate generated chain before execution *)
+      max_depth : int;               (** Maximum recursion depth (default: 3) *)
+      sandbox : bool;                (** Restrict dangerous tools in generated chain *)
+      context_inject : (string * string) list;  (** Context mapping: (child_var, parent_source) *)
+      pass_outputs : bool;           (** Pass all parent outputs to child (default: true) *)
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -248,6 +256,7 @@ let node_type_name = function
   | Retry _ -> "retry"
   | Fallback _ -> "fallback"
   | Race _ -> "race"
+  | ChainExec _ -> "chain_exec"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ~prompt ?timeout ?tools () =
