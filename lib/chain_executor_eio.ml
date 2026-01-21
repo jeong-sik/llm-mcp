@@ -171,6 +171,34 @@ let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry l
 
 (** {1 Input Resolution} *)
 
+(** Resolve a single input reference to its value
+
+    Supports:
+    - {{node_id}} - get output from node
+    - {{node_id.output}} - same, with explicit .output suffix
+    - literal string - returns as-is
+*)
+let resolve_single_input ctx (ref_str : string) : string =
+  (* Check if it's a {{variable}} reference *)
+  let trimmed = String.trim ref_str in
+  if String.length trimmed > 4 &&
+     String.sub trimmed 0 2 = "{{" &&
+     String.sub trimmed (String.length trimmed - 2) 2 = "}}" then
+    (* Extract variable name from {{var}} *)
+    let var = String.sub trimmed 2 (String.length trimmed - 4) in
+    let node_id = match String.split_on_char '.' var with
+      | id :: _ -> id
+      | [] -> var
+    in
+    match Hashtbl.find_opt ctx.outputs node_id with
+    | Some value -> value
+    | None -> ref_str  (* Return original if not found *)
+  else
+    (* Direct node_id reference or literal *)
+    match Hashtbl.find_opt ctx.outputs trimmed with
+    | Some value -> value
+    | None -> ref_str  (* Return as literal *)
+
 (** Resolve input mappings to actual values *)
 let resolve_inputs ctx (mappings : (string * string) list) : (string * string) list =
   List.filter_map (fun (key, ref_str) ->
@@ -488,6 +516,96 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Race { nodes = race_nodes; timeout } ->
       execute_race ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~nodes:race_nodes ~timeout
+  (* Meta-Chain: Execute a dynamically generated chain *)
+  | ChainExec { chain_source; validate; max_depth; sandbox = _; context_inject; pass_outputs } ->
+      execute_chain_exec ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~chain_source ~validate ~max_depth ~context_inject ~pass_outputs
+
+(** Execute a dynamically generated chain (ChainExec node)
+
+    Context Injection allows parent chain to pass data to generated chain:
+    - pass_outputs: if true, all parent outputs are available as {{parent.node_id}}
+    - context_inject: explicit mapping [(child_var, parent_source)] for {{var}} in child
+
+    Depth tracking uses __chain_depth in outputs hashtable.
+*)
+and execute_chain_exec ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
+    ~chain_source ~validate ~max_depth
+    ~context_inject ~pass_outputs : (string, string) result =
+  (* Check depth limit - stored in outputs table *)
+  let current_depth = try
+    int_of_string (Hashtbl.find ctx.outputs "__chain_depth")
+  with _ -> 0
+  in
+  if current_depth >= max_depth then
+    Error (Printf.sprintf "ChainExec depth limit exceeded: %d >= %d" current_depth max_depth)
+  else begin
+    (* Get chain JSON from source *)
+    let chain_json_str = resolve_single_input ctx chain_source in
+    if chain_json_str = "" then
+      Error (Printf.sprintf "ChainExec: empty chain source from '%s'" chain_source)
+    else
+      (* Parse the chain JSON *)
+      let chain_json = try
+        Ok (Yojson.Safe.from_string chain_json_str)
+      with exn ->
+        Error (Printf.sprintf "ChainExec: invalid JSON from '%s': %s" chain_source (Printexc.to_string exn))
+      in
+      match chain_json with
+      | Error msg -> Error msg
+      | Ok json ->
+          (* Parse chain *)
+          (match Chain_parser.parse_chain json with
+          | Error msg ->
+              Error (Printf.sprintf "ChainExec: parse error: %s" msg)
+          | Ok generated_chain ->
+              (* Validate if required *)
+              let validation = if validate then Chain_parser.validate_chain generated_chain else Ok () in
+              (match validation with
+              | Error msg -> Error (Printf.sprintf "ChainExec: validation error: %s" msg)
+              | Ok () ->
+                  (* Create new outputs table for child chain with incremented depth *)
+                  let new_outputs = Hashtbl.create 16 in
+                  Hashtbl.replace new_outputs "__chain_depth" (string_of_int (current_depth + 1));
+
+                  (* Context Injection: pass_outputs - copy parent outputs with "parent." prefix *)
+                  if pass_outputs then
+                    Hashtbl.iter (fun k v ->
+                      if not (String.equal k "__chain_depth") then
+                        Hashtbl.replace new_outputs ("parent." ^ k) v
+                    ) ctx.outputs;
+
+                  (* Context Injection: explicit mappings - resolve and inject *)
+                  List.iter (fun (child_var, parent_source) ->
+                    let resolved = resolve_single_input ctx parent_source in
+                    Hashtbl.replace new_outputs child_var resolved
+                  ) context_inject;
+
+                  let new_ctx = { ctx with outputs = new_outputs } in
+                  (* Compile and execute the generated chain *)
+                  (match Chain_compiler.compile generated_chain with
+                  | Error msg -> Error (Printf.sprintf "ChainExec: compile error: %s" msg)
+                  | Ok plan ->
+                      (* Execute nodes in order using compiled plan *)
+                      let rec exec_nodes = function
+                        | [] ->
+                            (* Get final output *)
+                            (match Hashtbl.find_opt new_ctx.outputs generated_chain.Chain_types.output with
+                            | Some output ->
+                                Hashtbl.replace ctx.outputs node.id output;
+                                Ok output
+                            | None ->
+                                Error (Printf.sprintf "ChainExec: output node '%s' not found" generated_chain.Chain_types.output))
+                        | node_id :: rest ->
+                            (match Chain_compiler.get_node generated_chain node_id with
+                            | None -> Error (Printf.sprintf "ChainExec: node '%s' not found" node_id)
+                            | Some child_node ->
+                                (match execute_node new_ctx ~sw ~clock ~exec_fn ~tool_exec child_node with
+                                | Ok _ -> exec_nodes rest
+                                | Error msg -> Error msg))
+                      in
+                      exec_nodes plan.Chain_types.execution_order)))
+  end
 
 (** Execute nodes in sequence (internal helper, no output storage) *)
 and execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : (string, string) result =

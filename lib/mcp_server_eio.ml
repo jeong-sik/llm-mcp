@@ -492,8 +492,12 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
           | (`POST, "/mcp" | `POST, "/") ->
               Http.Request.read_body_async reqd (fun body_str ->
                 let (_session_id_opt, response) = handle_request ~sw ~proc_mgr ~clock ~store ~headers body_str in
-                let response_str = Yojson.Safe.to_string response in
-                Http.Response.json response_str reqd
+                (* Notifications return `Null - respond with 202 Accepted per MCP Streamable HTTP spec *)
+                match response with
+                | `Null -> Http.Response.accepted reqd
+                | _ ->
+                    let response_str = Yojson.Safe.to_string response in
+                    Http.Response.json response_str reqd
               )
 
           (* Not found *)

@@ -326,7 +326,15 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
         | _ -> false
       in
 
-      if is_error then
+      (* Notifications return `Null - respond with 202 Accepted per MCP Streamable HTTP spec *)
+      if json_response = `Null then begin
+        let resp_headers = Httpun.Headers.of_list ([
+          ("content-length", "0");
+        ] @ Response.cors_headers) in
+        let resp = Httpun.Response.create ~headers:resp_headers `Accepted in
+        Httpun.Reqd.respond_with_string reqd resp ""
+      end
+      else if is_error then
         Response.json_with_session ~status:`Bad_request
           ~session_id ~protocol_version
           (Yojson.Safe.to_string json_response) reqd
