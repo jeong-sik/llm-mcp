@@ -26,6 +26,7 @@ let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let parse_chain_to_mermaid_args = Tool_parsers.parse_chain_to_mermaid_args
 let parse_chain_visualize_args = Tool_parsers.parse_chain_visualize_args
+let parse_chain_convert_args = Tool_parsers.parse_chain_convert_args
 let parse_chain_orchestrate_args = Tool_parsers.parse_chain_orchestrate_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
@@ -743,6 +744,63 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               ("node_count", string_of_int (List.length parsed_chain.Chain_types.nodes));
               ("output", parsed_chain.Chain_types.output);
             ]; })
+
+  | ChainConvert { from_format; to_format; input; pretty } ->
+      (* Bidirectional conversion: JSON <-> Mermaid *)
+      (match (from_format, to_format) with
+       | ("json", "mermaid") ->
+           (* JSON → Mermaid: parse JSON, convert to Mermaid *)
+           (match Chain_parser.parse_chain input with
+            | Error msg ->
+                { model = "chain.convert";
+                  returncode = -1;
+                  response = sprintf "JSON parse error: %s" msg;
+                  extra = [("from", "json"); ("to", "mermaid"); ("stage", "parse")]; }
+            | Ok chain ->
+                let mermaid = Chain_mermaid_parser.chain_to_mermaid chain in
+                { model = "chain.convert";
+                  returncode = 0;
+                  response = mermaid;
+                  extra = [
+                    ("from", "json"); ("to", "mermaid");
+                    ("chain_id", chain.Chain_types.id);
+                    ("node_count", string_of_int (List.length chain.Chain_types.nodes));
+                  ]; })
+
+       | ("mermaid", "json") ->
+           (* Mermaid → JSON: parse Mermaid, convert to JSON *)
+           let mermaid_text = match input with
+             | `String s -> s
+             | _ -> Yojson.Safe.to_string input
+           in
+           (match Chain_mermaid_parser.parse_chain mermaid_text with
+            | Error msg ->
+                { model = "chain.convert";
+                  returncode = -1;
+                  response = sprintf "Mermaid parse error: %s" msg;
+                  extra = [("from", "mermaid"); ("to", "json"); ("stage", "parse")]; }
+            | Ok chain ->
+                let json_str = Chain_parser.chain_to_json_string ~pretty chain in
+                { model = "chain.convert";
+                  returncode = 0;
+                  response = json_str;
+                  extra = [
+                    ("from", "mermaid"); ("to", "json");
+                    ("chain_id", chain.Chain_types.id);
+                    ("node_count", string_of_int (List.length chain.Chain_types.nodes));
+                  ]; })
+
+       | (f, t) when f = t ->
+           { model = "chain.convert";
+             returncode = -1;
+             response = sprintf "Same format conversion (from=%s, to=%s) is not meaningful" f t;
+             extra = [("from", f); ("to", t)]; }
+
+       | (f, t) ->
+           { model = "chain.convert";
+             returncode = -1;
+             response = sprintf "Unsupported conversion: %s → %s (supported: json↔mermaid)" f t;
+             extra = [("from", f); ("to", t)]; })
 
   | ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
       (* Build orchestration config *)

@@ -116,6 +116,12 @@ type tool_args =
   | ChainVisualize of {
       chain : Yojson.Safe.t;         (* Chain definition to visualize - required *)
     }
+  | ChainConvert of {
+      from_format : string;          (* Source format: "json" or "mermaid" *)
+      to_format : string;            (* Target format: "json" or "mermaid" *)
+      input : Yojson.Safe.t;         (* Input content (JSON object or string) *)
+      pretty : bool;                 (* Pretty-print JSON output *)
+    }
   | ChainOrchestrate of {
       goal : string;                       (* Goal description for the orchestration *)
       chain : Yojson.Safe.t option;        (* Initial chain definition (optional) *)
@@ -636,6 +642,51 @@ Returns: ASCII tree representation with:
   ];
 }
 
+let chain_convert_schema : tool_schema = {
+  name = "chain.convert";
+  description = {|Bidirectional conversion between Chain DSL formats.
+
+Supported conversions:
+- JSON → Mermaid: Visual flowchart from JSON definition
+- Mermaid → JSON: JSON definition from flowchart
+
+Parameters:
+- from: Source format ("json" or "mermaid")
+- to: Target format ("json" or "mermaid")
+- input: The input content (JSON object or Mermaid string)
+- pretty: For JSON output, pretty-print (default: true)
+
+Example Mermaid → JSON:
+  {"from": "mermaid", "to": "json", "input": "graph LR\n    A[LLM:gemini \"Hello\"]"}
+
+Example JSON → Mermaid:
+  {"from": "json", "to": "mermaid", "input": {"id": "test", "nodes": [...], "output": "A"}}|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("from", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Source format: json or mermaid");
+        ("enum", `List [`String "json"; `String "mermaid"]);
+      ]);
+      ("to", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Target format: json or mermaid");
+        ("enum", `List [`String "json"; `String "mermaid"]);
+      ]);
+      ("input", `Assoc [
+        ("description", `String "Input content (JSON object or Mermaid string)");
+      ]);
+      ("pretty", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Pretty-print JSON output");
+        ("default", `Bool true);
+      ]);
+    ]);
+    ("required", `List [`String "from"; `String "to"; `String "input"]);
+  ];
+}
+
 let chain_list_schema : tool_schema = {
   name = "chain.list";
   description = "List all registered chains in the registry.";
@@ -712,6 +763,7 @@ let all_schemas = [
   ollama_list_schema;
   chain_run_schema;
   chain_validate_schema;
+  chain_convert_schema;
   chain_list_schema;
   chain_to_mermaid_schema;
   chain_visualize_schema;

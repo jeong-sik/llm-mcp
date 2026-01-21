@@ -719,11 +719,55 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | GoalDriven _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
 
+(** Map node type to CSS class name for Mermaid styling *)
+let node_type_to_class (nt : node_type) : string =
+  match nt with
+  | Llm _ -> "llm"
+  | Tool _ -> "tool"
+  | Quorum _ -> "quorum"
+  | Gate _ -> "gate"
+  | Merge _ -> "merge"
+  | Threshold _ -> "threshold"
+  | Evaluator _ -> "evaluator"
+  | Pipeline _ -> "pipeline"
+  | Fanout _ -> "fanout"
+  | Map _ -> "map"
+  | Bind _ -> "bind"
+  | ChainRef _ -> "ref"
+  | Subgraph _ -> "subgraph"
+  | GoalDriven _ -> "goal"
+  | Retry _ -> "retry"
+  | Fallback _ -> "fallback"
+  | Race _ -> "race"
+
+(** Mermaid classDef color scheme for node types *)
+let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef subgraph fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+|}
+
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
-let chain_to_mermaid (chain : chain) : string =
+let chain_to_mermaid ?(styled=true) (chain : chain) : string =
   let buf = Buffer.create 256 in
   let dir = direction_to_string chain.config.direction in
   Buffer.add_string buf (Printf.sprintf "graph %s\n" dir);
+
+  (* Add classDef styles if styled=true *)
+  if styled then Buffer.add_string buf mermaid_class_defs;
 
   (* Build edge map: target -> sources *)
   let edges = Hashtbl.create 16 in
@@ -737,13 +781,14 @@ let chain_to_mermaid (chain : chain) : string =
     ) node.input_mapping
   ) chain.nodes;
 
-  (* Output nodes *)
+  (* Output nodes with class suffix *)
   List.iter (fun (node : node) ->
     let (shape_open, shape_close) = node_type_to_shape node.node_type in
     let text = node_type_to_text node.node_type in
     let text_escaped = Str.global_replace (Str.regexp {|"|}) {|'|} text in
-    Buffer.add_string buf (Printf.sprintf "    %s%s\"%s\"%s\n"
-      node.id shape_open text_escaped shape_close)
+    let class_suffix = if styled then ":::" ^ node_type_to_class node.node_type else "" in
+    Buffer.add_string buf (Printf.sprintf "    %s%s\"%s\"%s%s\n"
+      node.id shape_open text_escaped shape_close class_suffix)
   ) chain.nodes;
 
   (* Output edges *)
