@@ -486,12 +486,146 @@ type validation_error =
 
 ---
 
-## 10. 버전 히스토리
+## 10. Operational Semantics (실행 모델)
+
+> **구현 위치**: `lib/chain_executor_eio.ml` (47KB, 1200+ lines)
+
+### 10.1 실행 전략
+
+| 패턴 | 실행 방식 | 구현 |
+|------|----------|------|
+| **Sequential** | 순차 실행, fail-fast | `execute_node` 재귀 |
+| **Parallel** | `Eio.Fiber.all` 동시 실행 | `execute_fanout`, `execute_merge` |
+| **Conditional** | 조건 평가 후 분기 | `execute_gate` |
+| **Recursive** | 서브그래프 재귀 호출 | `execute_subgraph` |
+
+### 10.2 실행 컨텍스트
+
+```ocaml
+type exec_context = {
+  outputs: (string, string) Hashtbl.t;    (* 노드 출력 저장 *)
+  traces: internal_trace list ref;         (* 실행 트레이스 *)
+  start_time: float;                       (* 시작 시간 *)
+  timeout: int;                            (* 전체 타임아웃 *)
+  iteration_ctx: iteration_ctx option;     (* GoalDriven용 *)
+  conversation: conversation_ctx option;   (* 대화 컨텍스트 *)
+}
+```
+
+---
+
+## 11. Error Propagation (에러 전파)
+
+> **구현 위치**: `lib/chain_executor_eio.ml:508-758`
+
+### 11.1 전파 전략
+
+| 노드 | 전략 | 동작 |
+|------|------|------|
+| **Sequential** | fail-fast | 첫 에러에서 즉시 중단 |
+| **Merge** | collect-all | 부분 실패 허용, 모두 실패 시 에러 |
+| **Quorum** | N/K | required 이상 성공하면 OK |
+| **Gate** | fail-fast | 조건/분기 실패 시 전파 |
+| **Fallback** | try-next | 실패 시 다음 대안 시도 |
+
+### 11.2 에러 타입
+
+```ocaml
+type trace_event =
+  | NodeStart
+  | NodeComplete of { duration_ms: int; success: bool }
+  | NodeError of string
+  | ChainStart of { chain_id: string }
+  | ChainComplete of { chain_id: string; success: bool }
+```
+
+### 11.3 Merge 부분 실패 처리
+
+```ocaml
+(* lib/chain_executor_eio.ml:732-739 *)
+let outputs = List.filter_map (fun (id, r) ->
+  match r with Ok o -> Some (id, o) | Error _ -> None
+) !results in
+
+if List.length outputs = 0 then
+  Error "All merge inputs failed"  (* 모두 실패 시 에러 *)
+else
+  (* 성공한 것만 병합 - 부분 실패 허용 *)
+```
+
+---
+
+## 12. Category Theory 구현
+
+> **구현 위치**: `lib/chain_category.ml` (455 lines)
+
+### 12.1 구현된 타입클래스
+
+| 타입클래스 | 시그니처 | 인스턴스 |
+|-----------|----------|----------|
+| **Functor** | `map : ('a -> 'b) -> 'a t -> 'b t` | Result |
+| **Applicative** | `pure`, `ap`, `map2`, `sequence` | Result |
+| **Monad** | `bind`, `>>=`, `>=>` | Result |
+| **Monoid** | `empty`, `concat`, `concat_all` | Verdict, Confidence, Trace, Token |
+| **Kleisli** | `>>>`, `&&&`, `***`, `first`, `second` | Result |
+| **Profunctor** | `dimap`, `lmap`, `rmap` | Function |
+
+### 12.2 법칙 검증 코드
+
+```ocaml
+(* lib/chain_category.ml:419-453 *)
+module Laws = struct
+  module Functor (F : FUNCTOR) = struct
+    let identity_law x equal = equal (F.map identity x) x
+    let composition_law f g x equal =
+      equal (F.map (compose f g) x) (F.map f (F.map g x))
+  end
+
+  module Monad (M : MONAD) = struct
+    let left_identity_law x f equal = equal (M.bind (M.pure x) f) (f x)
+    let right_identity_law m equal = equal (M.bind m M.pure) m
+    let associativity_law m f g equal = (* ... *)
+  end
+end
+```
+
+---
+
+## 13. 실용성 증거 (테스트 결과)
+
+> **테스트 파일**: `tests/chain_practical_tests.sh`
+
+### 13.1 테스트 커버리지
+
+| 범주 | 테스트 수 | 결과 |
+|------|----------|------|
+| 기본 패턴 (순차/병렬) | 4 | ✅ PASS |
+| 에러 전파 | 2 | ✅ PASS |
+| Merge 전략 | 3 | ✅ PASS |
+| Tool 통합 | 4 | ✅ PASS |
+| 실제 사용 케이스 | 2 | ✅ PASS |
+| Ollama 통합 | 2 | ✅ PASS |
+| **총계** | **17** | **100%** |
+
+### 13.2 검증된 기능
+
+- ✅ Sequential pipeline (A→B→C)
+- ✅ Parallel fanout (A→B, A→C)
+- ✅ Diamond pattern (fan-out/fan-in)
+- ✅ Merge strategies (concat, first, last)
+- ✅ Quorum consensus (N/K)
+- ✅ LLM↔Tool composition
+- ✅ Local LLM (Ollama) integration
+
+---
+
+## 14. 버전 히스토리
 
 | 버전 | 날짜 | 변경사항 |
 |------|------|----------|
 | 1.0 | 2026-01-21 | 초기 스펙 |
 | 2.0 | 2026-01-21 | 명시적 타입 시스템, 카테고리 이론 기반 재구성 |
+| 2.1 | 2026-01-21 | Operational Semantics, Error Propagation, 실용성 증거 추가 |
 
 ---
 
