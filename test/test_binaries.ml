@@ -274,7 +274,7 @@ let test_neo4j_health_runs () =
         check bool "shows error" true
           (contains ~substring:"fail" (String.lowercase_ascii stderr) ||
            contains ~substring:"❌" stderr ||
-           String.length stderr >= 0)
+           String.length stderr > 0)
     | _ -> check bool "exits cleanly" true true
   end
 
@@ -381,7 +381,7 @@ let test_fast_query_analyzer_cache_stats () =
     check bool "shows cache info" true
       (contains ~substring:"cache" (String.lowercase_ascii stdout) ||
        contains ~substring:"hit" (String.lowercase_ascii stdout) ||
-       String.length stdout >= 0)
+       String.length stdout > 0)
   end
 
 (* ============================================================================
