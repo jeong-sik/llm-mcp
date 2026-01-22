@@ -1141,7 +1141,7 @@ let node_type_to_text (nt : node_type) : string =
         | Extract _ -> "extract" | Template _ -> "template" | Summarize _ -> "summarize"
         | Truncate _ -> "truncate" | JsonPath _ -> "jsonpath" | Regex _ -> "regex"
         | ValidateSchema _ -> "validate" | ParseJson -> "parse_json" | Stringify -> "stringify"
-        | Chain _ -> "chain" | Conditional _ -> "conditional" | Custom n -> n
+        | Chain _ -> "chain" | Conditional _ -> "conditional" | Split _ -> "split" | Custom n -> n
       in
       Printf.sprintf "Adapt[%s → %s]" input_ref transform_name
   | Cache { key_expr; ttl_seconds; inner } ->
@@ -1199,7 +1199,7 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef map fill:#81ecec,stroke:#00b894,color:#000
     classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
     classDef ref fill:#b2bec3,stroke:#636e72,color:#000
-    classDef subgraph fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
     classDef goal fill:#00b894,stroke:#00695c,color:#fff
     classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
     classDef fallback fill:#e17055,stroke:#d63031,color:#fff
