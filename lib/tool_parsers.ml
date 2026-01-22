@@ -280,6 +280,8 @@ let tool_schema_to_ollama_tool (t : Types.tool_schema) : Yojson.Safe.t =
 let build_ollama_curl_cmd ?(force_stream=None) args =
   match args with
   | Ollama { prompt; model; system_prompt; temperature; stream; tools; _ } ->
+      (* Auto-inject few-shot examples based on keywords *)
+      let (prompt, _) = Fewshot_injector.inject_safe prompt in
       let stream_val = match force_stream with Some s -> s | None -> stream in
       let (endpoint, json_payload) = match tools with
         | Some tool_list when List.length tool_list > 0 ->
