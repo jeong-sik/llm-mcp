@@ -5,6 +5,7 @@ let () =
     id = "translate_action";
     node_type = Llm {
       model = "ollama:qwen3:1.7b";
+      system = None;
       prompt = "Translate Hello World";
       timeout = Some 30;
       tools = None

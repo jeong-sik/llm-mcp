@@ -28,19 +28,19 @@ let md5_hex s =
 (** Create query hash from query + context *)
 let create_query_hash query context =
   let open Yojson.Safe.Util in
-  let activity = try context |> member "activity" with _ -> `Null in
-  let git_state = try context |> member "git_state" with _ -> `Null in
-  let recent_turns = try context |> member "recent_turns" |> to_list with _ -> [] in
+  let activity = try context |> member "activity" with Yojson.Safe.Util.Type_error _ -> `Null in
+  let git_state = try context |> member "git_state" with Yojson.Safe.Util.Type_error _ -> `Null in
+  let recent_turns = try context |> member "recent_turns" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
 
   let recent_files = try
     activity |> member "mentioned_files" |> to_list
     |> List.filteri (fun i _ -> i < 3)
-  with _ -> [] in
+  with Yojson.Safe.Util.Type_error _ -> [] in
 
   let changed_files = try
     git_state |> member "changed_files" |> to_list
     |> List.filteri (fun i _ -> i < 3)
-  with _ -> [] in
+  with Yojson.Safe.Util.Type_error _ -> [] in
 
   let last_turn = match recent_turns with
     | [] -> `Null
@@ -75,14 +75,14 @@ let load_cache () =
               let key = Yojson.Safe.Util.to_string key_json in
               let timestamp = try
                 Yojson.Safe.Util.(value_json |> member "timestamp" |> to_float)
-              with _ -> 0.0 in
+              with Yojson.Safe.Util.Type_error _ -> 0.0 in
               if now -. timestamp < cache_ttl_seconds then
                 Some (key, (value_json, timestamp))
               else None
           | _ -> None
-        with _ -> None
+        with Yojson.Safe.Util.Type_error _ -> None
       ) entries
-    with _ -> cache := []
+    with Sys_error _ | Yojson.Json_error _ -> cache := []
   end
 
 (** Save cache to file *)
@@ -95,7 +95,7 @@ let save_cache () =
     let oc = open_out cache_file in
     output_string oc (Yojson.Safe.to_string json);
     close_out oc
-  with _ -> ()
+  with Sys_error _ -> ()
 
 (** Get from cache *)
 let get_from_cache hash =
@@ -166,7 +166,7 @@ let extract_entities text =
   List.iter (fun word ->
     let is_num = String.length word > 0 &&
       try ignore (int_of_string (String.map (fun c -> if c = '%' then ' ' else c) word |> String.trim)); true
-      with _ -> false
+      with Failure _ -> false
     in
     if is_num then entities := word :: !entities
   ) words;
@@ -184,7 +184,7 @@ let has_clear_referent recent_turns =
       let content = try
         let open Yojson.Safe.Util in
         turn |> member "content" |> to_string
-      with _ -> ""
+      with Yojson.Safe.Util.Type_error _ -> ""
       in
       acc @ extract_entities content
     ) [] last_turns in
@@ -197,9 +197,9 @@ let calculate_ambiguity_heuristic query context =
   let score = ref 0 in
   let reasons = ref [] in
 
-  let recent_turns = try context |> member "recent_turns" |> to_list with _ -> [] in
-  let git_state = try context |> member "git_state" with _ -> `Null in
-  let activity = try context |> member "activity" with _ -> `Null in
+  let recent_turns = try context |> member "recent_turns" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
+  let git_state = try context |> member "git_state" with Yojson.Safe.Util.Type_error _ -> `Null in
+  let activity = try context |> member "activity" with Yojson.Safe.Util.Type_error _ -> `Null in
 
   (* 1. 대명사 감지 *)
   let pronouns = ["이거"; "그거"; "저거"; "요거"; "이것"; "그것"; "저것"; "여기"; "거기"; "걔"; "쟤"] in
@@ -222,8 +222,8 @@ let calculate_ambiguity_heuristic query context =
   (* 3. 과거 작업 참조 *)
   let past_work = ["하던"; "했던"; "마저"; "계속"; "진행한"; "만든"; "수정한"] in
   if any_match past_work query then begin
-    let changed_files = try git_state |> member "changed_files" |> to_list with _ -> [] in
-    let current_task = try activity |> member "current_task" |> to_string with _ -> "" in
+    let changed_files = try git_state |> member "changed_files" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
+    let current_task = try activity |> member "current_task" |> to_string with Yojson.Safe.Util.Type_error _ -> "" in
     if List.length changed_files = 0 && String.length current_task = 0 && List.length recent_turns = 0 then begin
       score := !score + 45;
       reasons := "과거 작업 참조 (현재 작업 없음)" :: !reasons
@@ -246,8 +246,8 @@ let calculate_ambiguity_heuristic query context =
   let has_code_word = any_match code_words (String.lowercase_ascii query) in
   let has_file_ref = contains query ".py" || contains query ".js" || contains query ".ts" in
   if has_code_word && not has_file_ref then begin
-    let mentioned_files = try activity |> member "mentioned_files" |> to_list with _ -> [] in
-    let changed_files = try git_state |> member "changed_files" |> to_list with _ -> [] in
+    let mentioned_files = try activity |> member "mentioned_files" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
+    let changed_files = try git_state |> member "changed_files" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
     if List.length mentioned_files > 0 || List.length changed_files > 0 then begin
       score := !score + 35;
       reasons := "파일명 없음 (최근 작업 파일 있음)" :: !reasons
@@ -283,23 +283,23 @@ let calculate_ambiguity_heuristic query context =
 (** Compress context for LLM *)
 let compress_context context =
   let open Yojson.Safe.Util in
-  let activity = try context |> member "activity" with _ -> `Null in
-  let git_state = try context |> member "git_state" with _ -> `Null in
-  let turns = try context |> member "recent_turns" |> to_list with _ -> [] in
+  let activity = try context |> member "activity" with Yojson.Safe.Util.Type_error _ -> `Null in
+  let git_state = try context |> member "git_state" with Yojson.Safe.Util.Type_error _ -> `Null in
+  let turns = try context |> member "recent_turns" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
 
   let recent_files = try
     activity |> member "mentioned_files" |> to_list
     |> List.filteri (fun i _ -> i < 5)
     |> List.map to_string
-  with _ -> [] in
+  with Yojson.Safe.Util.Type_error _ -> [] in
 
   let changed_files = try
     git_state |> member "changed_files" |> to_list
     |> List.filteri (fun i _ -> i < 5)
     |> List.map to_string
-  with _ -> [] in
+  with Yojson.Safe.Util.Type_error _ -> [] in
 
-  let current_task = try activity |> member "current_task" |> to_string with _ -> "" in
+  let current_task = try activity |> member "current_task" |> to_string with Yojson.Safe.Util.Type_error _ -> "" in
 
   let last_turn = match turns with
     | [] -> ""
@@ -308,14 +308,14 @@ let compress_context context =
         try
           let content = last |> member "content" |> to_string in
           if String.length content > 200 then String.sub content 0 200 else content
-        with _ -> ""
+        with Yojson.Safe.Util.Type_error _ -> ""
   in
 
   let recent_errors = try
     activity |> member "errors" |> to_list
     |> List.filteri (fun i _ -> i < 1)
     |> List.map to_string
-  with _ -> [] in
+  with Yojson.Safe.Util.Type_error _ -> [] in
 
   (recent_files, changed_files, current_task, last_turn, recent_errors)
 
@@ -386,12 +386,12 @@ Now analyze and output JSON only (no markdown):|}
           let stop = String.rindex result_text '}' in
           let json_str = String.sub result_text start (stop - start + 1) in
           Yojson.Safe.from_string json_str
-        with _ ->
+        with Not_found | Yojson.Json_error _ ->
           calculate_ambiguity_heuristic query context
         end
     | None ->
         calculate_ambiguity_heuristic query context
-  with _ ->
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ ->
     calculate_ambiguity_heuristic query context
 
 (** Main analysis function with caching *)
@@ -471,12 +471,12 @@ let main query_opt context_str no_cache cache_stats =
         prerr_endline "Error: --query is required";
         exit 1
     | Some query ->
-        let context = try Yojson.Safe.from_string context_str with _ -> `Assoc [] in
+        let context = try Yojson.Safe.from_string context_str with Yojson.Json_error _ -> `Assoc [] in
         let result = analyze_query_fast query context (not no_cache) in
 
         (* Add performance metadata *)
         let open Yojson.Safe.Util in
-        let cache_hit = try result |> member "cache_hit" |> to_bool with _ -> false in
+        let cache_hit = try result |> member "cache_hit" |> to_bool with Yojson.Safe.Util.Type_error _ -> false in
         let with_perf = match result with
           | `Assoc fields ->
               `Assoc (fields @ [

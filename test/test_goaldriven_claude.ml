@@ -64,8 +64,8 @@ let mock_tool_exec ~name:_ ~args:_ = Error "No tools"
    ============================================================================ *)
 
 (** Exec_fn that routes claude-cli to actual Claude, others to mock *)
-let make_claude_exec_fn () : (model:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result) =
-  fun ~model ~prompt ?tools:_ () ->
+let make_claude_exec_fn () : (model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result) =
+  fun ~model ?system:_ ~prompt ?tools:_ () ->
     Printf.printf "  [exec] model=%s prompt=%s...\n%!"
       model (truncate 50 prompt);
 
@@ -90,6 +90,7 @@ let test_goaldriven_call_api () =
     id = "evaluate_action";
     node_type = Llm {
       model = "claude-cli";
+      system = None;
       prompt = {|Return ONLY a JSON object with a score between 0.0 and 1.0.
 Example: {"score": 0.85}
 No explanation, just JSON.|};
@@ -146,6 +147,7 @@ let test_parse_json_claude () =
     id = "json_action";
     node_type = Llm {
       model = "claude-cli";
+      system = None;
       prompt = {|Return ONLY a JSON object with nested structure.
 Example: {"metrics": {"accuracy": 0.9}, "status": "ok"}
 No explanation, just JSON.|};
@@ -201,6 +203,7 @@ let test_strategy_hints () =
     id = "strategy_action";
     node_type = Llm {
       model = "claude-cli";
+      system = None;
       prompt = {|You are optimizing a value. Return ONLY JSON with value field.
 Target: achieve value >= 0.7
 
@@ -261,6 +264,7 @@ let test_conversational_mode () =
     id = "conversation_action";
     node_type = Llm {
       model = "claude-cli";
+      system = None;
       prompt = {|Count from 1 upward. Return JSON with current count and progress (count/3).
 Previous context: {{input}}
 

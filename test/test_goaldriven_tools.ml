@@ -148,7 +148,7 @@ let calculator_tool_exec ~name ~args =
    ============================================================================ *)
 
 let make_llm_exec_fn_with_tools () =
-  fun ~model ~prompt ?tools () ->
+  fun ~model ?system:_ ~prompt ?tools () ->
     let actual_model =
       if String.length model > 7 && String.sub model 0 7 = "ollama:" then
         String.sub model 7 (String.length model - 7)
@@ -302,6 +302,7 @@ let test_llm_calling_tool () =
       id = "llm_calc";
       node_type = Llm {
         model = "ollama:" ^ tool_model;
+        system = None;
         prompt = "What is 15 multiplied by 7? Use the calculate tool to find the answer.";
         timeout = Some 60;
         tools = Some (`List [calculator_tool_def])
@@ -365,6 +366,7 @@ let test_goaldriven_llm_with_tool () =
       id = "calc_llm";
       node_type = Llm {
         model = "ollama:" ^ tool_model;
+        system = None;
         prompt = "Calculate 20 * 5 using the calculator tool. After getting the result, respond with 'Result: [number]. accuracy: 0.95' format.";
         timeout = Some 60;
         tools = Some (`List [calculator_tool_def])

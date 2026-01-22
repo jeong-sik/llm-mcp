@@ -22,6 +22,7 @@ let () =
     id = "improve_code";
     node_type = Llm {
       model = "ollama:qwen3:1.7b";
+      system = None;
       prompt = "Improve this Python code and explain what you improved: def add(a,b): return a+b";
       timeout = Some 30;
       tools = None
