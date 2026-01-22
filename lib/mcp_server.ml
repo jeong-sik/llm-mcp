@@ -130,14 +130,14 @@ let resources : P.resource list = [
   {
     uri = "llm://runs?since_ts=0&limit=50";
     name = "Recent Runs";
-    description = "Recent llm-mcp tool executions (JSONL-backed, no prompt content)";
-    mime_type = "application/json";
+    description = Some "Recent llm-mcp tool executions (JSONL-backed, no prompt content)";
+    mime_type = Some "application/json";
   };
   {
     uri = "llm://stats?since_ts=0&until_ts=0";
     name = "Run Statistics";
-    description = "Aggregated stats over llm-mcp runs";
-    mime_type = "application/json";
+    description = Some "Aggregated stats over llm-mcp runs";
+    mime_type = Some "application/json";
   };
 ]
 
@@ -145,14 +145,14 @@ let resource_templates : R.resource_template list = [
   {
     uri_template = "llm://runs{?since_ts,limit}";
     name = "Runs (range)";
-    description = "Read runs with optional since_ts and limit";
-    mime_type = "application/json";
+    description = Some "Read runs with optional since_ts and limit";
+    mime_type = Some "application/json";
   };
   {
     uri_template = "llm://stats{?since_ts,until_ts}";
     name = "Stats (range)";
-    description = "Read aggregated stats with optional since_ts and until_ts";
-    mime_type = "application/json";
+    description = Some "Read aggregated stats with optional since_ts and until_ts";
+    mime_type = Some "application/json";
   };
 ]
 

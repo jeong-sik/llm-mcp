@@ -26,7 +26,6 @@
    chain_registry
    ; Chain Engine (Phase 5 - Category Theory)
    chain_category
-   chain_batch
    chain_stats
    chain_telemetry
    ; Session (Pure OCaml - moved from llm_mcp)
@@ -74,7 +73,9 @@
    ; Chain Engine (Phase 3-4)
    chain_adapter_eio
    chain_executor_eio
-   chain_orchestrator_eio)
+   chain_orchestrator_eio
+   ; Chain Engine (Phase 5 - requires Eio)
+   chain_batch)
  (libraries
    ; Shared modules
    llm_mcp.common
