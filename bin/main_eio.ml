@@ -116,33 +116,44 @@ let dashboard_html = {|<!DOCTYPE html>
     let currentMermaid = null;
     let nodeStates = {};  // node_id -> 'pending' | 'running' | 'complete' | 'error'
 
+    const STATE_COLORS = { pending: '#666', running: '#fbbf24', complete: '#4ade80', error: '#f87171' };
+    let renderCounter = 0;
+
     async function renderMermaid(dsl) {
       currentMermaid = dsl;
       nodeStates = {};
-      const styledDsl = applyNodeStyles(dsl);
       try {
-        const { svg } = await mermaid.render('mermaid-svg', styledDsl);
+        const { svg } = await mermaid.render('mermaid-svg-' + (++renderCounter), dsl);
         mermaidEl.innerHTML = svg;
       } catch (e) { console.error('Mermaid render error:', e); }
     }
 
-    function applyNodeStyles(dsl) {
-      const styles = Object.entries(nodeStates).map(([id, state]) => {
-        const colors = { pending: '#666', running: '#fbbf24', complete: '#4ade80', error: '#f87171' };
-        return 'style ' + id + ' fill:' + colors[state];
-      }).join('\n');
-      return styles ? dsl + '\n' + styles : dsl;
+    function updateNodeStyle(nodeId, state) {
+      // Direct SVG manipulation - no re-render needed
+      const svg = mermaidEl.querySelector('svg');
+      if (!svg) return;
+      // Mermaid generates nodes with id like "flowchart-nodeId-0" or class containing node id
+      const node = svg.querySelector('[id*="' + nodeId + '"] rect, [id*="' + nodeId + '"] polygon, [id*="' + nodeId + '"] circle, .node#' + nodeId + ' rect');
+      if (node) {
+        node.style.fill = STATE_COLORS[state];
+        node.style.transition = 'fill 0.3s ease';
+      }
     }
 
     function updateNodeState(nodeId, state) {
       nodeStates[nodeId] = state;
-      if (currentMermaid) renderMermaid(currentMermaid);
+      updateNodeStyle(nodeId, state);
     }
 
     function connect() {
       eventSource = new EventSource('/chain/events');
       eventSource.onopen = () => statusEl.classList.add('connected');
-      eventSource.onerror = () => { statusEl.classList.remove('connected'); setTimeout(connect, 3000); };
+      eventSource.onerror = () => {
+        statusEl.classList.remove('connected');
+        nodeStates = {};
+        currentMermaid = null;
+        setTimeout(connect, 3000);
+      };
 
       eventSource.addEventListener('chain_start', e => {
         const data = JSON.parse(e.data);
@@ -251,7 +262,7 @@ let accepts_streamable_mcp headers =
 
 let get_last_event_id headers =
   match get_header headers "last-event-id" with
-  | Some id -> (try Some (int_of_string id) with _ -> None)
+  | Some id -> (try Some (int_of_string id) with Failure _ -> None)
   | None -> None
 
 (** ============== Session Management ============== *)
@@ -395,7 +406,9 @@ let broadcast_sse_shutdown reason =
       try
         Httpun.Body.Writer.write_string client.body msg;
         Httpun.Body.Writer.flush client.body ignore
-      with _ -> ()
+      with
+      | Eio.Io _ -> client.connected <- false  (* Mark disconnected on I/O error *)
+      | _ -> ()  (* Ignore other errors during shutdown broadcast *)
   ) sse_clients
 
 let send_sse_event body ~event ~data =
@@ -436,7 +449,7 @@ let handle_get_mcp ~clock headers reqd =
         try
           Httpun.Body.Writer.write_string body s;
           Httpun.Body.Writer.flush body ignore
-        with _ -> ())
+        with Eio.Io _ | Invalid_argument _ -> ())  (* Connection closed *)
       ~last_event_id:(Option.value last_event_id ~default:0)
     in
 
@@ -462,10 +475,12 @@ let handle_get_mcp ~clock headers reqd =
         let timestamp = string_of_float (Unix.gettimeofday ()) in
         send_sse_event body ~event:"ping" ~data:timestamp;
         ping_loop ()
-      with _ ->
-        unregister_sse_client client_id;
-        Notification_sse.unregister session.id;
-        Httpun.Body.Writer.close body
+      with
+      | Eio.Io _ | Invalid_argument _ | Eio.Cancel.Cancelled _ ->
+          (* Connection closed, cancelled, or body invalid - cleanup *)
+          unregister_sse_client client_id;
+          Notification_sse.unregister session.id;
+          (try Httpun.Body.Writer.close body with Invalid_argument _ -> ())
     in
     ping_loop ()
   )
@@ -529,8 +544,8 @@ let handle_chain_events ~clock reqd =
     in
     let data = Yojson.Safe.to_string json_data in
     try
-      send_sse_event body ~event:event_type ~data;
-    with _ -> ()  (* Ignore write errors, connection may be closed *)
+      send_sse_event body ~event:event_type ~data
+    with Eio.Io _ | Invalid_argument _ -> ()  (* Connection closed *)
   ) in
 
   (* Keep connection alive with periodic pings until client disconnects *)
@@ -540,10 +555,11 @@ let handle_chain_events ~clock reqd =
       let timestamp = string_of_float (Unix.gettimeofday ()) in
       send_sse_event body ~event:"ping" ~data:timestamp;
       ping_loop ()
-    with _ ->
-      (* Client disconnected, clean up *)
-      Chain_telemetry.unsubscribe subscription;
-      Httpun.Body.Writer.close body
+    with
+    | Eio.Io _ | Invalid_argument _ | Eio.Cancel.Cancelled _ ->
+        (* Client disconnected, clean up *)
+        Chain_telemetry.unsubscribe subscription;
+        (try Httpun.Body.Writer.close body with Invalid_argument _ -> ())
   in
   ping_loop ()
 

@@ -84,6 +84,7 @@ type exec_context = {
   timeout: int;                              (** Overall timeout in seconds *)
   mutable iteration_ctx: iteration_ctx option;  (** Iteration context for GoalDriven *)
   mutable conversation: conversation_ctx option; (** Conversation context for conversational mode *)
+  cache: (string, string * float) Hashtbl.t;  (** Node cache: key -> (result, timestamp) *)
 }
 
 (** Create a new execution context *)
@@ -95,6 +96,7 @@ let make_context ~start_time ~trace_enabled ~timeout = {
   timeout;
   iteration_ctx = None;
   conversation = None;
+  cache = Hashtbl.create 32;
 }
 
 (** {1 Trace Helpers} *)
@@ -341,7 +343,7 @@ let substitute_iteration_vars (prompt : string) (iter_ctx : iteration_ctx option
           let t = float_of_int (ctx.iteration - 1) /. float_of_int (max 1 (ctx.max_iterations - 1)) in
           let interpolated = start_val +. (end_val -. start_val) *. t in
           Printf.sprintf "%.2f" interpolated
-        with _ -> Str.matched_string s
+        with Failure _ | Not_found -> Str.matched_string s
       ) result in
 
       (* Step function: {{step:v1,v2,v3,...}} *)
@@ -352,7 +354,7 @@ let substitute_iteration_vars (prompt : string) (iter_ctx : iteration_ctx option
           let values = String.split_on_char ',' values_str in
           let idx = min (ctx.iteration - 1) (List.length values - 1) in
           List.nth values (max 0 idx) |> String.trim
-        with _ -> Str.matched_string s
+        with Not_found | Failure _ | Invalid_argument _ -> Str.matched_string s
       ) result in
 
       result
@@ -534,7 +536,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                        extract_path (List.nth items idx) rest
                      else
                        Error (Printf.sprintf "Index %d out of bounds" idx)
-                   with _ -> Error (Printf.sprintf "Invalid index: %s" key))
+                   with Failure _ -> Error (Printf.sprintf "Invalid index: %s" key))
                | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
         in
         extract_path json parts
@@ -556,19 +558,39 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
       else Ok (String.sub input 0 max_chars ^ "...")
 
   | JsonPath path ->
-      (* Simplified JSONPath - delegates to Extract for now *)
-      apply_adapter_transform (Extract (String.sub path 2 (String.length path - 2))) input
+      (* Simplified JSONPath - supports $.field.subfield and $[0].field syntax *)
+      let normalized_path =
+        (* Strip $. or $ prefix if present *)
+        if String.length path >= 2 && String.sub path 0 2 = "$." then
+          String.sub path 2 (String.length path - 2)
+        else if String.length path >= 1 && path.[0] = '$' then
+          String.sub path 1 (String.length path - 1)
+        else
+          path
+      in
+      if String.length normalized_path = 0 then
+        Ok input  (* $ alone means root *)
+      else
+        apply_adapter_transform (Extract normalized_path) input
 
   | Regex (pattern, replacement) ->
       (try
         let re = Str.regexp pattern in
         Ok (Str.global_replace re replacement input)
-      with _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
+      with Failure _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
 
-  | ValidateSchema _schema_name ->
-      (* Schema validation placeholder - always passes for now *)
-      (* TODO: Implement proper JSON Schema validation *)
-      Ok input
+  | ValidateSchema schema_name ->
+      (* Schema validation - basic type checking.
+         TODO: Implement full JSON Schema draft-07 validation.
+         Options: 1) Use jsonschema2atd codegen 2) Minimal runtime validator
+         Current: Parse JSON and verify non-empty - basic sanity check *)
+      (try
+        let json = Yojson.Safe.from_string input in
+        match json with
+        | `Null -> Error (Printf.sprintf "Schema '%s': null value not allowed" schema_name)
+        | _ -> Ok input
+      with Yojson.Json_error msg ->
+        Error (Printf.sprintf "Schema '%s' validation failed: %s" schema_name msg))
 
   | ParseJson ->
       (* Validate input is valid JSON and return as-is *)
@@ -582,7 +604,7 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
       (try
         let _ = Yojson.Safe.from_string input in
         Ok input  (* Already JSON *)
-      with _ ->
+      with Yojson.Json_error _ ->
         Ok (Yojson.Safe.to_string (`String input)))
 
   | Chain transforms ->
@@ -596,12 +618,109 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
         transforms
 
   | Conditional { condition; on_true; on_false } ->
-      (* Simple condition evaluation: check if input contains condition string *)
-      let transform =
-        if String.length input > 0 && String.sub input 0 (min (String.length input) (String.length condition)) = condition
-        then on_true
-        else on_false
+      (* Expression-based condition evaluation
+         Supported operators:
+         - "contains:text" - input contains text (no trimming)
+         - "eq:value" - input equals value (input trimmed, value not trimmed)
+         - "neq:value" - input not equals value (input trimmed)
+         - "gt:number" - input > number (both trimmed for parsing)
+         - "gte:number" - input >= number
+         - "lt:number" - input < number
+         - "lte:number" - input <= number
+         - "empty" - input is empty or whitespace only
+         - "nonempty" - input has non-whitespace content
+         - "startswith:prefix" - input starts with prefix (no trimming)
+         - "endswith:suffix" - input ends with suffix (no trimming)
+         - "matches:regex" - input matches regex pattern (max 100 chars, ReDoS-protected)
+         - Plain text - input contains the text (legacy behavior)
+
+         Whitespace handling:
+         - eq/neq: Input is trimmed before comparison
+         - gt/gte/lt/lte: Both sides trimmed for numeric parsing
+         - contains/startswith/endswith/matches: No trimming (exact match)
+         - empty/nonempty: Checks after trimming
+
+         Security:
+         - matches: patterns limited to 100 chars
+         - matches: catastrophic backtracking patterns (e.g., (a+)+) are rejected
+      *)
+      let evaluate_condition cond inp =
+        let try_parse_float s =
+          try Some (float_of_string (String.trim s))
+          with Failure _ -> None
+        in
+        if String.length cond >= 9 && String.sub cond 0 9 = "contains:" then
+          let text = String.sub cond 9 (String.length cond - 9) in
+          try Str.search_forward (Str.regexp_string text) inp 0 >= 0
+          with Not_found -> false
+        else if String.length cond >= 3 && String.sub cond 0 3 = "eq:" then
+          let value = String.sub cond 3 (String.length cond - 3) in
+          String.trim inp = value
+        else if String.length cond >= 4 && String.sub cond 0 4 = "neq:" then
+          let value = String.sub cond 4 (String.length cond - 4) in
+          String.trim inp <> value
+        else if String.length cond >= 3 && String.sub cond 0 3 = "gt:" then
+          let threshold = String.sub cond 3 (String.length cond - 3) in
+          (match try_parse_float inp, try_parse_float threshold with
+           | Some v, Some t -> v > t
+           | _ -> false)
+        else if String.length cond >= 4 && String.sub cond 0 4 = "gte:" then
+          let threshold = String.sub cond 4 (String.length cond - 4) in
+          (match try_parse_float inp, try_parse_float threshold with
+           | Some v, Some t -> v >= t
+           | _ -> false)
+        else if String.length cond >= 3 && String.sub cond 0 3 = "lt:" then
+          let threshold = String.sub cond 3 (String.length cond - 3) in
+          (match try_parse_float inp, try_parse_float threshold with
+           | Some v, Some t -> v < t
+           | _ -> false)
+        else if String.length cond >= 4 && String.sub cond 0 4 = "lte:" then
+          let threshold = String.sub cond 4 (String.length cond - 4) in
+          (match try_parse_float inp, try_parse_float threshold with
+           | Some v, Some t -> v <= t
+           | _ -> false)
+        else if cond = "empty" then
+          String.length (String.trim inp) = 0
+        else if cond = "nonempty" then
+          String.length (String.trim inp) > 0
+        else if String.length cond >= 11 && String.sub cond 0 11 = "startswith:" then
+          let prefix = String.sub cond 11 (String.length cond - 11) in
+          String.length inp >= String.length prefix &&
+          String.sub inp 0 (String.length prefix) = prefix
+        else if String.length cond >= 9 && String.sub cond 0 9 = "endswith:" then
+          let suffix = String.sub cond 9 (String.length cond - 9) in
+          String.length inp >= String.length suffix &&
+          String.sub inp (String.length inp - String.length suffix) (String.length suffix) = suffix
+        else if String.length cond >= 8 && String.sub cond 0 8 = "matches:" then
+          let pattern = String.sub cond 8 (String.length cond - 8) in
+          (* ReDoS protection: limit pattern length and block catastrophic patterns *)
+          let max_pattern_len = 100 in
+          let has_redos_pattern p =
+            (* Detect patterns that can cause exponential backtracking:
+               - Nested quantifiers: (a+)+, (a[*])+, (a+)[*], (a[*])[*]
+               - Overlapping alternations with quantifiers *)
+            try
+              let redos_re = Str.regexp "\\([+*]\\)[+*]\\|[+*])\\+\\|[+*])\\*" in
+              Str.search_forward redos_re p 0 >= 0
+            with Not_found -> false
+          in
+          if String.length pattern > max_pattern_len then
+            false  (* Pattern too long - reject for safety *)
+          else if has_redos_pattern pattern then
+            false  (* Potentially catastrophic pattern - reject *)
+          else
+            (try
+              let re = Str.regexp pattern in
+              (* Use search_forward for contains-like matching *)
+              Str.search_forward re inp 0 >= 0
+            with Not_found | Failure _ -> false)
+        else
+          (* Legacy: plain text means "contains" *)
+          try Str.search_forward (Str.regexp_string cond) inp 0 >= 0
+          with Not_found -> false
       in
+      let result = evaluate_condition condition input in
+      let transform = if result then on_true else on_false in
       apply_adapter_transform transform input
 
   | Custom func_name ->
@@ -697,6 +816,147 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   (* Data Transformation Node *)
   | Adapter { input_ref; transform; on_error } ->
       execute_adapter ctx node ~input_ref ~transform ~on_error
+  (* Caching Node *)
+  | Cache { key_expr; ttl_seconds; inner } ->
+      execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec node ~key_expr ~ttl_seconds inner
+  (* Batch Processing Node *)
+  | Batch { batch_size; parallel; inner; collect_strategy } ->
+      execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec node ~batch_size ~parallel ~collect_strategy inner
+
+(** Execute cache node - check cache first, execute inner if miss *)
+and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
+    ~key_expr ~ttl_seconds (inner : node) : (string, string) result =
+  record_start ctx node.id;
+  let start = Unix.gettimeofday () in
+
+  (* Generate cache key by resolving the key expression *)
+  let cache_key = resolve_single_input ctx key_expr in
+  let full_key = Printf.sprintf "%s:%s" inner.id cache_key in
+
+  (* Check cache *)
+  let cached = match Hashtbl.find_opt ctx.cache full_key with
+    | Some (result, timestamp) ->
+        if ttl_seconds = 0 || Unix.gettimeofday () -. timestamp < float_of_int ttl_seconds then
+          Some result
+        else begin
+          (* Expired - remove from cache *)
+          Hashtbl.remove ctx.cache full_key;
+          None
+        end
+    | None -> None
+  in
+
+  let result = match cached with
+    | Some cached_result ->
+        (* Cache hit - return cached value *)
+        Ok cached_result
+    | None ->
+        (* Cache miss - execute inner node *)
+        let inner_result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
+        (match inner_result with
+        | Ok output ->
+            (* Store in cache *)
+            Hashtbl.replace ctx.cache full_key (output, Unix.gettimeofday ());
+            Ok output
+        | Error _ as e -> e)
+  in
+
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let success = Result.is_ok result in
+  record_complete ctx node.id ~duration_ms ~success;
+  (match result with
+  | Ok output -> Hashtbl.add ctx.outputs node.id output
+  | Error msg -> record_error ctx node.id msg);
+  result
+
+(** Execute batch node - process list items in batches *)
+and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
+    ~batch_size ~parallel ~collect_strategy (inner : node) : (string, string) result =
+  record_start ctx node.id;
+  let start = Unix.gettimeofday () in
+
+  (* Get input as JSON array *)
+  let input_str = resolve_single_input ctx (Printf.sprintf "{{%s}}" node.id) in
+  let items = try
+    match Yojson.Safe.from_string input_str with
+    | `List items -> Ok (List.map Yojson.Safe.to_string items)
+    | `String s ->
+        (* Try to parse as newline-separated items *)
+        Ok (String.split_on_char '\n' s |> List.filter (fun s -> String.trim s <> ""))
+    | _ -> Error "Batch input must be a JSON array or newline-separated text"
+  with Yojson.Json_error _ ->
+    (* Treat as newline-separated *)
+    Ok (String.split_on_char '\n' input_str |> List.filter (fun s -> String.trim s <> ""))
+  in
+
+  match items with
+  | Error msg ->
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx node.id ~duration_ms ~success:false;
+      record_error ctx node.id msg;
+      Error msg
+  | Ok item_list ->
+      (* Process items in batches - manual chunking *)
+      let rec chunk_list n lst =
+        if n <= 0 then [[]]
+        else match lst with
+        | [] -> []
+        | _ ->
+            let rec take n acc = function
+              | [] -> (List.rev acc, [])
+              | h :: t -> if n <= 0 then (List.rev acc, h :: t) else take (n - 1) (h :: acc) t
+            in
+            let (chunk, rest) = take n [] lst in
+            chunk :: chunk_list n rest
+      in
+      let batches = chunk_list batch_size item_list in
+      let all_results = ref [] in
+
+      let process_batch batch_list =
+        if parallel then begin
+          (* Parallel execution within batch *)
+          let mutex = Eio.Mutex.create () in
+          Eio.Fiber.all (List.mapi (fun i item ->
+            fun () ->
+              (* Set item as input for inner node *)
+              Hashtbl.replace ctx.outputs (Printf.sprintf "%s_item" node.id) item;
+              let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
+              Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+                all_results := (i, result) :: !all_results
+              )
+          ) batch_list)
+        end else begin
+          (* Sequential execution within batch *)
+          List.iteri (fun i item ->
+            Hashtbl.replace ctx.outputs (Printf.sprintf "%s_item" node.id) item;
+            let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
+            all_results := (i, result) :: !all_results
+          ) batch_list
+        end
+      in
+
+      List.iter process_batch batches;
+
+      (* Sort results by index and collect *)
+      let sorted_results = List.sort (fun (i1, _) (i2, _) -> compare i1 i2) !all_results in
+      let outputs = List.filter_map (fun (_, r) ->
+        match r with Ok o -> Some o | Error _ -> None
+      ) sorted_results in
+
+      let final_result = match collect_strategy with
+        | `List -> Ok (Printf.sprintf "[%s]" (String.concat "," outputs))
+        | `Concat -> Ok (String.concat "\n" outputs)
+        | `First -> (match outputs with h :: _ -> Ok h | [] -> Error "No successful results")
+        | `Last -> (match List.rev outputs with h :: _ -> Ok h | [] -> Error "No successful results")
+      in
+
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let success = Result.is_ok final_result in
+      record_complete ctx node.id ~duration_ms ~success;
+      (match final_result with
+      | Ok output -> Hashtbl.add ctx.outputs node.id output
+      | Error msg -> record_error ctx node.id msg);
+      final_result
 
 (** Execute a dynamically generated chain (ChainExec node)
 
@@ -712,7 +972,7 @@ and execute_chain_exec ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
   (* Check depth limit - stored in outputs table *)
   let current_depth = try
     int_of_string (Hashtbl.find ctx.outputs "__chain_depth")
-  with _ -> 0
+  with Not_found | Failure _ -> 0
   in
   if current_depth >= max_depth then
     Error (Printf.sprintf "ChainExec depth limit exceeded: %d >= %d" current_depth max_depth)
@@ -943,8 +1203,12 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
   add_trace ctx parent.id (ChainStart { chain_id = chain.id; mermaid_dsl });
   let start = Unix.gettimeofday () in
 
-  (* Execute subgraph nodes sequentially for now *)
-  (* TODO: Use compiled plan for proper parallel execution *)
+  (* Execute subgraph nodes sequentially for now.
+     TODO: Implement dependency-based parallel execution:
+     1. Analyze node dependencies via Chain_compiler.analyze_dependencies
+     2. Group independent nodes into parallel batches
+     3. Execute batches with Eio.Fiber.all, sequential between batches
+     4. Currently Fanout/Quorum/Race handle parallelism at their level *)
   let result = execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes in
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
@@ -1082,7 +1346,7 @@ and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
         | "confidence" | "score" | "coverage" | "latency" ->
             (* Try to parse a float from the output *)
             (try Some (float_of_string (String.trim input_output))
-             with _ -> None)
+             with Failure _ -> None)
         | _ -> None
       in
       (match extracted_value with
@@ -1143,8 +1407,8 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     let pct = (current_value /. goal_value) *. 100.0 in
     List.find_opt (fun (condition, _) ->
       match String.split_on_char '_' condition with
-      | ["below"; n] -> (try pct < float_of_string n with _ -> false)
-      | ["above"; n] -> (try pct >= float_of_string n with _ -> false)
+      | ["below"; n] -> (try pct < float_of_string n with Failure _ -> false)
+      | ["above"; n] -> (try pct >= float_of_string n with Failure _ -> false)
       | _ -> false
     ) strategy_hints
     |> Option.map snd
@@ -1156,13 +1420,13 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     | "parse_float" | "parse_json" ->
         (* Direct float parsing from output *)
         (try Some (float_of_string (String.trim output))
-         with _ ->
+         with Failure _ ->
            (* Try JSON extraction *)
            try
              let json = Yojson.Safe.from_string output in
              let open Yojson.Safe.Util in
              Some (json |> member goal_metric |> to_float)
-           with _ -> None)
+           with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
     | "exec_test" ->
         (* For test execution: extract coverage/pass rate from output *)
         (* Expected format: "coverage: 0.85" or JSON with metric field *)
@@ -1172,14 +1436,14 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           Some (float_of_string (Str.matched_group 1 output))
         with Not_found ->
           try Some (float_of_string (String.trim output))
-          with _ -> None)
+          with Failure _ -> None)
     | "call_api" ->
         (* For API calls: expect JSON response with metric *)
         (try
           let json = Yojson.Safe.from_string output in
           let open Yojson.Safe.Util in
           Some (json |> member goal_metric |> to_float)
-        with _ -> None)
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
     | "llm_judge" ->
         (* Use LLM to assess the metric *)
         let prompt = Printf.sprintf
@@ -1190,12 +1454,12 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
         (match result with
          | Ok score_str ->
              (try Some (float_of_string (String.trim score_str))
-              with _ -> None)
+              with Failure _ -> None)
          | Error _ -> None)
     | _ ->
         (* Default: try to extract any float *)
         (try Some (float_of_string (String.trim output))
-         with _ -> None)
+         with Failure _ -> None)
   in
 
   let rec iterate iteration last_value =
@@ -1288,14 +1552,14 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
         (try
           let score = float_of_string cleaned in
           min 1.0 (max 0.0 score)  (* Clamp to [0, 1] *)
-        with _ ->
+        with Failure _ ->
           (* Try to find a number in the response *)
           let regex = Str.regexp "[0-9]+\\.[0-9]+" in
           try
             let _ = Str.search_forward regex cleaned 0 in
             let found = Str.matched_string cleaned in
             min 1.0 (max 0.0 (float_of_string found))
-          with Not_found -> 0.5)  (* Fallback *)
+          with Not_found | Failure _ -> 0.5)  (* Fallback *)
     | Error _ -> 0.5  (* Fallback on error *)
   in
 
@@ -1325,7 +1589,7 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                 in
                 count_depth json;
                 min 1.0 (0.5 +. (float_of_int !depth *. 0.1))
-               with _ -> 0.0)
+               with Yojson.Json_error _ -> 0.0)
           | "llm_judge" ->
               (* Use LLM to score the output *)
               llm_score output
@@ -1335,7 +1599,7 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                 let json = Yojson.Safe.from_string output in
                 let open Yojson.Safe.Util in
                 json |> member "score" |> to_float
-               with _ -> 0.5)
+               with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> 0.5)
         in
         Some (id, output, score)
   ) !results in
@@ -1408,7 +1672,9 @@ and should_retry (retry_on : string list) (error_msg : string) : bool =
         try
           let regex = Str.regexp_case_fold pattern in
           Str.search_forward regex error_msg 0 >= 0
-        with _ -> String.sub error_msg 0 (min (String.length pattern) (String.length error_msg)) = pattern
+        with Failure _ | Not_found | Invalid_argument _ ->
+          (* Regex failed or pattern not found: try prefix match *)
+          String.sub error_msg 0 (min (String.length pattern) (String.length error_msg)) = pattern
       ) patterns
 
 (** Execute retry node - retry on failure with backoff *)

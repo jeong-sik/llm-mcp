@@ -91,6 +91,11 @@
  (name test_mermaid_parser)
  (libraries llm_mcp.common alcotest))
 
+; Adapter Transform tests (Conditional, JsonPath, etc.)
+(test
+ (name test_adapter_transforms)
+ (libraries llm_mcp.common alcotest str))
+
 ; Chain Composer tests (Neural Layer)
 (test
  (name test_composer)
