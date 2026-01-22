@@ -6,7 +6,27 @@
 
     Usage:
       memory_retriever --query "your search query" [--limit 3] [--format xml|json|text]
+
+    Error Handling:
+    - Network errors: logged and returned as empty results (graceful degradation)
+    - JSON parse errors: logged with context for debugging
+    - TLS errors: logged, falls back to no HTTPS support
 *)
+
+(** Verbose logging flag - set to true for debugging *)
+let verbose = try Sys.getenv "MEMORY_RETRIEVER_VERBOSE" <> "" with Not_found -> false
+
+(** Log message if verbose mode is enabled *)
+let log_verbose fmt =
+  Printf.ksprintf (fun s ->
+    if verbose then Printf.eprintf "[memory-retriever:debug] %s\n%!" s
+  ) fmt
+
+(** Log error message (always) *)
+let log_error fmt =
+  Printf.ksprintf (fun s ->
+    Printf.eprintf "[memory-retriever] %s\n%!" s
+  ) fmt
 
 (** Environment variable helpers *)
 let get_env_or key default =
@@ -100,11 +120,49 @@ let http_get ~sw ~client uri =
 
 (** {1 Embedding and Search Functions} *)
 
+(** Parse embeddings from RunPod response - handles multiple formats *)
+let parse_embeddings_from_output output =
+  let open Yojson.Safe.Util in
+  (* Format 1: Infinity Embedding API format {data: [{embedding: [...]}]} *)
+  match output |> member "data" with
+  | `List data_items ->
+      log_verbose "Parsing Infinity Embedding format";
+      let embeddings = List.filter_map (fun item ->
+        match item |> member "embedding" with
+        | `List floats ->
+            (try Some (List.map to_float floats)
+             with Type_error (msg, _) ->
+               log_verbose "Float conversion error in embedding: %s" msg;
+               None)
+        | _ -> None
+      ) data_items in
+      if embeddings <> [] then Some embeddings else None
+  | _ ->
+      (* Format 2: Custom handler format {embeddings: [[...]]} *)
+      match output |> member "embeddings" with
+      | `List emb_list ->
+          log_verbose "Parsing custom handler format";
+          let embeddings = List.filter_map (fun e ->
+            match e with
+            | `List floats ->
+                (try Some (List.map to_float floats)
+                 with Type_error (msg, _) ->
+                   log_verbose "Float conversion error: %s" msg;
+                   None)
+            | _ -> None
+          ) emb_list in
+          if embeddings <> [] then Some embeddings else None
+      | _ ->
+          log_verbose "Unknown embedding format in output: %s"
+            (Yojson.Safe.to_string output |> fun s ->
+             if String.length s > 100 then String.sub s 0 100 ^ "..." else s);
+          None
+
 (** Get embedding from RunPod BGE-M3 *)
 let get_embedding ~sw ~client text =
   let token = runpod_api_token () in
   if String.length token = 0 then begin
-    prerr_endline "[memory-retriever] RUNPOD_API_TOKEN not set";
+    log_error "RUNPOD_API_TOKEN not set";
     None
   end else begin
     let uri = Uri.of_string (runpod_api_url ()) in
@@ -112,7 +170,6 @@ let get_embedding ~sw ~client text =
       ("Content-Type", "application/json");
       ("Authorization", "Bearer " ^ token);
     ] in
-    (* RunPod custom handler format *)
     let payload = `Assoc [
       ("input", `Assoc [
         ("texts", `List [`String text])
@@ -123,38 +180,53 @@ let get_embedding ~sw ~client text =
     try
       let response, body_str = http_post ~sw ~client uri ~headers ~body in
       let status = Http.Response.status response in
+      let status_code = Http.Status.to_int status in
 
-      if Cohttp.Code.is_success (Http.Status.to_int status) then begin
-        try
-          let json = Yojson.Safe.from_string body_str in
-          let open Yojson.Safe.Util in
-          let status_str = json |> member "status" |> to_string in
-          if status_str = "COMPLETED" then begin
-            let output = json |> member "output" in
-            (* Try Infinity Embedding format first *)
-            let embeddings =
-              try
-                let data = output |> member "data" |> to_list in
-                List.map (fun item -> item |> member "embedding" |> to_list |> List.map to_float) data
-              with _ ->
-                (* Fallback to custom handler format *)
-                try output |> member "embeddings" |> to_list |> List.map (fun e -> to_list e |> List.map to_float)
-                with _ -> []
-            in
-            match embeddings with
-            | embedding :: _ -> Some embedding
-            | [] -> None
-          end
-          else None
-        with _ -> None
+      if Cohttp.Code.is_success status_code then begin
+        match Yojson.Safe.from_string body_str with
+        | json ->
+            let open Yojson.Safe.Util in
+            (match json |> member "status" |> to_string_option with
+             | Some "COMPLETED" ->
+                 let output = json |> member "output" in
+                 (match parse_embeddings_from_output output with
+                  | Some (embedding :: _) -> Some embedding
+                  | Some [] | None ->
+                      log_verbose "No embeddings found in completed response";
+                      None)
+             | Some status ->
+                 log_verbose "RunPod job status: %s" status;
+                 None
+             | None ->
+                 log_error "Missing 'status' field in RunPod response";
+                 None)
+        | exception Yojson.Json_error msg ->
+            log_error "JSON parse error: %s" msg;
+            None
       end
       else begin
-        prerr_endline (Printf.sprintf "[memory-retriever] RunPod error: %s" body_str);
+        log_error "RunPod HTTP %d: %s" status_code
+          (if String.length body_str > 200
+           then String.sub body_str 0 200 ^ "..."
+           else body_str);
         None
       end
-    with exn ->
-      prerr_endline (Printf.sprintf "[memory-retriever] HTTP error: %s" (Printexc.to_string exn));
-      None
+    with
+    | Eio.Io (Eio.Net.E (Eio.Net.Connection_failure _), _) as exn ->
+        log_error "Connection failed to RunPod: %s" (Printexc.to_string exn);
+        None
+    | Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) as exn ->
+        log_error "Connection reset by RunPod: %s" (Printexc.to_string exn);
+        None
+    | Eio.Time.Timeout ->
+        log_error "Timeout connecting to RunPod";
+        None
+    | Yojson.Json_error msg ->
+        log_error "JSON parse error: %s" msg;
+        None
+    | exn ->
+        log_error "RunPod error: %s" (Printexc.to_string exn);
+        None
   end
 
 (** Check if Qdrant collection exists *)
@@ -162,18 +234,85 @@ let qdrant_has_collection ~sw ~client collection_name =
   let uri = Uri.of_string (qdrant_url () ^ "/collections") in
   try
     let response, body_str = http_get ~sw ~client uri in
-    let status = Http.Response.status response in
-    if Cohttp.Code.is_success (Http.Status.to_int status) then begin
-      try
-        let json = Yojson.Safe.from_string body_str in
-        let open Yojson.Safe.Util in
-        let collections = json |> member "result" |> member "collections" |> to_list in
-        let names = List.map (fun c -> c |> member "name" |> to_string) collections in
-        List.mem collection_name names
-      with _ -> false
+    let status_code = Http.Status.to_int (Http.Response.status response) in
+    if Cohttp.Code.is_success status_code then begin
+      match Yojson.Safe.from_string body_str with
+      | json ->
+          let open Yojson.Safe.Util in
+          (match json |> member "result" |> member "collections" with
+           | `List collections ->
+               let names = List.filter_map (fun c ->
+                 match c |> member "name" with
+                 | `String name -> Some name
+                 | _ -> None
+               ) collections in
+               List.mem collection_name names
+           | _ ->
+               log_verbose "Unexpected collections format";
+               false)
+      | exception Yojson.Json_error msg ->
+          log_verbose "Qdrant collections JSON error: %s" msg;
+          false
     end
-    else false
-  with _ -> false
+    else begin
+      log_verbose "Qdrant collections HTTP %d" status_code;
+      false
+    end
+  with
+  | Eio.Io (Eio.Net.E (Eio.Net.Connection_failure _), _) ->
+      log_verbose "Cannot connect to Qdrant";
+      false
+  | exn ->
+      log_verbose "Qdrant check error: %s" (Printexc.to_string exn);
+      false
+
+(** Extract string from payload trying multiple field names *)
+let get_payload_string payload field_names =
+  let open Yojson.Safe.Util in
+  List.fold_left (fun acc key ->
+    match acc with
+    | Some _ -> acc
+    | None ->
+        match payload |> member key with
+        | `String s when String.length s > 0 -> Some s
+        | _ -> None
+  ) None field_names
+  |> Option.value ~default:""
+
+(** Parse a single Qdrant search result into a memory record *)
+let parse_qdrant_result collection_name result =
+  let open Yojson.Safe.Util in
+  match result |> member "score" with
+  | `Float score ->
+      let payload = result |> member "payload" in
+      let title = get_payload_string payload ["title"; "topic"; "pattern_name"; "filename"; "name"] in
+      let content = get_payload_string payload ["content"; "tldr"; "text"; "summary"] in
+      let source = get_payload_string payload ["source"; "session_id"; "file_path"; "filename"] in
+      let date = get_payload_string payload ["date"; "created_at"] in
+      Some {
+        score;
+        collection = collection_name;
+        title = if title = "" then "Untitled" else title;
+        content;
+        source;
+        date;
+      }
+  | `Int score_int ->
+      (* Handle integer scores (rare but possible) *)
+      let score = float_of_int score_int in
+      let payload = result |> member "payload" in
+      let title = get_payload_string payload ["title"; "topic"; "pattern_name"; "filename"; "name"] in
+      Some {
+        score;
+        collection = collection_name;
+        title = if title = "" then "Untitled" else title;
+        content = get_payload_string payload ["content"; "tldr"; "text"; "summary"];
+        source = get_payload_string payload ["source"; "session_id"; "file_path"; "filename"];
+        date = get_payload_string payload ["date"; "created_at"];
+      }
+  | _ ->
+      log_verbose "Missing or invalid score in Qdrant result";
+      None
 
 (** Search Qdrant collection *)
 let qdrant_search ~sw ~client collection_name query_vector =
@@ -189,49 +328,33 @@ let qdrant_search ~sw ~client collection_name query_vector =
 
   try
     let response, body_str = http_post ~sw ~client uri ~headers ~body in
-    let status = Http.Response.status response in
+    let status_code = Http.Status.to_int (Http.Response.status response) in
 
-    if Cohttp.Code.is_success (Http.Status.to_int status) then begin
-      try
-        let json = Yojson.Safe.from_string body_str in
-        let open Yojson.Safe.Util in
-        let results = json |> member "result" |> to_list in
-        List.filter_map (fun r ->
-          try
-            let score = r |> member "score" |> to_float in
-            let payload = r |> member "payload" in
-
-            (* Handle different payload structures across collections *)
-            let get_str keys =
-              List.fold_left (fun acc key ->
-                match acc with
-                | Some _ -> acc
-                | None ->
-                    try Some (payload |> member key |> to_string)
-                    with _ -> None
-              ) None keys
-              |> Option.value ~default:""
-            in
-
-            let title = get_str ["title"; "topic"; "pattern_name"; "filename"; "name"] in
-            let content = get_str ["content"; "tldr"; "text"; "summary"] in
-            let source = get_str ["source"; "session_id"; "file_path"; "filename"] in
-            let date = get_str ["date"; "created_at"] in
-
-            Some {
-              score;
-              collection = collection_name;
-              title = if title = "" then "Untitled" else title;
-              content;
-              source;
-              date;
-            }
-          with _ -> None
-        ) results
-      with _ -> []
+    if Cohttp.Code.is_success status_code then begin
+      match Yojson.Safe.from_string body_str with
+      | json ->
+          let open Yojson.Safe.Util in
+          (match json |> member "result" with
+           | `List results ->
+               List.filter_map (parse_qdrant_result collection_name) results
+           | _ ->
+               log_verbose "Unexpected result format for %s" collection_name;
+               [])
+      | exception Yojson.Json_error msg ->
+          log_verbose "Qdrant search JSON error: %s" msg;
+          []
     end
-    else []
-  with _ -> []
+    else begin
+      log_verbose "Qdrant search HTTP %d for %s" status_code collection_name;
+      []
+    end
+  with
+  | Eio.Io (Eio.Net.E (Eio.Net.Connection_failure _), _) ->
+      log_verbose "Cannot connect to Qdrant for search";
+      []
+  | exn ->
+      log_verbose "Qdrant search error: %s" (Printexc.to_string exn);
+      []
 
 (** Truncate text with ellipsis *)
 let truncate text max_len =
