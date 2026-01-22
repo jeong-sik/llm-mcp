@@ -23,6 +23,7 @@ type stats = {
   (* Execution stats *)
   total_chains: int;
   total_nodes: int;
+  active_chains: int;  (* Currently executing chains *)
   avg_duration_ms: float;
   p50_duration_ms: float;
   p95_duration_ms: float;
@@ -71,6 +72,7 @@ type raw_data = {
   mutable failure_count: int;
   mutable total_tokens: int;
   mutable total_cost: float;
+  mutable active_chains: int;  (* Currently executing chains *)
 }
 
 (** Global stats collector *)
@@ -88,6 +90,7 @@ let stats_data : raw_data = {
   failure_count = 0;
   total_tokens = 0;
   total_cost = 0.0;
+  active_chains = 0;
 }
 
 let stats_mutex = Mutex.create ()
@@ -110,7 +113,8 @@ let stats_handler event =
   (match event with
    | ChainStart _ ->
      let hour = current_hour () in
-     incr_counter stats_data.hourly_chains hour 1
+     incr_counter stats_data.hourly_chains hour 1;
+     stats_data.active_chains <- stats_data.active_chains + 1
 
    | NodeComplete payload ->
      stats_data.node_durations <- payload.node_duration_ms :: stats_data.node_durations;
@@ -125,11 +129,13 @@ let stats_handler event =
    | ChainComplete payload ->
      stats_data.chain_durations <- payload.complete_duration_ms :: stats_data.chain_durations;
      stats_data.chain_timestamps <- Unix.gettimeofday () :: stats_data.chain_timestamps;
-     stats_data.success_count <- stats_data.success_count + 1
+     stats_data.success_count <- stats_data.success_count + 1;
+     stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
 
    | Error payload ->
      stats_data.failure_count <- stats_data.failure_count + 1;
-     incr_counter stats_data.errors payload.error_message 1
+     incr_counter stats_data.errors payload.error_message 1;
+     stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
 
    | NodeStart _ -> ());
   Mutex.unlock stats_mutex
@@ -226,6 +232,7 @@ let compute ?(since=0.0) () =
   let result = {
     total_chains = List.length stats_data.chain_durations;
     total_nodes = List.length stats_data.node_durations;
+    active_chains = stats_data.active_chains;
     avg_duration_ms = avg_duration;
     p50_duration_ms = p50;
     p95_duration_ms = p95;
@@ -262,6 +269,7 @@ let reset () =
   stats_data.failure_count <- 0;
   stats_data.total_tokens <- 0;
   stats_data.total_cost <- 0.0;
+  stats_data.active_chains <- 0;
   Mutex.unlock stats_mutex
 
 (** {1 Subscription Management} *)

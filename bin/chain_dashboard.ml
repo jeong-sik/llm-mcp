@@ -149,8 +149,8 @@ let display_header () =
 
 (** Chain counts section *)
 let display_chain_counts (stats : stats) =
-  let active = 0 in  (* TODO: Track active chains in stats *)
-  let queued = 0 in  (* TODO: Track queued chains *)
+  let active = stats.active_chains in
+  let queued = 0 in  (* Queued chains would require scheduler integration *)
   let completed = stats.total_chains in
   let failed = stats.failure_count in
   let line = Printf.sprintf "ACTIVE: %-4d    QUEUED: %-4d    COMPLETED: %-4d    FAILED: %-4d"

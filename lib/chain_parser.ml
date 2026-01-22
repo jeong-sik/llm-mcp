@@ -549,6 +549,25 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       in
       Ok (Adapter { input_ref; transform; on_error })
 
+  (* Performance Optimization Nodes *)
+  | "cache" ->
+      let key_expr = parse_string_with_default json "key_expr" "{{input}}" in
+      let ttl_seconds = parse_int_with_default json "ttl_seconds" 0 in
+      let* inner = parse_node (json |> member "inner") in
+      Ok (Cache { key_expr; ttl_seconds; inner })
+
+  | "batch" ->
+      let batch_size = parse_int_with_default json "batch_size" 10 in
+      let parallel = parse_bool_with_default json "parallel" false in
+      let* inner = parse_node (json |> member "inner") in
+      let collect_strategy = match parse_string_opt json "collect_strategy" with
+        | Some "concat" -> `Concat
+        | Some "first" -> `First
+        | Some "last" -> `Last
+        | _ -> `List
+      in
+      Ok (Batch { batch_size; parallel; inner; collect_strategy })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
