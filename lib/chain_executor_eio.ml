@@ -24,6 +24,7 @@ type execution_plan = Chain_types.execution_plan
 type trace_entry = Chain_types.trace_entry
 type token_usage = Chain_types.token_usage
 type merge_strategy = Chain_types.merge_strategy
+type adapter_transform = Chain_types.adapter_transform
 
 (** {1 Local Trace Types} *)
 
@@ -433,7 +434,7 @@ let summarize_history ~exec_fn (conv : conversation_ctx) : string =
     history_text
   in
   (* Use current model for summarization *)
-  let summary = match exec_fn ~model:conv.current_model ~prompt:summary_prompt ?tools:None () with
+  let summary = match exec_fn ~model:conv.current_model ?system:None ~prompt:summary_prompt ?tools:None () with
     | Ok s -> s
     | Error _ -> "Previous context (summarization failed)"
   in
@@ -453,7 +454,7 @@ let maybe_summarize_and_rotate ~exec_fn (conv : conversation_ctx) : unit =
 (** {1 Node Execution} *)
 
 (** Type of execution function callback *)
-type exec_fn = model:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result
+type exec_fn = model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result
 
 (** Type of tool execution callback *)
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
@@ -461,14 +462,17 @@ type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 (** Execute a single LLM node *)
 let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, string) result =
   match llm with
-  | Llm { model; prompt; timeout = _; tools } ->
+  | Llm { model; system; prompt; timeout = _; tools } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
       let final_prompt = substitute_iteration_vars resolved_prompt ctx.iteration_ctx in
+      (* Also resolve system instruction if present *)
+      let resolved_system = Option.map (fun s -> substitute_prompt s inputs) system in
+      let final_system = Option.map (fun s -> substitute_iteration_vars s ctx.iteration_ctx) resolved_system in
       record_start ctx node.id;
       let start = Unix.gettimeofday () in
-      let result = exec_fn ~model ~prompt:final_prompt ?tools () in
+      let result = exec_fn ~model ?system:final_system ~prompt:final_prompt ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
@@ -503,6 +507,145 @@ let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string
           record_error ctx node.id msg;
           Error msg)
   | _ -> Error "execute_tool_node called with non-Tool node"
+
+(** Apply adapter transformation to input value *)
+let rec apply_adapter_transform (transform : adapter_transform) (input : string) : (string, string) result =
+  let open Chain_types in
+  match transform with
+  | Extract path ->
+      (* Simple dot-path extraction from JSON *)
+      (try
+        let json = Yojson.Safe.from_string input in
+        let parts = String.split_on_char '.' path in
+        let rec extract_path j = function
+          | [] -> Ok (Yojson.Safe.to_string j)
+          | key :: rest ->
+              (match j with
+               | `Assoc fields ->
+                   (match List.assoc_opt key fields with
+                    | Some v -> extract_path v rest
+                    | None -> Error (Printf.sprintf "Key '%s' not found in path '%s'" key path))
+               | `List items when String.length key > 0 && key.[0] = '[' ->
+                   (* Handle array index: [0], [1], etc. *)
+                   let idx_str = String.sub key 1 (String.length key - 2) in
+                   (try
+                     let idx = int_of_string idx_str in
+                     if idx >= 0 && idx < List.length items then
+                       extract_path (List.nth items idx) rest
+                     else
+                       Error (Printf.sprintf "Index %d out of bounds" idx)
+                   with _ -> Error (Printf.sprintf "Invalid index: %s" key))
+               | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
+        in
+        extract_path json parts
+      with Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error: %s" msg))
+
+  | Template tpl ->
+      (* Simple {{value}} substitution *)
+      let result = Str.global_replace (Str.regexp "{{value}}") input tpl in
+      Ok result
+
+  | Summarize max_tokens ->
+      (* Simple truncation-based summarization (placeholder for LLM summarization) *)
+      let words = String.split_on_char ' ' input in
+      let truncated = List.filteri (fun i _ -> i < max_tokens) words in
+      Ok (String.concat " " truncated)
+
+  | Truncate max_chars ->
+      if String.length input <= max_chars then Ok input
+      else Ok (String.sub input 0 max_chars ^ "...")
+
+  | JsonPath path ->
+      (* Simplified JSONPath - delegates to Extract for now *)
+      apply_adapter_transform (Extract (String.sub path 2 (String.length path - 2))) input
+
+  | Regex (pattern, replacement) ->
+      (try
+        let re = Str.regexp pattern in
+        Ok (Str.global_replace re replacement input)
+      with _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
+
+  | ValidateSchema _schema_name ->
+      (* Schema validation placeholder - always passes for now *)
+      (* TODO: Implement proper JSON Schema validation *)
+      Ok input
+
+  | ParseJson ->
+      (* Validate input is valid JSON and return as-is *)
+      (try
+        let _ = Yojson.Safe.from_string input in
+        Ok input
+      with Yojson.Json_error msg -> Error (Printf.sprintf "Not valid JSON: %s" msg))
+
+  | Stringify ->
+      (* Wrap in JSON string if not already *)
+      (try
+        let _ = Yojson.Safe.from_string input in
+        Ok input  (* Already JSON *)
+      with _ ->
+        Ok (Yojson.Safe.to_string (`String input)))
+
+  | Chain transforms ->
+      (* Apply transforms sequentially *)
+      List.fold_left
+        (fun acc t ->
+          match acc with
+          | Error _ -> acc
+          | Ok v -> apply_adapter_transform t v)
+        (Ok input)
+        transforms
+
+  | Conditional { condition; on_true; on_false } ->
+      (* Simple condition evaluation: check if input contains condition string *)
+      let transform =
+        if String.length input > 0 && String.sub input 0 (min (String.length input) (String.length condition)) = condition
+        then on_true
+        else on_false
+      in
+      apply_adapter_transform transform input
+
+  | Custom func_name ->
+      (* Custom function placeholder *)
+      (match func_name with
+       | "identity" -> Ok input
+       | "uppercase" -> Ok (String.uppercase_ascii input)
+       | "lowercase" -> Ok (String.lowercase_ascii input)
+       | "trim" -> Ok (String.trim input)
+       | "reverse" ->
+           let chars = String.to_seq input |> List.of_seq |> List.rev in
+           Ok (String.of_seq (List.to_seq chars))
+       | _ -> Error (Printf.sprintf "Unknown custom function: %s" func_name))
+
+(** Execute an adapter node *)
+let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string, string) result =
+  record_start ctx node.id;
+  let start = Unix.gettimeofday () in
+  (* Resolve input reference *)
+  let input_value = resolve_single_input ctx input_ref in
+  if input_value = "" then begin
+    let msg = Printf.sprintf "Adapter: empty input from '%s'" input_ref in
+    record_error ctx node.id msg;
+    match on_error with
+    | `Fail -> Error msg
+    | `Passthrough -> Ok ""
+    | `Default d -> Ok d
+  end
+  else
+    (* Apply transformation *)
+    let result = apply_adapter_transform transform input_value in
+    let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+    match result with
+    | Ok output ->
+        record_complete ctx node.id ~duration_ms ~success:true;
+        Hashtbl.add ctx.outputs node.id output;
+        Ok output
+    | Error msg ->
+        record_complete ctx node.id ~duration_ms ~success:false;
+        record_error ctx node.id msg;
+        (match on_error with
+         | `Fail -> Error msg
+         | `Passthrough -> Ok input_value  (* Return original on error *)
+         | `Default d -> Ok d)
 
 (** {1 Recursive Execution} *)
 
@@ -551,6 +694,9 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | ChainExec { chain_source; validate; max_depth; sandbox = _; context_inject; pass_outputs } ->
       execute_chain_exec ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~chain_source ~validate ~max_depth ~context_inject ~pass_outputs
+  (* Data Transformation Node *)
+  | Adapter { input_ref; transform; on_error } ->
+      execute_adapter ctx node ~input_ref ~transform ~on_error
 
 (** Execute a dynamically generated chain (ChainExec node)
 
@@ -1039,7 +1185,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           "Evaluate the following output for '%s' metric. Return ONLY a number between 0.0 and 1.0:\n\n%s"
           goal_metric output
         in
-        let result = exec_fn ~model:"gemini" ~prompt:prompt ?tools:None () in
+        let result = exec_fn ~model:"gemini" ?system:None ~prompt:prompt ?tools:None () in
         (match result with
          | Ok score_str ->
              (try Some (float_of_string (String.trim score_str))
@@ -1133,7 +1279,7 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       | Some p -> Printf.sprintf "%s\n\nCandidate output:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
       | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
     in
-    let result = exec_fn ~model:"gemini" ~prompt:prompt ?tools:None () in
+    let result = exec_fn ~model:"gemini" ?system:None ~prompt:prompt ?tools:None () in
     match result with
     | Ok score_str ->
         (* Extract float from response *)

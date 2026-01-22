@@ -83,10 +83,31 @@ type backoff_strategy =
   | Jitter of float * float   (** Random between min and max *)
 [@@deriving yojson]
 
-(** The 17 supported node types (including 3 resilience nodes) *)
+(** Adapter transformation types for inter-node data refinement *)
+type adapter_transform =
+  | Extract of string              (** Extract JSON field: "data.items[0].name" *)
+  | Template of string             (** Apply template: "Result: {{value}}" *)
+  | Summarize of int               (** Summarize with max tokens *)
+  | Truncate of int                (** Truncate to max characters *)
+  | JsonPath of string             (** JSONPath query *)
+  | Regex of string * string       (** Regex match and replace: (pattern, replacement) *)
+  | ValidateSchema of string       (** Validate against JSON schema name *)
+  | ParseJson                      (** Parse string as JSON *)
+  | Stringify                      (** Convert JSON to string *)
+  | Chain of adapter_transform list  (** Chain multiple transforms *)
+  | Conditional of {
+      condition : string;          (** Condition expression *)
+      on_true : adapter_transform;
+      on_false : adapter_transform;
+    }
+  | Custom of string               (** Custom function name *)
+[@@deriving yojson]
+
+(** The 19 supported node types (including 3 resilience + Adapter) *)
 type node_type =
   | Llm of {
       model : string;     (** Model name: gemini, claude, codex, ollama:* *)
+      system : string option;  (** System instruction for role definition *)
       prompt : string;    (** Prompt template with {{var}} placeholders *)
       timeout : int option;
       tools : Yojson.Safe.t option;  (** MCP tools for function calling (Ollama) *)
@@ -168,6 +189,12 @@ type node_type =
       sandbox : bool;                (** Restrict dangerous tools in generated chain *)
       context_inject : (string * string) list;  (** Context mapping: (child_var, parent_source) *)
       pass_outputs : bool;           (** Pass all parent outputs to child (default: true) *)
+    }
+  (* Inter-node data transformation *)
+  | Adapter of {
+      input_ref : string;            (** Input source: node ID or "{{node.output}}" *)
+      transform : adapter_transform; (** Transformation to apply *)
+      on_error : [ `Fail | `Passthrough | `Default of string ];  (** Error handling *)
     }
 [@@deriving yojson]
 
@@ -257,10 +284,15 @@ let node_type_name = function
   | Fallback _ -> "fallback"
   | Race _ -> "race"
   | ChainExec _ -> "chain_exec"
+  | Adapter _ -> "adapter"
 
 (** Helper: Create a simple LLM node *)
-let make_llm_node ~id ~model ~prompt ?timeout ?tools () =
-  { id; node_type = Llm { model; prompt; timeout; tools }; input_mapping = [] }
+let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
+  { id; node_type = Llm { model; system; prompt; timeout; tools }; input_mapping = [] }
+
+(** Helper: Create an adapter node for inter-node data transformation *)
+let make_adapter ~id ~input_ref ~transform ?(on_error=`Fail) () =
+  { id; node_type = Adapter { input_ref; transform; on_error }; input_mapping = [] }
 
 (** Helper: Create a simple tool node *)
 let make_tool_node ~id ~name ~args =
