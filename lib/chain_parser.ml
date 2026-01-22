@@ -193,6 +193,85 @@ let require_string json field_name =
   | other -> Error (Printf.sprintf "Field '%s' must be a string, got: %s"
                       field_name (Yojson.Safe.to_string other))
 
+(** Parse adapter transform from JSON *)
+let rec parse_adapter_transform (json : Yojson.Safe.t) : (adapter_transform, string) result =
+  let open Yojson.Safe.Util in
+  match json with
+  | `String s ->
+      (* Simple string format: "extract:data.field" or "truncate:100" *)
+      (match String.split_on_char ':' s with
+       | ["extract"; path] -> Ok (Extract path)
+       | ["template"; tpl] -> Ok (Template tpl)
+       | ["summarize"; n] -> (try Ok (Summarize (int_of_string n)) with _ -> Error "Invalid summarize value")
+       | ["truncate"; n] -> (try Ok (Truncate (int_of_string n)) with _ -> Error "Invalid truncate value")
+       | ["jsonpath"; path] -> Ok (JsonPath path)
+       | ["parse_json"] | ["parse"] -> Ok ParseJson
+       | ["stringify"] -> Ok Stringify
+       | ["custom"; name] -> Ok (Custom name)
+       | [simple] ->
+           (* Handle simple keywords *)
+           (match simple with
+            | "parse_json" | "parse" -> Ok ParseJson
+            | "stringify" -> Ok Stringify
+            | _ -> Error (Printf.sprintf "Unknown simple transform: %s" simple))
+       | _ -> Error (Printf.sprintf "Invalid transform string format: %s" s))
+  | `Assoc _ ->
+      (* Object format with "type" field *)
+      let typ = try json |> member "type" |> to_string with _ -> "unknown" in
+      (match typ with
+       | "extract" ->
+           let path = try json |> member "path" |> to_string with _ -> "." in
+           Ok (Extract path)
+       | "template" ->
+           let tpl = try json |> member "template" |> to_string with _ -> "{{value}}" in
+           Ok (Template tpl)
+       | "summarize" ->
+           let max_tokens = try json |> member "max_tokens" |> to_int with _ -> 500 in
+           Ok (Summarize max_tokens)
+       | "truncate" ->
+           let max_chars = try json |> member "max_chars" |> to_int with _ -> 1000 in
+           Ok (Truncate max_chars)
+       | "jsonpath" ->
+           let path = try json |> member "path" |> to_string with _ -> "$" in
+           Ok (JsonPath path)
+       | "regex" ->
+           let pattern = try json |> member "pattern" |> to_string with _ -> ".*" in
+           let replacement = try json |> member "replacement" |> to_string with _ -> "" in
+           Ok (Regex (pattern, replacement))
+       | "validate_schema" ->
+           let schema = try json |> member "schema" |> to_string with _ -> "" in
+           Ok (ValidateSchema schema)
+       | "parse_json" | "parse" -> Ok ParseJson
+       | "stringify" -> Ok Stringify
+       | "chain" ->
+           let transforms_json = try json |> member "transforms" |> to_list with _ -> [] in
+           let* transforms = parse_adapter_transforms transforms_json in
+           Ok (Chain transforms)
+       | "conditional" ->
+           let* condition =
+             try Ok (json |> member "condition" |> to_string)
+             with _ -> Error "Missing 'condition' in conditional transform"
+           in
+           let* on_true = parse_adapter_transform (json |> member "on_true") in
+           let* on_false = parse_adapter_transform (json |> member "on_false") in
+           Ok (Conditional { condition; on_true; on_false })
+       | "custom" ->
+           let name = try json |> member "name" |> to_string with _ -> "identity" in
+           Ok (Custom name)
+       | unknown -> Error (Printf.sprintf "Unknown transform type: %s" unknown))
+  | _ -> Error "Transform must be a string or object"
+
+(** Parse list of adapter transforms *)
+and parse_adapter_transforms (json_list : Yojson.Safe.t list) : (adapter_transform list, string) result =
+  let rec aux acc = function
+    | [] -> Ok (List.rev acc)
+    | json :: rest ->
+        match parse_adapter_transform json with
+        | Ok t -> aux (t :: acc) rest
+        | Error e -> Error e
+  in
+  aux [] json_list
+
 (** Parse a single node from JSON *)
 let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
   let open Yojson.Safe.Util in
@@ -240,6 +319,14 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
   | "llm" ->
       let* model = require_string json "model" in
       let* prompt = require_string json "prompt" in
+      let system =
+        try
+          match json |> member "system" with
+          | `Null -> None
+          | `String s -> Some s
+          | _ -> None
+        with _ -> None
+      in
       let timeout =
         try Some (json |> member "timeout" |> to_int)
         with _ -> None
@@ -251,7 +338,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
           | v -> Some v
         with _ -> None
       in
-      Ok (Llm { model; prompt; timeout; tools })
+      Ok (Llm { model; system; prompt; timeout; tools })
 
   | "tool" ->
       let* name = require_string json "name" in
@@ -430,6 +517,22 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let pass_outputs = parse_bool_with_default json "pass_outputs" true in
       Ok (ChainExec { chain_source; validate; max_depth; sandbox; context_inject; pass_outputs })
 
+  (* Data Transformation Node *)
+  | "adapter" ->
+      let* input_ref = require_string json "input_ref" in
+      let* transform = parse_adapter_transform (json |> member "transform") in
+      let on_error =
+        try
+          match json |> member "on_error" |> to_string with
+          | "fail" -> `Fail
+          | "passthrough" -> `Passthrough
+          | s when String.length s > 8 && String.sub s 0 8 = "default:" ->
+              `Default (String.sub s 8 (String.length s - 8))
+          | _ -> `Fail
+        with _ -> `Fail
+      in
+      Ok (Adapter { input_ref; transform; on_error })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -579,6 +682,35 @@ let backoff_to_json = function
   | Linear b -> `Assoc [("type", `String "linear"); ("base", `Float b)]
   | Jitter (min_s, max_s) -> `Assoc [("type", `String "jitter"); ("min", `Float min_s); ("max", `Float max_s)]
 
+(** Serialize adapter transform to JSON *)
+let rec adapter_transform_to_json = function
+  | Extract path -> `Assoc [("type", `String "extract"); ("path", `String path)]
+  | Template tpl -> `Assoc [("type", `String "template"); ("template", `String tpl)]
+  | Summarize tokens -> `Assoc [("type", `String "summarize"); ("max_tokens", `Int tokens)]
+  | Truncate chars -> `Assoc [("type", `String "truncate"); ("max_chars", `Int chars)]
+  | JsonPath path -> `Assoc [("type", `String "jsonpath"); ("path", `String path)]
+  | Regex (pattern, replacement) ->
+      `Assoc [("type", `String "regex"); ("pattern", `String pattern); ("replacement", `String replacement)]
+  | ValidateSchema schema -> `Assoc [("type", `String "validate_schema"); ("schema", `String schema)]
+  | ParseJson -> `String "parse_json"
+  | Stringify -> `String "stringify"
+  | Chain transforms ->
+      `Assoc [("type", `String "chain"); ("transforms", `List (List.map adapter_transform_to_json transforms))]
+  | Conditional { condition; on_true; on_false } ->
+      `Assoc [
+        ("type", `String "conditional");
+        ("condition", `String condition);
+        ("on_true", adapter_transform_to_json on_true);
+        ("on_false", adapter_transform_to_json on_false);
+      ]
+  | Custom name -> `Assoc [("type", `String "custom"); ("func", `String name)]
+
+(** Serialize on_error policy to JSON *)
+let on_error_to_json = function
+  | `Fail -> `String "fail"
+  | `Passthrough -> `String "passthrough"
+  | `Default s -> `Assoc [("default", `String s)]
+
 (** Serialize config to JSON *)
 let config_to_json (cfg : chain_config) : Yojson.Safe.t =
   `Assoc [
@@ -596,12 +728,16 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
     else [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
   in
   let type_fields = match n.node_type with
-    | Llm { model; prompt; timeout; tools } ->
+    | Llm { model; system; prompt; timeout; tools } ->
         let fields = [
           ("type", `String "llm");
           ("model", `String model);
           ("prompt", `String prompt);
         ] in
+        let fields = match system with
+          | Some s -> fields @ [("system", `String s)]
+          | None -> fields
+        in
         let fields = match timeout with
           | Some t -> fields @ [("timeout", `Int t)]
           | None -> fields
@@ -745,6 +881,14 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           else [("context_inject", `Assoc (List.map (fun (k, v) -> (k, `String v)) context_inject))]
         in
         base_fields @ inject_fields
+
+    | Adapter { input_ref; transform; on_error } ->
+        [
+          ("type", `String "adapter");
+          ("input_ref", `String input_ref);
+          ("transform", adapter_transform_to_json transform);
+          ("on_error", on_error_to_json on_error);
+        ]
   in
   `Assoc (base @ type_fields @ input_mapping)
 

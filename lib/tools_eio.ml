@@ -581,7 +581,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     else Some (server, String.sub name (idx + 1) tool_len)
               in
               (* Create exec_fn that routes to appropriate LLM *)
-              let exec_fn ~model ~prompt ?tools () =
+              let exec_fn ~model ?system ~prompt ?tools () =
+                let _ = system in  (* Unused for now, available for future enhancement *)
                 (* Convert Yojson.Safe.t tools to tool_schema list option *)
                 let parsed_tools = match tools with
                   | None -> None
@@ -1439,7 +1440,8 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 if server = "" || tool_len <= 0 then None
                 else Some (server, String.sub name (idx + 1) tool_len)
           in
-          let exec_fn ~model ~prompt ?tools () =
+          let exec_fn ~model ?system ~prompt ?tools () =
+            let _ = system in  (* Unused for now, available for future enhancement *)
             (* Convert Yojson.Safe.t tools to tool_schema list option *)
             let parsed_tools = match tools with
               | None -> None
