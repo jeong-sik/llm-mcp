@@ -22,7 +22,7 @@ let extract_agent_type item =
       let agent_type = input |> member "subagent_type" |> to_string_option in
       agent_type
     else None
-  with _ -> None
+  with Sys_error _ | Yojson.Json_error _ -> None
 
 (** Parse transcript line for agent calls *)
 let parse_line_for_agents line =
@@ -44,7 +44,7 @@ let parse_line_for_agents line =
         | _ -> []
         end
     | _ -> []
-  with _ -> []
+  with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> []
 
 (** Parse session transcript for agent calls *)
 let parse_session_transcript transcript_path =
@@ -79,7 +79,7 @@ let load_agent_stats () =
           Hashtbl.add tbl k (v |> to_int)
         ) total_calls;
         tbl
-      with _ -> Hashtbl.create 16
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Hashtbl.create 16
       end
   | None -> Hashtbl.create 16
 
@@ -103,7 +103,7 @@ let save_agent_stats stats =
     output_string oc (Yojson.Safe.pretty_to_string json);
     output_char oc '\n';
     close_out oc
-  with _ -> ()
+  with Sys_error _ -> ()
 
 (** Update stats and return context/warnings *)
 let update_stats _session_id transcript_path =
@@ -179,7 +179,7 @@ let main () =
         let sid = json |> member "sessionId" |> to_string_option in
         let tp = json |> member "transcript_path" |> to_string_option in
         (sid, tp)
-      with _ -> (None, None)
+      with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (None, None)
     else (None, None)
   in
 

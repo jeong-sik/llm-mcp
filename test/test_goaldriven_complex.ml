@@ -68,7 +68,7 @@ let ollama_available () : bool =
   Sys.command cmd = 0
 
 let make_ollama_exec_fn () =
-  fun ~model ~prompt ?tools:_ () ->
+  fun ~model ?system:_ ~prompt ?tools:_ () ->
     let actual_model =
       if String.length model > 7 && String.sub model 0 7 = "ollama:" then
         String.sub model 7 (String.length model - 7)
@@ -108,6 +108,7 @@ let test_multi_stage_pipeline () =
       id = "initial_gen";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Write a one-sentence definition of 'functional programming'. Be concise.";
         timeout = Some 30;
         tools = None
@@ -120,6 +121,7 @@ let test_multi_stage_pipeline () =
       id = "improve_action";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Improve this definition to be clearer and more precise. Add 'quality: 0.8' at the end. Input: {{input}}";
         timeout = Some 30;
         tools = None
@@ -151,6 +153,7 @@ let test_multi_stage_pipeline () =
       id = "format_output";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Format this as a dictionary entry with 'Term:' and 'Definition:' labels. Input: {{quality_gate}}";
         timeout = Some 30;
         tools = None
@@ -207,6 +210,7 @@ let test_iterative_code_improvement () =
       id = "code_gen";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = {|Write a Python function 'fibonacci(n)' that returns the nth Fibonacci number.
 Include type hints and a docstring.
 At the end, write 'score: 0.85' to indicate quality.
@@ -286,6 +290,7 @@ let test_mermaid_complex_execution () =
       id = "translate_action";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Translate 'Hello World' to Korean. End with 'accuracy: 0.9'";
         timeout = Some 30;
         tools = None

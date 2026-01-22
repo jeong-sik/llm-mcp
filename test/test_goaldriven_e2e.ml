@@ -70,8 +70,8 @@ let ollama_available () : bool =
    ============================================================================ *)
 
 (** Mock exec_fn that routes to Ollama *)
-let make_ollama_exec_fn () : (model:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result) =
-  fun ~model ~prompt ?tools:_ () ->
+let make_ollama_exec_fn () : (model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result) =
+  fun ~model ?system:_ ~prompt ?tools:_ () ->
     (* Extract actual model name: "ollama:qwen3:1.7b" -> "qwen3:1.7b" *)
     let actual_model =
       if String.length model > 7 && String.sub model 0 7 = "ollama:" then
@@ -107,6 +107,7 @@ let test_goaldriven_parse_float () =
       id = "number_gen";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Output ONLY a single decimal number between 0.7 and 1.0. No other text. Example: 0.85";
         timeout = Some 30;
         tools = None
@@ -168,6 +169,7 @@ let test_goaldriven_exec_test () =
       id = "coverage_gen";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "You are a test coverage reporter. Output exactly: 'coverage: 0.85' (a number between 0.80 and 0.95)";
         timeout = Some 30;
         tools = None
@@ -228,6 +230,7 @@ let test_goaldriven_llm_judge () =
       id = "code_gen";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Write a simple, clean Python function that adds two numbers with type hints and a docstring.";
         timeout = Some 45;
         tools = None
@@ -288,6 +291,7 @@ let test_goaldriven_strategy_hints () =
       id = "quality_gen";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         (* Uses {{iteration}} and {{strategy}} variables *)
         prompt = "Iteration {{iteration}}/{{max_iterations}}. Strategy: {{strategy}}. Output a quality score as: quality: 0.XX";
         timeout = Some 30;
@@ -354,6 +358,7 @@ let test_goaldriven_mermaid_roundtrip_execute () =
       id = "mermaid_action";
       node_type = Llm {
         model = "ollama:qwen3:1.7b";
+        system = None;
         prompt = "Say 'score: 0.9' exactly";
         timeout = Some 30;
         tools = None

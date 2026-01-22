@@ -688,7 +688,7 @@ let get_chains_json () =
   Printf.sprintf "[%s]" (String.concat ", " chain_items)
 
 (** Stub exec_fn for LLM calls - returns placeholder response *)
-let stub_exec_fn ~model ~prompt ?tools:_ () =
+let stub_exec_fn ~model ?system:_ ~prompt ?tools:_ () =
   (* In real implementation, this would call Tools_eio or similar *)
   let truncated = String.sub prompt 0 (min 50 (String.length prompt)) in
   let response = Printf.sprintf "[%s] Response to: %s..." model truncated in

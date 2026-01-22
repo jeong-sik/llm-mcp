@@ -89,7 +89,7 @@ let get_git_state () =
         ("recent_commits", `List recent_commits);
         ("has_changes", `Bool has_changes);
       ]
-    with _ ->
+    with Sys_error _ | Unix.Unix_error _ ->
       `Assoc [
         ("changed_files", `List []);
         ("untracked_files", `List []);
@@ -110,7 +110,7 @@ let extract_file_references text =
     matches
     |> List.map (fun m -> Re.Group.get m 0)
     |> List.sort_uniq String.compare
-  with _ -> []
+  with Not_found -> []
 
 (** Error patterns for extraction *)
 let error_patterns = [
@@ -130,7 +130,7 @@ let extract_error_messages text =
         if String.length s > 200 then String.sub s 0 200 else s
       ) matches in
       acc @ msgs
-    with _ -> acc
+    with Not_found -> acc
   ) [] error_patterns in
   List.sort_uniq String.compare all_errors
 
@@ -179,9 +179,9 @@ let load_transcript transcript_path n_turns =
       (* Try to get messages array *)
       let messages =
         try json |> member "messages" |> to_list
-        with _ ->
+        with Type_error _ ->
           try to_list json
-          with _ -> []
+          with Type_error _ -> []
       in
 
       (* Extract last n_turns * 2 messages, filter to user/assistant *)
@@ -195,7 +195,7 @@ let load_transcript transcript_path n_turns =
       let turns = List.filter_map (fun msg ->
         try
           let role = try msg |> member "type" |> to_string
-            with _ -> msg |> member "role" |> to_string in
+            with Type_error _ -> msg |> member "role" |> to_string in
           let content = msg |> member "content" |> to_string in
           if role = "user" || role = "assistant" then
             let truncated = if String.length content > 1000
@@ -204,7 +204,7 @@ let load_transcript transcript_path n_turns =
             in
             Some (role, truncated)
           else None
-        with _ -> None
+        with Type_error _ -> None
       ) recent in
 
       (* Take last n_turns *)
@@ -212,7 +212,7 @@ let load_transcript transcript_path n_turns =
         let start = List.length turns - n_turns in
         List.filteri (fun i _ -> i >= start) turns
       else turns
-    with _ -> []
+    with Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> []
   end
 
 (** Analyze recent activity from turns and git state *)
@@ -251,13 +251,13 @@ let analyze_recent_activity turns git_state =
 
   (* Infer current task from git state *)
   let open Yojson.Safe.Util in
-  let changed_files = try git_state |> member "changed_files" |> to_list with _ -> [] in
-  let recent_commits = try git_state |> member "recent_commits" |> to_list with _ -> [] in
+  let changed_files = try git_state |> member "changed_files" |> to_list with Type_error _ -> [] in
+  let recent_commits = try git_state |> member "recent_commits" |> to_list with Type_error _ -> [] in
 
   if List.length changed_files > 0 then begin
-    let first_file = try List.hd changed_files |> to_string with _ -> "" in
+    let first_file = try List.hd changed_files |> to_string with Type_error _ | Failure _ -> "" in
     if List.length recent_commits > 0 then
-      let commit_msg = try List.hd recent_commits |> to_string with _ -> "" in
+      let commit_msg = try List.hd recent_commits |> to_string with Type_error _ | Failure _ -> "" in
       current_task := `String (Printf.sprintf "Working on %s: %s" first_file commit_msg)
     else
       current_task := `String (Printf.sprintf "Modifying %s" first_file)
