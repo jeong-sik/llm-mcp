@@ -8,11 +8,36 @@
 
 open Types
 
+(** {1 Cache Configuration - Memory Leak Prevention} *)
+
+(** Maximum entries before LRU eviction *)
+let max_tool_cache_size = 256
+let max_system_prompt_cache_size = 64
+
 (** In-memory tool cache *)
 let tool_cache : (string, tool_cache_entry) Hashtbl.t = Hashtbl.create 64
 
-(** In-memory system prompt cache *)
-let system_prompt_cache : (string, string) Hashtbl.t = Hashtbl.create 16
+(** In-memory system prompt cache with timestamp for LRU *)
+type prompt_cache_entry = { prompt: string; added_at: float }
+let system_prompt_cache : (string, prompt_cache_entry) Hashtbl.t = Hashtbl.create 16
+
+(** Evict oldest entries when cache exceeds max size (LRU) *)
+let evict_oldest_tool_cache () =
+  if Hashtbl.length tool_cache > max_tool_cache_size then begin
+    let entries = Hashtbl.fold (fun k v acc -> (k, v.cached_at) :: acc) tool_cache [] in
+    let sorted = List.sort (fun (_, t1) (_, t2) -> compare t1 t2) entries in
+    (* Remove oldest 25% *)
+    let to_remove = max 1 (List.length sorted / 4) in
+    List.iteri (fun i (k, _) -> if i < to_remove then Hashtbl.remove tool_cache k) sorted
+  end
+
+let evict_oldest_prompt_cache () =
+  if Hashtbl.length system_prompt_cache > max_system_prompt_cache_size then begin
+    let entries = Hashtbl.fold (fun k v acc -> (k, v.added_at) :: acc) system_prompt_cache [] in
+    let sorted = List.sort (fun (_, t1) (_, t2) -> compare t1 t2) entries in
+    let to_remove = max 1 (List.length sorted / 4) in
+    List.iteri (fun i (k, _) -> if i < to_remove then Hashtbl.remove system_prompt_cache k) sorted
+  end
 
 (** Generate short hash for caching (MD5, first 8 chars) *)
 let short_hash s =
@@ -22,6 +47,7 @@ let short_hash s =
 
 (** Register tool definition, return cache reference *)
 let cache_tool_def ~name ~schema : string =
+  evict_oldest_tool_cache ();  (* Memory leak prevention *)
   let hash = short_hash (name ^ schema) in
   let id = "t_" ^ hash in
   if not (Hashtbl.mem tool_cache id) then begin
@@ -40,14 +66,28 @@ let lookup_tool id : tool_cache_entry option =
 
 (** Register system prompt, return hash reference *)
 let cache_system_prompt prompt : string =
+  evict_oldest_prompt_cache ();  (* Memory leak prevention *)
   let hash = "s_" ^ short_hash prompt in
   if not (Hashtbl.mem system_prompt_cache hash) then
-    Hashtbl.add system_prompt_cache hash prompt;
+    Hashtbl.add system_prompt_cache hash { prompt; added_at = Unix.gettimeofday () };
   hash
 
 (** Lookup cached system prompt *)
 let lookup_system_prompt hash : string option =
-  Hashtbl.find_opt system_prompt_cache hash
+  match Hashtbl.find_opt system_prompt_cache hash with
+  | Some entry -> Some entry.prompt
+  | None -> None
+
+(** Clear all caches (for testing or memory pressure) *)
+let clear_caches () =
+  Hashtbl.clear tool_cache;
+  Hashtbl.clear system_prompt_cache
+
+(** Get cache statistics *)
+let cache_stats () =
+  Printf.sprintf "tool_cache: %d/%d, prompt_cache: %d/%d"
+    (Hashtbl.length tool_cache) max_tool_cache_size
+    (Hashtbl.length system_prompt_cache) max_system_prompt_cache_size
 
 (** Encode delta operation to string *)
 let rec encode_delta = function
