@@ -33,3 +33,4 @@ llm-mcp-linux-x64
 !llm-mcp-macos-arm64
 .worktrees/
 .worktree/
+data/chain_history.jsonl
