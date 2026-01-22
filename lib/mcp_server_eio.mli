@@ -41,6 +41,20 @@ val remove_session : session_store -> string -> unit
 val cleanup_stale_sessions : session_store -> unit
 
 
+(** {1 Protocol Constants} *)
+
+(** Supported MCP protocol versions *)
+val supported_protocol_versions : string list
+
+(** {1 Response Helpers} *)
+
+(** Create a JSON-RPC error response *)
+val make_error : id:Yojson.Safe.t -> int -> string -> Yojson.Safe.t
+
+(** Health check response (JSON string) *)
+val health_response : unit -> string
+
+
 (** {1 Authentication} *)
 
 (** Check authorization header against LLM_MCP_API_KEY env var.

@@ -15,6 +15,7 @@ Chain DSL 스펙: docs/CHAIN_RFC.md (실용 오케스트레이션 DSL 및 예시
 | 5. Layered | ✅ | ✅ | `Presets.Layered` |
 | 6. Diamond | ✅ | ✅ | `Presets.Diamond` |
 | 7. Goal-Driven | ✅ | ✅ | `Validation_stack` |
+| 8. Clean Context | ✅ | ⬜ | `Spawn` node type |
 
 ---
 
@@ -412,6 +413,120 @@ end)
 | Circuit Breaker | 장애 차단 | ✅ |
 | Saga | 분산 트랜잭션 | ✅ |
 | Checkpoint | 진행 저장/복구 | ✅ |
+| **Clean Context** | **Vision/반복 작업** | ⬜ |
+
+---
+
+## 8. Clean Context (컨텍스트 격리)
+
+```
+        Main Agent (with context)
+                  │
+                  │ "analyze this image"
+                  ▼
+    ┌─────────────────────────────┐
+    │   SPAWN CLEAN AGENT         │
+    │   (NO prior context)        │
+    │                             │
+    │   ┌───────────────────┐     │
+    │   │   Read(image.png) │     │
+    │   │        ↓          │     │
+    │   │   Vision Analysis │     │
+    │   │        ↓          │     │
+    │   │   Pure Output     │     │
+    │   └───────────────────┘     │
+    │                             │
+    └──────────────┬──────────────┘
+                   │ uncontaminated result
+                   ▼
+        Main Agent continues
+```
+
+### 문제: 컨텍스트 오염 (Context Contamination)
+
+```
+❌ Bad: 이전 세션 HTML이 컨텍스트에 있음
+        ↓
+   Vision이 이미지를 "읽는" 게 아니라
+   컨텍스트에서 텍스트를 "기억"해서 사용
+
+✅ Good: 깨끗한 에이전트가 이미지만 보고 분석
+        ↓
+   순수하게 시각적 정보만 추출
+```
+
+### Use Cases
+
+1. **Vision-First Figma 구현**: 이전 구현 없이 순수하게 디자인 분석
+2. **이미지 텍스트 추출**: OCR처럼 정확하게 텍스트 읽기
+3. **반복 작업의 독립성**: 각 반복이 이전 결과에 영향받지 않음
+4. **A/B 테스트**: 두 에이전트가 동일 조건에서 비교
+
+### Chain DSL (v0.2 제안)
+
+```json
+{
+  "chain": {
+    "id": "clean_context_vision",
+    "nodes": [
+      {
+        "id": "vision",
+        "type": "spawn",
+        "clean_context": true,
+        "node": {
+          "id": "analyze",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "이 이미지를 분석해주세요: {{image_path}}",
+          "vision": true
+        }
+      }
+    ],
+    "output": "vision"
+  }
+}
+```
+
+### Mermaid (제안)
+
+```mermaid
+graph LR
+    main["Main Agent"]
+    spawn[["Spawn:clean"]]
+    vision["LLM:claude:vision 'Analyze image'"]
+    result["Return"]
+    main --> spawn
+    spawn --> vision
+    vision --> result
+    result --> main
+```
+
+### 핵심 속성
+
+| 속성 | 설명 |
+|------|------|
+| `clean_context: true` | 이전 대화/파일 컨텍스트 없이 시작 |
+| `vision: true` | 멀티모달 이미지 분석 활성화 |
+| `inherit_tools: true` | 도구는 상속 (Read, Write 등) |
+| `inherit_env: true` | 환경변수는 상속 |
+
+### 구현 고려사항
+
+```ocaml
+(* 제안: spawn_clean 함수 *)
+let spawn_clean ~sw ~prompt ~image_path =
+  (* 새 에이전트 프로세스 시작, 컨텍스트 없이 *)
+  let agent = Agent.create ~sw ~context:[] in
+  Agent.run agent ~prompt ~attachments:[image_path]
+```
+
+### 발견 경위 (2026-01-22)
+
+Figma Vision-First 구현 중 발견:
+- 이전 세션의 HTML 파일이 컨텍스트에 로드됨
+- "파일에 입력된 정보 기준으로 원생이 즉시 등록됩니다." 텍스트
+- 이 텍스트가 Vision 분석에서 나온 건지, 컨텍스트에서 나온 건지 불명확
+- **순수 Vision 테스트를 위해 Clean Context 필요성 확인**
 
 ---
 

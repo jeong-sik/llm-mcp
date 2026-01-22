@@ -52,6 +52,8 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         collect_nested_dependencies inner
     | Chain_types.Batch { inner; _ } ->
         collect_nested_dependencies inner
+    | Chain_types.Spawn { inner; _ } ->
+        collect_nested_dependencies inner
     | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _
     | Chain_types.ChainExec _ | Chain_types.Adapter _ ->
         []
@@ -219,6 +221,8 @@ let rec calculate_depth (node : Chain_types.node) : int =
   | Chain_types.Cache { inner; _ } ->
       1 + calculate_depth inner
   | Chain_types.Batch { inner; _ } ->
+      1 + calculate_depth inner
+  | Chain_types.Spawn { inner; _ } ->
       1 + calculate_depth inner
 
 (** Main entry point: Compile chain to execution plan *)
