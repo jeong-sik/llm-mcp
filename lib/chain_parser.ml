@@ -568,6 +568,17 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       in
       Ok (Batch { batch_size; parallel; inner; collect_strategy })
 
+  | "spawn" ->
+      (* Clean Context Spawn - execute inner with isolated context *)
+      let clean = parse_bool_with_default json "clean" true in  (* default: clean *)
+      let* inner = parse_node (json |> member "inner") in
+      let pass_vars = match json |> member "pass_vars" with
+        | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+        | _ -> []
+      in
+      let inherit_cache = parse_bool_with_default json "inherit_cache" true in
+      Ok (Spawn { clean; inner; pass_vars; inherit_cache })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -951,6 +962,14 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("parallel", `Bool parallel);
           ("inner", node_to_json inner);
           ("collect_strategy", `String strategy_str);
+        ]
+    | Spawn { clean; inner; pass_vars; inherit_cache } ->
+        [
+          ("type", `String "spawn");
+          ("clean", `Bool clean);
+          ("inner", node_to_json inner);
+          ("pass_vars", `List (List.map (fun v -> `String v) pass_vars));
+          ("inherit_cache", `Bool inherit_cache);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)

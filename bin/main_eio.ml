@@ -53,6 +53,10 @@ let dashboard_html = {|<!DOCTYPE html>
     .mermaid-container h2 { font-size: 16px; color: #888; margin: 0; }
     .mermaid-container .toggle-btn { background: #4ade80; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; }
     .mermaid-container .toggle-btn:hover { background: #22c55e; }
+    .chain-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chain-tab { background: #1a1a2e; color: #888; border: 1px solid #333; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
+    .chain-tab:hover { background: #2a2a4e; color: #eee; }
+    .chain-tab.active { background: #4ade80; color: #000; border-color: #4ade80; font-weight: bold; }
     .mermaid-container #mermaid-graph { background: #1a1a2e; padding: 20px; border-radius: 8px; min-height: 200px; max-height: 500px; overflow: auto; }
     .mermaid-container #mermaid-graph svg { max-width: 100%; max-height: 450px; }
     .mermaid-container .no-chain { color: #666; font-style: italic; text-align: center; padding: 50px; }
@@ -75,6 +79,16 @@ let dashboard_html = {|<!DOCTYPE html>
     .event.node_start { border-left: 3px solid #fbbf24; }
     .event.node_complete { border-left: 3px solid #a78bfa; }
     .event.chain_error { border-left: 3px solid #f87171; background: #2d1f1f; }
+    .history-panel { background: #16213e; border-radius: 12px; padding: 20px; max-height: 300px; overflow-y: auto; margin-top: 20px; }
+    .history-panel h2 { font-size: 16px; margin-bottom: 15px; color: #888; display: flex; align-items: center; gap: 10px; }
+    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-radius: 8px; margin-bottom: 6px; background: #1a1a2e; font-family: monospace; font-size: 12px; cursor: pointer; transition: background 0.2s; }
+    .history-item:hover { background: #2a2a4e; }
+    .history-item.chain_complete { border-left: 3px solid #4ade80; }
+    .history-item.chain_error { border-left: 3px solid #f87171; }
+    .history-item .chain-id { color: #60a5fa; font-weight: bold; }
+    .history-item .duration { color: #4ade80; }
+    .history-item .timestamp { color: #666; font-size: 11px; }
+    .history-item .tokens { color: #a78bfa; }
     @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
@@ -105,7 +119,9 @@ let dashboard_html = {|<!DOCTYPE html>
 
   <div class="mermaid-container" id="mermaid-container">
     <div class="header-row">
-      <h2>🔄 Current Chain</h2>
+      <h2>🔄 Active Chains</h2>
+      <div id="chain-tabs" class="chain-tabs"></div>
+      <button class="toggle-btn" id="toggle-direction" onclick="toggleDirection()">↔ LR</button>
       <button class="toggle-btn" id="toggle-expand" onclick="toggleExpand()">⛶ Expand</button>
     </div>
     <div id="mermaid-graph"><div class="no-chain">Waiting for chain execution...</div></div>
@@ -122,8 +138,14 @@ let dashboard_html = {|<!DOCTYPE html>
     <div id="event-list"></div>
   </div>
 
+  <div class="history-panel">
+    <h2>📜 History <button class="toggle-btn" onclick="loadHistory()">↻ Refresh</button></h2>
+    <div id="history-list"></div>
+  </div>
+
   <script>
-    // Toggle expand function (global scope)
+    // Global scope functions for onclick handlers
+    window.switchChain = null;  // Will be set after DOMContentLoaded
     function toggleExpand() {
       const container = document.getElementById('mermaid-container');
       const btn = document.getElementById('toggle-expand');
@@ -147,45 +169,129 @@ let dashboard_html = {|<!DOCTYPE html>
     const mermaidEl = document.getElementById('mermaid-graph');
     const legendEl = document.getElementById('node-legend');
     let eventSource;
-    let currentMermaid = null;
-    let nodeStates = {};  // node_id -> 'pending' | 'running' | 'complete' | 'error'
+    // Multi-chain support
+    let activeChains = {};  // chain_id -> { mermaid, nodeStates, startTime, fullTexts }
+    let currentChainId = null;
+    let graphDirection = 'LR';  // LR (left-right) or TB (top-bottom)
 
     const STATE_COLORS = { pending: '#666', running: '#fbbf24', complete: '#4ade80', error: '#f87171' };
     let renderCounter = 0;
 
-    async function renderMermaid(dsl) {
-      currentMermaid = dsl;
-      nodeStates = {};
+    function toggleDirection() {
+      graphDirection = graphDirection === 'LR' ? 'TB' : 'LR';
+      const btn = document.getElementById('toggle-direction');
+      btn.textContent = graphDirection === 'LR' ? '↔ LR' : '↕ TB';
+      // Re-render current chain with new direction
+      if (currentChainId && activeChains[currentChainId]) {
+        const chain = activeChains[currentChainId];
+        renderMermaid(chain.mermaid, currentChainId);
+        Object.entries(chain.nodeStates).forEach(([nodeId, state]) => {
+          updateNodeStyle(nodeId, state);
+        });
+      }
+    }
+
+    // Truncate long text in Mermaid DSL and apply direction
+    function truncateMermaidDsl(dsl, maxLen = 40) {
+      const fullTexts = {};  // nodeId -> fullText (for tooltip)
+      let truncated = dsl.replace(/\["([^"]+)"\]/g, (match, text) => {
+        // Extract node id from context (before the bracket)
+        const nodeMatch = dsl.substring(0, dsl.indexOf(match)).match(/(\w+)\s*$/);
+        const nodeId = nodeMatch ? nodeMatch[1] : 'node';
+        fullTexts[nodeId] = text;
+        if (text.length > maxLen) {
+          return '["' + text.substring(0, maxLen) + '..."]';
+        }
+        return match;
+      });
+      // Apply graph direction (replace LR/TB/RL/BT with current direction)
+      truncated = truncated.replace(/graph\s+(LR|TB|RL|BT)/i, 'graph ' + graphDirection);
+      return { dsl: truncated, fullTexts };
+    }
+
+    async function renderMermaid(dsl, chainId) {
+      const { dsl: truncatedDsl, fullTexts } = truncateMermaidDsl(dsl);
+
+      if (!activeChains[chainId]) {
+        activeChains[chainId] = { mermaid: dsl, nodeStates: {}, startTime: Date.now(), fullTexts };
+      }
+      activeChains[chainId].mermaid = dsl;
+      activeChains[chainId].fullTexts = fullTexts;
+      currentChainId = chainId;
+
+      updateChainTabs();
       legendEl.style.display = 'flex';
-      console.log('renderMermaid called, mermaid available:', typeof mermaid !== 'undefined');
+
       if (typeof mermaid === 'undefined') {
         mermaidEl.innerHTML = '<pre style="color:#f87171;font-size:12px;">Mermaid not loaded</pre>';
         return;
       }
       try {
-        const { svg } = await mermaid.render('mermaid-svg-' + (++renderCounter), dsl);
-        console.log('Mermaid rendered successfully');
+        const { svg } = await mermaid.render('mermaid-svg-' + (++renderCounter), truncatedDsl);
         mermaidEl.innerHTML = svg;
-        // Make SVG larger
         const svgEl = mermaidEl.querySelector('svg');
         if (svgEl) {
           svgEl.style.minWidth = '100%';
           svgEl.style.height = 'auto';
         }
+        // Add tooltips for truncated nodes
+        addNodeTooltips(fullTexts);
       } catch (e) {
         console.error('Mermaid render error:', e);
         mermaidEl.innerHTML = '<pre style="color:#f87171;font-size:12px;">Render error: ' + e.message + '</pre>';
       }
     }
 
+    function addNodeTooltips(fullTexts) {
+      const svg = mermaidEl.querySelector('svg');
+      if (!svg) return;
+      Object.entries(fullTexts).forEach(([nodeId, text]) => {
+        const node = svg.querySelector('[id*="' + nodeId + '"]');
+        if (node) {
+          const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+          title.textContent = text;
+          node.appendChild(title);
+        }
+      });
+    }
+
+    function updateChainTabs() {
+      const tabsEl = document.getElementById('chain-tabs');
+      if (!tabsEl) return;
+      tabsEl.innerHTML = Object.keys(activeChains).map(id => {
+        const chain = activeChains[id];
+        const isActive = id === currentChainId;
+        const elapsed = ((Date.now() - chain.startTime) / 1000).toFixed(0);
+        return '<button class="chain-tab' + (isActive ? ' active' : '') + '" onclick="switchChain(\'' + id + '\')">' +
+          id + ' (' + elapsed + 's)</button>';
+      }).join('');
+    }
+
+    function switchChain(chainId) {
+      if (!activeChains[chainId]) return;
+      currentChainId = chainId;
+      const chain = activeChains[chainId];
+      renderMermaid(chain.mermaid, chainId);
+      // Restore node states
+      Object.entries(chain.nodeStates).forEach(([nodeId, state]) => {
+        updateNodeStyle(nodeId, state);
+      });
+      updateChainTabs();
+    }
+
     function updateNodeStyle(nodeId, state) {
       const svg = mermaidEl.querySelector('svg');
       if (!svg) { console.log('No SVG found'); return; }
 
-      // Try multiple selectors - Mermaid uses different patterns
+      // Normalize nodeId (remove special chars, lowercase for matching)
+      const normalizedId = nodeId.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+
+      // Try multiple selectors - Mermaid uses different ID patterns
       const selectors = [
-        '[id*="flowchart-' + nodeId + '"] rect',
-        '[id*="flowchart-' + nodeId + '"] polygon',
+        '[id*="flowchart-' + nodeId + '-"] rect',
+        '[id*="flowchart-' + nodeId + '-"] polygon',
+        '[id*="flowchart-' + normalizedId + '-"] rect',
+        '[id*="flowchart-' + normalizedId + '-"] polygon',
         '[id*="' + nodeId + '"] rect',
         '[id*="' + nodeId + '"] polygon',
         'g[id*="' + nodeId + '"] rect',
@@ -194,23 +300,32 @@ let dashboard_html = {|<!DOCTYPE html>
 
       let found = false;
       for (const sel of selectors) {
-        const nodes = svg.querySelectorAll(sel);
-        nodes.forEach(node => {
-          node.style.fill = STATE_COLORS[state];
-          node.style.transition = 'fill 0.3s ease';
-          node.style.stroke = state === 'running' ? '#fff' : '';
-          node.style.strokeWidth = state === 'running' ? '3px' : '';
-          found = true;
-        });
-        if (found) break;
+        try {
+          const nodes = svg.querySelectorAll(sel);
+          nodes.forEach(node => {
+            node.style.fill = STATE_COLORS[state];
+            node.style.transition = 'fill 0.3s ease';
+            node.style.stroke = state === 'running' ? '#fff' : '#333';
+            node.style.strokeWidth = state === 'running' ? '3px' : '1px';
+            found = true;
+          });
+          if (found) break;
+        } catch(e) { /* invalid selector */ }
       }
 
-      if (!found) console.log('Node not found for:', nodeId, 'tried:', selectors[0]);
+      if (!found) {
+        // Debug: list all node IDs in SVG
+        const allIds = Array.from(svg.querySelectorAll('[id*="flowchart-"]')).map(el => el.id).slice(0, 5);
+        console.log('Node not found:', nodeId, 'Available:', allIds.join(', '));
+      }
     }
 
-    function updateNodeState(nodeId, state) {
-      nodeStates[nodeId] = state;
-      updateNodeStyle(nodeId, state);
+    function updateNodeState(chainId, nodeId, state) {
+      if (!activeChains[chainId]) return;
+      activeChains[chainId].nodeStates[nodeId] = state;
+      if (chainId === currentChainId) {
+        updateNodeStyle(nodeId, state);
+      }
     }
 
     function connect() {
@@ -218,43 +333,48 @@ let dashboard_html = {|<!DOCTYPE html>
       eventSource.onopen = () => statusEl.classList.add('connected');
       eventSource.onerror = () => {
         statusEl.classList.remove('connected');
-        nodeStates = {};
-        currentMermaid = null;
         setTimeout(connect, 3000);
       };
 
       eventSource.addEventListener('chain_start', e => {
         const data = JSON.parse(e.data);
-        console.log('chain_start received:', data);
+        const chainId = data.chain_id || 'unknown';
+        console.log('chain_start received:', chainId);
         if (data.mermaid_dsl) {
-          console.log('Rendering mermaid:', data.mermaid_dsl.substring(0, 100) + '...');
-          renderMermaid(data.mermaid_dsl);
-        } else {
-          console.warn('No mermaid_dsl in chain_start');
+          renderMermaid(data.mermaid_dsl, chainId);
         }
         addEvent('chain_start', data);
       });
 
       eventSource.addEventListener('node_start', e => {
         const data = JSON.parse(e.data);
-        updateNodeState(data.node_id, 'running');
+        const chainId = data.chain_id || currentChainId;
+        updateNodeState(chainId, data.node_id, 'running');
         addEvent('node_start', data);
       });
 
       eventSource.addEventListener('node_complete', e => {
         const data = JSON.parse(e.data);
-        updateNodeState(data.node_id, 'complete');
+        const chainId = data.chain_id || currentChainId;
+        updateNodeState(chainId, data.node_id, 'complete');
         addEvent('node_complete', data);
       });
 
       eventSource.addEventListener('chain_complete', e => {
         const data = JSON.parse(e.data);
+        const chainId = data.chain_id || currentChainId;
+        // Mark chain as complete but keep in activeChains for viewing
+        if (activeChains[chainId]) {
+          activeChains[chainId].complete = true;
+        }
+        updateChainTabs();
         addEvent('chain_complete', data);
       });
 
       eventSource.addEventListener('chain_error', e => {
         const data = JSON.parse(e.data);
-        if (data.node_id) updateNodeState(data.node_id, 'error');
+        const chainId = data.chain_id || currentChainId;
+        if (data.node_id) updateNodeState(chainId, data.node_id, 'error');
         addEvent('chain_error', data);
       });
     }
@@ -279,9 +399,55 @@ let dashboard_html = {|<!DOCTYPE html>
       }).catch(() => {});
     }
 
+    function loadHistory() {
+      fetch('/chain/history').then(r => r.json()).then(history => {
+        const listEl = document.getElementById('history-list');
+        if (!history || history.length === 0) {
+          listEl.innerHTML = '<div style="color:#666;text-align:center;padding:20px;">No history yet</div>';
+          return;
+        }
+        // Group by chain_id, show only complete/error events
+        const chains = {};
+        history.forEach(h => {
+          if (h.event === 'chain_complete' || h.event === 'chain_error') {
+            chains[h.chain_id || h.node_id] = h;
+          }
+        });
+        listEl.innerHTML = Object.values(chains).slice(0, 50).map(h => {
+          const date = new Date(h.timestamp * 1000);
+          const timeStr = date.toLocaleTimeString();
+          const dateStr = date.toLocaleDateString();
+          const isError = h.event === 'chain_error';
+          const duration = h.duration_ms ? (h.duration_ms / 1000).toFixed(1) + 's' : '-';
+          const tokens = h.tokens ? (h.tokens.input + h.tokens.output) : 0;
+          return '<div class="history-item ' + h.event + '" onclick="showHistoryDetail(\'' + (h.chain_id || '') + '\')">' +
+            '<div><span class="chain-id">' + (h.chain_id || h.node_id || 'unknown') + '</span></div>' +
+            '<div class="duration">' + (isError ? '❌' : '✓') + ' ' + duration + '</div>' +
+            '<div class="tokens">' + tokens + ' tok</div>' +
+            '<div class="timestamp">' + dateStr + ' ' + timeStr + '</div>' +
+          '</div>';
+        }).join('');
+      }).catch(() => {
+        document.getElementById('history-list').innerHTML = '<div style="color:#f87171;">Failed to load history</div>';
+      });
+    }
+
+    function showHistoryDetail(chainId) {
+      console.log('Show detail for:', chainId);
+      // TODO: Show Mermaid diagram for historical chain
+    }
+
     connect();
     fetchStats();
+    loadHistory();  // Load history on page load
     setInterval(fetchStats, 5000);
+    setInterval(updateChainTabs, 1000);  // Update elapsed time
+
+    // Expose to global scope for onclick handlers
+    window.switchChain = switchChain;
+    window.toggleDirection = toggleDirection;
+    window.loadHistory = loadHistory;
+    window.showHistoryDetail = showHistoryDetail;
     });  // end DOMContentLoaded
   </script>
 </body>
@@ -764,6 +930,36 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
           ("elapsed_sec", `Float (Unix.gettimeofday () -. started));
         ]
       ) status)) in
+      Response.json body reqd
+
+  (* Chain history endpoint - read past executions from JSONL *)
+  | `GET, "/chain/history" ->
+      let history_file = match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+        | Some path -> path
+        | None -> "data/chain_history.jsonl"
+      in
+      let records =
+        try
+          let ic = open_in history_file in
+          Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+            let rec read_lines acc =
+              match input_line ic with
+              | line ->
+                  (try read_lines (Yojson.Safe.from_string line :: acc)
+                   with _ -> read_lines acc)  (* Skip malformed lines *)
+              | exception End_of_file -> List.rev acc
+            in
+            read_lines []
+          )
+        with _ -> []  (* File doesn't exist or can't be read *)
+      in
+      (* Return last 100 records, most recent first *)
+      let recent = List.rev records |> fun l ->
+        if List.length l > 100 then
+          List.filteri (fun i _ -> i < 100) l
+        else l
+      in
+      let body = Yojson.Safe.to_string (`List recent) in
       Response.json body reqd
 
   (* Chain events SSE endpoint for real-time progress monitoring *)

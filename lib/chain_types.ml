@@ -167,7 +167,7 @@ type node_type =
     }
   | Evaluator of {
       candidates : node list;      (** Candidate nodes to evaluate *)
-      scoring_func : string;       (** Scoring function: "llm_judge", "regex_match", "json_schema", "custom" *)
+      scoring_func : string;       (** Scoring function: "llm_judge", "regex_match", "json_schema", "anti_fake", "custom" *)
       scoring_prompt : string option;  (** Prompt for LLM judge scoring *)
       select_strategy : select_strategy;  (** Selection strategy *)
       min_score : float option;    (** Minimum score threshold (fails if none meet it) *)
@@ -213,6 +213,13 @@ type node_type =
       parallel : bool;               (** Process items within batch in parallel *)
       inner : node;                  (** Node to apply to each item *)
       collect_strategy : [ `List | `Concat | `First | `Last ];  (** How to collect results *)
+    }
+  (* Clean context spawn - execute inner node with fresh context (no prior outputs/conversation) *)
+  | Spawn of {
+      clean : bool;                  (** true = start with empty context, false = inherit *)
+      inner : node;                  (** Node to execute in spawned context *)
+      pass_vars : string list;       (** Variables to pass even when clean=true: ["input"; "config"] *)
+      inherit_cache : bool;          (** Whether to keep cache from parent context (default: true) *)
     }
 [@@deriving yojson]
 
@@ -305,6 +312,7 @@ let node_type_name = function
   | Adapter _ -> "adapter"
   | Cache _ -> "cache"
   | Batch _ -> "batch"
+  | Spawn _ -> "spawn"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
@@ -458,6 +466,9 @@ let rec count_parallel_groups (node: node) : int =
   | Batch { inner; parallel; _ } ->
       (* Batch is a parallel group if parallel=true *)
       (if parallel then 1 else 0) + count_parallel_groups inner
+  | Spawn { inner; _ } ->
+      (* Spawn wraps inner - count inner's parallel groups *)
+      count_parallel_groups inner
   | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ -> 0
 
 (** Count total parallel groups in a chain *)

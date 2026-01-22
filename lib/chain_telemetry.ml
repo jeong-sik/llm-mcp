@@ -19,6 +19,25 @@ let with_mutex mutex f =
   Mutex.lock mutex;
   Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
 
+(** {1 History Persistence} *)
+
+(** History file path - configurable via environment *)
+let history_file =
+  match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+  | Some path -> path
+  | None -> "data/chain_history.jsonl"
+
+(** Append a JSON record to history file (thread-safe via OS) *)
+let append_history (json : Yojson.Safe.t) =
+  try
+    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 history_file in
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      output_string oc (Yojson.Safe.to_string json);
+      output_char oc '\n';
+      flush oc
+    )
+  with _ -> () (* Silently ignore write errors *)
+
 (** {1 Event Types} *)
 
 (** Chain start event payload *)
@@ -152,8 +171,44 @@ let gen_sub_id () =
 
 (** {1 Event Emission} *)
 
+(** Save significant events to history *)
+let save_to_history event =
+  let now = Unix.gettimeofday () in
+  let record = match event with
+    | ChainStart p ->
+        Some (`Assoc [
+          ("event", `String "chain_start");
+          ("chain_id", `String p.start_chain_id);
+          ("nodes", `Int p.start_nodes);
+          ("timestamp", `Float now);
+          ("mermaid_dsl", match p.start_mermaid_dsl with Some s -> `String s | None -> `Null);
+        ])
+    | ChainComplete p ->
+        Some (`Assoc [
+          ("event", `String "chain_complete");
+          ("chain_id", `String p.complete_chain_id);
+          ("duration_ms", `Int p.complete_duration_ms);
+          ("tokens", token_usage_to_yojson p.complete_tokens);
+          ("nodes_executed", `Int p.nodes_executed);
+          ("nodes_skipped", `Int p.nodes_skipped);
+          ("timestamp", `Float now);
+        ])
+    | Error p ->
+        Some (`Assoc [
+          ("event", `String "chain_error");
+          ("node_id", `String p.error_node_id);
+          ("message", `String p.error_message);
+          ("retries", `Int p.error_retries);
+          ("timestamp", `Float now);
+        ])
+    | _ -> None  (* Only persist chain-level events *)
+  in
+  match record with Some r -> append_history r | None -> ()
+
 (** Emit an event to all subscribers *)
 let emit event =
+  (* Save to history file (chain_start, chain_complete, chain_error only) *)
+  save_to_history event;
   (* Get handlers snapshot under lock *)
   let handlers = with_mutex subscribers_mutex (fun () ->
     Hashtbl.fold (fun _ handler acc -> handler :: acc) subscribers []
