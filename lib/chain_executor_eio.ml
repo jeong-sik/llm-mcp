@@ -1084,13 +1084,14 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
     match r with Ok o -> Some (id, o) | Error _ -> None
   ) !results in
 
-  if List.length outputs = 0 then begin
+  match outputs with
+  | [] ->
     record_complete ctx parent.id ~duration_ms ~success:false;
     Error "All merge inputs failed"
-  end else begin
+  | first :: _ ->
     let merged = match strategy with
-      | First -> snd (List.hd outputs)
-      | Last -> snd (List.hd (List.rev outputs))
+      | First -> snd first
+      | Last -> snd (List.hd (List.rev outputs))  (* Safe: outputs is non-empty *)
       | Concat -> String.concat "\n" (List.map snd outputs)
       | WeightedAvg ->
           (* Weighted average - for now just concatenate with equal weights *)
@@ -1105,7 +1106,6 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
     record_complete ctx parent.id ~duration_ms ~success:true;
     Hashtbl.add ctx.outputs parent.id merged;
     Ok merged
-  end
 
 (** Execute threshold node - conditional branching based on metric value *)
 and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
