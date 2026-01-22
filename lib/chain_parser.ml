@@ -100,6 +100,26 @@ let parse_float_opt json field_name =
   | `Int i -> Some (float_of_int i)
   | _ -> None
 
+(** Parse MCTS policy from JSON *)
+let parse_mcts_policy (json : Yojson.Safe.t) : (mcts_policy, string) result =
+  let open Yojson.Safe.Util in
+  match json |> member "type" |> to_string_option with
+  | Some "ucb1" ->
+      let c = match json |> member "c" with
+        | `Float f -> f | `Int i -> float_of_int i | _ -> 1.41
+      in Ok (UCB1 c)
+  | Some "greedy" -> Ok Greedy
+  | Some "epsilon_greedy" ->
+      let eps = match json |> member "epsilon" with
+        | `Float f -> f | `Int i -> float_of_int i | _ -> 0.1
+      in Ok (EpsilonGreedy eps)
+  | Some "softmax" ->
+      let temp = match json |> member "temperature" with
+        | `Float f -> f | `Int i -> float_of_int i | _ -> 1.0
+      in Ok (Softmax temp)
+  | Some t -> Error (Printf.sprintf "Unknown MCTS policy type: %s" t)
+  | None -> Ok (UCB1 1.41)  (* default policy *)
+
 (** Parse backoff strategy from JSON with sensible defaults *)
 let parse_backoff_strategy json =
   let open Yojson.Safe.Util in
@@ -579,6 +599,24 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let inherit_cache = parse_bool_with_default json "inherit_cache" true in
       Ok (Spawn { clean; inner; pass_vars; inherit_cache })
 
+  | "mcts" ->
+      (* MCTS - Monte Carlo Tree Search for multi-strategy exploration *)
+      let strategies_json = parse_list_with_default json "strategies" in
+      let* strategies = parse_nodes strategies_json in
+      let* simulation = parse_node (json |> member "simulation") in
+      let evaluator = parse_string_with_default json "evaluator" "llm_judge" in
+      let evaluator_prompt = parse_string_opt json "evaluator_prompt" in
+      let* policy = parse_mcts_policy (json |> member "policy") in
+      let max_iterations = parse_int_with_default json "max_iterations" 10 in
+      let max_depth = parse_int_with_default json "max_depth" 5 in
+      let expansion_threshold = parse_int_with_default json "expansion_threshold" 3 in
+      let early_stop = parse_float_opt json "early_stop" in
+      let parallel_sims = parse_int_with_default json "parallel_sims" 1 in
+      Ok (Mcts {
+        strategies; simulation; evaluator; evaluator_prompt; policy;
+        max_iterations; max_depth; expansion_threshold; early_stop; parallel_sims
+      })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -636,6 +674,8 @@ let rec has_placeholder_in_node_type = function
   | Map { inner; _ } -> has_placeholder_node inner
   | Threshold { input_node; _ } -> has_placeholder_node input_node
   | Evaluator { candidates; _ } -> List.exists has_placeholder_node candidates
+  | Mcts { strategies; simulation; _ } ->
+      List.exists has_placeholder_node strategies || has_placeholder_node simulation
   | _ -> false
 
 and has_placeholder_node (n : Chain_types.node) =
@@ -666,6 +706,9 @@ let rec collect_placeholders_in_node_type acc = function
       collect_placeholders_in_node acc input_node
   | Evaluator { candidates; _ } ->
       List.fold_left collect_placeholders_in_node acc candidates
+  | Mcts { strategies; simulation; _ } ->
+      let acc = List.fold_left collect_placeholders_in_node acc strategies in
+      collect_placeholders_in_node acc simulation
   | _ -> acc
 
 and collect_placeholders_in_node acc (n : Chain_types.node) =
@@ -970,6 +1013,27 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("inner", node_to_json inner);
           ("pass_vars", `List (List.map (fun v -> `String v) pass_vars));
           ("inherit_cache", `Bool inherit_cache);
+        ]
+    | Mcts { strategies; simulation; evaluator; evaluator_prompt; policy;
+             max_iterations; max_depth; expansion_threshold; early_stop; parallel_sims } ->
+        let policy_json = match policy with
+          | UCB1 c -> `Assoc [("type", `String "ucb1"); ("c", `Float c)]
+          | Greedy -> `Assoc [("type", `String "greedy")]
+          | EpsilonGreedy e -> `Assoc [("type", `String "epsilon_greedy"); ("epsilon", `Float e)]
+          | Softmax t -> `Assoc [("type", `String "softmax"); ("temperature", `Float t)]
+        in
+        [
+          ("type", `String "mcts");
+          ("strategies", `List (List.map node_to_json strategies));
+          ("simulation", node_to_json simulation);
+          ("evaluator", `String evaluator);
+          ("evaluator_prompt", match evaluator_prompt with Some p -> `String p | None -> `Null);
+          ("policy", policy_json);
+          ("max_iterations", `Int max_iterations);
+          ("max_depth", `Int max_depth);
+          ("expansion_threshold", `Int expansion_threshold);
+          ("early_stop", match early_stop with Some s -> `Float s | None -> `Null);
+          ("parallel_sims", `Int parallel_sims);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)

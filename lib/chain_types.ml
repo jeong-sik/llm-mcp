@@ -108,7 +108,15 @@ type adapter_transform =
   | Custom of string               (** Custom function name *)
 [@@deriving yojson]
 
-(** The 21 supported node types (including 3 resilience + Adapter + Cache + Batch) *)
+(** MCTS selection policy for tree search *)
+type mcts_policy =
+  | UCB1 of float                 (** UCB1 with exploration constant c *)
+  | Greedy                        (** Always select highest score *)
+  | EpsilonGreedy of float        (** Random with probability epsilon *)
+  | Softmax of float              (** Temperature-based selection *)
+[@@deriving yojson]
+
+(** The 22 supported node types (including 3 resilience + Adapter + Cache + Batch + MCTS) *)
 type node_type =
   | Llm of {
       model : string;     (** Model name: gemini, claude, codex, ollama:* *)
@@ -221,6 +229,19 @@ type node_type =
       pass_vars : string list;       (** Variables to pass even when clean=true: ["input"; "config"] *)
       inherit_cache : bool;          (** Whether to keep cache from parent context (default: true) *)
     }
+  (* MCTS - Monte Carlo Tree Search for multi-strategy exploration *)
+  | Mcts of {
+      strategies : node list;        (** Strategy nodes to explore *)
+      simulation : node;             (** Simulation node for rollout *)
+      evaluator : string;            (** Scoring function: "llm_judge", "regex", "custom" *)
+      evaluator_prompt : string option;  (** Prompt for LLM evaluator *)
+      policy : mcts_policy;          (** Selection policy: UCB1, Greedy, EpsilonGreedy, Softmax *)
+      max_iterations : int;          (** Maximum MCTS iterations *)
+      max_depth : int;               (** Maximum tree depth *)
+      expansion_threshold : int;     (** Visits before expansion *)
+      early_stop : float option;     (** Stop if score exceeds threshold *)
+      parallel_sims : int;           (** Number of parallel simulations *)
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -313,6 +334,7 @@ let node_type_name = function
   | Cache _ -> "cache"
   | Batch _ -> "batch"
   | Spawn _ -> "spawn"
+  | Mcts _ -> "mcts"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
@@ -469,6 +491,10 @@ let rec count_parallel_groups (node: node) : int =
   | Spawn { inner; _ } ->
       (* Spawn wraps inner - count inner's parallel groups *)
       count_parallel_groups inner
+  | Mcts { strategies; simulation; _ } ->
+      (* MCTS runs strategies in parallel and performs parallel simulations *)
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 strategies +
+      count_parallel_groups simulation
   | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ -> 0
 
 (** Count total parallel groups in a chain *)

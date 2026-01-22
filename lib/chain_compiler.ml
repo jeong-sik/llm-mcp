@@ -54,6 +54,9 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         collect_nested_dependencies inner
     | Chain_types.Spawn { inner; _ } ->
         collect_nested_dependencies inner
+    | Chain_types.Mcts { strategies; simulation; _ } ->
+        List.concat_map collect_nested_dependencies strategies @
+        collect_nested_dependencies simulation
     | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _
     | Chain_types.ChainExec _ | Chain_types.Adapter _ ->
         []
@@ -224,6 +227,11 @@ let rec calculate_depth (node : Chain_types.node) : int =
       1 + calculate_depth inner
   | Chain_types.Spawn { inner; _ } ->
       1 + calculate_depth inner
+  | Chain_types.Mcts { strategies; simulation; max_depth; _ } ->
+      (* MCTS depth: 1 + max of (strategies depth, simulation depth) + max_depth *)
+      let strat_depth = List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 strategies in
+      let sim_depth = calculate_depth simulation in
+      1 + max_depth + max strat_depth sim_depth
 
 (** Main entry point: Compile chain to execution plan *)
 let compile (c : Chain_types.chain) : (Chain_types.execution_plan, string) result =

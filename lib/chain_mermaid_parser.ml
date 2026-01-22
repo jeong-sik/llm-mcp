@@ -567,8 +567,49 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           })
         else
           Error (Printf.sprintf "Invalid GoalDriven format (expected metric:op:value:max_iter): %s" content)
+      else if String.length content > 5 && String.sub content 0 5 = "MCTS:" then
+        (* {MCTS:policy:iterations} - e.g., {MCTS:ucb1:1.41:10} or {MCTS:greedy:10} *)
+        let rest = String.sub content 5 (String.length content - 5) in
+        let parts = String.split_on_char ':' rest |> List.map trim in
+        (match parts with
+        | [policy_type; iter_str] when policy_type = "greedy" ->
+            let max_iterations = try int_of_string iter_str with _ -> 10 in
+            Ok (Mcts {
+              strategies = [];  (* filled from edges *)
+              simulation = { id = "_sim"; node_type = ChainRef "_"; input_mapping = [] };
+              evaluator = "llm_judge";
+              evaluator_prompt = None;
+              policy = Greedy;
+              max_iterations;
+              max_depth = 5;
+              expansion_threshold = 3;
+              early_stop = None;
+              parallel_sims = 1;
+            })
+        | [policy_type; param_str; iter_str] ->
+            let max_iterations = try int_of_string iter_str with _ -> 10 in
+            let policy = match policy_type with
+              | "ucb1" -> UCB1 (try float_of_string param_str with _ -> 1.41)
+              | "eps" | "epsilon" -> EpsilonGreedy (try float_of_string param_str with _ -> 0.1)
+              | "softmax" -> Softmax (try float_of_string param_str with _ -> 1.0)
+              | _ -> UCB1 1.41  (* default *)
+            in
+            Ok (Mcts {
+              strategies = [];  (* filled from edges *)
+              simulation = { id = "_sim"; node_type = ChainRef "_"; input_mapping = [] };
+              evaluator = "llm_judge";
+              evaluator_prompt = None;
+              policy;
+              max_iterations;
+              max_depth = 5;
+              expansion_threshold = 3;
+              early_stop = None;
+              parallel_sims = 1;
+            })
+        | _ ->
+            Error (Printf.sprintf "Invalid MCTS format (expected policy:iterations or policy:param:iterations): %s" content))
       else
-        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, or GoalDriven:..., got: %s" content)
+        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, GoalDriven:..., or MCTS:..., got: %s" content)
 
   | `Rect ->
       (* [LLM:model "prompt"] or [LLM:model "prompt" +tools] or [Tool:name] *)
@@ -1090,6 +1131,13 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Cache { key_expr; ttl_seconds; _ } -> Printf.sprintf "cache_%s_%d" (String.sub key_expr 0 (min 8 (String.length key_expr))) ttl_seconds
   | Batch { batch_size; _ } -> Printf.sprintf "batch_%d" batch_size
   | Spawn { clean; _ } -> Printf.sprintf "spawn_%s" (if clean then "clean" else "inherit")
+  | Mcts { policy; max_iterations; _ } ->
+      let policy_str = match policy with
+        | UCB1 c -> Printf.sprintf "ucb1_%.2f" c
+        | Greedy -> "greedy"
+        | EpsilonGreedy e -> Printf.sprintf "eps_%.2f" e
+        | Softmax t -> Printf.sprintf "softmax_%.2f" t
+      in Printf.sprintf "mcts_%s_%d" policy_str max_iterations
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -1171,6 +1219,13 @@ let node_type_to_text (nt : node_type) : string =
       let clean_str = if clean then "clean" else "inherit" in
       let vars_str = if pass_vars = [] then "" else "," ^ String.concat "|" pass_vars in
       Printf.sprintf "Spawn:%s%s,%s" clean_str vars_str inner.id
+  | Mcts { policy; max_iterations; max_depth; evaluator; _ } ->
+      let policy_str = match policy with
+        | UCB1 c -> Printf.sprintf "ucb1:%.2f" c
+        | Greedy -> "greedy"
+        | EpsilonGreedy e -> Printf.sprintf "eps:%.2f" e
+        | Softmax t -> Printf.sprintf "softmax:%.2f" t
+      in Printf.sprintf "MCTS:%s:%d (depth:%d,eval:%s)" policy_str max_iterations max_depth evaluator
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -1181,6 +1236,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
   | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
+  | Mcts _ -> ("{", "}")  (* MCTS: diamond like decision nodes *)
 
 (** Map node type to CSS class name for Mermaid styling *)
 let node_type_to_class (nt : node_type) : string =
@@ -1207,6 +1263,7 @@ let node_type_to_class (nt : node_type) : string =
   | Cache _ -> "cache"
   | Batch _ -> "batch"
   | Spawn _ -> "spawn"
+  | Mcts _ -> "mcts"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1230,6 +1287,7 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
     classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
     classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
@@ -1370,6 +1428,7 @@ let chain_to_ascii (chain : chain) : string =
       | Retry _ -> "🔁" | Fallback _ -> "🛟" | Race _ -> "🏁"
       | ChainExec _ -> "🔮" | Adapter _ -> "🔌"
       | Cache _ -> "💾" | Batch _ -> "📦" | Spawn _ -> "🌱"
+      | Mcts _ -> "🌳"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in
