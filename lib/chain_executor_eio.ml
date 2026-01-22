@@ -1416,7 +1416,10 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             List.find_opt (fun (_, _, sc) -> sc >= t) filtered
         | WeightedRandom ->
             (* Simplified: just pick first (proper impl would use weighted random) *)
-            Some (List.hd filtered)
+            (* Safe: filtered is non-empty due to guard at line 1397 *)
+            match filtered with
+            | first :: _ -> Some first
+            | [] -> None  (* Unreachable but type-safe *)
       in
       match selected with
       | None ->
