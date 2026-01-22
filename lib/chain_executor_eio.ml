@@ -601,6 +601,9 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   (* Batch Processing Node *)
   | Batch { batch_size; parallel; inner; collect_strategy } ->
       execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec node ~batch_size ~parallel ~collect_strategy inner
+  (* Clean Context Spawn Node *)
+  | Spawn { clean; inner; pass_vars; inherit_cache } ->
+      execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec node ~clean ~pass_vars ~inherit_cache inner
 
 (** Execute cache node - check cache first, execute inner if miss *)
 and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
@@ -736,6 +739,64 @@ and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       | Ok output -> Hashtbl.add ctx.outputs node.id output
       | Error msg -> record_error ctx node.id msg);
       final_result
+
+(** Execute spawn node - clean context execution for isolation
+
+    When clean=true, creates a fresh context without prior outputs or conversation.
+    This prevents "context contamination" where previous results pollute new analysis.
+
+    Use cases:
+    - Vision analysis: Ensure LLM sees only the image, not prior HTML/text
+    - Multi-iteration loops: Each iteration starts fresh
+    - Parallel independent tasks: No cross-contamination
+
+    pass_vars allows selective passing of specific variables even when clean=true.
+*)
+and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
+    ~clean ~pass_vars ~inherit_cache (inner : node) : (string, string) result =
+  record_start ctx node.id;
+  let start = Unix.gettimeofday () in
+
+  (* Create spawned context based on clean flag *)
+  let spawn_ctx = if clean then begin
+    (* Clean context - fresh start *)
+    let new_ctx = make_context
+      ~start_time:ctx.start_time
+      ~trace_enabled:ctx.trace_enabled
+      ~timeout:ctx.timeout
+    in
+    (* Optionally inherit cache *)
+    if inherit_cache then
+      Hashtbl.iter (fun k v -> Hashtbl.replace new_ctx.cache k v) ctx.cache;
+    (* Pass only specified variables *)
+    List.iter (fun var_name ->
+      match Hashtbl.find_opt ctx.outputs var_name with
+      | Some value -> Hashtbl.replace new_ctx.outputs var_name value
+      | None -> ()  (* Variable not found - silently skip *)
+    ) pass_vars;
+    new_ctx
+  end else begin
+    (* Non-clean: inherit everything (basically just grouping) *)
+    ctx
+  end in
+
+  (* Execute inner node in spawned context *)
+  let result = execute_node spawn_ctx ~sw ~clock ~exec_fn ~tool_exec inner in
+
+  (* Copy result back to parent context (for downstream nodes) *)
+  (match result with
+  | Ok output ->
+      Hashtbl.add ctx.outputs inner.id output;
+      Hashtbl.add ctx.outputs node.id output
+  | Error _ -> ());
+
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let success = Result.is_ok result in
+  record_complete ctx node.id ~duration_ms ~success;
+  (match result with
+  | Ok _ -> ()
+  | Error msg -> record_error ctx node.id msg);
+  result
 
 (** Execute a dynamically generated chain (ChainExec node)
 
@@ -1433,6 +1494,99 @@ and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           | "llm_judge" ->
               (* Use LLM to score the output *)
               llm_score output
+          | "anti_fake" ->
+              (* Anti-fake test detection: Hybrid (heuristic + LLM judge) *)
+              let output_lower = String.lowercase_ascii output in
+              (* Helper: check if haystack contains needle *)
+              let contains_str needle haystack =
+                let nl = String.length needle and hl = String.length haystack in
+                if nl > hl then false
+                else
+                  let rec check i =
+                    if i > hl - nl then false
+                    else if String.sub haystack i nl = needle then true
+                    else check (i + 1)
+                  in check 0
+              in
+              (* Phase 1: Fast heuristic checks (0.0-0.5 range) *)
+              let heuristic_score = ref 0.5 in
+              (* Penalty patterns (fake tests) *)
+              if contains_str "assert true" output_lower then
+                heuristic_score := !heuristic_score -. 0.15;
+              if contains_str "let _ =" output then
+                heuristic_score := !heuristic_score -. 0.1;
+              if contains_str "(* todo" output_lower then
+                heuristic_score := !heuristic_score -. 0.05;
+              (* Bonus patterns (real tests) *)
+              let count_substr needle haystack =
+                let nl = String.length needle and hl = String.length haystack in
+                if nl > hl || nl = 0 then 0
+                else
+                  let rec aux i acc =
+                    if i > hl - nl then acc
+                    else if String.sub haystack i nl = needle then aux (i + 1) (acc + 1)
+                    else aux (i + 1) acc
+                  in aux 0 0
+              in
+              let real_asserts = count_substr "assert (" output in
+              let alcotest_checks = count_substr "Alcotest.check" output in
+              heuristic_score := !heuristic_score +. (float_of_int (real_asserts + alcotest_checks) *. 0.02);
+              if contains_str "decode" output_lower && contains_str "encode" output_lower then
+                heuristic_score := !heuristic_score +. 0.1;
+              let h_score = max 0.0 (min 0.5 !heuristic_score) in
+
+              (* Phase 2: LLM judge for semantic analysis (0.0-0.5 range) *)
+              (* Few-shot examples for better accuracy *)
+              let llm_prompt = Printf.sprintf {|Analyze this test code for fake test patterns.
+
+## Few-Shot Examples:
+
+FAKE (score: 0.2):
+```
+let test () = let _ = encode () in assert true
+```
+Reason: Ignores return value, empty assertion
+
+FAKE (score: 0.3):
+```
+def test(): result = process(); assert True
+```
+Reason: Doesn't verify result
+
+REAL (score: 0.85):
+```
+let test () = let encoded = encode x in let decoded = decode encoded in assert (decoded = x)
+```
+Reason: Roundtrip verification, real assertion
+
+REAL (score: 0.8):
+```
+it('works', () => { expect(decode(encode(x))).toEqual(x); });
+```
+Reason: Roundtrip with proper expectation
+
+## Score Scale:
+- 0.0-0.3 = Fake test (assert true, ignores results)
+- 0.4-0.6 = Partial test (some assertions, missing cases)
+- 0.7-1.0 = Real test (meaningful assertions, tests behavior)
+
+## Code to Analyze:
+```
+%s
+```
+
+Reply with ONLY a number between 0.0 and 1.0:|}
+                (String.sub output 0 (min 1500 (String.length output)))
+              in
+              let llm_score =
+                match exec_fn ~model:"gemini" ?system:None ~prompt:llm_prompt ?tools:None () with
+                | Ok score_str ->
+                    (try float_of_string (String.trim score_str) *. 0.5
+                     with Failure _ -> 0.25)
+                | Error _ -> 0.25  (* Default if LLM fails *)
+              in
+              (* Final: heuristic (50%) + LLM (50%) *)
+              h_score +. llm_score
           | "custom" | _ ->
               (* For custom, try to parse score from output metadata *)
               (try
