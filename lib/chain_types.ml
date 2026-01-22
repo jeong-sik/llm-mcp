@@ -100,6 +100,11 @@ type adapter_transform =
       on_true : adapter_transform;
       on_false : adapter_transform;
     }
+  | Split of {
+      delimiter : string;          (** Split delimiter: "line", "paragraph", "sentence", or custom string *)
+      chunk_size : int;            (** Max chunk size in estimated tokens (chars/4) *)
+      overlap : int;               (** Overlap between chunks in estimated tokens *)
+    }
   | Custom of string               (** Custom function name *)
 [@@deriving yojson]
 

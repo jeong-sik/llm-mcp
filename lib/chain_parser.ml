@@ -62,6 +62,36 @@ let parse_string_assoc_opt json field_name =
   | `Null -> []
   | _ -> []
 
+(** Parse string with default value *)
+let parse_string_with_default json field_name default =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `String s -> s
+  | `Null -> default
+  | _ -> default
+
+(** Parse optional string from JSON *)
+let parse_string_opt json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `String s -> Some s
+  | _ -> None
+
+(** Parse optional int from JSON *)
+let parse_int_opt json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Int i -> Some i
+  | _ -> None
+
+(** Parse list with default empty - handles various JSON types *)
+let parse_list_with_default json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `List l -> l
+  | `Null -> []
+  | _ -> []
+
 (** Parse optional float from JSON *)
 let parse_float_opt json field_name =
   let open Yojson.Safe.Util in
@@ -171,10 +201,9 @@ let parse_config (json : Yojson.Safe.t) : chain_config =
     with Type_error _ -> default
   in
   let get_direction_opt key default =
-    try
-      let s = json |> member key |> to_string in
-      direction_of_string s
-    with _ -> default
+    match json |> member key with
+    | `String s -> direction_of_string s
+    | _ -> default
   in
   {
     max_depth = get_int_opt "max_depth" default_config.max_depth;
@@ -217,46 +246,47 @@ let rec parse_adapter_transform (json : Yojson.Safe.t) : (adapter_transform, str
        | _ -> Error (Printf.sprintf "Invalid transform string format: %s" s))
   | `Assoc _ ->
       (* Object format with "type" field *)
-      let typ = try json |> member "type" |> to_string with _ -> "unknown" in
+      let typ = parse_string_with_default json "type" "unknown" in
       (match typ with
        | "extract" ->
-           let path = try json |> member "path" |> to_string with _ -> "." in
+           let path = parse_string_with_default json "path" "." in
            Ok (Extract path)
        | "template" ->
-           let tpl = try json |> member "template" |> to_string with _ -> "{{value}}" in
+           let tpl = parse_string_with_default json "template" "{{value}}" in
            Ok (Template tpl)
        | "summarize" ->
-           let max_tokens = try json |> member "max_tokens" |> to_int with _ -> 500 in
+           let max_tokens = parse_int_with_default json "max_tokens" 500 in
            Ok (Summarize max_tokens)
        | "truncate" ->
-           let max_chars = try json |> member "max_chars" |> to_int with _ -> 1000 in
+           let max_chars = parse_int_with_default json "max_chars" 1000 in
            Ok (Truncate max_chars)
        | "jsonpath" ->
-           let path = try json |> member "path" |> to_string with _ -> "$" in
+           let path = parse_string_with_default json "path" "$" in
            Ok (JsonPath path)
        | "regex" ->
-           let pattern = try json |> member "pattern" |> to_string with _ -> ".*" in
-           let replacement = try json |> member "replacement" |> to_string with _ -> "" in
+           let pattern = parse_string_with_default json "pattern" ".*" in
+           let replacement = parse_string_with_default json "replacement" "" in
            Ok (Regex (pattern, replacement))
        | "validate_schema" ->
-           let schema = try json |> member "schema" |> to_string with _ -> "" in
+           let schema = parse_string_with_default json "schema" "" in
            Ok (ValidateSchema schema)
        | "parse_json" | "parse" -> Ok ParseJson
        | "stringify" -> Ok Stringify
        | "chain" ->
-           let transforms_json = try json |> member "transforms" |> to_list with _ -> [] in
+           let transforms_json = parse_list_with_default json "transforms" in
            let* transforms = parse_adapter_transforms transforms_json in
            Ok (Chain transforms)
        | "conditional" ->
            let* condition =
-             try Ok (json |> member "condition" |> to_string)
-             with _ -> Error "Missing 'condition' in conditional transform"
+             match parse_string_opt json "condition" with
+             | Some s -> Ok s
+             | None -> Error "Missing 'condition' in conditional transform"
            in
            let* on_true = parse_adapter_transform (json |> member "on_true") in
            let* on_false = parse_adapter_transform (json |> member "on_false") in
            Ok (Conditional { condition; on_true; on_false })
        | "custom" ->
-           let name = try json |> member "name" |> to_string with _ -> "identity" in
+           let name = parse_string_with_default json "name" "identity" in
            Ok (Custom name)
        | unknown -> Error (Printf.sprintf "Unknown transform type: %s" unknown))
   | _ -> Error "Transform must be a string or object"
@@ -282,27 +312,23 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
     let* node_type = parse_node_type json node_type_str in
 
     (* Parse explicit input_mapping if provided, otherwise extract from prompt/args *)
+    (* Helper for auto-extracting input mappings from node content *)
+    let auto_extract_mappings () =
+      match node_type with
+      | Llm { prompt; _ } -> extract_input_mappings prompt
+      | Tool { args; _ } -> extract_json_mappings args
+      | _ -> []
+    in
     let input_mapping =
-      try
-        let mapping_json = json |> member "input_mapping" in
-        match mapping_json with
-        | `List pairs ->
-            List.filter_map (fun pair ->
-              match pair with
-              | `List [`String k; `String v] -> Some (k, v)
-              | _ -> None
-            ) pairs
-        | `Null ->
-            (match node_type with
-             | Llm { prompt; _ } -> extract_input_mappings prompt
-             | Tool { args; _ } -> extract_json_mappings args
-             | _ -> [])
-        | _ -> []
-      with _ ->
-        match node_type with
-        | Llm { prompt; _ } -> extract_input_mappings prompt
-        | Tool { args; _ } -> extract_json_mappings args
-        | _ -> []
+      match json |> member "input_mapping" with
+      | `List pairs ->
+          List.filter_map (fun pair ->
+            match pair with
+            | `List [`String k; `String v] -> Some (k, v)
+            | _ -> None
+          ) pairs
+      | `Null -> auto_extract_mappings ()
+      | _ -> []
     in
 
     Ok { id; node_type; input_mapping }
@@ -319,32 +345,21 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
   | "llm" ->
       let* model = require_string json "model" in
       let* prompt = require_string json "prompt" in
-      let system =
-        try
-          match json |> member "system" with
-          | `Null -> None
-          | `String s -> Some s
-          | _ -> None
-        with _ -> None
-      in
-      let timeout =
-        try Some (json |> member "timeout" |> to_int)
-        with _ -> None
-      in
+      let system = parse_string_opt json "system" in
+      let timeout = parse_int_opt json "timeout" in
       let tools =
-        try
-          match json |> member "tools" with
-          | `Null -> None
-          | v -> Some v
-        with _ -> None
+        match json |> member "tools" with
+        | `Null -> None
+        | v -> Some v
       in
       Ok (Llm { model; system; prompt; timeout; tools })
 
   | "tool" ->
       let* name = require_string json "name" in
       let args =
-        try json |> member "args"
-        with _ -> `Assoc []
+        match json |> member "args" with
+        | `Null -> `Assoc []
+        | v -> v
       in
       Ok (Tool { name; args })
 
@@ -354,18 +369,22 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       Ok (Pipeline nodes)
 
   | "fanout" ->
+      (* Try "branches" first, fallback to "nodes" *)
       let branches_json =
-        try json |> member "branches" |> to_list
-        with _ -> json |> member "nodes" |> to_list
+        match json |> member "branches" with
+        | `List l -> l
+        | _ -> parse_list_with_default json "nodes"
       in
       let* nodes = parse_nodes branches_json in
       Ok (Fanout nodes)
 
   | "quorum" ->
       let required = json |> member "required" |> to_int in
+      (* Try "nodes" first, fallback to "inputs" *)
       let nodes_json =
-        try json |> member "nodes" |> to_list
-        with _ -> json |> member "inputs" |> to_list
+        match json |> member "nodes" with
+        | `List l -> l
+        | _ -> parse_list_with_default json "inputs"
       in
       let* nodes = parse_nodes nodes_json in
       Ok (Quorum { required; nodes })
@@ -375,12 +394,12 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let then_json = json |> member "then" in
       let* then_node = parse_node then_json in
       let else_node =
-        try
-          let else_json = json |> member "else" in
-          match parse_node else_json with
-          | Ok n -> Some n
-          | Error _ -> None
-        with _ -> None
+        match json |> member "else" with
+        | `Null -> None
+        | else_json ->
+            (match parse_node else_json with
+             | Ok n -> Some n
+             | Error _ -> None)
       in
       Ok (Gate { condition; then_node; else_node })
 
@@ -406,14 +425,13 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       Ok (Bind { func; inner })
 
   | "merge" ->
-      let strategy_str =
-        try json |> member "strategy" |> to_string
-        with _ -> "concat"
-      in
+      let strategy_str = parse_string_with_default json "strategy" "concat" in
       let* strategy = parse_merge_strategy strategy_str in
+      (* Try "nodes" first, fallback to "inputs" *)
       let nodes_json =
-        try json |> member "nodes" |> to_list
-        with _ -> json |> member "inputs" |> to_list
+        match json |> member "nodes" with
+        | `List l -> l
+        | _ -> parse_list_with_default json "inputs"
       in
       let* nodes = parse_nodes nodes_json in
       Ok (Merge { strategy; nodes })
@@ -522,14 +540,12 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let* input_ref = require_string json "input_ref" in
       let* transform = parse_adapter_transform (json |> member "transform") in
       let on_error =
-        try
-          match json |> member "on_error" |> to_string with
-          | "fail" -> `Fail
-          | "passthrough" -> `Passthrough
-          | s when String.length s > 8 && String.sub s 0 8 = "default:" ->
-              `Default (String.sub s 8 (String.length s - 8))
-          | _ -> `Fail
-        with _ -> `Fail
+        match parse_string_opt json "on_error" with
+        | Some "fail" -> `Fail
+        | Some "passthrough" -> `Passthrough
+        | Some s when String.length s > 8 && String.sub s 0 8 = "default:" ->
+            `Default (String.sub s 8 (String.length s - 8))
+        | _ -> `Fail
       in
       Ok (Adapter { input_ref; transform; on_error })
 
@@ -552,15 +568,16 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
   let open Yojson.Safe.Util in
   try
     let id =
-      try json |> member "id" |> to_string
-      with _ -> Printf.sprintf "subgraph_%d" (Random.int 10000)
+      parse_string_with_default json "id"
+        (Printf.sprintf "subgraph_%d" (Random.int 10000))
     in
     let nodes_json = json |> member "nodes" |> to_list in
     let* nodes = parse_nodes nodes_json in
     let output = json |> member "output" |> to_string in
     let config =
-      try parse_config (json |> member "config")
-      with _ -> default_config
+      match json |> member "config" with
+      | `Null -> default_config
+      | cfg -> parse_config cfg
     in
     Ok { id; nodes; output; config }
   with
@@ -702,6 +719,13 @@ let rec adapter_transform_to_json = function
         ("condition", `String condition);
         ("on_true", adapter_transform_to_json on_true);
         ("on_false", adapter_transform_to_json on_false);
+      ]
+  | Split { delimiter; chunk_size; overlap } ->
+      `Assoc [
+        ("type", `String "split");
+        ("delimiter", `String delimiter);
+        ("chunk_size", `Int chunk_size);
+        ("overlap", `Int overlap);
       ]
   | Custom name -> `Assoc [("type", `String "custom"); ("func", `String name)]
 
