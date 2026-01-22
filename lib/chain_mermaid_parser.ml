@@ -574,9 +574,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         (match parts with
         | [policy_type; iter_str] when policy_type = "greedy" ->
             let max_iterations = try int_of_string iter_str with _ -> 10 in
+            (* Default simulation node - uses LLM to simulate outcomes *)
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None }; input_mapping = [] } in
             Ok (Mcts {
-              strategies = [];  (* filled from edges *)
-              simulation = { id = "_sim"; node_type = ChainRef "_"; input_mapping = [] };
+              strategies = [];  (* filled from edges in post-process *)
+              simulation = default_sim;
               evaluator = "llm_judge";
               evaluator_prompt = None;
               policy = Greedy;
@@ -594,9 +596,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
               | "softmax" -> Softmax (try float_of_string param_str with _ -> 1.0)
               | _ -> UCB1 1.41  (* default *)
             in
+            (* Default simulation node - uses LLM to simulate outcomes *)
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None }; input_mapping = [] } in
             Ok (Mcts {
-              strategies = [];  (* filled from edges *)
-              simulation = { id = "_sim"; node_type = ChainRef "_"; input_mapping = [] };
+              strategies = [];  (* filled from edges in post-process *)
+              simulation = default_sim;
               evaluator = "llm_judge";
               evaluator_prompt = None;
               policy;
@@ -845,7 +849,8 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
             (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
             (String.length content > 4 && String.sub content 0 4 = "Map:") ||
             (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
-            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:")
+            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
+            (String.length content > 5 && String.sub content 0 5 = "MCTS:")
           in
           if uses_old_syntax then
             parse_node_content mnode.shape content
@@ -943,7 +948,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
             (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
             (String.length content > 4 && String.sub content 0 4 = "Map:") ||
             (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
-            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:")
+            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
+            (String.length content > 5 && String.sub content 0 5 = "MCTS:")
           in
           if uses_old_syntax then
             parse_node_content mnode.shape content
@@ -1025,7 +1031,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
   | Ok () ->
       let nodes_raw = Hashtbl.fold (fun _ node acc -> node :: acc) node_map [] in
 
-      (* Post-process: Resolve GoalDriven action_node from ChainRef to actual node *)
+      (* Post-process: Resolve node types that need edge information *)
       let nodes = List.map (fun (node : node) ->
         match node.node_type with
         | GoalDriven gd ->
@@ -1037,6 +1043,14 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
              | None ->
                  (* Keep original if not found (will error at runtime) *)
                  node)
+        | Mcts mcts ->
+            (* Fill strategies from incoming edges *)
+            let input_ids = match Hashtbl.find_opt deps node.id with
+              | Some ids -> ids
+              | None -> []
+            in
+            let strategies = List.filter_map (fun id -> Hashtbl.find_opt node_map id) input_ids in
+            { node with node_type = Mcts { mcts with strategies } }
         | _ -> node
       ) nodes_raw in
 
