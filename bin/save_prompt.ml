@@ -1,4 +1,4 @@
-(** save_prompt - Save user prompts to PostgreSQL
+(** save_prompt - Save user prompts to PostgreSQL (Eio)
 
     OCaml port of .claude/hooks/save-prompt.py
     Called asynchronously from UserPromptSubmit hook.
@@ -66,32 +66,29 @@ let get_hostname () =
   Unix.gethostname ()
 
 (** Save prompt to PostgreSQL *)
-let save_prompt ~session_id ~prompt_text ~routing_category ~routing_confidence ~segment_number =
-  let open Lwt.Syntax in
-
+let save_prompt ~sw ~stdenv ~session_id ~prompt_text ~routing_category ~routing_confidence ~segment_number =
   (* Get PostgreSQL URL from environment *)
   let pg_url = Sys.getenv_opt "RAILWAY_PG_URL" in
   match pg_url with
   | None ->
       prerr_endline "Warning: RAILWAY_PG_URL not set";
-      Lwt.return false
+      false
   | Some url ->
       (* Validate prompt *)
       if String.length prompt_text < 10 then
-        Lwt.return false
+        false
       else if String.length prompt_text > 0 && prompt_text.[0] = '/' then
-        Lwt.return false
+        false
       else if String.sub prompt_text 0 (min 9 (String.length prompt_text)) = "<command-" then
-        Lwt.return false
+        false
       else begin
         (* Connect and insert *)
         let uri = Uri.of_string url in
-        let* conn_result = Caqti_lwt_unix.connect uri in
-        match conn_result with
+        match Caqti_eio_unix.connect ~sw ~stdenv uri with
         | Error err ->
             prerr_endline (Printf.sprintf "DB connection error: %s" (Caqti_error.show err));
-            Lwt.return false
-        | Ok (module Db : Caqti_lwt.CONNECTION) ->
+            false
+        | Ok (module Db : Caqti_eio.CONNECTION) ->
             let hostname = get_hostname () in
             let prompt_len = String.length prompt_text in
             let truncated = if prompt_len > 5000 then String.sub prompt_text 0 5000 else prompt_text in
@@ -115,13 +112,13 @@ let save_prompt ~session_id ~prompt_text ~routing_category ~routing_confidence ~
               (((session_id, truncated), (prompt_len, has_kr)), (is_q, routing_category)),
               ((routing_confidence, segment_number), hostname)
             ) in
-            let* insert_result = Db.exec insert_query params in
-            let* () = Db.disconnect () in
+            let insert_result = Db.exec insert_query params in
+            let () = Db.disconnect () in
             match insert_result with
-            | Ok () -> Lwt.return true
+            | Ok () -> true
             | Error err ->
                 prerr_endline (Printf.sprintf "Error saving prompt: %s" (Caqti_error.show err));
-                Lwt.return false
+                false
       end
 
 (** CLI argument definitions *)
@@ -146,14 +143,20 @@ let segment =
   Arg.(value & opt int 1 & info ["segment"] ~doc)
 
 let main session_id prompt category confidence segment =
-  let success = Lwt_main.run (
+  let success =
+    Eio_main.run @@ fun env ->
+    Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let stdenv = (env :> Caqti_eio.stdenv) in
     save_prompt
+      ~sw
+      ~stdenv
       ~session_id
       ~prompt_text:prompt
       ~routing_category:category
       ~routing_confidence:confidence
       ~segment_number:segment
-  ) in
+  in
   exit (if success then 0 else 1)
 
 let cmd =

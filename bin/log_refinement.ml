@@ -1,4 +1,4 @@
-(** log_refinement - Query Refinement Logger
+(** log_refinement - Query Refinement Logger (Eio)
 
     OCaml port of .claude/hooks/log-refinement.py
     Logs query refinements to PostgreSQL for few-shot learning.
@@ -50,20 +50,18 @@ let build_refinement_type ~confidence ~user_choice ~needs_refinement =
         | None -> "unknown"
 
 (** Insert refinement into PostgreSQL *)
-let insert_refinement ~original ~refined ~refinement_type ~session_id =
-  let open Lwt.Syntax in
+let insert_refinement ~sw ~stdenv ~original ~refined ~refinement_type ~session_id =
   match pg_url () with
   | None ->
       prerr_endline "[log-refinement] RAILWAY_PG_URL not set";
-      Lwt.return false
+      false
   | Some url ->
       let uri = Uri.of_string url in
-      let* conn_result = Caqti_lwt_unix.connect uri in
-      match conn_result with
+      match Caqti_eio_unix.connect ~sw ~stdenv uri with
       | Error err ->
           prerr_endline (Printf.sprintf "[log-refinement] DB error: %s" (Caqti_error.show err));
-          Lwt.return false
-      | Ok (module Db : Caqti_lwt.CONNECTION) ->
+          false
+      | Ok (module Db : Caqti_eio.CONNECTION) ->
           let open Caqti_request.Infix in
           let open Caqti_type.Std in
           let insert_query = (t4 string string string (option string) ->. unit) ~oneshot:true
@@ -71,29 +69,27 @@ let insert_refinement ~original ~refined ~refinement_type ~session_id =
               (timestamp, original_query, refined_query, refinement_type, session_id)
               VALUES (NOW(), $1, $2, $3, $4)|}
           in
-          let* result = Db.exec insert_query (original, refined, refinement_type, session_id) in
-          let* () = Db.disconnect () in
+          let result = Db.exec insert_query (original, refined, refinement_type, session_id) in
+          let () = Db.disconnect () in
           match result with
-          | Ok () -> Lwt.return true
+          | Ok () -> true
           | Error err ->
               prerr_endline (Printf.sprintf "[log-refinement] Insert error: %s" (Caqti_error.show err));
-              Lwt.return false
+              false
 
 (** Get recent refinements from PostgreSQL *)
-let get_recent_refinements n =
-  let open Lwt.Syntax in
+let get_recent_refinements ~sw ~stdenv n =
   match pg_url () with
   | None ->
       prerr_endline "[log-refinement] RAILWAY_PG_URL not set";
-      Lwt.return []
+      []
   | Some url ->
       let uri = Uri.of_string url in
-      let* conn_result = Caqti_lwt_unix.connect uri in
-      match conn_result with
+      match Caqti_eio_unix.connect ~sw ~stdenv uri with
       | Error err ->
           prerr_endline (Printf.sprintf "[log-refinement] DB error: %s" (Caqti_error.show err));
-          Lwt.return []
-      | Ok (module Db : Caqti_lwt.CONNECTION) ->
+          []
+      | Ok (module Db : Caqti_eio.CONNECTION) ->
           let open Caqti_request.Infix in
           let open Caqti_type.Std in
           (* Return (original, refined, type, timestamp) tuples *)
@@ -105,13 +101,13 @@ let get_recent_refinements n =
               ORDER BY timestamp DESC
               LIMIT $1|}
           in
-          let* result = Db.collect_list select_query n in
-          let* () = Db.disconnect () in
+          let result = Db.collect_list select_query n in
+          let () = Db.disconnect () in
           match result with
-          | Ok rows -> Lwt.return rows
+          | Ok rows -> rows
           | Error err ->
               prerr_endline (Printf.sprintf "[log-refinement] Query error: %s" (Caqti_error.show err));
-              Lwt.return []
+              []
 
 (** JSONL fallback for backwards compatibility *)
 let fallback_to_jsonl ~original ~refined ~confidence ~ambiguity_score
@@ -140,7 +136,7 @@ let fallback_to_jsonl ~original ~refined ~confidence ~ambiguity_score
   true
 
 (** Log a refinement decision *)
-let log_refinement ~original ~refined ~confidence ~context_json:_
+let log_refinement ~sw ~stdenv ~original ~refined ~confidence ~context_json:_
     ~user_choice ~ambiguity_score ~needs_refinement ~session_id =
   let refinement_type = build_refinement_type ~confidence ~user_choice ~needs_refinement in
   let session = match session_id with
@@ -149,9 +145,9 @@ let log_refinement ~original ~refined ~confidence ~context_json:_
   in
 
   (* Try PostgreSQL first *)
-  let pg_success = Lwt_main.run (
-    insert_refinement ~original ~refined ~refinement_type ~session_id:session
-  ) in
+  let pg_success =
+    insert_refinement ~sw ~stdenv ~original ~refined ~refinement_type ~session_id:session
+  in
 
   if pg_success then true
   else begin
@@ -224,10 +220,14 @@ let get_recent_arg =
 
 let main original refined confidence context_json user_choice
     ambiguity_score needs_refinement_str session_id get_recent =
+  Eio_main.run @@ fun env ->
+  Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let stdenv = (env :> Caqti_eio.stdenv) in
   match get_recent with
   | Some n ->
       (* Get recent refinements mode *)
-      let rows = Lwt_main.run (get_recent_refinements n) in
+      let rows = get_recent_refinements ~sw ~stdenv n in
       print_endline (format_recent_as_json rows)
   | None ->
       (* Log refinement mode *)
@@ -239,6 +239,8 @@ let main original refined confidence context_json user_choice
             | _ -> None
           in
           let success = log_refinement
+            ~sw
+            ~stdenv
             ~original:orig
             ~refined:ref
             ~confidence
