@@ -3,7 +3,7 @@
     Tests content type detection, dictionary I/O, and compression/decompression.
 *)
 
-module Dictionary = Llm_mcp.Dictionary
+module Dictionary = Dictionary
 
 (* Test content type detection *)
 let test_detect_json () =

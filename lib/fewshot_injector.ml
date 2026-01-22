@@ -77,6 +77,43 @@ let keyword_map = [
   ("generate_content", "vertex-ai-sdk.md");
   ("generatecontent", "vertex-ai-sdk.md");
   ("@google-cloud/vertexai", "vertex-ai-sdk.md");
+
+  (* Anthropic Messages API *)
+  ("anthropic sdk", "anthropic-messages-api.md");
+  ("messages.create", "anthropic-messages-api.md");
+  ("tool_use", "anthropic-messages-api.md");
+  ("content block", "anthropic-messages-api.md");
+  ("tool_result", "anthropic-messages-api.md");
+  ("claude api", "anthropic-messages-api.md");
+  ("anthropic.anthropic", "anthropic-messages-api.md");
+  ("@anthropic-ai/sdk", "anthropic-messages-api.md");
+  ("stop_reason", "anthropic-messages-api.md");
+  ("extended thinking", "anthropic-messages-api.md");
+
+  (* LangGraph / LangChain *)
+  ("langgraph", "langgraph-langchain.md");
+  ("langchain", "langgraph-langchain.md");
+  ("stategraph", "langgraph-langchain.md");
+  ("lcel", "langgraph-langchain.md");
+  ("runnablepassthrough", "langgraph-langchain.md");
+  ("runnableparallel", "langgraph-langchain.md");
+  ("create_react_agent", "langgraph-langchain.md");
+  ("chatprompttemplate", "langgraph-langchain.md");
+  ("add_messages", "langgraph-langchain.md");
+  ("human-in-the-loop", "langgraph-langchain.md");
+  ("checkpointer", "langgraph-langchain.md");
+
+  (* Ollama API *)
+  ("ollama generate", "ollama-api.md");
+  ("ollama chat", "ollama-api.md");
+  ("ollama.generate", "ollama-api.md");
+  ("ollama.chat", "ollama-api.md");
+  ("ollama embeddings", "ollama-api.md");
+  ("ollama stream", "ollama-api.md");
+  ("keep_alive", "ollama-api.md");
+  ("localhost:11434", "ollama-api.md");
+  ("api/generate", "ollama-api.md");
+  ("api/chat", "ollama-api.md");
 ]
 
 (** Check if haystack contains needle (case-insensitive) *)

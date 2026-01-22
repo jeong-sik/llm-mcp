@@ -1,8 +1,0 @@
-(library
- (name agent_core_bridge)
- (public_name llm_mcp.agent_core_bridge)
- (libraries
-   agent_core_eio
-   eio
-   lwt
-   lwt_eio))

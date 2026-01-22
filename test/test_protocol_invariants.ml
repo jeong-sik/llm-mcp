@@ -1,7 +1,7 @@
 (* Protocol codec invariants (Phase 1-2) *)
 
 open Alcotest
-open Llm_mcp.Types
+open Types
 
 let decode_or_fail encoded =
   match decode_formatted_response encoded with

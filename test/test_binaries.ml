@@ -707,7 +707,7 @@ let claude_cli_tests = [
    Compact Protocol v0.1 tests
    ============================================================================ *)
 
-open Llm_mcp.Types
+open Types
 
 let test_model_code_roundtrip () =
   let codes = [G3; C4; X5; OL] in

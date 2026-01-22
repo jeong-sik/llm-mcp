@@ -108,40 +108,5 @@
  (preprocess (pps ppx_deriving_yojson)))
 
 ; =============================================================================
-; llm_mcp - Legacy Lwt Library (for backwards compatibility)
+; NOTE: llm_mcp (Lwt) library REMOVED - Use llm_mcp.eio instead
 ; =============================================================================
-(library
- (name llm_mcp)
- (public_name llm_mcp)
- (flags (:standard -w -69))
- (modules
-   ; Lwt-based modules
-   mcp_server
-   tools
-   mcp_client
-   agent_loop
-   cli_runner
-   parallel_utils
-   run_log
-   llm_mcp)
- (libraries
-   ; Shared modules
-   llm_mcp.common
-   ; Lwt
-   lwt
-   lwt.unix
-   cohttp-lwt-unix
-   domainslib
-   lwt_eio
-   ; Common
-   yojson
-   str
-   unix
-   mcp_protocol
-   msgpck
-   grpc-direct-core
-   zstd
-   compact-protocol
-   llm_mcp_resilience)
- (ocamlopt_flags (:standard -O3))
- (preprocess (pps lwt_ppx ppx_deriving_yojson)))

@@ -1,7 +1,7 @@
 (* Compact Protocol v1.3 Size Benchmark and Version Tests *)
 
 open Alcotest
-open Llm_mcp.Types
+open Types
 
 (* =========================================================================
    v1/v2/v3 Roundtrip Tests
