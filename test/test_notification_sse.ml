@@ -59,9 +59,14 @@ let test_unregister_if_current () =
 
 (** Test get_events_after for replay *)
 let test_get_events_after () =
-  (* This tests the event buffer replay functionality *)
+  (* This tests the event buffer replay functionality.
+     The function should return a valid list (possibly empty if no events yet).
+     We verify the function executes without error and returns the expected type. *)
   let events = Llm_mcp.Notification_sse.get_events_after 0 in
-  check bool "returns list" true (List.length events >= 0)
+  (* Verify it's a proper list by checking it's iterable - the actual count
+     depends on prior test state, so we just verify the structure is valid *)
+  let _ = List.length events in
+  check bool "function executes successfully" true true
 
 (** Test update_last_event_id *)
 let test_update_last_event_id () =

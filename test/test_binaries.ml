@@ -156,9 +156,9 @@ let test_agent_stats_empty_input () =
   if not (binary_exists "agent-stats") then
     skip ()
   else begin
-    let stdout, _, status = run_command "agent-stats" (Some "{}") in
-    check bool "exit success" true (status = Unix.WEXITED 0);
-    check bool "outputs something" true (String.length stdout >= 0)
+    let _stdout, _, status = run_command "agent-stats" (Some "{}") in
+    check bool "exit success" true (status = Unix.WEXITED 0)
+    (* Note: agent-stats with empty input may produce no output, which is valid behavior *)
   end
 
 (* ============================================================================
@@ -316,10 +316,9 @@ let test_person_lookup_no_korean () =
     skip ()
   else begin
     let input = "Hello world no korean names" in
-    let stdout, _, status = run_command "person-lookup" (Some input) in
-    check bool "exit success" true (status = Unix.WEXITED 0);
-    (* No korean names → minimal or empty output *)
-    check bool "processes input" true (String.length stdout >= 0)
+    let _stdout, _, status = run_command "person-lookup" (Some input) in
+    check bool "exit success" true (status = Unix.WEXITED 0)
+    (* No korean names → minimal or empty output is expected behavior *)
   end
 
 let test_person_lookup_with_korean () =
@@ -327,10 +326,9 @@ let test_person_lookup_with_korean () =
     skip ()
   else begin
     let input = "정한길이 드럼작업한다고 X4 빌려감" in
-    let stdout, _, status = run_command "person-lookup" (Some input) in
-    check bool "exit success" true (status = Unix.WEXITED 0);
-    (* May find name or may fail Neo4j - both OK *)
-    check bool "processes input" true (String.length stdout >= 0)
+    let _stdout, _, status = run_command "person-lookup" (Some input) in
+    check bool "exit success" true (status = Unix.WEXITED 0)
+    (* May find name or may fail Neo4j - both OK, empty output is valid *)
   end
 
 (* ============================================================================
@@ -436,10 +434,9 @@ let test_retrospective_checker_runs () =
   if not (binary_exists "retrospective-checker") then
     skip ()
   else begin
-    let stdout, _, status = run_command "retrospective-checker" None in
-    check bool "exit success" true (status = Unix.WEXITED 0);
-    (* Output may be empty or contain status *)
-    check bool "runs without crash" true (String.length stdout >= 0)
+    let _stdout, _, status = run_command "retrospective-checker" None in
+    check bool "exit success" true (status = Unix.WEXITED 0)
+    (* Output may be empty or contain status - exit code 0 proves it ran without crash *)
   end
 
 (* ============================================================================
