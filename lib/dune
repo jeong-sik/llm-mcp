@@ -79,7 +79,9 @@
    ; Chain Engine (Phase 5 - requires Eio)
    chain_batch
    ; Logging (Eio)
-   run_log_eio)
+   run_log_eio
+   ; Agent Loop (Eio)
+   agent_loop_eio)
  (libraries
    ; Shared modules
    llm_mcp.common
