@@ -10,8 +10,8 @@
 *)
 
 (* Use Common module utilities *)
-let read_file = Llm_mcp.Common.read_file_opt
-let me_root () = Llm_mcp.Common.me_root
+let read_file = Common.read_file_opt
+let me_root () = Common.me_root
 
 (** Account configuration *)
 type account = {

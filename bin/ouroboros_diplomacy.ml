@@ -1,7 +1,7 @@
 (** Ouroboros v74.0: Recursive Diplomacy - OCaml
     Manages trust and resource exchange with external agents and services. *)
 
-open Llm_mcp.Common
+open Common
 
 let diplomacy_dir =
   let swarm = Filename.concat (Filename.concat me_root "logs") "swarm" in

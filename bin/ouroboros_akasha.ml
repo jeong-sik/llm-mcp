@@ -1,7 +1,7 @@
 (** Ouroboros CLI: Akasha Interface - OCaml
     Manifests and consults universal evolution principles. *)
 
-open Llm_mcp.Common
+open Common
 
 let akasha_dir = Filename.concat (Filename.concat me_root "knowledge") "akasha"
 

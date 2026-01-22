@@ -1,7 +1,7 @@
 (** Ouroboros v77.0: Recursive Governance (DAO) - OCaml
     Manages collective decision-making through decentralized voting. *)
 
-open Llm_mcp.Common
+open Common
 
 let governance_dir =
   let swarm_dir = Filename.concat (Filename.concat me_root "logs") "swarm" in

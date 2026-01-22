@@ -1,7 +1,7 @@
 (** Ouroboros v12.0: Ouroboros-X (Self-Replication) - OCaml
     Spawns a temporary clone of the system to run dangerous experiments safely. *)
 
-open Llm_mcp.Common
+open Common
 
 let lab_root = "/tmp/ouroboros_labs"
 

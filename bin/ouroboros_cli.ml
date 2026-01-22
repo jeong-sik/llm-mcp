@@ -1,7 +1,7 @@
 (** Ouroboros CLI Hub Wrapper (v2.0) - OCaml
     Dispatches commands to the various Ouroboros engines. *)
 
-open Llm_mcp.Common
+open Common
 
 let scripts_dir = Filename.concat me_root "scripts"
 

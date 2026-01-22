@@ -1,7 +1,7 @@
 (** Ouroboros v19.0: The Genetic Recombinator - OCaml
     Breeds new hybrid modules by merging genes from existing scripts. *)
 
-open Llm_mcp.Common
+open Common
 
 let experiments_dir = Filename.concat me_root "experiments"
 

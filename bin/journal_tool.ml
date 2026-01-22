@@ -22,7 +22,7 @@ let get_journal_path date =
   (* Date format: YYYY-MM-DD *)
   let year_month = String.sub date 0 7 in (* YYYY-MM *)
   let day = String.sub date 8 2 in (* DD *)
-  Filename.concat (Filename.concat (Filename.concat Llm_mcp.Common.me_root "claude") year_month) (day ^ ".md")
+  Filename.concat (Filename.concat (Filename.concat Common.me_root "claude") year_month) (day ^ ".md")
 
 let count_lines file =
   if not (Sys.file_exists file) then 0

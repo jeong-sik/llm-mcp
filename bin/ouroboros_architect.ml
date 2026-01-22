@@ -1,7 +1,7 @@
 (** Ouroboros v17.0: The Moonshot Architect - OCaml
     Synthesizes radical new goals and spawns swarm missions. *)
 
-open Llm_mcp.Common
+open Common
 
 let mission_dir =
   let swarm = Filename.concat (Filename.concat me_root "logs") "swarm" in

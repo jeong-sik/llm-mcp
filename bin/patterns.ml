@@ -2,7 +2,7 @@
 
 (** Pattern Extractor for MASC Session Hook *)
 
-open Llm_mcp.Common
+open Common
 open Yojson.Safe.Util
 
 (* STAR Pattern Structure *)
@@ -123,7 +123,7 @@ let process_patterns json_input =
 (* Entry point *)
 let () = 
   (* Use me_root value to avoid unused module warning *)
-  let _ = Llm_mcp.Common.me_root in
+  let _ = Common.me_root in
   
   let input_json = 
     try Yojson.Safe.from_channel stdin 

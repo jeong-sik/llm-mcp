@@ -1,7 +1,7 @@
 (** Ouroboros v7.0: Lucid Dreaming (Dream Mode) - OCaml
     Simulates hypothetical scenarios to find gaps before they happen. *)
 
-open Llm_mcp.Common
+open Common
 
 let plans_dir = Filename.concat me_root "PLANS"
 

@@ -8,9 +8,9 @@
 *)
 
 (* Use Common module utilities *)
-let read_file = Llm_mcp.Common.read_file_opt
-let read_lines = Llm_mcp.Common.read_lines
-let iso_timestamp = Llm_mcp.Common.iso_timestamp
+let read_file = Common.read_file_opt
+let read_lines = Common.read_lines
+let iso_timestamp = Common.iso_timestamp
 
 (** Extract agent type from a tool_use item *)
 let extract_agent_type item =
@@ -62,7 +62,7 @@ let count_items items =
 
 (** Get stats file path *)
 let get_stats_file () =
-  let me_root = Llm_mcp.Common.me_root in
+  let me_root = Common.me_root in
   Filename.concat (Filename.concat (Filename.concat me_root ".claude") "state") "agent-stats.json"
 
 (** Load existing agent stats *)
@@ -152,7 +152,7 @@ let update_stats _session_id transcript_path =
   end
 
 (** Format output as human-readable text *)
-let format_output = Llm_mcp.Common.format_result_output
+let format_output = Common.format_result_output
 
 (** Main function *)
 let main () =

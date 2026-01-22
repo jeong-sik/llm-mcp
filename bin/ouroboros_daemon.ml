@@ -1,7 +1,7 @@
 (** Ouroboros Daemon: Autonomous Evolution Loop - OCaml
     Runs in background, searching for trends and planning upgrades. *)
 
-open Llm_mcp.Common
+open Common
 
 let daemon_log = Filename.concat (Filename.concat me_root "logs/evolution") "daemon.log"
 let interval = 900 (* 15 minutes in seconds *)

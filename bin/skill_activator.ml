@@ -10,7 +10,7 @@
 open Cmdliner
 
 (** Get ME_ROOT from Common module *)
-let me_root () = Llm_mcp.Common.me_root
+let me_root () = Common.me_root
 
 (** Rules file path *)
 let rules_file () =

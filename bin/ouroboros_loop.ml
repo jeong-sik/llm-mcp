@@ -1,7 +1,7 @@
 (** Project Ouroboros: Infinity Loop (Semi-Auto) - OCaml
     Executes the evolution cycle N times safely. *)
 
-open Llm_mcp.Common
+open Common
 
 let plans_dir = Filename.concat me_root "PLANS"
 

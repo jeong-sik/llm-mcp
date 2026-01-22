@@ -35,10 +35,10 @@ EXAMPLES:
 |}
 
 let content_type_of_string = function
-  | "code" -> Some Llm_mcp.Dictionary.Code
-  | "json" -> Some Llm_mcp.Dictionary.JSON
-  | "markdown" -> Some Llm_mcp.Dictionary.Markdown
-  | "mixed" -> Some Llm_mcp.Dictionary.Mixed
+  | "code" -> Some Dictionary.Code
+  | "json" -> Some Dictionary.JSON
+  | "markdown" -> Some Dictionary.Markdown
+  | "mixed" -> Some Dictionary.Mixed
   | _ -> None
 
 let read_samples_from_dir (dir : string) : string list =
@@ -118,7 +118,7 @@ let () =
 
   (* Train dictionary *)
   Printf.printf "Training dictionary (type=%s)...\n%!" type_str;
-  match Llm_mcp.Dictionary.train ~samples ~content_type () with
+  match Dictionary.train ~samples ~content_type () with
   | Error e ->
       Printf.eprintf "Training failed: %s\n" e;
       exit 1
@@ -130,7 +130,7 @@ let () =
       if not (Sys.file_exists dir) then
         Unix.mkdir dir 0o755;
       (* Save dictionary *)
-      match Llm_mcp.Dictionary.save dict output with
+      match Dictionary.save dict output with
       | Error e ->
           Printf.eprintf "Failed to save: %s\n" e;
           exit 1
@@ -138,6 +138,6 @@ let () =
           Printf.printf "Saved to %s\n" output;
           (* Show compression stats *)
           let test_sample = List.hd samples in
-          let compressed = Llm_mcp.Dictionary.compress_with_dict dict test_sample in
+          let compressed = Dictionary.compress_with_dict dict test_sample in
           let ratio = 1.0 -. (float (String.length compressed) /. float (String.length test_sample)) in
           Printf.printf "Test compression: %.1f%% savings\n" (ratio *. 100.0)

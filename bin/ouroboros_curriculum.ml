@@ -1,7 +1,7 @@
 (** Ouroboros v39.0: Autonomous Curriculum Learning - OCaml
     Determines the optimal learning path to accelerate AGI evolution. *)
 
-open Llm_mcp.Common
+open Common
 
 let curriculum_dir = Filename.concat (Filename.concat me_root "knowledge") "curriculum"
 let research_dir = Filename.concat (Filename.concat me_root "knowledge") "research"

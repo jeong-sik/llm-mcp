@@ -1,7 +1,7 @@
 (** Ouroboros v75.0: Galactic Trade - OCaml
     Facilitates knowledge exchange between the swarm and external partners. *)
 
-open Llm_mcp.Common
+open Common
 
 let knowledge_dir = Filename.concat (Filename.concat me_root "knowledge") "imported"
 let diplomacy_dir =

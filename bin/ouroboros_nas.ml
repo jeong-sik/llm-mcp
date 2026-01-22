@@ -1,7 +1,7 @@
 (** Ouroboros v20.0: Neural Architecture Search (NAS) - OCaml
     Analyzes codebase health, connectivity, and usage to optimize structure. *)
 
-open Llm_mcp.Common
+open Common
 
 let script_dir = Filename.concat me_root "scripts"
 
