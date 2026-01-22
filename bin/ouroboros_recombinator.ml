@@ -72,7 +72,7 @@ let test_viability child_path =
     true
   end else begin
     Printf.printf "[NATURAL SELECTION] %s is UNFIT. Deleting.\n" (Filename.basename child_path);
-    (try Sys.remove child_path with _ -> ());
+    (try Sys.remove child_path with Sys_error _ -> ());
     false
   end
 

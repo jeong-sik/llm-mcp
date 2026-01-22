@@ -56,7 +56,7 @@ let run_psql host port user password database sql =
       (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done
        with End_of_file -> ());
       String.trim (Buffer.contents buf)
-    with _ -> ""
+    with Sys_error _ | End_of_file -> ""
   in
   let status = Unix.close_process_in ic in
   (status = Unix.WEXITED 0, output)
@@ -141,7 +141,7 @@ let main () =
       match args with
       | _ :: "start" :: session_id :: rest ->
           let segment = match rest with
-            | s :: _ -> (try int_of_string s with _ -> 1)
+            | s :: _ -> (try int_of_string s with Failure _ -> 1)
             | [] -> 1
           in
           exit (log_start host port user password database session_id segment)

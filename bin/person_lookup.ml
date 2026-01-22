@@ -160,10 +160,10 @@ let lookup_person ~clock conn name =
                   (* Extract person properties from _struct format *)
                   let props = try person |> member "fields" |> to_list |> fun l ->
                     if List.length l >= 3 then List.nth l 2 else `Null
-                    with _ -> person in
+                    with Type_error _ | Not_found -> person in
                   let groups = try List.nth inner_row 1 |> to_list |> List.filter_map (fun g ->
-                    try Some (to_string g) with _ -> None
-                  ) with _ -> [] in
+                    try Some (to_string g) with Type_error _ -> None
+                  ) with Type_error _ -> [] in
                   Some (props, groups)
                 end
           end
@@ -177,23 +177,23 @@ let lookup_person ~clock conn name =
           (* Extract person properties from _struct format *)
           let props = try person |> member "fields" |> to_list |> fun l ->
             if List.length l >= 3 then List.nth l 2 else `Null
-            with _ -> person in
+            with Type_error _ | Not_found -> person in
           let groups = try List.nth inner_row 1 |> to_list |> List.filter_map (fun g ->
-            try Some (to_string g) with _ -> None
-          ) with _ -> [] in
+            try Some (to_string g) with Type_error _ -> None
+          ) with Type_error _ -> [] in
           Some (props, groups)
         end
-      with _ -> None
+      with Type_error _ -> None
 
 (** Format person context for output *)
 let format_person_context person groups =
   let open Yojson.Safe.Util in
   let buf = Buffer.create 256 in
 
-  let name = try person |> member "name" |> to_string with _ ->
-    try person |> member "displayName" |> to_string with _ -> "Unknown"
+  let name = try person |> member "name" |> to_string with Type_error _ ->
+    try person |> member "displayName" |> to_string with Type_error _ -> "Unknown"
   in
-  let nickname = try Some (person |> member "nickname" |> to_string) with _ -> None in
+  let nickname = try Some (person |> member "nickname" |> to_string) with Type_error _ -> None in
 
   Buffer.add_string buf (Printf.sprintf "👤 **%s**" name);
   (match nickname with Some n -> Buffer.add_string buf (Printf.sprintf " (%s)" n) | None -> ());
@@ -204,19 +204,19 @@ let format_person_context person groups =
     let roles = person |> member "roles" |> to_list |> List.map to_string in
     if List.length roles > 0 then
       Buffer.add_string buf (Printf.sprintf "   역할: %s\n" (String.concat ", " roles))
-  with _ -> ());
+  with Type_error _ -> ());
 
   (* Instrument *)
   (try
     let inst = person |> member "instrument" |> to_string in
     Buffer.add_string buf (Printf.sprintf "   악기: %s\n" inst)
-  with _ -> ());
+  with Type_error _ -> ());
 
   (* Company *)
   (try
     let company = person |> member "company" |> to_string in
     Buffer.add_string buf (Printf.sprintf "   회사: %s\n" company)
-  with _ -> ());
+  with Type_error _ -> ());
 
   (* Groups *)
   if List.length groups > 0 then
@@ -224,21 +224,21 @@ let format_person_context person groups =
 
   (* Teams *)
   (try
-    let nba = try Some (person |> member "nba_team" |> to_string) with _ -> None in
-    let epl = try Some (person |> member "epl_team" |> to_string) with _ -> None in
+    let nba = try Some (person |> member "nba_team" |> to_string) with Type_error _ -> None in
+    let epl = try Some (person |> member "epl_team" |> to_string) with Type_error _ -> None in
     let teams = List.filter_map (fun x -> x) [
       Option.map (fun t -> "NBA: " ^ t) nba;
       Option.map (fun t -> "EPL: " ^ t) epl;
     ] in
     if List.length teams > 0 then
       Buffer.add_string buf (Printf.sprintf "   팀: %s\n" (String.concat ", " teams))
-  with _ -> ());
+  with Type_error _ -> ());
 
   (* Wine preference *)
   (try
     let wine = person |> member "wine_preference" |> to_string in
     Buffer.add_string buf (Printf.sprintf "   🍷: %s\n" wine)
-  with _ -> ());
+  with Type_error _ -> ());
 
   Buffer.contents buf
 

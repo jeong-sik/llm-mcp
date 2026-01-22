@@ -21,9 +21,13 @@
     │ [[Fanout:a,b,c]]            │ Fanout [a; b; c]                    │
     │ [[Map:func,node]]           │ Map { func; inner }                 │
     │ [[Bind:func,node]]          │ Bind { func; inner }                │
+    │ [[Cache:key,ttl,node]]      │ Cache { key_expr; ttl_seconds; ... }│
+    │ [[Batch:size,parallel,node]]│ Batch { batch_size; parallel; ... } │
     └─────────────────────────────┴─────────────────────────────────────┘
 
     Merge strategies: weighted_avg, first, last, concat, or custom name
+    Cache: ttl in seconds (0 = infinite), key can use {{input}} variables
+    Batch: parallel=true for concurrent processing, collect_strategy=list|concat|first|last
 
     ═══════════════════════════════════════════════════════════════════
     COMPOSABILITY: All types can compose with each other
@@ -43,7 +47,7 @@
 
     - [...]   = Rectangle: LLM or Tool nodes
     - {...}   = Diamond: Quorum, Gate, or Merge nodes
-    - [[...]] = Subroutine: Ref, Pipeline, Fanout, Map, Bind
+    - [[...]] = Subroutine: Ref, Pipeline, Fanout, Map, Bind, Cache, Batch
 *)
 
 open Chain_types
@@ -140,7 +144,7 @@ let parse_chain_meta (json_str : string) (meta : mermaid_meta) : mermaid_meta =
           chain_max_depth = (match get_int "max_depth" with Some v -> Some v | None -> meta.chain_max_depth);
         }
     | _ -> meta
-  with _ -> meta
+  with Yojson.Json_error _ -> meta  (* Invalid JSON in @chain comment *)
 
 (** Parse @node:id metadata comment: %% @node:mynode {"input_mapping":[[k,v],...]} *)
 let parse_node_meta (node_id : string) (json_str : string) (meta : mermaid_meta) : mermaid_meta =
@@ -190,7 +194,7 @@ let parse_node_meta (node_id : string) (json_str : string) (meta : mermaid_meta)
 
         meta
     | _ -> meta
-  with _ -> meta
+  with Yojson.Json_error _ -> meta  (* Invalid JSON in @node comment *)
 
 (** Parse metadata from a comment line: %% @chain {...} or %% @node:id {...} *)
 let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
@@ -315,7 +319,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
         (try
           let n = Scanf.sscanf text "Quorum:%d" (fun n -> n) in
           Ok (Quorum { required = n; nodes = [] })
-        with _ ->
+        with Scanf.Scan_failure _ | Failure _ | End_of_file ->
           Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] }; else_node = None }))
 
   | `Subroutine ->
@@ -353,7 +357,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
         let name = Str.matched_group 1 text in
         let args_str = trim (Str.matched_group 2 text) in
         let args = if args_str = "" then `Null else
-          try Yojson.Safe.from_string args_str with _ -> `String args_str
+          try Yojson.Safe.from_string args_str with Yojson.Json_error _ -> `String args_str
         in
         Ok (Tool { name; args })
       else
@@ -459,8 +463,39 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
             Ok (Bind { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
         | _ ->
             Error (Printf.sprintf "Bind requires func,node format, got: %s" content))
+      else if String.length content > 6 && String.sub content 0 6 = "Cache:" then
+        (* [[Cache:key_expr,ttl,node_id]] - cache results with TTL *)
+        let parts = String.sub content 6 (String.length content - 6)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        (match parts with
+        | [key_expr; ttl_str; node_id] ->
+            let ttl_seconds = try int_of_string ttl_str with _ -> 0 in
+            Ok (Cache { key_expr; ttl_seconds; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+        | [key_expr; node_id] ->
+            (* Default TTL = 0 (infinite) *)
+            Ok (Cache { key_expr; ttl_seconds = 0; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+        | _ ->
+            Error (Printf.sprintf "Cache requires key,ttl,node or key,node format, got: %s" content))
+      else if String.length content > 6 && String.sub content 0 6 = "Batch:" then
+        (* [[Batch:size,parallel,node_id]] - batch processing *)
+        let parts = String.sub content 6 (String.length content - 6)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        (match parts with
+        | [size_str; parallel_str; node_id] ->
+            let batch_size = try int_of_string size_str with _ -> 10 in
+            let parallel = parallel_str = "true" || parallel_str = "parallel" in
+            Ok (Batch { batch_size; parallel; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; collect_strategy = `List })
+        | [size_str; node_id] ->
+            let batch_size = try int_of_string size_str with _ -> 10 in
+            Ok (Batch { batch_size; parallel = true; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; collect_strategy = `List })
+        | _ ->
+            Error (Printf.sprintf "Batch requires size,parallel,node or size,node format, got: %s" content))
       else
-        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind, got: %s" content)
+        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch, got: %s" content)
 
   | `Diamond ->
       (* {Quorum:N} or {Gate:condition} *)
@@ -470,7 +505,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           let required = int_of_string n_str in
           (* Quorum nodes need their inputs filled in later from edges *)
           Ok (Quorum { required; nodes = [] })
-        with _ ->
+        with Failure _ ->
           Error (Printf.sprintf "Invalid quorum count: %s" n_str))
       else if String.length content > 5 && String.sub content 0 5 = "Gate:" then
         let condition = trim (String.sub content 5 (String.length content - 5)) in
@@ -1036,6 +1071,8 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Race _ -> "race"
   | ChainExec { chain_source; _ } -> Printf.sprintf "exec_%s" (String.sub chain_source 0 (min 8 (String.length chain_source)))
   | Adapter { input_ref; _ } -> Printf.sprintf "adapt_%s" (String.sub input_ref 0 (min 8 (String.length input_ref)))
+  | Cache { key_expr; ttl_seconds; _ } -> Printf.sprintf "cache_%s_%d" (String.sub key_expr 0 (min 8 (String.length key_expr))) ttl_seconds
+  | Batch { batch_size; _ } -> Printf.sprintf "batch_%d" batch_size
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -1107,13 +1144,19 @@ let node_type_to_text (nt : node_type) : string =
         | Chain _ -> "chain" | Conditional _ -> "conditional" | Custom n -> n
       in
       Printf.sprintf "Adapt[%s → %s]" input_ref transform_name
+  | Cache { key_expr; ttl_seconds; inner } ->
+      let ttl_str = if ttl_seconds > 0 then Printf.sprintf ",%d" ttl_seconds else "" in
+      Printf.sprintf "Cache:%s%s,%s" key_expr ttl_str inner.id
+  | Batch { batch_size; parallel; inner; _ } ->
+      let parallel_str = if parallel then ",true" else ",false" in
+      Printf.sprintf "Batch:%d%s,%s" batch_size parallel_str inner.id
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
   match nt with
   | Llm _ | Tool _ -> ("[", "]")
   | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ -> ("{", "}")
-  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ -> ("[[", "]]")
+  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | Cache _ | Batch _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
   | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
@@ -1140,6 +1183,8 @@ let node_type_to_class (nt : node_type) : string =
   | Race _ -> "race"
   | ChainExec _ -> "meta"
   | Adapter _ -> "adapter"
+  | Cache _ -> "cache"
+  | Batch _ -> "batch"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1160,6 +1205,8 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef fallback fill:#e17055,stroke:#d63031,color:#fff
     classDef race fill:#0984e3,stroke:#0652dd,color:#fff
     classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
@@ -1299,6 +1346,7 @@ let chain_to_ascii (chain : chain) : string =
       | Map _ -> "📍" | Bind _ -> "🔄" | Subgraph _ -> "📦"
       | Retry _ -> "🔁" | Fallback _ -> "🛟" | Race _ -> "🏁"
       | ChainExec _ -> "🔮" | Adapter _ -> "🔌"
+      | Cache _ -> "💾" | Batch _ -> "📦"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

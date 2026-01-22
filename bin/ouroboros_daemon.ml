@@ -37,7 +37,7 @@ let run_rescue_mission () =
         match read_json_opt filepath with
         | Some json ->
             let open Yojson.Safe.Util in
-            let status = try json |> member "status" |> to_string with _ -> "" in
+            let status = try json |> member "status" |> to_string with Type_error _ -> "" in
             if status = "SOS" then begin
               let task_id = Filename.chop_suffix f ".json" in
               log (Printf.sprintf "🚑 Detected SOS: %s" task_id);

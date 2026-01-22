@@ -21,8 +21,8 @@ let generate_personalized_scenario () =
       match read_json_opt twin_file with
       | Some json ->
           let open Yojson.Safe.Util in
-          let style = try json |> member "persona" |> member "coding_style" |> member "avoid" |> to_string with _ -> "bugs" in
-          let favorite = try json |> member "persona" |> member "coding_style" |> member "favorite_libs" |> to_list |> List.hd |> to_string with _ -> "AI" in
+          let style = try json |> member "persona" |> member "coding_style" |> member "avoid" |> to_string with Type_error _ -> "bugs" in
+          let favorite = try json |> member "persona" |> member "coding_style" |> member "favorite_libs" |> to_list |> List.hd |> to_string with Type_error _ | Failure _ -> "AI" in
           [
             Printf.sprintf "Massive %s detected in production" style;
             Printf.sprintf "Migrating core system to %s autonomously" favorite;

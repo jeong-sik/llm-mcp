@@ -12,8 +12,8 @@ let get_emotion () =
     match read_json_opt emotion_file with
     | Some json ->
         let open Yojson.Safe.Util in
-        let mood = try json |> member "current_mood" |> to_string with _ -> "NEUTRAL" in
-        let energy = try json |> member "energy_level" |> to_int with _ -> 50 in
+        let mood = try json |> member "current_mood" |> to_string with Type_error _ -> "NEUTRAL" in
+        let energy = try json |> member "energy_level" |> to_int with Type_error _ -> 50 in
         (mood, energy)
     | None -> ("UNKNOWN", 0)
   else ("UNKNOWN", 0)
@@ -34,8 +34,8 @@ let get_swarm_nodes () =
         match read_json_opt filepath with
         | Some json ->
             let open Yojson.Safe.Util in
-            let hostname = try json |> member "hostname" |> to_string with _ -> "unknown" in
-            let status = try json |> member "status" |> to_string with _ -> "unknown" in
+            let hostname = try json |> member "hostname" |> to_string with Type_error _ -> "unknown" in
+            let status = try json |> member "status" |> to_string with Type_error _ -> "unknown" in
             Some (hostname, status)
         | None -> None)
   else []
@@ -49,8 +49,8 @@ let get_current_mission () =
         (match read_json_opt filepath with
          | Some json ->
              let open Yojson.Safe.Util in
-             let title = try json |> member "title" |> to_string with _ -> "Unknown" in
-             let status = try json |> member "status" |> to_string with _ -> "Unknown" in
+             let title = try json |> member "title" |> to_string with Type_error _ -> "Unknown" in
+             let status = try json |> member "status" |> to_string with Type_error _ -> "Unknown" in
              Some (title, status)
          | None -> None)
     | _ -> None

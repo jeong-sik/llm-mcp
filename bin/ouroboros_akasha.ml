@@ -31,7 +31,7 @@ let search_records query =
       match read_json_opt filepath with
       | Some json ->
           let open Yojson.Safe.Util in
-          let title = try json |> member "title" |> to_string with _ -> "Unknown" in
+          let title = try json |> member "title" |> to_string with Type_error _ -> "Unknown" in
           if query = "*" || String.lowercase_ascii title
              |> fun t -> String.length t > 0 &&
                          (try ignore (Str.search_forward (Str.regexp_string (String.lowercase_ascii query)) t 0); true
@@ -50,7 +50,7 @@ let () =
   match args with
   | "manifest" :: title :: essence :: rest ->
       let count = match rest with
-        | n :: _ -> (try int_of_string n with _ -> 1)
+        | n :: _ -> (try int_of_string n with Failure _ -> 1)
         | [] -> 1
       in
       manifest_principle title essence count

@@ -34,7 +34,7 @@ let establish_contact partner_name services =
 
   let state = load_state () in
   let open Yojson.Safe.Util in
-  let partners = try state |> member "partners" |> to_assoc with _ -> [] in
+  let partners = try state |> member "partners" |> to_assoc with Type_error _ -> [] in
   let updated_partners = (partner_name, partner_data) :: (List.remove_assoc partner_name partners) in
 
   save_state (`Assoc [("partners", `Assoc updated_partners)]);
@@ -43,7 +43,7 @@ let establish_contact partner_name services =
 let sign_agreement partner_name agreement_title =
   let state = load_state () in
   let open Yojson.Safe.Util in
-  let partners = try state |> member "partners" |> to_assoc with _ -> [] in
+  let partners = try state |> member "partners" |> to_assoc with Type_error _ -> [] in
 
   match List.assoc_opt partner_name partners with
   | None ->
@@ -51,8 +51,8 @@ let sign_agreement partner_name agreement_title =
   | Some partner ->
       Printf.printf "📜 [AGREEMENT] Signing treaty: '%s' with %s\n" agreement_title partner_name;
 
-      let current_trust = try partner |> member "trust_index" |> to_float with _ -> 0.5 in
-      let current_agreements = try partner |> member "agreements" |> to_list with _ -> [] in
+      let current_trust = try partner |> member "trust_index" |> to_float with Type_error _ -> 0.5 in
+      let current_agreements = try partner |> member "agreements" |> to_list with Type_error _ -> [] in
 
       let updated_partner = `Assoc [
         ("id", partner |> member "id");

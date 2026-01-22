@@ -37,7 +37,7 @@ let collect_votes proposal_id =
   | None -> Printf.printf "❌ Failed to read proposal\n"
   | Some json ->
       let open Yojson.Safe.Util in
-      let title = try json |> member "title" |> to_string with _ -> "Unknown" in
+      let title = try json |> member "title" |> to_string with Type_error _ -> "Unknown" in
       Printf.printf "🏛️  [COUNCIL] Collecting votes for: '%s'\n" title;
 
       (* Simulated partners *)

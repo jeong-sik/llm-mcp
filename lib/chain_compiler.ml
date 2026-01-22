@@ -48,6 +48,10 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         collect_nested_dependencies primary @ List.concat_map collect_nested_dependencies fallbacks
     | Chain_types.Race { nodes; _ } ->
         List.concat_map collect_nested_dependencies nodes
+    | Chain_types.Cache { inner; _ } ->
+        collect_nested_dependencies inner
+    | Chain_types.Batch { inner; _ } ->
+        collect_nested_dependencies inner
     | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _
     | Chain_types.ChainExec _ | Chain_types.Adapter _ ->
         []
@@ -195,6 +199,10 @@ let rec calculate_depth (node : Chain_types.node) : int =
       1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 nodes
   | Chain_types.ChainExec { max_depth; _ } ->
       1 + max_depth  (* Estimate: 1 for this node + max_depth for generated chain *)
+  | Chain_types.Cache { inner; _ } ->
+      1 + calculate_depth inner
+  | Chain_types.Batch { inner; _ } ->
+      1 + calculate_depth inner
 
 (** Main entry point: Compile chain to execution plan *)
 let compile (c : Chain_types.chain) : (Chain_types.execution_plan, string) result =

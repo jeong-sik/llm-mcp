@@ -22,7 +22,7 @@ let get_mood () =
     match read_json_opt emotion_path with
     | Some json ->
         let open Yojson.Safe.Util in
-        (try json |> member "current_mood" |> to_string with _ -> "NEUTRAL")
+        (try json |> member "current_mood" |> to_string with Type_error _ -> "NEUTRAL")
     | None -> "NEUTRAL"
   else "NEUTRAL"
 
@@ -45,7 +45,7 @@ let pulse ?(status="IDLE") ?(task="None") () =
     match read_json_opt liquid_state_path with
     | Some json ->
         let open Yojson.Safe.Util in
-        let weights = try json |> member "weights" with _ -> `Null in
+        let weights = try json |> member "weights" with Type_error _ -> `Null in
         if weights <> `Null then begin
           let synapse_file = Filename.concat synapse_dir (Printf.sprintf "state_%s.json" hostname) in
           ignore (write_json synapse_file weights)
@@ -69,9 +69,9 @@ let scan_swarm () =
       match read_json_opt path with
       | Some json ->
           let open Yojson.Safe.Util in
-          let h = try json |> member "hostname" |> to_string with _ -> "?" in
-          let s = try json |> member "status" |> to_string with _ -> "?" in
-          let t = try json |> member "current_task" |> to_string with _ -> "?" in
+          let h = try json |> member "hostname" |> to_string with Type_error _ -> "?" in
+          let s = try json |> member "status" |> to_string with Type_error _ -> "?" in
+          let t = try json |> member "current_task" |> to_string with Type_error _ -> "?" in
           Printf.printf "  - Node: %s | Status: %s | Task: %s\n" h s t;
           found := true
       | None -> ()
@@ -92,7 +92,7 @@ let sync_synapses () =
     | None -> ()
     | Some my_state ->
         let open Yojson.Safe.Util in
-        let my_weights = try my_state |> member "weights" |> to_assoc with _ -> [] in
+        let my_weights = try my_state |> member "weights" |> to_assoc with Type_error _ -> [] in
 
         ensure_dir synapse_dir;
         let peer_files = Sys.readdir synapse_dir in
@@ -108,10 +108,10 @@ let sync_synapses () =
               match read_json_opt path with
               | Some peer_weights ->
                   Printf.printf "   Merging knowledge from %s...\n" f;
-                  let pw = try to_assoc peer_weights with _ -> [] in
+                  let pw = try to_assoc peer_weights with Type_error _ -> [] in
                   List.iter (fun (k, v) ->
-                    let pv = try to_float v with _ -> 1.0 in
-                    let current = try List.assoc k !merged |> to_float with _ -> 1.0 in
+                    let pv = try to_float v with Type_error _ -> 1.0 in
+                    let current = try List.assoc k !merged |> to_float with Type_error _ | Not_found -> 1.0 in
                     let new_val = current +. (pv -. current) *. 0.2 in
                     merged := (k, `Float new_val) :: (List.remove_assoc k !merged)
                   ) pw

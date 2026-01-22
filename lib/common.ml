@@ -48,7 +48,7 @@ let read_file_opt path =
     let s = really_input_string ic n in
     close_in ic;
     Some s
-  with _ -> None
+  with Sys_error _ -> None
 
 (** Safe file write - returns false on error *)
 let write_file path content =
@@ -57,7 +57,7 @@ let write_file path content =
     output_string oc content;
     close_out oc;
     true
-  with _ -> false
+  with Sys_error _ -> false
 
 (** Read JSON file *)
 let read_json_opt path =
@@ -65,7 +65,7 @@ let read_json_opt path =
   | None -> None
   | Some s ->
       try Some (Yojson.Safe.from_string s)
-      with _ -> None
+      with Yojson.Json_error _ -> None
 
 (** Write JSON file with pretty formatting *)
 let write_json path json =
@@ -126,7 +126,7 @@ let read_lines path =
     end;
     close_in ic;
     List.rev !lines
-  with _ -> []
+  with Sys_error _ -> []
 
 (** List files with given suffix in directory *)
 let list_files_with_suffix dir suffix =
@@ -188,7 +188,7 @@ let run_command cmd =
     end;
     ignore (Unix.close_process_in ic);
     List.rev !lines
-  with _ -> []
+  with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Run command and return output as string *)
 let run_cmd cmd =
@@ -226,7 +226,7 @@ let format_result_output result =
   (* Context section *)
   let context =
     try result |> member "context" |> to_list |> List.map to_string
-    with _ -> []
+    with Yojson.Safe.Util.Type_error _ -> []
   in
   if List.length context > 0 then begin
     Buffer.add_string buf "📋 Context:\n";
@@ -239,7 +239,7 @@ let format_result_output result =
   (* Warnings section *)
   let warnings =
     try result |> member "warnings" |> to_list |> List.map to_string
-    with _ -> []
+    with Yojson.Safe.Util.Type_error _ -> []
   in
   if List.length warnings > 0 then begin
     Buffer.add_string buf "⚠️  Warnings:\n";

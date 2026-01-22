@@ -128,7 +128,7 @@ let parse_select_strategy json =
       (try
         let threshold = float_of_string (String.sub s 16 (String.length s - 16)) in
         Ok (AboveThreshold threshold)
-      with _ -> Error (Printf.sprintf "Invalid threshold value in: %s" s))
+      with Failure _ -> Error (Printf.sprintf "Invalid threshold value in: %s" s))
   | other -> Error (Printf.sprintf "Unknown select strategy: %s" (Yojson.Safe.to_string other))
 
 (** Extract input mappings from prompt template *)
@@ -164,11 +164,11 @@ let parse_config (json : Yojson.Safe.t) : chain_config =
   let open Yojson.Safe.Util in
   let get_int_opt key default =
     try json |> member key |> to_int
-    with _ -> default
+    with Type_error _ -> default
   in
   let get_bool_opt key default =
     try json |> member key |> to_bool
-    with _ -> default
+    with Type_error _ -> default
   in
   let get_direction_opt key default =
     try
@@ -888,6 +888,26 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("input_ref", `String input_ref);
           ("transform", adapter_transform_to_json transform);
           ("on_error", on_error_to_json on_error);
+        ]
+
+    | Cache { key_expr; ttl_seconds; inner } ->
+        [
+          ("type", `String "cache");
+          ("key_expr", `String key_expr);
+          ("ttl_seconds", `Int ttl_seconds);
+          ("inner", node_to_json inner);
+        ]
+
+    | Batch { batch_size; parallel; inner; collect_strategy } ->
+        let strategy_str = match collect_strategy with
+          | `List -> "list" | `Concat -> "concat" | `First -> "first" | `Last -> "last"
+        in
+        [
+          ("type", `String "batch");
+          ("batch_size", `Int batch_size);
+          ("parallel", `Bool parallel);
+          ("inner", node_to_json inner);
+          ("collect_strategy", `String strategy_str);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)

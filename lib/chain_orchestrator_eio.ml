@@ -93,9 +93,15 @@ let parse_chain_design (response: string) : (chain, string) result =
     with Not_found ->
       Error "No valid chain format found in LLM response"
 
+(** Calculate chain parallelization efficiency:
+    Ratio of parallel_groups to total_nodes (0.0 = fully sequential, 1.0 = maximally parallel) *)
+let calc_parallelization_efficiency ~parallel_groups ~total_nodes =
+  if total_nodes <= 1 then 1.0
+  else float_of_int parallel_groups /. float_of_int (total_nodes - 1) |> min 1.0
+
 (** Convert chain execution result to metrics *)
 let result_to_metrics ~(chain_id: string) ~(goal: string) ~(started_at: float)
-    ~(max_depth: int)
+    ~(max_depth: int) ?(chain: chain option = None)
     (result: Chain_executor_eio.chain_result) : chain_metrics =
   let now = Unix.gettimeofday () in
   let node_metrics = List.map (fun (entry: Chain_types.trace_entry) ->
@@ -134,10 +140,16 @@ let result_to_metrics ~(chain_id: string) ~(goal: string) ~(started_at: float)
     nodes_failed = failed;
     nodes_skipped = skipped;
     nodes_pending = 0;
-    parallel_groups = 1;  (* TODO: calculate from chain structure *)
+    parallel_groups = (match chain with
+      | Some c -> Chain_types.count_chain_parallel_groups c
+      | None -> 0);
     max_depth;
     success_rate = if total > 0 then float_of_int succeeded /. float_of_int total else 0.0;
-    parallelization_efficiency = 1.0;  (* TODO: calculate *)
+    parallelization_efficiency = (match chain with
+      | Some c ->
+          let groups = Chain_types.count_chain_parallel_groups c in
+          calc_parallelization_efficiency ~parallel_groups:groups ~total_nodes:total
+      | None -> 1.0);
     estimation_accuracy = 1.0;
     node_metrics;
     verification = None;

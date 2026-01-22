@@ -107,7 +107,7 @@ let format_date_short date_str =
     match parts with
     | [_; m; d] -> Printf.sprintf "%s/%s" m d
     | _ -> date_str
-  with _ -> date_str
+  with Failure _ -> date_str
 
 (** Take first n elements from list *)
 let rec take n lst =
@@ -207,7 +207,7 @@ let format_pr row =
       let parts = String.split_on_char '/' repo in
       let last = List.nth_opt parts (List.length parts - 1) in
       Option.value ~default:"unknown" last
-    with _ -> "unknown"
+    with Invalid_argument _ | Failure _ -> "unknown"
   in
   let repo_short = if String.length repo_short > 15 then String.sub repo_short 0 15 else repo_short in
   let emoji = if status = "draft" then "📝" else "🔄" in
