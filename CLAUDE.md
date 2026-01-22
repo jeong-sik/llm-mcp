@@ -12,13 +12,17 @@ chain.orchestrate  - Run preset chain by ID
 ```
 
 ### Presets (data/chains/)
-| ID | Description |
-|----|-------------|
-| magi-code-review | 3-LLM consensus code review |
-| deep-research | Multi-source research + fact-check |
-| pr-review-pipeline | Automated PR review |
-| incident-response | Incident triage |
-| code-migration | Code transform + verify |
+| ID | Description | When to Use |
+|----|-------------|-------------|
+| magi-code-review | 3-LLM consensus code review | 중요한 코드 변경 리뷰 |
+| mcts-mantra-review | MCTS + MANTRA refactoring | 리팩토링 품질 보장 |
+| deep-research | Multi-source research + fact-check | 깊은 리서치 필요 시 |
+| pr-review-pipeline | Automated PR review | CI 통합 자동 리뷰 |
+| incident-response | Incident triage | 장애 초기 대응 |
+| code-migration | Code transform + verify | 대규모 코드 이전 |
+| figma-to-prototype | Figma → iOS/Android/Web | 디자인 → 코드 변환 |
+
+> 📖 **Full Guide**: [docs/PRESETS.md](docs/PRESETS.md) - Mermaid 다이어그램 + 사용 예시
 
 ---
 
