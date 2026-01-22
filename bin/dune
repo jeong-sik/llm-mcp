@@ -12,8 +12,8 @@
  (public_name save-prompt)
  (package llm_mcp)
  (modules save_prompt)
- (libraries lwt lwt.unix cmdliner caqti caqti-lwt caqti-lwt.unix caqti-driver-postgresql re uri)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main cmdliner caqti caqti-eio caqti-eio.unix caqti-driver-postgresql mirage-crypto-rng-eio uri unix)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name skill_activator)
@@ -108,16 +108,16 @@
  (public_name llm-mcp-doctor)
  (package llm_mcp)
  (modules doctor)
- (libraries lwt lwt.unix neo4j_bolt yojson)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson unix)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name subagent_logger)
  (public_name subagent-logger)
  (package llm_mcp)
  (modules subagent_logger)
- (libraries lwt lwt.unix neo4j_bolt)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name hook_input)
@@ -131,16 +131,16 @@
  (public_name neo4j-session)
  (package llm_mcp)
  (modules neo4j_session)
- (libraries lwt lwt.unix neo4j_bolt yojson re unix)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson re unix)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name neo4j_session_context)
  (public_name neo4j-session-context)
  (package llm_mcp)
  (modules neo4j_session_context)
- (libraries lwt lwt.unix neo4j_bolt yojson)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name session_logger)
@@ -154,8 +154,8 @@
  (public_name previously-on)
  (package llm_mcp)
  (modules previously_on)
- (libraries lwt lwt.unix neo4j_bolt yojson)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main neo4j_bolt_eio yojson mirage-crypto-rng-eio)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name council_vote)
