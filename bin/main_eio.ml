@@ -42,16 +42,27 @@ let dashboard_html = {|<!DOCTYPE html>
     .status { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #666; }
     .status.connected { background: #4ade80; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
     .card { background: #16213e; border-radius: 12px; padding: 20px; }
     .card-label { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
     .card-value { font-size: 28px; font-weight: bold; color: #4ade80; }
     .card-value.warn { color: #fbbf24; }
-    .mermaid-container { background: #16213e; border-radius: 12px; padding: 20px; min-height: 300px; }
-    .mermaid-container h2 { font-size: 16px; margin-bottom: 15px; color: #888; }
-    .mermaid-container .mermaid { background: #1a1a2e; padding: 15px; border-radius: 8px; }
+    .mermaid-container { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 20px; transition: all 0.3s ease; }
+    .mermaid-container.expanded { position: fixed; top: 20px; left: 20px; right: 20px; bottom: 20px; z-index: 1000; overflow: auto; }
+    .mermaid-container .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+    .mermaid-container h2 { font-size: 16px; color: #888; margin: 0; }
+    .mermaid-container .toggle-btn { background: #4ade80; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; }
+    .mermaid-container .toggle-btn:hover { background: #22c55e; }
+    .mermaid-container #mermaid-graph { background: #1a1a2e; padding: 20px; border-radius: 8px; min-height: 200px; max-height: 500px; overflow: auto; }
+    .mermaid-container #mermaid-graph svg { max-width: 100%; max-height: 450px; }
     .mermaid-container .no-chain { color: #666; font-style: italic; text-align: center; padding: 50px; }
+    .mermaid-container .node-legend { display: flex; gap: 20px; margin-top: 15px; font-size: 12px; }
+    .mermaid-container .legend-item { display: flex; align-items: center; gap: 6px; }
+    .mermaid-container .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
+    .mermaid-container .legend-dot.pending { background: #666; }
+    .mermaid-container .legend-dot.running { background: #fbbf24; }
+    .mermaid-container .legend-dot.complete { background: #4ade80; }
+    .mermaid-container .legend-dot.error { background: #f87171; }
     .events { background: #16213e; border-radius: 12px; padding: 20px; max-height: 400px; overflow-y: auto; }
     .events h2 { font-size: 16px; margin-bottom: 15px; color: #888; }
     .event { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; font-family: monospace; font-size: 13px; }
@@ -64,7 +75,7 @@ let dashboard_html = {|<!DOCTYPE html>
     .event.node_start { border-left: 3px solid #fbbf24; }
     .event.node_complete { border-left: 3px solid #a78bfa; }
     .event.chain_error { border-left: 3px solid #f87171; background: #2d1f1f; }
-    @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
 <body>
@@ -73,30 +84,36 @@ let dashboard_html = {|<!DOCTYPE html>
     <h1>🐫 Chain Engine Dashboard</h1>
   </div>
 
-  <div class="main-grid">
-    <div>
-      <div class="stats-grid">
-        <div class="card">
-          <div class="card-label">Total Chains</div>
-          <div class="card-value" id="total-chains">-</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Success Rate</div>
-          <div class="card-value" id="success-rate">-</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Avg Duration</div>
-          <div class="card-value" id="avg-duration">-</div>
-        </div>
-        <div class="card">
-          <div class="card-label">Total Nodes</div>
-          <div class="card-value" id="total-nodes">-</div>
-        </div>
-      </div>
+  <div class="stats-grid">
+    <div class="card">
+      <div class="card-label">Total Chains</div>
+      <div class="card-value" id="total-chains">-</div>
     </div>
-    <div class="mermaid-container">
+    <div class="card">
+      <div class="card-label">Success Rate</div>
+      <div class="card-value" id="success-rate">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Duration</div>
+      <div class="card-value" id="avg-duration">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Nodes</div>
+      <div class="card-value" id="total-nodes">-</div>
+    </div>
+  </div>
+
+  <div class="mermaid-container" id="mermaid-container">
+    <div class="header-row">
       <h2>🔄 Current Chain</h2>
-      <div id="mermaid-graph"><div class="no-chain">Waiting for chain execution...</div></div>
+      <button class="toggle-btn" id="toggle-expand" onclick="toggleExpand()">⛶ Expand</button>
+    </div>
+    <div id="mermaid-graph"><div class="no-chain">Waiting for chain execution...</div></div>
+    <div class="node-legend" id="node-legend" style="display:none;">
+      <div class="legend-item"><div class="legend-dot pending"></div> Pending</div>
+      <div class="legend-item"><div class="legend-dot running"></div> Running</div>
+      <div class="legend-item"><div class="legend-dot complete"></div> Complete</div>
+      <div class="legend-item"><div class="legend-dot error"></div> Error</div>
     </div>
   </div>
 
@@ -106,12 +123,29 @@ let dashboard_html = {|<!DOCTYPE html>
   </div>
 
   <script>
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', themeVariables: { primaryColor: '#16213e', primaryTextColor: '#eee', lineColor: '#4ade80' } });
+    // Toggle expand function (global scope)
+    function toggleExpand() {
+      const container = document.getElementById('mermaid-container');
+      const btn = document.getElementById('toggle-expand');
+      container.classList.toggle('expanded');
+      btn.textContent = container.classList.contains('expanded') ? '✕ Close' : '⛶ Expand';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: { primaryColor: '#16213e', primaryTextColor: '#eee', lineColor: '#4ade80' },
+        flowchart: { nodeSpacing: 30, rankSpacing: 40, curve: 'basis', htmlLabels: true, useMaxWidth: false }
+      });
+    }
 
     const icons = { chain_start: '▶', chain_complete: '✓', node_start: '→', node_complete: '●', chain_error: '✗', ping: '♥' };
     const eventList = document.getElementById('event-list');
     const statusEl = document.getElementById('status');
     const mermaidEl = document.getElementById('mermaid-graph');
+    const legendEl = document.getElementById('node-legend');
     let eventSource;
     let currentMermaid = null;
     let nodeStates = {};  // node_id -> 'pending' | 'running' | 'complete' | 'error'
@@ -122,22 +156,56 @@ let dashboard_html = {|<!DOCTYPE html>
     async function renderMermaid(dsl) {
       currentMermaid = dsl;
       nodeStates = {};
+      legendEl.style.display = 'flex';
+      console.log('renderMermaid called, mermaid available:', typeof mermaid !== 'undefined');
+      if (typeof mermaid === 'undefined') {
+        mermaidEl.innerHTML = '<pre style="color:#f87171;font-size:12px;">Mermaid not loaded</pre>';
+        return;
+      }
       try {
         const { svg } = await mermaid.render('mermaid-svg-' + (++renderCounter), dsl);
+        console.log('Mermaid rendered successfully');
         mermaidEl.innerHTML = svg;
-      } catch (e) { console.error('Mermaid render error:', e); }
+        // Make SVG larger
+        const svgEl = mermaidEl.querySelector('svg');
+        if (svgEl) {
+          svgEl.style.minWidth = '100%';
+          svgEl.style.height = 'auto';
+        }
+      } catch (e) {
+        console.error('Mermaid render error:', e);
+        mermaidEl.innerHTML = '<pre style="color:#f87171;font-size:12px;">Render error: ' + e.message + '</pre>';
+      }
     }
 
     function updateNodeStyle(nodeId, state) {
-      // Direct SVG manipulation - no re-render needed
       const svg = mermaidEl.querySelector('svg');
-      if (!svg) return;
-      // Mermaid generates nodes with id like "flowchart-nodeId-0" or class containing node id
-      const node = svg.querySelector('[id*="' + nodeId + '"] rect, [id*="' + nodeId + '"] polygon, [id*="' + nodeId + '"] circle, .node#' + nodeId + ' rect');
-      if (node) {
-        node.style.fill = STATE_COLORS[state];
-        node.style.transition = 'fill 0.3s ease';
+      if (!svg) { console.log('No SVG found'); return; }
+
+      // Try multiple selectors - Mermaid uses different patterns
+      const selectors = [
+        '[id*="flowchart-' + nodeId + '"] rect',
+        '[id*="flowchart-' + nodeId + '"] polygon',
+        '[id*="' + nodeId + '"] rect',
+        '[id*="' + nodeId + '"] polygon',
+        'g[id*="' + nodeId + '"] rect',
+        'g[id*="' + nodeId + '"] polygon'
+      ];
+
+      let found = false;
+      for (const sel of selectors) {
+        const nodes = svg.querySelectorAll(sel);
+        nodes.forEach(node => {
+          node.style.fill = STATE_COLORS[state];
+          node.style.transition = 'fill 0.3s ease';
+          node.style.stroke = state === 'running' ? '#fff' : '';
+          node.style.strokeWidth = state === 'running' ? '3px' : '';
+          found = true;
+        });
+        if (found) break;
       }
+
+      if (!found) console.log('Node not found for:', nodeId, 'tried:', selectors[0]);
     }
 
     function updateNodeState(nodeId, state) {
@@ -157,7 +225,13 @@ let dashboard_html = {|<!DOCTYPE html>
 
       eventSource.addEventListener('chain_start', e => {
         const data = JSON.parse(e.data);
-        if (data.mermaid_dsl) renderMermaid(data.mermaid_dsl);
+        console.log('chain_start received:', data);
+        if (data.mermaid_dsl) {
+          console.log('Rendering mermaid:', data.mermaid_dsl.substring(0, 100) + '...');
+          renderMermaid(data.mermaid_dsl);
+        } else {
+          console.warn('No mermaid_dsl in chain_start');
+        }
         addEvent('chain_start', data);
       });
 
@@ -208,6 +282,7 @@ let dashboard_html = {|<!DOCTYPE html>
     connect();
     fetchStats();
     setInterval(fetchStats, 5000);
+    });  // end DOMContentLoaded
   </script>
 </body>
 </html>|}

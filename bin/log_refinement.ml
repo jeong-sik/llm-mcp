@@ -221,7 +221,7 @@ let get_recent_arg =
 let main original refined confidence context_json user_choice
     ambiguity_score needs_refinement_str session_id get_recent =
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+  Mirage_crypto_rng_unix.use_default ();
   Eio.Switch.run @@ fun sw ->
   let stdenv = (env :> Caqti_eio.stdenv) in
   match get_recent with

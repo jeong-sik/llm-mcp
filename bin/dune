@@ -12,8 +12,8 @@
  (public_name save-prompt)
  (package llm_mcp)
  (modules save_prompt)
- (libraries eio eio_main cmdliner caqti caqti-eio caqti-eio.unix caqti-driver-postgresql mirage-crypto-rng-eio uri unix)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main cmdliner caqti caqti-eio caqti-eio.unix caqti-driver-postgresql mirage-crypto-rng.unix uri unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name skill_activator)
@@ -27,8 +27,8 @@
  (public_name log-refinement)
  (package llm_mcp)
  (modules log_refinement)
- (libraries eio eio_main cmdliner caqti caqti-eio caqti-eio.unix caqti-driver-postgresql mirage-crypto-rng-eio yojson uri unix)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main cmdliner caqti caqti-eio caqti-eio.unix caqti-driver-postgresql mirage-crypto-rng.unix yojson uri unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name build_query_context)
@@ -50,8 +50,8 @@
  (public_name memory-retriever)
  (package llm_mcp)
  (modules memory_retriever)
- (libraries eio eio_main cohttp-eio tls-eio ca-certs mirage-crypto-rng-eio yojson cmdliner uri unix)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main cohttp-eio tls-eio ca-certs mirage-crypto-rng.unix yojson cmdliner uri unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name claude_cli)
@@ -100,24 +100,24 @@
  (public_name neo4j-health)
  (package llm_mcp)
  (modules neo4j_health)
- (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix yojson)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name doctor)
  (public_name llm-mcp-doctor)
  (package llm_mcp)
  (modules doctor)
- (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson unix)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix yojson unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name subagent_logger)
  (public_name subagent-logger)
  (package llm_mcp)
  (modules subagent_logger)
- (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name hook_input)
@@ -131,16 +131,16 @@
  (public_name neo4j-session)
  (package llm_mcp)
  (modules neo4j_session)
- (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson re unix)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix yojson re unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name neo4j_session_context)
  (public_name neo4j-session-context)
  (package llm_mcp)
  (modules neo4j_session_context)
- (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng-eio yojson)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix yojson)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name session_logger)
@@ -154,8 +154,8 @@
  (public_name previously-on)
  (package llm_mcp)
  (modules previously_on)
- (libraries eio eio_main neo4j_bolt_eio yojson mirage-crypto-rng-eio)
- (ocamlopt_flags (:standard -alert -deprecated)))
+ (libraries eio eio_main neo4j_bolt_eio yojson mirage-crypto-rng.unix)
+ (ocamlopt_flags (:standard -O3)))
 
 (executable
  (name council_vote)

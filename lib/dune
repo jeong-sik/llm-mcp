@@ -67,6 +67,7 @@
    mcp_client_eio
    cli_runner_eio
    ; Chain Engine (Phase 3-4)
+   chain_adapter_eio
    chain_executor_eio
    chain_orchestrator_eio)
  (libraries

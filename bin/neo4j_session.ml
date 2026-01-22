@@ -215,7 +215,7 @@ let main ~sw ~net ~clock =
 let () =
   let exit_code =
     Eio_main.run @@ fun env ->
-    Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+    Mirage_crypto_rng_unix.use_default ();
     Eio.Switch.run @@ fun sw ->
     let net = Eio.Stdenv.net env in
     let clock = Eio.Stdenv.clock env in

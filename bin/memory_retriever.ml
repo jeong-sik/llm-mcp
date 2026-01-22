@@ -492,7 +492,7 @@ let json_flag =
 let main query limit format_str json_flag =
   let format = if json_flag then "json" else format_str in
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+  Mirage_crypto_rng_unix.use_default ();
   Eio.Switch.run @@ fun sw ->
   let client = make_client env in
   let memories = search_memories ~sw ~client query limit in

@@ -145,7 +145,7 @@ let segment =
 let main session_id prompt category confidence segment =
   let success =
     Eio_main.run @@ fun env ->
-    Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+    Mirage_crypto_rng_unix.use_default ();
     Eio.Switch.run @@ fun sw ->
     let stdenv = (env :> Caqti_eio.stdenv) in
     save_prompt
