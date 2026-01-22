@@ -8,6 +8,7 @@
     - 비용 추정
     - 성공/실패율 계산
     - 시간별 추이 분석
+    - Thread-safe 통계 수집 (Mutex 사용)
 
     @author Chain Engine
     @since 2026-01
@@ -93,7 +94,13 @@ let stats_data : raw_data = {
   active_chains = 0;
 }
 
+(** Standard mutex for thread-safe operations *)
 let stats_mutex = Mutex.create ()
+
+(** Helper for mutex-protected operations *)
+let with_mutex f =
+  Mutex.lock stats_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock stats_mutex) f
 
 (** {1 Data Collection} *)
 
@@ -109,50 +116,50 @@ let incr_counter tbl key delta =
 
 (** Event handler for statistics collection *)
 let stats_handler event =
-  Mutex.lock stats_mutex;
-  (match event with
-   | ChainStart _ ->
-     let hour = current_hour () in
-     incr_counter stats_data.hourly_chains hour 1;
-     stats_data.active_chains <- stats_data.active_chains + 1
+  with_mutex (fun () ->
+    match event with
+    | ChainStart _ ->
+      let hour = current_hour () in
+      incr_counter stats_data.hourly_chains hour 1;
+      stats_data.active_chains <- stats_data.active_chains + 1
 
-   | NodeComplete payload ->
-     stats_data.node_durations <- payload.node_duration_ms :: stats_data.node_durations;
-     let tokens = payload.node_tokens in
-     stats_data.total_tokens <- stats_data.total_tokens + tokens.total_tokens;
-     stats_data.total_cost <- stats_data.total_cost +. tokens.estimated_cost_usd;
+    | NodeComplete payload ->
+      stats_data.node_durations <- payload.node_duration_ms :: stats_data.node_durations;
+      let tokens = payload.node_tokens in
+      stats_data.total_tokens <- stats_data.total_tokens + tokens.total_tokens;
+      stats_data.total_cost <- stats_data.total_cost +. tokens.estimated_cost_usd;
 
-     (* Track hourly tokens *)
-     let hour = current_hour () in
-     incr_counter stats_data.hourly_tokens hour tokens.total_tokens
+      (* Track hourly tokens *)
+      let hour = current_hour () in
+      incr_counter stats_data.hourly_tokens hour tokens.total_tokens
 
-   | ChainComplete payload ->
-     stats_data.chain_durations <- payload.complete_duration_ms :: stats_data.chain_durations;
-     stats_data.chain_timestamps <- Unix.gettimeofday () :: stats_data.chain_timestamps;
-     stats_data.success_count <- stats_data.success_count + 1;
-     stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
+    | ChainComplete payload ->
+      stats_data.chain_durations <- payload.complete_duration_ms :: stats_data.chain_durations;
+      stats_data.chain_timestamps <- Unix.gettimeofday () :: stats_data.chain_timestamps;
+      stats_data.success_count <- stats_data.success_count + 1;
+      stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
 
-   | Error payload ->
-     stats_data.failure_count <- stats_data.failure_count + 1;
-     incr_counter stats_data.errors payload.error_message 1;
-     stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
+    | Error payload ->
+      stats_data.failure_count <- stats_data.failure_count + 1;
+      incr_counter stats_data.errors payload.error_message 1;
+      stats_data.active_chains <- max 0 (stats_data.active_chains - 1)
 
-   | NodeStart _ -> ());
-  Mutex.unlock stats_mutex
+    | NodeStart _ -> ()
+  )
 
 (** Track model-specific token usage *)
 let track_model_tokens ~model ~tokens =
-  Mutex.lock stats_mutex;
-  incr_counter stats_data.tokens_by_model model tokens;
-  incr_counter stats_data.call_counts_by_model model 1;
-  Mutex.unlock stats_mutex
+  with_mutex (fun () ->
+    incr_counter stats_data.tokens_by_model model tokens;
+    incr_counter stats_data.call_counts_by_model model 1
+  )
 
 (** Track model-specific latency *)
 let track_model_latency ~model ~latency_ms =
-  Mutex.lock stats_mutex;
-  let current = Hashtbl.find_opt stats_data.latencies_by_model model |> Option.value ~default:[] in
-  Hashtbl.replace stats_data.latencies_by_model model (latency_ms :: current);
-  Mutex.unlock stats_mutex
+  with_mutex (fun () ->
+    let current = Hashtbl.find_opt stats_data.latencies_by_model model |> Option.value ~default:[] in
+    Hashtbl.replace stats_data.latencies_by_model model (latency_ms :: current)
+  )
 
 (** {1 Percentile Calculation} *)
 
@@ -173,104 +180,101 @@ let percentiles ps list =
 
 (** Compute current statistics *)
 let compute ?(since=0.0) () =
-  Mutex.lock stats_mutex;
+  with_mutex (fun () ->
+    (* Filter durations by timestamp if since > 0 *)
+    let filtered_durations =
+      if since <= 0.0 then stats_data.chain_durations
+      else
+        List.filter_map (fun (d, ts) -> if ts >= since then Some d else None)
+          (List.combine stats_data.chain_durations stats_data.chain_timestamps
+           |> fun pairs -> if List.length pairs = 0 then [] else pairs)
+    in
 
-  (* Filter durations by timestamp if since > 0 *)
-  let filtered_durations =
-    if since <= 0.0 then stats_data.chain_durations
-    else
-      List.filter_map (fun (d, ts) -> if ts >= since then Some d else None)
-        (List.combine stats_data.chain_durations stats_data.chain_timestamps
-         |> fun pairs -> if List.length pairs = 0 then [] else pairs)
-  in
+    (* Calculate duration percentiles *)
+    let chain_ps = percentiles [0.5; 0.95; 0.99] filtered_durations in
+    let p50, p95, p99 = match chain_ps with
+      | [a; b; c] -> (a, b, c)
+      | _ -> (0.0, 0.0, 0.0)
+    in
 
-  (* Calculate duration percentiles *)
-  let chain_ps = percentiles [0.5; 0.95; 0.99] filtered_durations in
-  let p50, p95, p99 = match chain_ps with
-    | [a; b; c] -> (a, b, c)
-    | _ -> (0.0, 0.0, 0.0)
-  in
+    (* Calculate average *)
+    let avg_duration =
+      if filtered_durations = [] then 0.0
+      else
+        let sum = List.fold_left (+) 0 filtered_durations in
+        float_of_int sum /. float_of_int (List.length filtered_durations)
+    in
 
-  (* Calculate average *)
-  let avg_duration =
-    if filtered_durations = [] then 0.0
-    else
-      let sum = List.fold_left (+) 0 filtered_durations in
-      float_of_int sum /. float_of_int (List.length filtered_durations)
-  in
+    (* Convert hashtables to lists *)
+    let tokens_by_model =
+      Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.tokens_by_model []
+      |> List.sort (fun (_, a) (_, b) -> compare b a)  (* Sort by tokens desc *)
+    in
 
-  (* Convert hashtables to lists *)
-  let tokens_by_model =
-    Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.tokens_by_model []
-    |> List.sort (fun (_, a) (_, b) -> compare b a)  (* Sort by tokens desc *)
-  in
+    let failure_reasons =
+      Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.errors []
+      |> List.sort (fun (_, a) (_, b) -> compare b a)  (* Sort by count desc *)
+    in
 
-  let failure_reasons =
-    Hashtbl.fold (fun k v acc -> (k, v) :: acc) stats_data.errors []
-    |> List.sort (fun (_, a) (_, b) -> compare b a)  (* Sort by count desc *)
-  in
+    let hourly_tokens =
+      List.init 24 (fun h ->
+        (h, Hashtbl.find_opt stats_data.hourly_tokens h |> Option.value ~default:0))
+      |> List.filter (fun (_, v) -> v > 0)
+    in
 
-  let hourly_tokens =
-    List.init 24 (fun h ->
-      (h, Hashtbl.find_opt stats_data.hourly_tokens h |> Option.value ~default:0))
-    |> List.filter (fun (_, v) -> v > 0)
-  in
+    let hourly_chains =
+      List.init 24 (fun h ->
+        (h, Hashtbl.find_opt stats_data.hourly_chains h |> Option.value ~default:0))
+      |> List.filter (fun (_, v) -> v > 0)
+    in
 
-  let hourly_chains =
-    List.init 24 (fun h ->
-      (h, Hashtbl.find_opt stats_data.hourly_chains h |> Option.value ~default:0))
-    |> List.filter (fun (_, v) -> v > 0)
-  in
+    (* Calculate success rate *)
+    let total_attempts = stats_data.success_count + stats_data.failure_count in
+    let success_rate =
+      if total_attempts = 0 then 1.0
+      else float_of_int stats_data.success_count /. float_of_int total_attempts
+    in
 
-  (* Calculate success rate *)
-  let total_attempts = stats_data.success_count + stats_data.failure_count in
-  let success_rate =
-    if total_attempts = 0 then 1.0
-    else float_of_int stats_data.success_count /. float_of_int total_attempts
-  in
-
-  let result = {
-    total_chains = List.length stats_data.chain_durations;
-    total_nodes = List.length stats_data.node_durations;
-    active_chains = stats_data.active_chains;
-    avg_duration_ms = avg_duration;
-    p50_duration_ms = p50;
-    p95_duration_ms = p95;
-    p99_duration_ms = p99;
-    total_tokens = stats_data.total_tokens;
-    tokens_by_model;
-    estimated_cost_usd = stats_data.total_cost;
-    success_count = stats_data.success_count;
-    failure_count = stats_data.failure_count;
-    success_rate;
-    failure_reasons;
-    hourly_tokens;
-    hourly_chains;
-  } in
-
-  Mutex.unlock stats_mutex;
-  result
+    {
+      total_chains = List.length stats_data.chain_durations;
+      total_nodes = List.length stats_data.node_durations;
+      active_chains = stats_data.active_chains;
+      avg_duration_ms = avg_duration;
+      p50_duration_ms = p50;
+      p95_duration_ms = p95;
+      p99_duration_ms = p99;
+      total_tokens = stats_data.total_tokens;
+      tokens_by_model;
+      estimated_cost_usd = stats_data.total_cost;
+      success_count = stats_data.success_count;
+      failure_count = stats_data.failure_count;
+      success_rate;
+      failure_reasons;
+      hourly_tokens;
+      hourly_chains;
+    }
+  )
 
 (** {1 Reset and Management} *)
 
 (** Reset all statistics *)
 let reset () =
-  Mutex.lock stats_mutex;
-  stats_data.chain_durations <- [];
-  stats_data.chain_timestamps <- [];
-  stats_data.node_durations <- [];
-  Hashtbl.clear stats_data.tokens_by_model;
-  Hashtbl.clear stats_data.call_counts_by_model;
-  Hashtbl.clear stats_data.latencies_by_model;
-  Hashtbl.clear stats_data.errors;
-  Hashtbl.clear stats_data.hourly_tokens;
-  Hashtbl.clear stats_data.hourly_chains;
-  stats_data.success_count <- 0;
-  stats_data.failure_count <- 0;
-  stats_data.total_tokens <- 0;
-  stats_data.total_cost <- 0.0;
-  stats_data.active_chains <- 0;
-  Mutex.unlock stats_mutex
+  with_mutex (fun () ->
+    stats_data.chain_durations <- [];
+    stats_data.chain_timestamps <- [];
+    stats_data.node_durations <- [];
+    Hashtbl.clear stats_data.tokens_by_model;
+    Hashtbl.clear stats_data.call_counts_by_model;
+    Hashtbl.clear stats_data.latencies_by_model;
+    Hashtbl.clear stats_data.errors;
+    Hashtbl.clear stats_data.hourly_tokens;
+    Hashtbl.clear stats_data.hourly_chains;
+    stats_data.success_count <- 0;
+    stats_data.failure_count <- 0;
+    stats_data.total_tokens <- 0;
+    stats_data.total_cost <- 0.0;
+    stats_data.active_chains <- 0
+  )
 
 (** {1 Subscription Management} *)
 
@@ -311,8 +315,7 @@ let cost_per_1k_tokens = function
 
 (** Calculate model-specific statistics *)
 let model_statistics () : model_stats list =
-  Mutex.lock stats_mutex;
-  let result : model_stats list =
+  with_mutex (fun () ->
     Hashtbl.fold (fun model tokens (acc : model_stats list) ->
       let cost = float_of_int tokens *. cost_per_1k_tokens model /. 1000.0 in
       let call_count =
@@ -338,9 +341,7 @@ let model_statistics () : model_stats list =
       } : model_stats) :: acc
     ) stats_data.tokens_by_model ([] : model_stats list)
     |> List.sort (fun (a : model_stats) (b : model_stats) -> compare b.total_tokens a.total_tokens)
-  in
-  Mutex.unlock stats_mutex;
-  result
+  )
 
 (** {1 Serialization} *)
 
