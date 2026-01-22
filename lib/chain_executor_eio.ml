@@ -85,6 +85,7 @@ type exec_context = {
   mutable iteration_ctx: iteration_ctx option;  (** Iteration context for GoalDriven *)
   mutable conversation: conversation_ctx option; (** Conversation context for conversational mode *)
   cache: (string, string * float) Hashtbl.t;  (** Node cache: key -> (result, timestamp) *)
+  mutable total_tokens: Chain_category.token_usage; (** Accumulated token usage *)
 }
 
 (** Create a new execution context *)
@@ -97,6 +98,7 @@ let make_context ~start_time ~trace_enabled ~timeout = {
   iteration_ctx = None;
   conversation = None;
   cache = Hashtbl.create 32;
+  total_tokens = Chain_category.Token_monoid.empty;
 }
 
 (** {1 Trace Helpers} *)
@@ -119,7 +121,7 @@ let add_trace ctx node_id event =
        Chain_telemetry.emit (Chain_telemetry.ChainComplete {
          Chain_telemetry.complete_chain_id = chain_id;
          complete_duration_ms = duration_ms;
-         complete_tokens = Chain_category.Token_monoid.empty;
+         complete_tokens = ctx.total_tokens;
          nodes_executed = 0;
          nodes_skipped = 0;
        })
@@ -478,6 +480,16 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
+          (* Estimate tokens: ~4 chars per token (rough approximation) *)
+          let prompt_tokens = (String.length final_prompt + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
+          let completion_tokens = String.length output / 4 in
+          let node_tokens = {
+            Chain_category.prompt_tokens;
+            completion_tokens;
+            total_tokens = prompt_tokens + completion_tokens;
+            estimated_cost_usd = 0.0;
+          } in
+          ctx.total_tokens <- Chain_category.Token_monoid.concat ctx.total_tokens node_tokens;
           record_complete ctx node.id ~duration_ms ~success:true;
           Hashtbl.add ctx.outputs node.id output;
           Ok output
@@ -547,6 +559,32 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
 
 (** {1 Recursive Execution} *)
 
+(** MCTS Tree Node - mutable for backpropagation *)
+type mcts_tree_node = {
+  strategy_idx : int;                     (* Index into strategies list *)
+  mutable visits : int;
+  mutable total_score : float;
+  mutable children : mcts_tree_node list;
+  parent : mcts_tree_node option;
+  depth : int;
+  last_output : string ref;               (* Store simulation output for expansion *)
+}
+
+(** Calculate UCB1 value for node selection *)
+let ucb1_value ~c (parent_visits : int) (node : mcts_tree_node) : float =
+  if node.visits = 0 then Float.infinity
+  else
+    let exploitation = node.total_score /. float_of_int node.visits in
+    let exploration = c *. sqrt (log (float_of_int parent_visits) /. float_of_int node.visits) in
+    exploitation +. exploration
+
+(** Helper: Check if string contains substring *)
+let string_contains ~substring str =
+  try
+    let _ = Str.search_forward (Str.regexp_string substring) str 0 in
+    true
+  with Not_found -> false
+
 (** Forward declaration for recursive execution *)
 let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =
   match node.node_type with
@@ -604,6 +642,270 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   (* Clean Context Spawn Node *)
   | Spawn { clean; inner; pass_vars; inherit_cache } ->
       execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec node ~clean ~pass_vars ~inherit_cache inner
+  (* Monte Carlo Tree Search Node *)
+  | Mcts { strategies; simulation; evaluator; evaluator_prompt; policy;
+           max_iterations; max_depth; expansion_threshold; early_stop; parallel_sims } ->
+      execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~strategies ~simulation ~evaluator ~evaluator_prompt ~policy
+        ~max_iterations ~max_depth ~expansion_threshold ~early_stop ~parallel_sims
+
+(** Execute Monte Carlo Tree Search node *)
+and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~strategies ~simulation ~evaluator ~evaluator_prompt ~policy
+    ~max_iterations ~max_depth ~expansion_threshold ~early_stop ~parallel_sims
+    : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* Get exploration constant from policy *)
+  let exploration_c = match policy with
+    | UCB1 c -> c
+    | Greedy -> 0.0
+    | EpsilonGreedy _ -> 1.414
+    | Softmax _ -> 1.414
+  in
+
+  (* Create root node with initial strategies as children *)
+  let root = {
+    strategy_idx = -1;
+    visits = 0;
+    total_score = 0.0;
+    children = [];
+    parent = None;
+    depth = 0;
+    last_output = ref "";
+  } in
+
+  (* Initialize children for each strategy *)
+  root.children <- List.mapi (fun i _ -> {
+    strategy_idx = i;
+    visits = 0;
+    total_score = 0.0;
+    children = [];
+    parent = Some root;
+    depth = 1;
+    last_output = ref "";
+  }) strategies;
+
+  (* Selection phase: traverse tree using UCB1/policy to find node to expand *)
+  let rec select (node : mcts_tree_node) : mcts_tree_node =
+    if node.children = [] || node.depth >= max_depth then node
+    else
+      let parent_visits = max 1 node.visits in
+      let selected = match policy with
+        | UCB1 _ | EpsilonGreedy _ ->
+            (* UCB1 or epsilon-greedy uses UCB1 for selection *)
+            let with_scores = List.map (fun child ->
+              (child, ucb1_value ~c:exploration_c parent_visits child)
+            ) node.children in
+            let sorted = List.sort (fun (_, s1) (_, s2) -> Float.compare s2 s1) with_scores in
+            (match sorted with (best, _) :: _ -> best | [] -> node)
+        | Greedy ->
+            (* Pure exploitation: pick highest average score *)
+            let with_avg = List.map (fun child ->
+              let avg = if child.visits = 0 then 0.0 else child.total_score /. float_of_int child.visits in
+              (child, avg)
+            ) node.children in
+            let sorted = List.sort (fun (_, s1) (_, s2) -> Float.compare s2 s1) with_avg in
+            (match sorted with (best, _) :: _ -> best | [] -> node)
+        | Softmax temp ->
+            (* Softmax selection with temperature *)
+            let scores = List.map (fun child ->
+              if child.visits = 0 then 0.0 else child.total_score /. float_of_int child.visits
+            ) node.children in
+            let max_score = List.fold_left max Float.neg_infinity scores in
+            let exp_scores = List.map (fun s -> exp ((s -. max_score) /. temp)) scores in
+            let sum = List.fold_left (+.) 0.0 exp_scores in
+            let probs = List.map (fun e -> e /. sum) exp_scores in
+            (* Sample from distribution *)
+            let r = Random.float 1.0 in
+            let rec sample acc = function
+              | [] -> List.nth node.children 0
+              | (child, prob) :: rest ->
+                  let acc' = acc +. prob in
+                  if r < acc' then child else sample acc' rest
+            in
+            sample 0.0 (List.combine node.children probs)
+      in
+      select selected
+  in
+
+  (* Expansion phase: add new child nodes if visits exceed threshold *)
+  let expand (node : mcts_tree_node) : mcts_tree_node =
+    if node.visits >= expansion_threshold && node.depth < max_depth && node.children = [] then begin
+      (* Create children by re-using all strategies (exploring different paths) *)
+      node.children <- List.mapi (fun i _ -> {
+        strategy_idx = i;
+        visits = 0;
+        total_score = 0.0;
+        children = [];
+        parent = Some node;
+        depth = node.depth + 1;
+        last_output = ref "";
+      }) strategies;
+      (* Return first unvisited child *)
+      match node.children with
+      | first :: _ -> first
+      | [] -> node
+    end
+    else node
+  in
+
+  (* Simulation phase: execute strategy and simulation in clean context *)
+  let simulate (node : mcts_tree_node) : float =
+    let strategy_node = List.nth strategies node.strategy_idx in
+    (* Execute strategy in current context first *)
+    let strategy_result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec strategy_node in
+    match strategy_result with
+    | Error _ -> 0.0  (* Failed strategy gets 0 score *)
+    | Ok strategy_output ->
+        node.last_output := strategy_output;
+        (* Store strategy output for simulation *)
+        Hashtbl.replace ctx.outputs strategy_node.Chain_types.id strategy_output;
+        (* Execute simulation in spawned clean context *)
+        let sim_result = execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec simulation
+          ~clean:true ~pass_vars:[strategy_node.Chain_types.id] ~inherit_cache:false simulation in
+        match sim_result with
+        | Error _ -> 0.0
+        | Ok sim_output ->
+            (* Score the simulation output *)
+            let score = match evaluator with
+            | "llm_judge" ->
+                let prompt = match evaluator_prompt with
+                  | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s" p sim_output
+                  | None -> Printf.sprintf "Rate this output from 0.0 to 1.0:\n%s" sim_output
+                in
+                (match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+                 | Ok s -> (try Float.min 1.0 (Float.max 0.0 (float_of_string (String.trim s))) with _ -> 0.5)
+                 | Error _ -> 0.5)
+            | "exec_test" ->
+                (* Parse test results: look for pass rate or coverage *)
+                let regex = Str.regexp "\\([0-9]+\\)/\\([0-9]+\\)\\|coverage[: ]+\\([0-9.]+\\)" in
+                (try
+                  let _ = Str.search_forward regex sim_output 0 in
+                  try
+                    let passed = float_of_string (Str.matched_group 1 sim_output) in
+                    let total = float_of_string (Str.matched_group 2 sim_output) in
+                    passed /. total
+                  with _ ->
+                    float_of_string (Str.matched_group 3 sim_output)
+                with Not_found -> 0.5)
+            | "anti_fake" ->
+                (* Hybrid heuristic + LLM scoring for code quality *)
+                let heuristic_score =
+                  let penalties = [
+                    ("assert true", -0.3); ("let _ =", -0.2); ("(* TODO", -0.15);
+                    ("skip", -0.1); ("ignore", -0.1);
+                  ] in
+                  let bonuses = [
+                    ("assert_equal", 0.1); ("expect", 0.1); ("roundtrip", 0.15);
+                    ("property", 0.1); ("quickcheck", 0.1);
+                  ] in
+                  let base = 0.5 in
+                  let pen = List.fold_left (fun acc (pat, pen) ->
+                    if string_contains ~substring:pat sim_output then acc +. pen else acc
+                  ) 0.0 penalties in
+                  let bon = List.fold_left (fun acc (pat, bon) ->
+                    if string_contains ~substring:pat sim_output then acc +. bon else acc
+                  ) 0.0 bonuses in
+                  Float.min 1.0 (Float.max 0.0 (base +. pen +. bon))
+                in
+                (* LLM judge for semantic analysis *)
+                let llm_score =
+                  let prompt = Printf.sprintf
+                    "Rate this code/test quality from 0.0 to 1.0. Check for: fake tests, missing assertions, incomplete coverage.\n\n%s"
+                    sim_output
+                  in
+                  match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+                  | Ok s -> (try float_of_string (String.trim s) with _ -> 0.5)
+                  | Error _ -> 0.5
+                in
+                (heuristic_score +. llm_score) /. 2.0
+            | _ ->
+                (* Default: try to parse as float or return 0.5 *)
+                (try float_of_string (String.trim sim_output) with _ -> 0.5)
+            in
+            score
+  in
+
+  (* Backpropagation phase: update scores up the tree *)
+  let rec backpropagate (node : mcts_tree_node) (score : float) : unit =
+    node.visits <- node.visits + 1;
+    node.total_score <- node.total_score +. score;
+    match node.parent with
+    | Some p -> backpropagate p score
+    | None -> ()
+  in
+
+  (* Main MCTS loop *)
+  let best_output = ref "" in
+  let best_score = ref Float.neg_infinity in
+
+  let rec mcts_iteration iteration =
+    if iteration >= max_iterations then ()
+    else begin
+      (* Run parallel simulations *)
+      let sim_results = ref [] in
+      let mutex = Eio.Mutex.create () in
+
+      Eio.Fiber.all (List.init parallel_sims (fun _ ->
+        fun () ->
+          let selected = select root in
+          let expanded = expand selected in
+          let score = simulate expanded in
+          Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+            sim_results := (expanded, score) :: !sim_results;
+            (* Track best result *)
+            if score > !best_score then begin
+              best_score := score;
+              best_output := !(expanded.last_output)
+            end
+          )
+      ));
+
+      (* Backpropagate all results *)
+      List.iter (fun (node, score) ->
+        backpropagate node score
+      ) !sim_results;
+
+      (* Check early stopping *)
+      match early_stop with
+      | Some threshold when !best_score >= threshold ->
+          ()  (* Early stop: found good enough solution *)
+      | _ ->
+          mcts_iteration (iteration + parallel_sims)
+    end
+  in
+
+  mcts_iteration 0;
+
+  (* Find best strategy based on final statistics *)
+  let best_child =
+    let sorted = List.sort (fun c1 c2 ->
+      let avg1 = if c1.visits = 0 then 0.0 else c1.total_score /. float_of_int c1.visits in
+      let avg2 = if c2.visits = 0 then 0.0 else c2.total_score /. float_of_int c2.visits in
+      Float.compare avg2 avg1
+    ) root.children in
+    match sorted with best :: _ -> Some best | [] -> None
+  in
+
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+
+  match best_child with
+  | None ->
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      Error "MCTS: No strategies found"
+  | Some best ->
+      let result_json = Yojson.Safe.to_string (`Assoc [
+        ("strategy_idx", `Int best.strategy_idx);
+        ("visits", `Int best.visits);
+        ("avg_score", `Float (best.total_score /. float_of_int (max 1 best.visits)));
+        ("total_iterations", `Int root.visits);
+        ("best_output", `String !best_output);
+      ]) in
+      Hashtbl.replace ctx.outputs parent.id result_json;
+      record_complete ctx parent.id ~duration_ms ~success:true;
+      Ok result_json
 
 (** Execute cache node - check cache first, execute inner if miss *)
 and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
