@@ -115,9 +115,21 @@ type adapter_transform =
 val adapter_transform_to_yojson : adapter_transform -> Yojson.Safe.t
 val adapter_transform_of_yojson : Yojson.Safe.t -> (adapter_transform, string) result
 
+(** {1 MCTS Policy} *)
+
+(** MCTS selection policy for tree search *)
+type mcts_policy =
+  | UCB1 of float                 (** UCB1 with exploration constant c *)
+  | Greedy                        (** Always select highest score *)
+  | EpsilonGreedy of float        (** Random with probability epsilon *)
+  | Softmax of float              (** Temperature-based selection *)
+
+val mcts_policy_to_yojson : mcts_policy -> Yojson.Safe.t
+val mcts_policy_of_yojson : Yojson.Safe.t -> (mcts_policy, string) result
+
 (** {1 Core Types} *)
 
-(** The 21 supported node types *)
+(** The 22 supported node types (including MCTS) *)
 type node_type =
   | Llm of {
       model : string;
@@ -195,6 +207,18 @@ type node_type =
       inner : node;
       pass_vars : string list;
       inherit_cache : bool;
+    }
+  | Mcts of {
+      strategies : node list;
+      simulation : node;
+      evaluator : string;
+      evaluator_prompt : string option;
+      policy : mcts_policy;
+      max_iterations : int;
+      max_depth : int;
+      expansion_threshold : int;
+      early_stop : float option;
+      parallel_sims : int;
     }
 
 (** A single execution node *)
