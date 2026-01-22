@@ -129,6 +129,23 @@ let make_error ~id code message =
     ]);
   ]
 
+(** Supported MCP protocol versions *)
+let supported_protocol_versions = [
+  "2024-11-05";
+  "2025-03-26";
+  "2025-11-25";
+]
+
+(** Health check response *)
+let health_response () =
+  Yojson.Safe.to_string (`Assoc [
+    ("status", `String "ok");
+    ("server", `String "llm-mcp");
+    ("version", `String Version.version);
+    ("transport", `String "http");
+    ("language", `String "ocaml");
+  ])
+
 (** {1 Server Info} *)
 
 let server_info = {
@@ -187,6 +204,11 @@ let handle_initialize ~store id params =
     ("serverInfo", P.server_info_to_json server_info);
     ("capabilities", P.capabilities_to_json capabilities);
     ("sessionId", `String session.id); (* Return session ID to client *)
+    ("instructions", `String "LLM-MCP provides multi-LLM access (MAGI Trinity). \
+      Tools: gemini (CASPER/strategy), claude-cli (BALTHASAR/values), codex (MELCHIOR/code), ollama (local). \
+      Use response_format='compact' for 64% token savings. \
+      For MAGI consensus, call 2+ LLMs and compare results. \
+      Chain Engine: Use chain.run for multi-LLM workflows (Mermaid DSL supported).");
   ] in
   (Some session.id, make_response ~id result)
 

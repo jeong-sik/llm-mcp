@@ -9,7 +9,6 @@
 *)
 
 open Printf
-open Llm_mcp
 
 (** ============== Configuration ============== *)
 
@@ -34,6 +33,7 @@ let dashboard_html = {|<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>🐫 Chain Engine Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
@@ -86,9 +86,17 @@ let dashboard_html = {|<!DOCTYPE html>
     .history-item.chain_complete { border-left: 3px solid #4ade80; }
     .history-item.chain_error { border-left: 3px solid #f87171; }
     .history-item .chain-id { color: #60a5fa; font-weight: bold; }
+    .replay-btn { background: #4f46e5; border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; transition: background 0.2s; }
+    .replay-btn:hover { background: #6366f1; }
     .history-item .duration { color: #4ade80; }
     .history-item .timestamp { color: #666; font-size: 11px; }
     .history-item .tokens { color: #a78bfa; }
+    .chart-panel { background: #16213e; border-radius: 12px; padding: 20px; margin-top: 20px; }
+    .chart-panel h2 { font-size: 16px; margin-bottom: 15px; color: #888; display: flex; align-items: center; gap: 10px; }
+    .chart-container { height: 200px; position: relative; }
+    .token-summary { display: flex; gap: 20px; margin-bottom: 15px; font-size: 12px; }
+    .token-summary .model-stat { display: flex; align-items: center; gap: 5px; }
+    .token-summary .model-dot { width: 10px; height: 10px; border-radius: 50%; }
     @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
@@ -141,6 +149,14 @@ let dashboard_html = {|<!DOCTYPE html>
   <div class="history-panel">
     <h2>📜 History <button class="toggle-btn" onclick="loadHistory()">↻ Refresh</button></h2>
     <div id="history-list"></div>
+  </div>
+
+  <div class="chart-panel">
+    <h2>📊 Token Usage <button class="toggle-btn" onclick="refreshTokenChart()">↻ Refresh</button></h2>
+    <div id="token-summary" class="token-summary"></div>
+    <div class="chart-container">
+      <canvas id="token-chart"></canvas>
+    </div>
   </div>
 
   <script>
@@ -236,6 +252,10 @@ let dashboard_html = {|<!DOCTYPE html>
         }
         // Add tooltips for truncated nodes
         addNodeTooltips(fullTexts);
+        // Build node ID map for state updates
+        if (activeChains[chainId]) {
+          activeChains[chainId].nodeIdMap = buildNodeIdMap();
+        }
       } catch (e) {
         console.error('Mermaid render error:', e);
         mermaidEl.innerHTML = '<pre style="color:#f87171;font-size:12px;">Render error: ' + e.message + '</pre>';
@@ -253,6 +273,55 @@ let dashboard_html = {|<!DOCTYPE html>
           node.appendChild(title);
         }
       });
+    }
+
+    // Build map of Mermaid node IDs to SVG element IDs
+    function buildNodeIdMap() {
+      const svg = mermaidEl.querySelector('svg');
+      if (!svg) return {};
+      const nodeMap = {};
+
+      // Pattern 1: flowchart-nodeId-N (most common)
+      // Use greedy match that captures everything between 'flowchart-' and the last '-N'
+      svg.querySelectorAll('[id^="flowchart-"]').forEach(el => {
+        // Match: flowchart-<node_id>-<number>
+        // Node IDs can contain hyphens, so capture everything before the last -number
+        const match = el.id.match(/^flowchart-(.+)-(\d+)$/);
+        if (match) {
+          const mermaidId = match[1];
+          if (!nodeMap[mermaidId]) nodeMap[mermaidId] = el.id;
+        }
+      });
+
+      // Pattern 2: node-nodeId (alternative pattern)
+      svg.querySelectorAll('g.node[id]').forEach(el => {
+        const id = el.getAttribute('id');
+        if (id && !id.startsWith('flowchart-')) {
+          nodeMap[id] = id;
+        }
+      });
+
+      // Pattern 3: data-id attribute (newer Mermaid versions)
+      svg.querySelectorAll('[data-id]').forEach(el => {
+        const dataId = el.getAttribute('data-id');
+        if (dataId && !nodeMap[dataId]) {
+          nodeMap[dataId] = el.id || dataId;
+        }
+      });
+
+      // Pattern 4: Aria-label based lookup (Mermaid adds aria-label with node content)
+      svg.querySelectorAll('[aria-label]').forEach(el => {
+        const label = el.getAttribute('aria-label');
+        // Try to find node ID from parent group
+        let parent = el.closest('[id^="flowchart-"]');
+        if (parent && label) {
+          const match = parent.id.match(/^flowchart-(.+)-(\d+)$/);
+          if (match) nodeMap[match[1]] = parent.id;
+        }
+      });
+
+      console.log('Node ID map built:', Object.keys(nodeMap).length, 'nodes:', JSON.stringify(nodeMap));
+      return nodeMap;
     }
 
     function updateChainTabs() {
@@ -283,40 +352,70 @@ let dashboard_html = {|<!DOCTYPE html>
       const svg = mermaidEl.querySelector('svg');
       if (!svg) { console.log('No SVG found'); return; }
 
-      // Normalize nodeId (remove special chars, lowercase for matching)
-      const normalizedId = nodeId.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
-
-      // Try multiple selectors - Mermaid uses different ID patterns
-      const selectors = [
-        '[id*="flowchart-' + nodeId + '-"] rect',
-        '[id*="flowchart-' + nodeId + '-"] polygon',
-        '[id*="flowchart-' + normalizedId + '-"] rect',
-        '[id*="flowchart-' + normalizedId + '-"] polygon',
-        '[id*="' + nodeId + '"] rect',
-        '[id*="' + nodeId + '"] polygon',
-        'g[id*="' + nodeId + '"] rect',
-        'g[id*="' + nodeId + '"] polygon'
-      ];
+      // Try using nodeIdMap first (most reliable)
+      const chain = activeChains[currentChainId];
+      const nodeIdMap = chain ? chain.nodeIdMap : null;
 
       let found = false;
-      for (const sel of selectors) {
-        try {
-          const nodes = svg.querySelectorAll(sel);
-          nodes.forEach(node => {
-            node.style.fill = STATE_COLORS[state];
-            node.style.transition = 'fill 0.3s ease';
-            node.style.stroke = state === 'running' ? '#fff' : '#333';
-            node.style.strokeWidth = state === 'running' ? '3px' : '1px';
-            found = true;
+
+      // Method 1: Use pre-built nodeIdMap
+      if (nodeIdMap && nodeIdMap[nodeId]) {
+        const svgId = nodeIdMap[nodeId];
+        const el = svg.getElementById(svgId);
+        if (el) {
+          // Apply to rect/polygon inside the group
+          const shapes = el.querySelectorAll('rect, polygon, circle, ellipse');
+          shapes.forEach(shape => {
+            shape.style.fill = STATE_COLORS[state];
+            shape.style.transition = 'fill 0.3s ease';
+            shape.style.stroke = state === 'running' ? '#fff' : '#333';
+            shape.style.strokeWidth = state === 'running' ? '3px' : '1px';
           });
-          if (found) break;
-        } catch(e) { /* invalid selector */ }
+          // Also try direct rect/polygon if it's the element itself
+          if (['rect', 'polygon', 'circle', 'ellipse'].includes(el.tagName.toLowerCase())) {
+            el.style.fill = STATE_COLORS[state];
+            el.style.transition = 'fill 0.3s ease';
+          }
+          found = shapes.length > 0 || ['rect', 'polygon'].includes(el.tagName.toLowerCase());
+          if (found) console.log('✓ Node styled via map:', nodeId, '->', svgId, 'state:', state);
+        }
+      }
+
+      // Method 2: Fallback to selector-based matching
+      if (!found) {
+        const normalizedId = nodeId.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+        const selectors = [
+          '[id*="flowchart-' + nodeId + '-"] rect',
+          '[id*="flowchart-' + nodeId + '-"] polygon',
+          '[id*="flowchart-' + normalizedId + '-"] rect',
+          '[id*="flowchart-' + normalizedId + '-"] polygon',
+          'g[id*="' + nodeId + '"] rect',
+          'g[id*="' + nodeId + '"] polygon'
+        ];
+
+        for (const sel of selectors) {
+          try {
+            const nodes = svg.querySelectorAll(sel);
+            nodes.forEach(node => {
+              node.style.fill = STATE_COLORS[state];
+              node.style.transition = 'fill 0.3s ease';
+              node.style.stroke = state === 'running' ? '#fff' : '#333';
+              node.style.strokeWidth = state === 'running' ? '3px' : '1px';
+              found = true;
+            });
+            if (found) {
+              console.log('✓ Node styled via selector:', nodeId, 'sel:', sel, 'state:', state);
+              break;
+            }
+          } catch(e) { /* invalid selector */ }
+        }
       }
 
       if (!found) {
-        // Debug: list all node IDs in SVG
+        // Debug: list available mappings and SVG IDs
+        const mapKeys = nodeIdMap ? Object.keys(nodeIdMap).join(', ') : 'no map';
         const allIds = Array.from(svg.querySelectorAll('[id*="flowchart-"]')).map(el => el.id).slice(0, 5);
-        console.log('Node not found:', nodeId, 'Available:', allIds.join(', '));
+        console.log('✗ Node not found:', nodeId, '| Map keys:', mapKeys, '| SVG IDs:', allIds.join(', '));
       }
     }
 
@@ -349,6 +448,7 @@ let dashboard_html = {|<!DOCTYPE html>
       eventSource.addEventListener('node_start', e => {
         const data = JSON.parse(e.data);
         const chainId = data.chain_id || currentChainId;
+        console.log('node_start:', data.node_id, 'chain:', chainId);
         updateNodeState(chainId, data.node_id, 'running');
         addEvent('node_start', data);
       });
@@ -399,6 +499,9 @@ let dashboard_html = {|<!DOCTYPE html>
       }).catch(() => {});
     }
 
+    // Store mermaid DSL from history for replay
+    const historyMermaid = {};
+
     function loadHistory() {
       fetch('/chain/history').then(r => r.json()).then(history => {
         const listEl = document.getElementById('history-list');
@@ -406,6 +509,12 @@ let dashboard_html = {|<!DOCTYPE html>
           listEl.innerHTML = '<div style="color:#666;text-align:center;padding:20px;">No history yet</div>';
           return;
         }
+        // Store mermaid_dsl from chain_start events
+        history.forEach(h => {
+          if (h.event === 'chain_start' && h.chain_id && h.mermaid_dsl) {
+            historyMermaid[h.chain_id] = h.mermaid_dsl;
+          }
+        });
         // Group by chain_id, show only complete/error events
         const chains = {};
         history.forEach(h => {
@@ -419,12 +528,15 @@ let dashboard_html = {|<!DOCTYPE html>
           const dateStr = date.toLocaleDateString();
           const isError = h.event === 'chain_error';
           const duration = h.duration_ms ? (h.duration_ms / 1000).toFixed(1) + 's' : '-';
-          const tokens = h.tokens ? (h.tokens.input + h.tokens.output) : 0;
-          return '<div class="history-item ' + h.event + '" onclick="showHistoryDetail(\'' + (h.chain_id || '') + '\')">' +
-            '<div><span class="chain-id">' + (h.chain_id || h.node_id || 'unknown') + '</span></div>' +
+          const tokens = h.tokens ? (typeof h.tokens === 'object' ? h.tokens.input + h.tokens.output : h.tokens) : 0;
+          const chainId = h.chain_id || h.node_id || 'unknown';
+          const hasMermaid = historyMermaid[chainId] ? true : false;
+          return '<div class="history-item ' + h.event + '">' +
+            '<div onclick="showHistoryDetail(\'' + chainId + '\')"><span class="chain-id">' + chainId + '</span></div>' +
             '<div class="duration">' + (isError ? '❌' : '✓') + ' ' + duration + '</div>' +
             '<div class="tokens">' + tokens + ' tok</div>' +
             '<div class="timestamp">' + dateStr + ' ' + timeStr + '</div>' +
+            (hasMermaid ? '<button class="replay-btn" onclick="event.stopPropagation();replayChain(\'' + chainId + '\')" title="Replay">▶</button>' : '') +
           '</div>';
         }).join('');
       }).catch(() => {
@@ -432,22 +544,174 @@ let dashboard_html = {|<!DOCTYPE html>
       });
     }
 
+    // Replay a chain from history
+    function replayChain(chainId) {
+      const mermaid = historyMermaid[chainId];
+      if (!mermaid) {
+        alert('Cannot replay: Mermaid DSL not found');
+        return;
+      }
+      // Call chain.run with the stored mermaid DSL
+      fetch('/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'tools/call',
+          params: {
+            name: 'chain.run',
+            arguments: { mermaid: mermaid, input: '{}' }
+          }
+        })
+      }).then(r => r.json()).then(res => {
+        console.log('Chain replay started:', res);
+      }).catch(err => {
+        console.error('Replay failed:', err);
+        alert('Replay failed: ' + err.message);
+      });
+    }
+
     function showHistoryDetail(chainId) {
       console.log('Show detail for:', chainId);
-      // TODO: Show Mermaid diagram for historical chain
+      // Fetch full history and find the chain_start event with mermaid_dsl
+      fetch('/chain/history').then(r => r.json()).then(history => {
+        // Find the chain_start event for this chainId
+        const chainStart = history.find(h =>
+          h.event === 'chain_start' && h.chain_id === chainId
+        );
+        if (chainStart && chainStart.mermaid_dsl) {
+          // Render the Mermaid diagram
+          renderMermaid(chainStart.mermaid_dsl, chainId + '_history');
+          // Update tabs to show this is a history view
+          const tabsEl = document.getElementById('chain-tabs');
+          if (tabsEl) {
+            tabsEl.innerHTML = '<button class="chain-tab active">📜 ' + chainId + ' (history)</button>' +
+              '<button class="chain-tab" onclick="loadHistory()">← Back to History</button>';
+          }
+          // Find the completion event to show final state
+          const chainComplete = history.find(h =>
+            (h.event === 'chain_complete' || h.event === 'chain_error') && h.chain_id === chainId
+          );
+          if (chainComplete) {
+            // Show summary in events panel
+            const eventsEl = document.getElementById('event-list');
+            if (eventsEl) {
+              const duration = chainComplete.duration_ms ? (chainComplete.duration_ms / 1000).toFixed(2) + 's' : '-';
+              const tokens = chainComplete.tokens ? (typeof chainComplete.tokens === 'object' ? chainComplete.tokens.input + chainComplete.tokens.output : chainComplete.tokens) : 0;
+              eventsEl.innerHTML = '<div class="event ' + chainComplete.event + '">' +
+                '<strong>' + (chainComplete.event === 'chain_error' ? '❌ Error' : '✓ Complete') + '</strong><br>' +
+                'Duration: ' + duration + '<br>' +
+                'Tokens: ' + tokens + '<br>' +
+                (chainComplete.message ? 'Error: ' + chainComplete.message : '') +
+              '</div>';
+            }
+          }
+        } else {
+          alert('Mermaid diagram not available for this chain');
+        }
+      }).catch(err => {
+        console.error('Failed to load history:', err);
+        alert('Failed to load chain details');
+      });
+    }
+
+    // Token usage chart
+    let tokenChart = null;
+    const modelColors = {
+      gemini: '#4285f4',
+      claude: '#f8a500',
+      codex: '#10a37f',
+      ollama: '#a78bfa',
+      unknown: '#666'
+    };
+
+    function refreshTokenChart() {
+      fetch('/chain/history').then(r => r.json()).then(history => {
+        // Aggregate token usage by model from chain_complete events
+        const byModel = {};
+        const byHour = {};
+
+        history.forEach(h => {
+          if (h.event === 'chain_complete' && h.tokens) {
+            const tokens = typeof h.tokens === 'object' ? h.tokens.total_tokens || (h.tokens.input + h.tokens.output) : h.tokens;
+            // Try to extract model from chain_id or use 'unknown'
+            let model = 'unknown';
+            if (h.chain_id) {
+              if (h.chain_id.includes('gemini')) model = 'gemini';
+              else if (h.chain_id.includes('claude')) model = 'claude';
+              else if (h.chain_id.includes('codex')) model = 'codex';
+              else if (h.chain_id.includes('ollama')) model = 'ollama';
+            }
+            byModel[model] = (byModel[model] || 0) + tokens;
+
+            // Group by hour for time series
+            const hour = new Date(h.timestamp * 1000).getHours();
+            if (!byHour[hour]) byHour[hour] = {};
+            byHour[hour][model] = (byHour[hour][model] || 0) + tokens;
+          }
+        });
+
+        // Update summary
+        const summaryEl = document.getElementById('token-summary');
+        summaryEl.innerHTML = Object.entries(byModel).map(([model, tokens]) =>
+          '<div class="model-stat">' +
+            '<div class="model-dot" style="background:' + (modelColors[model] || '#666') + '"></div>' +
+            '<span>' + model + ': ' + tokens.toLocaleString() + '</span>' +
+          '</div>'
+        ).join('');
+
+        // Create/update chart
+        const ctx = document.getElementById('token-chart').getContext('2d');
+        const hours = Array.from({length: 24}, (_, i) => i + 'h');
+        const datasets = Object.keys(modelColors).filter(m => byModel[m]).map(model => ({
+          label: model,
+          data: hours.map((_, i) => (byHour[i] && byHour[i][model]) || 0),
+          backgroundColor: modelColors[model],
+          borderColor: modelColors[model],
+          borderWidth: 1
+        }));
+
+        if (tokenChart) {
+          tokenChart.data.datasets = datasets;
+          tokenChart.update();
+        } else {
+          tokenChart = new Chart(ctx, {
+            type: 'bar',
+            data: { labels: hours, datasets: datasets },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: { display: true, position: 'top', labels: { color: '#888', font: { size: 10 } } }
+              },
+              scales: {
+                x: { stacked: true, ticks: { color: '#666' }, grid: { color: '#333' } },
+                y: { stacked: true, ticks: { color: '#666' }, grid: { color: '#333' } }
+              }
+            }
+          });
+        }
+      }).catch(() => {
+        document.getElementById('token-summary').innerHTML = '<span style="color:#f87171;">Failed to load token data</span>';
+      });
     }
 
     connect();
     fetchStats();
     loadHistory();  // Load history on page load
+    refreshTokenChart();  // Load token chart
     setInterval(fetchStats, 5000);
     setInterval(updateChainTabs, 1000);  // Update elapsed time
+    setInterval(refreshTokenChart, 30000);  // Refresh chart every 30s
 
     // Expose to global scope for onclick handlers
     window.switchChain = switchChain;
     window.toggleDirection = toggleDirection;
     window.loadHistory = loadHistory;
     window.showHistoryDetail = showHistoryDetail;
+    window.replayChain = replayChain;
+    window.refreshTokenChart = refreshTokenChart;
     });  // end DOMContentLoaded
   </script>
 </body>
@@ -455,7 +719,7 @@ let dashboard_html = {|<!DOCTYPE html>
 
 (** ============== MCP Protocol Constants ============== *)
 
-let mcp_protocol_versions = Mcp_server.supported_protocol_versions
+let mcp_protocol_versions = Mcp_server_eio.supported_protocol_versions
 let mcp_protocol_version_default = Mcp_session.protocol_version
 
 (** ============== Debug Logging ============== *)
@@ -665,12 +929,12 @@ let[@warning "-32"] send_sse_event_with_id body ~id ~event ~data =
 (** ============== JSON-RPC Helpers ============== *)
 
 let json_rpc_error code message =
-  Yojson.Safe.to_string (Mcp_server.make_error ~id:`Null code message)
+  Yojson.Safe.to_string (Mcp_server_eio.make_error ~id:`Null code message)
 
 (** ============== HTTP Handlers ============== *)
 
 let health_handler _request reqd =
-  let body = Mcp_server.health_response () in
+  let body = Mcp_server_eio.health_response () in
   Response.json body reqd
 
 let handle_get_mcp ~clock headers reqd =

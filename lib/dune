@@ -28,7 +28,12 @@
    chain_category
    chain_batch
    chain_stats
-   chain_telemetry)
+   chain_telemetry
+   ; Session (Pure OCaml - moved from llm_mcp)
+   mcp_session
+   ; SSE Notifications (Pure OCaml - moved from llm_mcp)
+   notification_sse
+   sse)
  (libraries
    yojson
    str
@@ -111,9 +116,6 @@
    cli_runner
    parallel_utils
    run_log
-   mcp_session
-   notification_sse
-   sse
    llm_mcp)
  (libraries
    ; Shared modules
