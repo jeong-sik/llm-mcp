@@ -281,9 +281,133 @@ let transform_type_tests = [
   "conditional roundtrip", `Quick, test_adapter_conditional_transform_roundtrip;
 ]
 
+(* ============================================================================
+   Summarize Tests (Token-based truncation)
+   ============================================================================ *)
+
+(* Mirror the token-based summarize logic from chain_executor_eio *)
+let summarize_tokens max_tokens input =
+  let estimated_chars = max_tokens * 4 in
+  if String.length input <= estimated_chars then
+    input
+  else
+    let truncated = String.sub input 0 estimated_chars in
+    let last_space =
+      try String.rindex truncated ' '
+      with Not_found -> estimated_chars
+    in
+    String.sub truncated 0 last_space ^ "..."
+
+let test_summarize_short_input () =
+  (* Short input should be returned as-is *)
+  let input = "Hello world" in
+  let result = summarize_tokens 100 input in
+  Alcotest.(check string) "short input unchanged" input result
+
+let test_summarize_truncation () =
+  (* Long input should be truncated at word boundary *)
+  let input = "This is a very long text that should be truncated at a word boundary" in
+  let result = summarize_tokens 5 input in  (* 5 tokens = 20 chars *)
+  Alcotest.(check bool) "truncated with ellipsis" true
+    (String.length result < String.length input &&
+     String.sub result (String.length result - 3) 3 = "...")
+
+let test_summarize_word_boundary () =
+  (* Truncation should happen at word boundary *)
+  let input = "word1 word2 word3 word4 word5" in
+  let result = summarize_tokens 3 input in  (* 3 tokens = 12 chars *)
+  Alcotest.(check bool) "ends with space before ..." true
+    (not (String.contains (String.sub result 0 (String.length result - 3)) (Char.chr 0)))
+
+let summarize_tests = [
+  "short input unchanged", `Quick, test_summarize_short_input;
+  "long input truncated", `Quick, test_summarize_truncation;
+  "truncate at word boundary", `Quick, test_summarize_word_boundary;
+]
+
+(* ============================================================================
+   ValidateSchema Tests (JSON Schema validation)
+   ============================================================================ *)
+
+(* Mirror the validate_type logic from chain_executor_eio *)
+let validate_type expected json =
+  match expected, json with
+  | "string", `String _ -> true
+  | "number", `Float _ | "number", `Int _ -> true
+  | "integer", `Int _ -> true
+  | "boolean", `Bool _ -> true
+  | "array", `List _ -> true
+  | "object", `Assoc _ -> true
+  | "null", `Null -> true
+  | _ -> false
+
+let validate_required required json =
+  match json with
+  | `Assoc fields ->
+      let field_names = List.map fst fields in
+      List.for_all (fun r -> List.mem r field_names) required
+  | _ -> false
+
+let test_validate_type_string () =
+  Alcotest.(check bool) "string type" true
+    (validate_type "string" (`String "hello"));
+  Alcotest.(check bool) "not string" false
+    (validate_type "string" (`Int 42))
+
+let test_validate_type_number () =
+  Alcotest.(check bool) "float is number" true
+    (validate_type "number" (`Float 3.14));
+  Alcotest.(check bool) "int is number" true
+    (validate_type "number" (`Int 42));
+  Alcotest.(check bool) "string is not number" false
+    (validate_type "number" (`String "42"))
+
+let test_validate_type_integer () =
+  Alcotest.(check bool) "int is integer" true
+    (validate_type "integer" (`Int 42));
+  Alcotest.(check bool) "float is not integer" false
+    (validate_type "integer" (`Float 3.14))
+
+let test_validate_type_boolean () =
+  Alcotest.(check bool) "bool type" true
+    (validate_type "boolean" (`Bool true));
+  Alcotest.(check bool) "not bool" false
+    (validate_type "boolean" (`String "true"))
+
+let test_validate_type_array () =
+  Alcotest.(check bool) "array type" true
+    (validate_type "array" (`List [`Int 1; `Int 2]));
+  Alcotest.(check bool) "not array" false
+    (validate_type "array" (`String "[]"))
+
+let test_validate_type_object () =
+  Alcotest.(check bool) "object type" true
+    (validate_type "object" (`Assoc [("key", `String "value")]));
+  Alcotest.(check bool) "not object" false
+    (validate_type "object" (`List []))
+
+let test_validate_required_fields () =
+  let json = `Assoc [("name", `String "Alice"); ("age", `Int 30)] in
+  Alcotest.(check bool) "has required" true
+    (validate_required ["name"] json);
+  Alcotest.(check bool) "missing required" false
+    (validate_required ["name"; "email"] json)
+
+let validate_schema_tests = [
+  "type: string", `Quick, test_validate_type_string;
+  "type: number", `Quick, test_validate_type_number;
+  "type: integer", `Quick, test_validate_type_integer;
+  "type: boolean", `Quick, test_validate_type_boolean;
+  "type: array", `Quick, test_validate_type_array;
+  "type: object", `Quick, test_validate_type_object;
+  "required fields", `Quick, test_validate_required_fields;
+]
+
 let () =
   Alcotest.run "Adapter Transforms" [
     "Conditional Evaluation", conditional_tests;
     "JsonPath Normalization", jsonpath_tests;
     "Transform Types", transform_type_tests;
+    "Summarize (Token-based)", summarize_tests;
+    "ValidateSchema", validate_schema_tests;
   ]

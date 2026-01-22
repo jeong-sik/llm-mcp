@@ -548,10 +548,20 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
       Ok result
 
   | Summarize max_tokens ->
-      (* Simple truncation-based summarization (placeholder for LLM summarization) *)
-      let words = String.split_on_char ' ' input in
-      let truncated = List.filteri (fun i _ -> i < max_tokens) words in
-      Ok (String.concat " " truncated)
+      (* Token-based truncation using char estimation (1 token ≈ 4 chars).
+         This is more accurate than word count for LLM context budgets.
+         For actual summarization, use LLM node with summarization prompt. *)
+      let estimated_chars = max_tokens * 4 in
+      if String.length input <= estimated_chars then
+        Ok input
+      else
+        (* Truncate at word boundary to avoid cutting words *)
+        let truncated = String.sub input 0 estimated_chars in
+        let last_space =
+          try String.rindex truncated ' '
+          with Not_found -> estimated_chars
+        in
+        Ok (String.sub truncated 0 last_space ^ "...")
 
   | Truncate max_chars ->
       if String.length input <= max_chars then Ok input
@@ -579,18 +589,112 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
         Ok (Str.global_replace re replacement input)
       with Failure _ -> Error (Printf.sprintf "Invalid regex pattern: %s" pattern))
 
-  | ValidateSchema schema_name ->
-      (* Schema validation - basic type checking.
-         TODO: Implement full JSON Schema draft-07 validation.
-         Options: 1) Use jsonschema2atd codegen 2) Minimal runtime validator
-         Current: Parse JSON and verify non-empty - basic sanity check *)
-      (try
-        let json = Yojson.Safe.from_string input in
+  | ValidateSchema schema_str ->
+      (* JSON Schema validation (subset of draft-07).
+         schema_str can be:
+         - Inline JSON Schema: {"type":"object","required":["name"]}
+         - Simple type name: "object", "string", "number", "array"
+
+         Supported validations:
+         - type: string, number, integer, boolean, array, object, null
+         - required: array of field names (for objects)
+         - enum: array of allowed values
+         - minLength/maxLength: for strings
+         - minimum/maximum: for numbers *)
+      let validate_type expected json =
+        match expected, json with
+        | "string", `String _ -> true
+        | "number", `Float _ | "number", `Int _ -> true
+        | "integer", `Int _ -> true
+        | "boolean", `Bool _ -> true
+        | "array", `List _ -> true
+        | "object", `Assoc _ -> true
+        | "null", `Null -> true
+        | _ -> false
+      in
+      let validate_required required json =
         match json with
-        | `Null -> Error (Printf.sprintf "Schema '%s': null value not allowed" schema_name)
-        | _ -> Ok input
-      with Yojson.Json_error msg ->
-        Error (Printf.sprintf "Schema '%s' validation failed: %s" schema_name msg))
+        | `Assoc fields ->
+            let field_names = List.map fst fields in
+            List.for_all (fun r -> List.mem r field_names) required
+        | _ -> false
+      in
+      let validate_enum allowed json =
+        List.exists (fun v -> v = json) allowed
+      in
+      let validate_string_length min_len max_len json =
+        match json with
+        | `String s ->
+            let len = String.length s in
+            (match min_len with Some m -> len >= m | None -> true) &&
+            (match max_len with Some m -> len <= m | None -> true)
+        | _ -> true
+      in
+      let validate_number_range minimum maximum json =
+        match json with
+        | `Float f ->
+            (match minimum with Some m -> f >= m | None -> true) &&
+            (match maximum with Some m -> f <= m | None -> true)
+        | `Int i ->
+            let f = float_of_int i in
+            (match minimum with Some m -> f >= m | None -> true) &&
+            (match maximum with Some m -> f <= m | None -> true)
+        | _ -> true
+      in
+      (try
+        let data = Yojson.Safe.from_string input in
+        (* Parse schema - either inline JSON or simple type name *)
+        let schema =
+          if String.length schema_str > 0 && schema_str.[0] = '{' then
+            Yojson.Safe.from_string schema_str
+          else
+            `Assoc [("type", `String schema_str)]
+        in
+        let open Yojson.Safe.Util in
+        let errors = ref [] in
+
+        (* Validate type *)
+        (match schema |> member "type" with
+         | `String t when not (validate_type t data) ->
+             errors := Printf.sprintf "expected type '%s'" t :: !errors
+         | _ -> ());
+
+        (* Validate required fields *)
+        (match schema |> member "required" with
+         | `List req_list ->
+             let required = List.filter_map (function `String s -> Some s | _ -> None) req_list in
+             if not (validate_required required data) then
+               errors := Printf.sprintf "missing required fields: %s"
+                 (String.concat ", " required) :: !errors
+         | _ -> ());
+
+        (* Validate enum *)
+        (match schema |> member "enum" with
+         | `List enum_list when not (validate_enum enum_list data) ->
+             errors := "value not in enum" :: !errors
+         | _ -> ());
+
+        (* Validate string length *)
+        let min_len = match schema |> member "minLength" with `Int n -> Some n | _ -> None in
+        let max_len = match schema |> member "maxLength" with `Int n -> Some n | _ -> None in
+        if not (validate_string_length min_len max_len data) then
+          errors := "string length constraint violated" :: !errors;
+
+        (* Validate number range *)
+        let minimum = match schema |> member "minimum" with
+          | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None in
+        let maximum = match schema |> member "maximum" with
+          | `Float f -> Some f | `Int i -> Some (float_of_int i) | _ -> None in
+        if not (validate_number_range minimum maximum data) then
+          errors := "number range constraint violated" :: !errors;
+
+        if !errors = [] then Ok input
+        else Error (Printf.sprintf "Schema validation failed: %s" (String.concat "; " !errors))
+      with
+      | Yojson.Json_error msg ->
+          Error (Printf.sprintf "Invalid JSON: %s" msg)
+      | _ ->
+          Error "Schema validation error")
 
   | ParseJson ->
       (* Validate input is valid JSON and return as-is *)
