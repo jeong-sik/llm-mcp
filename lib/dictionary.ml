@@ -64,6 +64,23 @@ let default_dict_size = 110 * 1024  (** 110KB - zstd recommended *)
 let min_samples = 100  (** Minimum samples for training *)
 let min_payload_size = 64  (** Minimum size for dictionary compression *)
 
+(** {1 Helper functions for safe file I/O} *)
+
+(** Read binary file with proper cleanup on exception *)
+let read_binary_file path =
+  let ic = open_in_bin path in
+  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+    let len = in_channel_length ic in
+    really_input_string ic len
+  )
+
+(** Write binary file with proper cleanup on exception *)
+let write_binary_file path content =
+  let oc = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc content
+  )
+
 (** {1 Content Type Detection} *)
 
 let contains_substring s sub =
@@ -143,13 +160,12 @@ let detect_model_type (data : string) : model_type =
     Supports both v1 (legacy) and v2 (with model_type) formats.
     - v1: "ZDCT|v1|json|100|1736697600.0"
     - v2: "ZDCT|v2|json|claude|100|1736697600.0"
+    Uses Fun.protect for proper resource cleanup.
 *)
 let load (path : string) : (t, string) result =
   try
-    let ic = open_in_bin path in
-    let len = in_channel_length ic in
-    let data = really_input_string ic len in
-    close_in ic;
+    let data = read_binary_file path in
+    let len = String.length data in
     (* Parse metadata from first line *)
     let idx = String.index data '\n' in
     let meta = String.sub data 0 idx in
@@ -181,19 +197,22 @@ let load (path : string) : (t, string) result =
   | Sys_error e -> Error e
   | _ -> Error ("Failed to load dictionary: " ^ path)
 
-(** Save dictionary to file (v2 format with model_type) *)
+(** Save dictionary to file (v2 format with model_type).
+    Uses Fun.protect for proper resource cleanup.
+*)
 let save (dict : t) (path : string) : (unit, string) result =
   try
     let oc = open_out_bin path in
-    (* v2 format: ZDCT|v2|content_type|model_type|sample_count|created_at *)
-    Printf.fprintf oc "%s|v2|%s|%s|%d|%.1f\n"
-      magic
-      (string_of_content_type dict.content_type)
-      (string_of_model_type dict.model_type)
-      dict.sample_count
-      dict.created_at;
-    output_string oc dict.dict_data;
-    close_out oc;
+    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+      (* v2 format: ZDCT|v2|content_type|model_type|sample_count|created_at *)
+      Printf.fprintf oc "%s|v2|%s|%s|%d|%.1f\n"
+        magic
+        (string_of_content_type dict.content_type)
+        (string_of_model_type dict.model_type)
+        dict.sample_count
+        dict.created_at;
+      output_string oc dict.dict_data
+    );
     Ok ()
   with Sys_error e -> Error e
 
@@ -216,9 +235,7 @@ let train ~(samples : string list) ~(content_type : content_type) ?(model_type =
     (try Unix.mkdir temp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     let sample_files = List.mapi (fun i s ->
       let path = Filename.concat temp_dir (Printf.sprintf "sample_%d.txt" i) in
-      let oc = open_out_bin path in
-      output_string oc s;
-      close_out oc;
+      write_binary_file path s;
       path
     ) samples in
     (* Train with zstd CLI *)
@@ -232,10 +249,7 @@ let train ~(samples : string list) ~(content_type : content_type) ?(model_type =
       Error "zstd training failed (ensure zstd CLI is installed)"
     else
       try
-        let ic = open_in_bin dict_path in
-        let len = in_channel_length ic in
-        let dict_data = really_input_string ic len in
-        close_in ic;
+        let dict_data = read_binary_file dict_path in
         Sys.remove dict_path;
         (try Unix.rmdir temp_dir with _ -> ());
         Ok {
@@ -278,22 +292,14 @@ let compress_with_dict (dict : t) ?(level = 3) (data : string) : string =
       let temp_out = Filename.temp_file "zdict_out" ".zst" in
       let temp_dict = Filename.temp_file "zdict" ".dict" in
       (* Write data and dict *)
-      let write_file path content =
-        let oc = open_out_bin path in
-        output_string oc content;
-        close_out oc
-      in
-      write_file temp_in data;
-      write_file temp_dict dict.dict_data;
+      write_binary_file temp_in data;
+      write_binary_file temp_dict dict.dict_data;
       (* Compress with dict *)
       let cmd = Printf.sprintf "zstd -%d -D %s -o %s %s 2>/dev/null"
         level temp_dict temp_out temp_in in
       let _ = Sys.command cmd in
       (* Read result *)
-      let ic = open_in_bin temp_out in
-      let len = in_channel_length ic in
-      let compressed = really_input_string ic len in
-      close_in ic;
+      let compressed = read_binary_file temp_out in
       (* Clean up *)
       Sys.remove temp_in;
       Sys.remove temp_out;
@@ -336,13 +342,8 @@ let decompress_with_dict (dict : t) (data : string) : (string, string) result =
         let temp_in = Filename.temp_file "zdict_in" ".zst" in
         let temp_out = Filename.temp_file "zdict_out" ".bin" in
         let temp_dict = Filename.temp_file "zdict" ".dict" in
-        let write_file path content =
-          let oc = open_out_bin path in
-          output_string oc content;
-          close_out oc
-        in
-        write_file temp_in compressed;
-        write_file temp_dict dict.dict_data;
+        write_binary_file temp_in compressed;
+        write_binary_file temp_dict dict.dict_data;
         let cmd = Printf.sprintf "zstd -d -D %s -o %s %s 2>/dev/null"
           temp_dict temp_out temp_in in
         let exit_code = Sys.command cmd in
@@ -352,10 +353,8 @@ let decompress_with_dict (dict : t) (data : string) : (string, string) result =
           (try Sys.remove temp_out with _ -> ());
           Error "Decompression failed"
         end else begin
-          let ic = open_in_bin temp_out in
-          let result_len = in_channel_length ic in
-          let result = really_input_string ic result_len in
-          close_in ic;
+          let result = read_binary_file temp_out in
+          let result_len = String.length result in
           Sys.remove temp_in;
           Sys.remove temp_out;
           Sys.remove temp_dict;

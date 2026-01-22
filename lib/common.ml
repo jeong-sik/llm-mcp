@@ -5,7 +5,7 @@
     - Environment variable handling
     - Directory operations
     - Timestamp formatting
-    - File I/O helpers
+    - File I/O helpers (with proper resource cleanup)
 *)
 
 (** Get ME_ROOT environment variable, defaulting to ~/me *)
@@ -40,22 +40,20 @@ let date_str () =
 let me_path parts =
   List.fold_left Filename.concat me_root parts
 
-(** Safe file read - returns None on error *)
+(** Safe file read - returns None on error.
+    Uses In_channel.with_open_text for automatic resource cleanup. *)
 let read_file_opt path =
   try
-    let ic = open_in path in
-    let n = in_channel_length ic in
-    let s = really_input_string ic n in
-    close_in ic;
-    Some s
+    Some (In_channel.with_open_text path In_channel.input_all)
   with Sys_error _ -> None
 
-(** Safe file write - returns false on error *)
+(** Safe file write - returns false on error.
+    Uses Out_channel.with_open_text for automatic resource cleanup. *)
 let write_file path content =
   try
-    let oc = open_out path in
-    output_string oc content;
-    close_out oc;
+    Out_channel.with_open_text path (fun oc ->
+      Out_channel.output_string oc content
+    );
     true
   with Sys_error _ -> false
 
@@ -112,20 +110,21 @@ let print_warning msg = emoji_print "⚠️" "WARNING" msg
 (* File I/O Extended                            *)
 (* ============================================ *)
 
-(** Read file as list of lines *)
+(** Read file as list of lines.
+    Uses In_channel.with_open_text for automatic resource cleanup. *)
 let read_lines path =
   try
-    let ic = open_in path in
-    let lines = ref [] in
-    begin
-      try
-        while true do
-          lines := input_line ic :: !lines
-        done
-      with End_of_file -> ()
-    end;
-    close_in ic;
-    List.rev !lines
+    In_channel.with_open_text path (fun ic ->
+      let lines = ref [] in
+      begin
+        try
+          while true do
+            lines := In_channel.input_line ic :: !lines
+          done
+        with End_of_file -> ()
+      end;
+      List.filter_map Fun.id !lines |> List.rev
+    )
   with Sys_error _ -> []
 
 (** List files with given suffix in directory *)
@@ -174,20 +173,22 @@ let day_str () =
 (* Shell Command Execution                      *)
 (* ============================================ *)
 
-(** Run shell command and return output lines *)
+(** Run shell command and return output lines.
+    Uses Fun.protect for proper process cleanup on exception. *)
 let run_command cmd =
   try
     let ic = Unix.open_process_in cmd in
-    let lines = ref [] in
-    begin
-      try
-        while true do
-          lines := input_line ic :: !lines
-        done
-      with End_of_file -> ()
-    end;
-    ignore (Unix.close_process_in ic);
-    List.rev !lines
+    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+      let lines = ref [] in
+      begin
+        try
+          while true do
+            lines := input_line ic :: !lines
+          done
+        with End_of_file -> ()
+      end;
+      List.rev !lines
+    )
   with Unix.Unix_error _ | Sys_error _ -> []
 
 (** Run command and return output as string *)
