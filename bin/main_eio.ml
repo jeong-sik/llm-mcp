@@ -25,6 +25,113 @@ let default_config = {
   max_connections = 128;
 }
 
+(** ============== Dashboard HTML ============== *)
+
+let dashboard_html = {|<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🐫 Chain Engine Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+    .header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; }
+    .header h1 { font-size: 24px; }
+    .status { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #666; }
+    .status.connected { background: #4ade80; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+    .card { background: #16213e; border-radius: 12px; padding: 20px; }
+    .card-label { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
+    .card-value { font-size: 28px; font-weight: bold; color: #4ade80; }
+    .card-value.warn { color: #fbbf24; }
+    .events { background: #16213e; border-radius: 12px; padding: 20px; max-height: 500px; overflow-y: auto; }
+    .events h2 { font-size: 16px; margin-bottom: 15px; color: #888; }
+    .event { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; font-family: monospace; font-size: 13px; }
+    .event-icon { font-size: 16px; }
+    .event-type { color: #60a5fa; min-width: 120px; }
+    .event-id { color: #a78bfa; min-width: 100px; }
+    .event-detail { color: #888; }
+    .event.chain_start { border-left: 3px solid #4ade80; }
+    .event.chain_complete { border-left: 3px solid #22d3ee; }
+    .event.node_start { border-left: 3px solid #fbbf24; }
+    .event.node_complete { border-left: 3px solid #a78bfa; }
+    .event.chain_error { border-left: 3px solid #f87171; background: #2d1f1f; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="status" id="status"></span>
+    <h1>🐫 Chain Engine Dashboard</h1>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">Total Chains</div>
+      <div class="card-value" id="total-chains">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Success Rate</div>
+      <div class="card-value" id="success-rate">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Avg Duration</div>
+      <div class="card-value" id="avg-duration">-</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total Nodes</div>
+      <div class="card-value" id="total-nodes">-</div>
+    </div>
+  </div>
+
+  <div class="events">
+    <h2>Live Events</h2>
+    <div id="event-list"></div>
+  </div>
+
+  <script>
+    const icons = { chain_start: '▶', chain_complete: '✓', node_start: '→', node_complete: '●', chain_error: '✗', ping: '♥' };
+    const eventList = document.getElementById('event-list');
+    const statusEl = document.getElementById('status');
+    let eventSource;
+
+    function connect() {
+      eventSource = new EventSource('/chain/events');
+      eventSource.onopen = () => statusEl.classList.add('connected');
+      eventSource.onerror = () => { statusEl.classList.remove('connected'); setTimeout(connect, 3000); };
+
+      ['chain_start', 'chain_complete', 'node_start', 'node_complete', 'chain_error'].forEach(type => {
+        eventSource.addEventListener(type, e => {
+          const data = JSON.parse(e.data);
+          const div = document.createElement('div');
+          div.className = 'event ' + type;
+          const id = data.chain_id || data.node_id || '';
+          const detail = data.duration_ms ? (data.duration_ms / 1000).toFixed(1) + 's' : (data.message || '');
+          div.innerHTML = '<span class="event-icon">' + icons[type] + '</span><span class="event-type">' + type + '</span><span class="event-id">' + id + '</span><span class="event-detail">' + detail + '</span>';
+          eventList.insertBefore(div, eventList.firstChild);
+          if (eventList.children.length > 50) eventList.removeChild(eventList.lastChild);
+        });
+      });
+    }
+
+    function fetchStats() {
+      fetch('/chain/stats').then(r => r.json()).then(s => {
+        document.getElementById('total-chains').textContent = s.total_chains;
+        document.getElementById('success-rate').textContent = (s.success_rate * 100).toFixed(0) + '%';
+        document.getElementById('avg-duration').textContent = (s.avg_duration_ms / 1000).toFixed(1) + 's';
+        document.getElementById('total-nodes').textContent = s.total_nodes;
+        document.getElementById('success-rate').classList.toggle('warn', s.success_rate < 0.9);
+      }).catch(() => {});
+    }
+
+    connect();
+    fetchStats();
+    setInterval(fetchStats, 5000);
+  </script>
+</body>
+</html>|}
+
 (** ============== MCP Protocol Constants ============== *)
 
 let mcp_protocol_versions = Mcp_server.supported_protocol_versions
@@ -124,6 +231,14 @@ module Response = struct
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
     ] in
+    let response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd response body
+
+  let html ?(status = `OK) body reqd =
+    let headers = Httpun.Headers.of_list ([
+      ("content-type", "text/html; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+    ] @ cors_headers) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
@@ -493,6 +608,10 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
   (* Chain events SSE endpoint for real-time progress monitoring *)
   | `GET, "/chain/events" ->
       handle_chain_events ~clock reqd
+
+  (* Dashboard HTML page for monitoring *)
+  | `GET, "/dashboard" ->
+      Response.html dashboard_html reqd
 
   | `GET, "/mcp" ->
       handle_get_mcp ~clock headers reqd
