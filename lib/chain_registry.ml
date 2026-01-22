@@ -43,8 +43,13 @@ type registry_stats = {
 (** In-memory registry storage *)
 let registry : (string, registry_entry) Hashtbl.t = Hashtbl.create 64
 
-(** Mutex for thread-safe operations *)
+(** Standard mutex for thread-safe operations *)
 let registry_mutex = Mutex.create ()
+
+(** Helper for mutex-protected operations *)
+let with_mutex f =
+  Mutex.lock registry_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) f
 
 (** File-based persistence directory *)
 let registry_dir = ref None
@@ -80,8 +85,7 @@ let init ?persist_dir () =
 
 (** Register a chain in the registry *)
 let register ?(description : string option) (chain : chain) : unit =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     let version = match Hashtbl.find_opt registry chain.id with
       | Some entry -> entry.version + 1
       | None -> 1
@@ -107,8 +111,7 @@ let register ?(description : string option) (chain : chain) : unit =
 
 (** Look up a chain by ID *)
 let lookup (id : string) : chain option =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     match Hashtbl.find_opt registry id with
     | Some entry -> Some entry.chain
     | None -> None
@@ -122,22 +125,19 @@ let lookup_exn (id : string) : chain =
 
 (** Look up with full entry metadata *)
 let lookup_entry (id : string) : registry_entry option =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.find_opt registry id
   )
 
 (** Check if a chain is registered *)
 let exists (id : string) : bool =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.mem registry id
   )
 
 (** Unregister a chain by ID *)
 let unregister (id : string) : bool =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     if Hashtbl.mem registry id then begin
       Hashtbl.remove registry id;
       (* Remove file if persistence enabled *)
@@ -153,29 +153,25 @@ let unregister (id : string) : bool =
 
 (** List all registered chain IDs *)
 let list_ids () : string list =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.fold (fun id _ acc -> id :: acc) registry []
   )
 
 (** List all registered chains *)
 let list_all () : chain list =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.fold (fun _ entry acc -> entry.chain :: acc) registry []
   )
 
 (** List all entries with metadata *)
 let list_entries () : (string * registry_entry) list =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.fold (fun id entry acc -> (id, entry) :: acc) registry []
   )
 
 (** Get registry statistics *)
 let stats () : registry_stats =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     let total_chains = Hashtbl.length registry in
     let total_nodes = Hashtbl.fold (fun _ entry acc ->
       acc + List.length entry.chain.nodes
@@ -205,8 +201,7 @@ let stats () : registry_stats =
 
 (** Clear all registered chains *)
 let clear () : unit =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.clear registry;
     (* Clear files if persistence enabled *)
     match !registry_dir with
@@ -221,15 +216,13 @@ let clear () : unit =
 
 (** Count of registered chains *)
 let count () : int =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     Hashtbl.length registry
   )
 
 (** Export registry to JSON *)
 let to_json () : Yojson.Safe.t =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     let chains = Hashtbl.fold (fun id entry acc ->
       let entry_json = `Assoc [
         ("id", `String id);
@@ -247,8 +240,7 @@ let to_json () : Yojson.Safe.t =
 
 (** Import registry from JSON *)
 let of_json (json : Yojson.Safe.t) : (int, string) result =
-  Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) (fun () ->
+  with_mutex (fun () ->
     try
       let open Yojson.Safe.Util in
       let entries = to_list json in
