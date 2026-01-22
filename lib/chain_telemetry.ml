@@ -21,6 +21,7 @@ type chain_start_payload = {
   start_chain_id: string;
   start_nodes: int;
   start_timestamp: float;
+  start_mermaid_dsl: string option;  (** Mermaid diagram for visualization *)
 } [@@deriving yojson]
 
 (** Node start event payload *)
@@ -190,11 +191,12 @@ let subscriber_count () =
 (** {1 Event Constructors} *)
 
 (** Create a ChainStart event *)
-let chain_start ~chain_id ~nodes =
+let chain_start ~chain_id ~nodes ?mermaid_dsl () =
   ChainStart {
     start_chain_id = chain_id;
     start_nodes = nodes;
     start_timestamp = Unix.gettimeofday ();
+    start_mermaid_dsl = mermaid_dsl;
   }
 
 (** Create a NodeStart event *)

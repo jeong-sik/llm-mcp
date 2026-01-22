@@ -33,6 +33,7 @@ let dashboard_html = {|<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>🐫 Chain Engine Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
@@ -41,12 +42,17 @@ let dashboard_html = {|<!DOCTYPE html>
     .status { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #666; }
     .status.connected { background: #4ade80; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+    .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
     .card { background: #16213e; border-radius: 12px; padding: 20px; }
     .card-label { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
     .card-value { font-size: 28px; font-weight: bold; color: #4ade80; }
     .card-value.warn { color: #fbbf24; }
-    .events { background: #16213e; border-radius: 12px; padding: 20px; max-height: 500px; overflow-y: auto; }
+    .mermaid-container { background: #16213e; border-radius: 12px; padding: 20px; min-height: 300px; }
+    .mermaid-container h2 { font-size: 16px; margin-bottom: 15px; color: #888; }
+    .mermaid-container .mermaid { background: #1a1a2e; padding: 15px; border-radius: 8px; }
+    .mermaid-container .no-chain { color: #666; font-style: italic; text-align: center; padding: 50px; }
+    .events { background: #16213e; border-radius: 12px; padding: 20px; max-height: 400px; overflow-y: auto; }
     .events h2 { font-size: 16px; margin-bottom: 15px; color: #888; }
     .event { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; font-family: monospace; font-size: 13px; }
     .event-icon { font-size: 16px; }
@@ -58,6 +64,7 @@ let dashboard_html = {|<!DOCTYPE html>
     .event.node_start { border-left: 3px solid #fbbf24; }
     .event.node_complete { border-left: 3px solid #a78bfa; }
     .event.chain_error { border-left: 3px solid #f87171; background: #2d1f1f; }
+    @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -66,22 +73,30 @@ let dashboard_html = {|<!DOCTYPE html>
     <h1>🐫 Chain Engine Dashboard</h1>
   </div>
 
-  <div class="grid">
-    <div class="card">
-      <div class="card-label">Total Chains</div>
-      <div class="card-value" id="total-chains">-</div>
+  <div class="main-grid">
+    <div>
+      <div class="stats-grid">
+        <div class="card">
+          <div class="card-label">Total Chains</div>
+          <div class="card-value" id="total-chains">-</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Success Rate</div>
+          <div class="card-value" id="success-rate">-</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Avg Duration</div>
+          <div class="card-value" id="avg-duration">-</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Total Nodes</div>
+          <div class="card-value" id="total-nodes">-</div>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-label">Success Rate</div>
-      <div class="card-value" id="success-rate">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Avg Duration</div>
-      <div class="card-value" id="avg-duration">-</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Total Nodes</div>
-      <div class="card-value" id="total-nodes">-</div>
+    <div class="mermaid-container">
+      <h2>🔄 Current Chain</h2>
+      <div id="mermaid-graph"><div class="no-chain">Waiting for chain execution...</div></div>
     </div>
   </div>
 
@@ -91,28 +106,82 @@ let dashboard_html = {|<!DOCTYPE html>
   </div>
 
   <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', themeVariables: { primaryColor: '#16213e', primaryTextColor: '#eee', lineColor: '#4ade80' } });
+
     const icons = { chain_start: '▶', chain_complete: '✓', node_start: '→', node_complete: '●', chain_error: '✗', ping: '♥' };
     const eventList = document.getElementById('event-list');
     const statusEl = document.getElementById('status');
+    const mermaidEl = document.getElementById('mermaid-graph');
     let eventSource;
+    let currentMermaid = null;
+    let nodeStates = {};  // node_id -> 'pending' | 'running' | 'complete' | 'error'
+
+    async function renderMermaid(dsl) {
+      currentMermaid = dsl;
+      nodeStates = {};
+      const styledDsl = applyNodeStyles(dsl);
+      try {
+        const { svg } = await mermaid.render('mermaid-svg', styledDsl);
+        mermaidEl.innerHTML = svg;
+      } catch (e) { console.error('Mermaid render error:', e); }
+    }
+
+    function applyNodeStyles(dsl) {
+      const styles = Object.entries(nodeStates).map(([id, state]) => {
+        const colors = { pending: '#666', running: '#fbbf24', complete: '#4ade80', error: '#f87171' };
+        return 'style ' + id + ' fill:' + colors[state];
+      }).join('\n');
+      return styles ? dsl + '\n' + styles : dsl;
+    }
+
+    function updateNodeState(nodeId, state) {
+      nodeStates[nodeId] = state;
+      if (currentMermaid) renderMermaid(currentMermaid);
+    }
 
     function connect() {
       eventSource = new EventSource('/chain/events');
       eventSource.onopen = () => statusEl.classList.add('connected');
       eventSource.onerror = () => { statusEl.classList.remove('connected'); setTimeout(connect, 3000); };
 
-      ['chain_start', 'chain_complete', 'node_start', 'node_complete', 'chain_error'].forEach(type => {
-        eventSource.addEventListener(type, e => {
-          const data = JSON.parse(e.data);
-          const div = document.createElement('div');
-          div.className = 'event ' + type;
-          const id = data.chain_id || data.node_id || '';
-          const detail = data.duration_ms ? (data.duration_ms / 1000).toFixed(1) + 's' : (data.message || '');
-          div.innerHTML = '<span class="event-icon">' + icons[type] + '</span><span class="event-type">' + type + '</span><span class="event-id">' + id + '</span><span class="event-detail">' + detail + '</span>';
-          eventList.insertBefore(div, eventList.firstChild);
-          if (eventList.children.length > 50) eventList.removeChild(eventList.lastChild);
-        });
+      eventSource.addEventListener('chain_start', e => {
+        const data = JSON.parse(e.data);
+        if (data.mermaid_dsl) renderMermaid(data.mermaid_dsl);
+        addEvent('chain_start', data);
       });
+
+      eventSource.addEventListener('node_start', e => {
+        const data = JSON.parse(e.data);
+        updateNodeState(data.node_id, 'running');
+        addEvent('node_start', data);
+      });
+
+      eventSource.addEventListener('node_complete', e => {
+        const data = JSON.parse(e.data);
+        updateNodeState(data.node_id, 'complete');
+        addEvent('node_complete', data);
+      });
+
+      eventSource.addEventListener('chain_complete', e => {
+        const data = JSON.parse(e.data);
+        addEvent('chain_complete', data);
+      });
+
+      eventSource.addEventListener('chain_error', e => {
+        const data = JSON.parse(e.data);
+        if (data.node_id) updateNodeState(data.node_id, 'error');
+        addEvent('chain_error', data);
+      });
+    }
+
+    function addEvent(type, data) {
+      const div = document.createElement('div');
+      div.className = 'event ' + type;
+      const id = data.chain_id || data.node_id || '';
+      const detail = data.duration_ms ? (data.duration_ms / 1000).toFixed(1) + 's' : (data.message || '');
+      div.innerHTML = '<span class="event-icon">' + icons[type] + '</span><span class="event-type">' + type + '</span><span class="event-id">' + id + '</span><span class="event-detail">' + detail + '</span>';
+      eventList.insertBefore(div, eventList.firstChild);
+      if (eventList.children.length > 50) eventList.removeChild(eventList.lastChild);
     }
 
     function fetchStats() {
@@ -427,6 +496,7 @@ let handle_chain_events ~clock reqd =
             ("chain_id", `String payload.Chain_telemetry.start_chain_id);
             ("nodes", `Int payload.start_nodes);
             ("timestamp", `Float payload.start_timestamp);
+            ("mermaid_dsl", match payload.start_mermaid_dsl with Some m -> `String m | None -> `Null);
           ])
       | Chain_telemetry.NodeStart payload ->
           ("node_start", `Assoc [
