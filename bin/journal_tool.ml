@@ -28,7 +28,7 @@ let count_lines file =
   if not (Sys.file_exists file) then 0
   else
     let cmd = Printf.sprintf "wc -l < %s" file in
-    try int_of_string (String.trim (run_cmd cmd)) with _ -> 0
+    try int_of_string (String.trim (run_cmd cmd)) with Failure _ -> 0
 
 let check_current threshold =
   let today = today_str () in

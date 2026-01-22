@@ -14,7 +14,7 @@ let load_partners () =
     match read_json_opt partners_file with
     | Some json ->
         let open Yojson.Safe.Util in
-        (try json |> member "partners" |> to_assoc with _ -> [])
+        (try json |> member "partners" |> to_assoc with Type_error _ -> [])
     | None -> []
   else []
 
@@ -49,7 +49,7 @@ let propose_trade partner_name export_item import_item =
       false
   | Some partner ->
       let open Yojson.Safe.Util in
-      let trust = try partner |> member "trust_index" |> to_float with _ -> 0.0 in
+      let trust = try partner |> member "trust_index" |> to_float with Type_error _ -> 0.0 in
       Printf.printf "⚖️  [MERCHANT] Partner Trust Index: %.2f\n" trust;
 
       if trust < 0.6 then begin

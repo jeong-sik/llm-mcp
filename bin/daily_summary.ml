@@ -48,7 +48,7 @@ let get_mood_summary () =
           in
           Printf.sprintf "**Final Mood**: %s (%s%%)" mood energy
       | _ -> "Neutral"
-    with _ -> "Neutral"
+    with Yojson.Safe.Util.Type_error _ | Sys_error _ | Yojson.Json_error _ -> "Neutral"
   else
     "Neutral"
 

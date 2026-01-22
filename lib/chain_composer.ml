@@ -234,7 +234,7 @@ Return a modified chain in the same format as design.
       Printf.sprintf "- %s ✓" n.node_id
     ) succeeded_nodes))
     (List.length original_chain.nodes)
-    0  (* TODO: calculate parallel groups *)
+    (Chain_types.count_chain_parallel_groups original_chain)
     original_chain.config.max_depth
 
 (* ============================================================

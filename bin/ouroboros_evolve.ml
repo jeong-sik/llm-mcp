@@ -50,7 +50,7 @@ let sense_past_wisdom () =
       let content = really_input_string ic (min 1000 (in_channel_length ic)) in
       close_in ic;
       Some (Filename.basename path, content)
-    with _ -> None
+    with Sys_error _ -> None
   ) sampled in
 
   Printf.eprintf "  🕰️  Excavated %d artifacts from the past...\n" (List.length wisdom);
@@ -117,9 +117,9 @@ let () =
 
   List.iter (fun p ->
     let open Yojson.Safe.Util in
-    let ptype = try p |> member "type" |> to_string with _ -> "UNKNOWN" in
-    let title = try p |> member "title" |> to_string with _ -> "Unknown" in
-    let suggestion = try p |> member "suggestion" |> to_string with _ -> "" in
+    let ptype = try p |> member "type" |> to_string with Type_error _ -> "UNKNOWN" in
+    let title = try p |> member "title" |> to_string with Type_error _ -> "Unknown" in
+    let suggestion = try p |> member "suggestion" |> to_string with Type_error _ -> "" in
     Printf.printf "\n[%s] %s\n" ptype title;
     Printf.printf "  > %s\n" suggestion
   ) proposals

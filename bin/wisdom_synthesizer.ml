@@ -30,7 +30,7 @@ let extract_seed path =
               | Some (`String t) -> Some t
               | _ -> None))
     | _ -> None
-  with _ -> None
+  with Sys_error _ | Yojson.Json_error _ -> None
 
 (** Gather knowledge seeds from research and curriculum directories *)
 let gather_seeds () =

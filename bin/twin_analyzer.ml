@@ -21,7 +21,7 @@ let load_state () =
       let s = really_input_string ic n in
       close_in ic;
       Yojson.Safe.from_string s
-    with _ -> `Assoc [("persona", `Assoc []); ("interaction_stats", `Assoc [])]
+    with Sys_error _ | Yojson.Json_error _ -> `Assoc [("persona", `Assoc []); ("interaction_stats", `Assoc [])]
   else
     `Assoc [("persona", `Assoc []); ("interaction_stats", `Assoc [])]
 

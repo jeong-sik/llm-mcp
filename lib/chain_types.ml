@@ -1,7 +1,7 @@
 (** Chain Types - Core type definitions for Chain DSL
 
     This module defines the fundamental types for the Chain Engine:
-    - node_type: The 12 supported node types (Llm, Tool, Pipeline, Threshold, etc.)
+    - node_type: The 21 supported node types (Llm, Tool, Pipeline, Cache, Batch, etc.)
     - node: A single execution unit with id and type
     - chain: A complete chain definition with nodes and config
     - chain_result: The result of chain execution
@@ -103,7 +103,7 @@ type adapter_transform =
   | Custom of string               (** Custom function name *)
 [@@deriving yojson]
 
-(** The 19 supported node types (including 3 resilience + Adapter) *)
+(** The 21 supported node types (including 3 resilience + Adapter + Cache + Batch) *)
 type node_type =
   | Llm of {
       model : string;     (** Model name: gemini, claude, codex, ollama:* *)
@@ -196,6 +196,19 @@ type node_type =
       transform : adapter_transform; (** Transformation to apply *)
       on_error : [ `Fail | `Passthrough | `Default of string ];  (** Error handling *)
     }
+  (* Caching node - avoids re-executing expensive operations *)
+  | Cache of {
+      key_expr : string;             (** Cache key expression: "{{input}}" or "static-key" *)
+      ttl_seconds : int;             (** Time-to-live in seconds (0 = infinite) *)
+      inner : node;                  (** Node to cache results from *)
+    }
+  (* Batch processing node - process list items in batches *)
+  | Batch of {
+      batch_size : int;              (** Number of items per batch *)
+      parallel : bool;               (** Process items within batch in parallel *)
+      inner : node;                  (** Node to apply to each item *)
+      collect_strategy : [ `List | `Concat | `First | `Last ];  (** How to collect results *)
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -285,6 +298,8 @@ let node_type_name = function
   | Race _ -> "race"
   | ChainExec _ -> "chain_exec"
   | Adapter _ -> "adapter"
+  | Cache _ -> "cache"
+  | Batch _ -> "batch"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
@@ -402,3 +417,44 @@ type batch_result = {
   failed_chains: (string * string) list;  (** Chain ID to error mapping *)
 }
 [@@deriving yojson]
+
+(** Count parallel groups in a chain structure recursively.
+    Parallel groups are: Fanout, Quorum, Merge, Race, Evaluator *)
+let rec count_parallel_groups (node: node) : int =
+  match node.node_type with
+  | Fanout nodes ->
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
+  | Quorum { nodes; _ } ->
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
+  | Merge { nodes; _ } ->
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
+  | Race { nodes; _ } ->
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
+  | Evaluator { candidates; _ } ->
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 candidates
+  | Pipeline nodes ->
+      List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
+  | Gate { then_node; else_node; _ } ->
+      count_parallel_groups then_node +
+      (match else_node with Some n -> count_parallel_groups n | None -> 0)
+  | Threshold { input_node; on_pass; on_fail; _ } ->
+      count_parallel_groups input_node +
+      (match on_pass with Some n -> count_parallel_groups n | None -> 0) +
+      (match on_fail with Some n -> count_parallel_groups n | None -> 0)
+  | Retry { node = inner; _ } | Map { inner; _ } | Bind { inner; _ } ->
+      count_parallel_groups inner
+  | Fallback { primary; fallbacks; _ } ->
+      count_parallel_groups primary +
+      List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 fallbacks
+  | Subgraph chain ->
+      List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 chain.nodes
+  | GoalDriven { action_node; _ } -> count_parallel_groups action_node
+  | Cache { inner; _ } -> count_parallel_groups inner
+  | Batch { inner; parallel; _ } ->
+      (* Batch is a parallel group if parallel=true *)
+      (if parallel then 1 else 0) + count_parallel_groups inner
+  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ -> 0
+
+(** Count total parallel groups in a chain *)
+let count_chain_parallel_groups (chain: chain) : int =
+  List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 chain.nodes

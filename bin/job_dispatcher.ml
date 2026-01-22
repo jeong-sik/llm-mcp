@@ -24,7 +24,7 @@ let check_embedding_sync () =
     let cmd = Printf.sprintf "find %s/claude %s/memory/procedural-memory -name '*.md' -type f -newer %s 2>/dev/null | wc -l" 
       me_root me_root last_sync_file in
     let count_str = String.trim (run_cmd cmd) in
-    let count = try int_of_string count_str with _ -> 0 in
+    let count = try int_of_string count_str with Failure _ -> 0 in
     
     if count >= 10 then
       [], [Printf.sprintf "🔄 Embedding sync needed: %d new docs" count; "💡 Run: /sync-memory"]
@@ -74,7 +74,7 @@ let process_jobs json_input =
 let () =
   let input_json = 
     try Yojson.Safe.from_channel stdin 
-    with _ -> `Assoc [] 
+    with Yojson.Json_error _ -> `Assoc [] 
   in
   let result = process_jobs input_json in
   print_endline "--- JSON ---";

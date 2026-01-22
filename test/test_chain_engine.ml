@@ -1740,6 +1740,159 @@ let chain_exec_tests = [
   "chain_exec_compile_depth", `Quick, test_chain_exec_compile_depth;
 ]
 
+(* ===== Cache Node Tests ===== *)
+
+(** Test parsing Cache node from JSON *)
+let test_parse_cache_basic () =
+  let json_str = {|
+{
+  "id": "cache_test",
+  "nodes": [
+    {
+      "id": "cached_llm",
+      "type": "cache",
+      "key_expr": "{{input}}",
+      "ttl_seconds": 3600,
+      "inner": {
+        "id": "llm",
+        "type": "llm",
+        "model": "gemini",
+        "prompt": "Test: {{input}}"
+      }
+    }
+  ],
+  "output": "cached_llm"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check int) "node count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Cache { key_expr; ttl_seconds; inner } ->
+           Alcotest.(check string) "key_expr" "{{input}}" key_expr;
+           Alcotest.(check int) "ttl" 3600 ttl_seconds;
+           Alcotest.(check string) "inner id" "llm" inner.id
+       | _ -> Alcotest.fail "Expected Cache node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test Cache compile depth *)
+let test_cache_compile_depth () =
+  let json_str = {|
+{
+  "id": "depth_test",
+  "nodes": [
+    {
+      "id": "cache",
+      "type": "cache",
+      "key_expr": "key",
+      "ttl_seconds": 60,
+      "inner": {
+        "id": "nested",
+        "type": "llm",
+        "model": "gemini",
+        "prompt": "test"
+      }
+    }
+  ],
+  "output": "cache"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (match compile chain with
+       | Ok plan ->
+           (* Cache(1) + LLM(1) = 2 *)
+           Alcotest.(check int) "compiled depth" 2 plan.depth
+       | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+let cache_tests = [
+  "parse_cache_basic", `Quick, test_parse_cache_basic;
+  "cache_compile_depth", `Quick, test_cache_compile_depth;
+]
+
+(* ===== Batch Node Tests ===== *)
+
+(** Test parsing Batch node from JSON *)
+let test_parse_batch_basic () =
+  let json_str = {|
+{
+  "id": "batch_test",
+  "nodes": [
+    {
+      "id": "batch_processor",
+      "type": "batch",
+      "batch_size": 5,
+      "parallel": true,
+      "collect_strategy": "list",
+      "inner": {
+        "id": "process",
+        "type": "llm",
+        "model": "gemini",
+        "prompt": "Process: {{batch_processor_item}}"
+      }
+    }
+  ],
+  "output": "batch_processor"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check int) "node count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Batch { batch_size; parallel; inner; collect_strategy } ->
+           Alcotest.(check int) "batch_size" 5 batch_size;
+           Alcotest.(check bool) "parallel" true parallel;
+           Alcotest.(check string) "inner id" "process" inner.id;
+           (match collect_strategy with `List -> () | _ -> Alcotest.fail "Expected List strategy")
+       | _ -> Alcotest.fail "Expected Batch node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test Batch compile depth *)
+let test_batch_compile_depth () =
+  let json_str = {|
+{
+  "id": "depth_test",
+  "nodes": [
+    {
+      "id": "batch",
+      "type": "batch",
+      "batch_size": 3,
+      "parallel": true,
+      "collect_strategy": "list",
+      "inner": {
+        "id": "nested",
+        "type": "pipeline",
+        "nodes": [
+          {"id": "a", "type": "llm", "model": "gemini", "prompt": "1"},
+          {"id": "b", "type": "llm", "model": "gemini", "prompt": "2"}
+        ]
+      }
+    }
+  ],
+  "output": "batch"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (match compile chain with
+       | Ok plan ->
+           (* Batch(1) + Pipeline(1) + max(LLM(1), LLM(1)) = 3 *)
+           Alcotest.(check int) "compiled depth" 3 plan.depth
+       | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+let batch_tests = [
+  "parse_batch_basic", `Quick, test_parse_batch_basic;
+  "batch_compile_depth", `Quick, test_batch_compile_depth;
+]
+
 let () =
   Alcotest.run "Chain Engine" [
     "Chain Types", types_tests;
@@ -1750,4 +1903,6 @@ let () =
     "Self-Recursion", recursion_tests;
     "JSON-Mermaid Roundtrip", roundtrip_tests;
     "ChainExec (Meta-Chain)", chain_exec_tests;
+    "Cache Node", cache_tests;
+    "Batch Node", batch_tests;
   ]

@@ -119,7 +119,7 @@ let find_executor name =
 (** Execute a tool call *)
 let execute_tool_call (tc : tool_call) ~external_mcp_url =
   let open Lwt.Syntax in
-  let args = try Yojson.Safe.from_string tc.arguments with _ -> `Null in
+  let args = try Yojson.Safe.from_string tc.arguments with Yojson.Json_error _ -> `Null in
 
   (* First check if we have a built-in executor *)
   match find_executor tc.name with

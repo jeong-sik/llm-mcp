@@ -22,7 +22,7 @@ let load_skill_rules () : Yojson.Safe.t option =
   if Sys.file_exists path then
     try
       Some (Yojson.Safe.from_file path)
-    with _ ->
+    with Yojson.Json_error _ | Sys_error _ ->
       prerr_endline "[WARN] Failed to load skill-rules.json";
       None
   else
@@ -53,7 +53,7 @@ let match_intent_patterns prompt patterns =
     try
       let re = Re.Pcre.regexp ~flags:[`CASELESS] pattern in
       Re.execp re prompt
-    with _ -> false  (* Skip invalid regex *)
+    with _ -> false  (* Skip invalid regex - Re.Pcre can raise various exceptions *)
   ) patterns
 
 (** Check if any negative pattern matches *)
@@ -65,12 +65,12 @@ let json_to_string_list json =
   let open Yojson.Safe.Util in
   try
     json |> to_list |> List.map to_string
-  with _ -> []
+  with Type_error _ | Yojson.Json_error _ -> []
 
 (** Extract optional string from JSON *)
 let json_to_string_opt json =
   let open Yojson.Safe.Util in
-  try Some (to_string json) with _ -> None
+  try Some (to_string json) with Type_error _ -> None
 
 (** Skill match result *)
 type skill_match = {
@@ -88,12 +88,12 @@ let find_matching_skills prompt rules =
   let open Yojson.Safe.Util in
   let skills =
     try rules |> member "skills" |> to_assoc
-    with _ -> []
+    with Type_error _ | Yojson.Json_error _ -> []
   in
   let matches = List.filter_map (fun (skill_name, config) ->
     let triggers =
       try config |> member "promptTriggers"
-      with _ -> `Null
+      with Type_error _ -> `Null
     in
 
     (* Check negative patterns first *)

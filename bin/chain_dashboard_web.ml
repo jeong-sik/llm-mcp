@@ -757,7 +757,7 @@ let broadcast_sse event_type data =
     try
       Flow.copy_string msg sink;
       true
-    with _ -> false
+    with Failure _ -> false
   ) !sse_clients
 
 (** Setup telemetry listener for SSE broadcasting *)

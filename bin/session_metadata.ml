@@ -74,12 +74,12 @@ let collect_metadata session_input =
 
   let start_time_opt =
     try Some (start_info |> member "start_time" |> to_int)
-    with _ -> None
+    with Type_error _ -> None
   in
 
   let start_timestamp =
     try start_info |> member "start_timestamp" |> to_string
-    with _ -> "Unknown"
+    with Type_error _ -> "Unknown"
   in
 
   (* Calculate duration *)
@@ -101,7 +101,7 @@ let collect_metadata session_input =
       try
         let json = Yojson.Safe.from_string session_input in
         Some (json |> member "session_id" |> to_string)
-      with _ -> None
+      with Yojson.Json_error _ | Type_error _ -> None
     else None
   in
 
@@ -138,7 +138,7 @@ let save_metadata metadata output_path =
     output_char oc '\n';
     close_out oc;
     true
-  with _ -> false
+  with Sys_error _ -> false
 
 (** Main function *)
 let main () =

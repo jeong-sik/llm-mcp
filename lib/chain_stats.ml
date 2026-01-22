@@ -59,8 +59,11 @@ type model_stats = {
 (** Raw data collection *)
 type raw_data = {
   mutable chain_durations: int list;
+  mutable chain_timestamps: float list;  (* Timestamps for filtering by 'since' *)
   mutable node_durations: int list;
   mutable tokens_by_model: (string, int) Hashtbl.t;
+  mutable call_counts_by_model: (string, int) Hashtbl.t;  (* Per-model call counts *)
+  mutable latencies_by_model: (string, int list) Hashtbl.t;  (* Per-model latency lists *)
   mutable errors: (string, int) Hashtbl.t;
   mutable hourly_tokens: (int, int) Hashtbl.t;
   mutable hourly_chains: (int, int) Hashtbl.t;
@@ -73,8 +76,11 @@ type raw_data = {
 (** Global stats collector *)
 let stats_data : raw_data = {
   chain_durations = [];
+  chain_timestamps = [];
   node_durations = [];
   tokens_by_model = Hashtbl.create 8;
+  call_counts_by_model = Hashtbl.create 8;
+  latencies_by_model = Hashtbl.create 8;
   errors = Hashtbl.create 16;
   hourly_tokens = Hashtbl.create 24;
   hourly_chains = Hashtbl.create 24;
@@ -118,6 +124,7 @@ let stats_handler event =
 
    | ChainComplete payload ->
      stats_data.chain_durations <- payload.complete_duration_ms :: stats_data.chain_durations;
+     stats_data.chain_timestamps <- Unix.gettimeofday () :: stats_data.chain_timestamps;
      stats_data.success_count <- stats_data.success_count + 1
 
    | Error payload ->
@@ -131,6 +138,14 @@ let stats_handler event =
 let track_model_tokens ~model ~tokens =
   Mutex.lock stats_mutex;
   incr_counter stats_data.tokens_by_model model tokens;
+  incr_counter stats_data.call_counts_by_model model 1;
+  Mutex.unlock stats_mutex
+
+(** Track model-specific latency *)
+let track_model_latency ~model ~latency_ms =
+  Mutex.lock stats_mutex;
+  let current = Hashtbl.find_opt stats_data.latencies_by_model model |> Option.value ~default:[] in
+  Hashtbl.replace stats_data.latencies_by_model model (latency_ms :: current);
   Mutex.unlock stats_mutex
 
 (** {1 Percentile Calculation} *)
@@ -152,12 +167,19 @@ let percentiles ps list =
 
 (** Compute current statistics *)
 let compute ?(since=0.0) () =
-  let _ = since in  (* TODO: Filter by timestamp *)
-
   Mutex.lock stats_mutex;
 
+  (* Filter durations by timestamp if since > 0 *)
+  let filtered_durations =
+    if since <= 0.0 then stats_data.chain_durations
+    else
+      List.filter_map (fun (d, ts) -> if ts >= since then Some d else None)
+        (List.combine stats_data.chain_durations stats_data.chain_timestamps
+         |> fun pairs -> if List.length pairs = 0 then [] else pairs)
+  in
+
   (* Calculate duration percentiles *)
-  let chain_ps = percentiles [0.5; 0.95; 0.99] stats_data.chain_durations in
+  let chain_ps = percentiles [0.5; 0.95; 0.99] filtered_durations in
   let p50, p95, p99 = match chain_ps with
     | [a; b; c] -> (a, b, c)
     | _ -> (0.0, 0.0, 0.0)
@@ -165,10 +187,10 @@ let compute ?(since=0.0) () =
 
   (* Calculate average *)
   let avg_duration =
-    if stats_data.chain_durations = [] then 0.0
+    if filtered_durations = [] then 0.0
     else
-      let sum = List.fold_left (+) 0 stats_data.chain_durations in
-      float_of_int sum /. float_of_int (List.length stats_data.chain_durations)
+      let sum = List.fold_left (+) 0 filtered_durations in
+      float_of_int sum /. float_of_int (List.length filtered_durations)
   in
 
   (* Convert hashtables to lists *)
@@ -228,8 +250,11 @@ let compute ?(since=0.0) () =
 let reset () =
   Mutex.lock stats_mutex;
   stats_data.chain_durations <- [];
+  stats_data.chain_timestamps <- [];
   stats_data.node_durations <- [];
   Hashtbl.clear stats_data.tokens_by_model;
+  Hashtbl.clear stats_data.call_counts_by_model;
+  Hashtbl.clear stats_data.latencies_by_model;
   Hashtbl.clear stats_data.errors;
   Hashtbl.clear stats_data.hourly_tokens;
   Hashtbl.clear stats_data.hourly_chains;
@@ -282,15 +307,26 @@ let model_statistics () : model_stats list =
   let result : model_stats list =
     Hashtbl.fold (fun model tokens (acc : model_stats list) ->
       let cost = float_of_int tokens *. cost_per_1k_tokens model /. 1000.0 in
-      let call_count = 1 in  (* TODO: Track per-model call count *)
+      let call_count =
+        Hashtbl.find_opt stats_data.call_counts_by_model model
+        |> Option.value ~default:1
+      in
       let avg_tokens = float_of_int tokens /. float_of_int (max 1 call_count) in
+      let avg_latency_ms =
+        match Hashtbl.find_opt stats_data.latencies_by_model model with
+        | None -> 0.0
+        | Some [] -> 0.0
+        | Some latencies ->
+            let sum = List.fold_left (+) 0 latencies in
+            float_of_int sum /. float_of_int (List.length latencies)
+      in
       ({
         model_name = model;
         call_count;
         total_tokens = tokens;
         avg_tokens_per_call = avg_tokens;
         total_cost_usd = cost;
-        avg_latency_ms = 0.0;  (* TODO: Track per-model latency *)
+        avg_latency_ms;
       } : model_stats) :: acc
     ) stats_data.tokens_by_model ([] : model_stats list)
     |> List.sort (fun (a : model_stats) (b : model_stats) -> compare b.total_tokens a.total_tokens)

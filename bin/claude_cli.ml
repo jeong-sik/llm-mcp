@@ -178,9 +178,9 @@ let _claude_messages_create
           let open Yojson.Safe.Util in
           try
             let result_text = json |> member "result" |> to_string in
-            let input_tokens = try json |> member "num_input_tokens" |> to_int with _ -> 0 in
-            let output_tokens = try json |> member "num_output_tokens" |> to_int with _ -> 0 in
-            let cost_usd = try json |> member "cost_usd" |> to_float with _ -> 0.0 in
+            let input_tokens = try json |> member "num_input_tokens" |> to_int with Type_error _ -> 0 in
+            let output_tokens = try json |> member "num_output_tokens" |> to_int with Type_error _ -> 0 in
+            let cost_usd = try json |> member "cost_usd" |> to_float with Type_error _ -> 0.0 in
 
             Ok (`Assoc [
               ("content", `List [`Assoc [("text", `String result_text)]]);
@@ -191,7 +191,7 @@ let _claude_messages_create
               ]);
               ("cost_usd", `Float cost_usd);
             ])
-          with _ ->
+          with Type_error _ ->
             (* If result key doesn't exist, treat raw as text *)
             Ok (`Assoc [
               ("content", `List [`Assoc [("text", `String json_str)]]);

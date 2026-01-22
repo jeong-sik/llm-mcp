@@ -19,8 +19,8 @@ let extract_goal filepath =
   match read_json_opt filepath with
   | Some json ->
       let open Yojson.Safe.Util in
-      let tech = try json |> member "tech" |> to_string with _ -> "Unknown" in
-      let summary = try json |> member "summary" |> to_string with _ -> "" in
+      let tech = try json |> member "tech" |> to_string with Type_error _ -> "Unknown" in
+      let summary = try json |> member "summary" |> to_string with Type_error _ -> "" in
       (* Simulated potential score *)
       let potential = 0.5 +. (Random.float 0.5) in
       Some (tech, potential, summary)

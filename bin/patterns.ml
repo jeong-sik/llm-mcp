@@ -75,13 +75,13 @@ let extract_legacy_pattern (content: string) : pattern_result =
       
       if pattern = "" then None_found
       else Legacy { topic; pattern; recommendation; warning }
-  with _ -> None_found
+  with Yojson.Json_error _ -> None_found
 
 (* Main processing logic *)
 let process_patterns json_input = 
   let transcript_path = 
     try json_input |> member "transcript_path" |> to_string 
-    with _ -> "" 
+    with Type_error _ -> "" 
   in
   
   let context = ref [] in
@@ -127,7 +127,7 @@ let () =
   
   let input_json = 
     try Yojson.Safe.from_channel stdin 
-    with _ -> `Assoc [] 
+    with Yojson.Json_error _ -> `Assoc [] 
   in
   let result = process_patterns input_json in
   print_endline "--- JSON ---";

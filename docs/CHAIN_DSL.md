@@ -75,6 +75,8 @@ The Chain Engine applies category theory principles to create mathematically sou
 | `fallback` | Try alternatives | Primary → fallbacks |
 | `race` | Parallel race | First result wins |
 | `adapter` | Data transformation | Inter-node refinement |
+| `cache` | Result caching | TTL-based memoization |
+| `batch` | List batch processing | Parallel/sequential batches |
 
 ## DSL Syntax
 
@@ -405,6 +407,102 @@ Transform data between nodes with various strategies:
     }
   ]
 }
+```
+
+### Cache Node (Result Caching)
+
+Cache expensive operations to avoid re-execution:
+
+```json
+{
+  "id": "cached_analysis",
+  "type": "cache",
+  "key_expr": "{{input}}",
+  "ttl_seconds": 3600,
+  "inner": {
+    "id": "expensive_llm",
+    "type": "llm",
+    "model": "claude",
+    "prompt": "Perform deep analysis of: {{input}}"
+  }
+}
+```
+
+**Parameters:**
+- `key_expr`: Cache key expression (e.g., `"{{input}}"`, `"static-key"`)
+- `ttl_seconds`: Time-to-live in seconds (0 = infinite cache)
+- `inner`: The node whose results will be cached
+
+**Use Cases:**
+- Caching LLM responses for repeated queries
+- Avoiding redundant API calls in loops
+- Memoizing expensive computations
+
+**Mermaid Syntax:**
+```mermaid
+[[Cache:{{input}},3600,expensive_llm]]
+```
+
+### Batch Node (List Processing)
+
+Process list items in configurable batches:
+
+```json
+{
+  "id": "batch_processor",
+  "type": "batch",
+  "batch_size": 5,
+  "parallel": true,
+  "collect_strategy": "list",
+  "inner": {
+    "id": "process_item",
+    "type": "llm",
+    "model": "gemini",
+    "prompt": "Process this item: {{batch_processor_item}}"
+  }
+}
+```
+
+**Parameters:**
+- `batch_size`: Number of items per batch
+- `parallel`: Process items within batch in parallel (`true`/`false`)
+- `collect_strategy`: How to collect results
+  - `list`: Return as JSON array
+  - `concat`: Concatenate results with newlines
+  - `first`: Return first successful result
+  - `last`: Return last successful result
+- `inner`: Node to apply to each item
+
+**Input Format:**
+- JSON array: `["item1", "item2", "item3"]`
+- Newline-separated text: `"item1\nitem2\nitem3"`
+
+**Item Access:**
+Inside the inner node, access the current item via `{{node_id_item}}`:
+```
+{{batch_processor_item}}  // Current item being processed
+```
+
+**Example: Batch Translation**
+```json
+{
+  "id": "translate_batch",
+  "type": "batch",
+  "batch_size": 10,
+  "parallel": true,
+  "collect_strategy": "list",
+  "inner": {
+    "id": "translate",
+    "type": "llm",
+    "model": "gemini",
+    "prompt": "Translate to Korean: {{translate_batch_item}}"
+  }
+}
+```
+
+**Mermaid Syntax:**
+```mermaid
+[[Batch:5,true,process_item]]
 ```
 
 ### Resilience Patterns in Practice

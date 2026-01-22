@@ -72,7 +72,7 @@ let parse_iso_datetime s =
         } in
         let (time, _) = Unix.mktime tm in
         time)
-  with _ -> 0.0
+  with Scanf.Scan_failure _ | Invalid_argument _ -> 0.0
 
 (** Check token file *)
 let check_token path =
