@@ -231,7 +231,8 @@ let handle_initialize ~session_opt ~params id =
     ("instructions", `String "LLM-MCP provides multi-LLM access (MAGI Trinity). \
       Tools: gemini (CASPER/strategy), claude-cli (BALTHASAR/values), codex (MELCHIOR/code), ollama (local). \
       Use response_format='compact' for 64% token savings. \
-      For MAGI consensus, call 2+ LLMs and compare results.");
+      For MAGI consensus, call 2+ LLMs and compare results. \
+      Chain Engine: Use chain.run for multi-LLM workflows (Mermaid DSL supported).");
   ])))
 
 (** Handle tools/list request *)

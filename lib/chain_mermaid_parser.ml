@@ -494,8 +494,24 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
             Ok (Batch { batch_size; parallel = true; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; collect_strategy = `List })
         | _ ->
             Error (Printf.sprintf "Batch requires size,parallel,node or size,node format, got: %s" content))
+      else if String.length content > 6 && String.sub content 0 6 = "Spawn:" then
+        (* [[Spawn:clean,node_id]] or [[Spawn:clean,pass_var1|pass_var2,node_id]] - clean context spawn *)
+        let parts = String.sub content 6 (String.length content - 6)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        (match parts with
+        | [clean_str; node_id] ->
+            let clean = clean_str = "true" || clean_str = "clean" in
+            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; pass_vars = []; inherit_cache = true })
+        | [clean_str; pass_vars_str; node_id] ->
+            let clean = clean_str = "true" || clean_str = "clean" in
+            let pass_vars = String.split_on_char '|' pass_vars_str |> List.map trim in
+            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; pass_vars; inherit_cache = true })
+        | _ ->
+            Error (Printf.sprintf "Spawn requires clean,node or clean,pass_vars,node format, got: %s" content))
       else
-        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch, got: %s" content)
+        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn, got: %s" content)
 
   | `Diamond ->
       (* {Quorum:N} or {Gate:condition} *)
@@ -1073,6 +1089,7 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Adapter { input_ref; _ } -> Printf.sprintf "adapt_%s" (String.sub input_ref 0 (min 8 (String.length input_ref)))
   | Cache { key_expr; ttl_seconds; _ } -> Printf.sprintf "cache_%s_%d" (String.sub key_expr 0 (min 8 (String.length key_expr))) ttl_seconds
   | Batch { batch_size; _ } -> Printf.sprintf "batch_%d" batch_size
+  | Spawn { clean; _ } -> Printf.sprintf "spawn_%s" (if clean then "clean" else "inherit")
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -1150,13 +1167,17 @@ let node_type_to_text (nt : node_type) : string =
   | Batch { batch_size; parallel; inner; _ } ->
       let parallel_str = if parallel then ",true" else ",false" in
       Printf.sprintf "Batch:%d%s,%s" batch_size parallel_str inner.id
+  | Spawn { clean; inner; pass_vars; _ } ->
+      let clean_str = if clean then "clean" else "inherit" in
+      let vars_str = if pass_vars = [] then "" else "," ^ String.concat "|" pass_vars in
+      Printf.sprintf "Spawn:%s%s,%s" clean_str vars_str inner.id
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
   match nt with
   | Llm _ | Tool _ -> ("[", "]")
   | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ -> ("{", "}")
-  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | Cache _ | Batch _ -> ("[[", "]]")
+  | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | Cache _ | Batch _ | Spawn _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
   | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
@@ -1185,6 +1206,7 @@ let node_type_to_class (nt : node_type) : string =
   | Adapter _ -> "adapter"
   | Cache _ -> "cache"
   | Batch _ -> "batch"
+  | Spawn _ -> "spawn"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1207,6 +1229,7 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
     classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
     classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
@@ -1346,7 +1369,7 @@ let chain_to_ascii (chain : chain) : string =
       | Map _ -> "📍" | Bind _ -> "🔄" | Subgraph _ -> "📦"
       | Retry _ -> "🔁" | Fallback _ -> "🛟" | Race _ -> "🏁"
       | ChainExec _ -> "🔮" | Adapter _ -> "🔌"
-      | Cache _ -> "💾" | Batch _ -> "📦"
+      | Cache _ -> "💾" | Batch _ -> "📦" | Spawn _ -> "🌱"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

@@ -1,0 +1,84 @@
+{
+  "scoring_func": "anti_fake",
+  "description": "Hybrid heuristic + LLM scoring for fake test detection",
+  "version": "1.0.0",
+
+  "heuristics": {
+    "penalties": [
+      {"pattern": "assert true", "score": -0.15, "reason": "Empty assertion - tests nothing"},
+      {"pattern": "let _ =", "score": -0.10, "reason": "Ignores return value"},
+      {"pattern": "(* todo", "score": -0.05, "reason": "Incomplete implementation"},
+      {"pattern": "(* fixme", "score": -0.05, "reason": "Known issue not addressed"}
+    ],
+    "bonuses": [
+      {"pattern": "assert (", "score": 0.02, "reason": "Real assertion with condition", "per_match": true},
+      {"pattern": "Alcotest.check", "score": 0.02, "reason": "Proper test framework usage", "per_match": true},
+      {"pattern": "encode.*decode|decode.*encode", "score": 0.10, "reason": "Roundtrip test pattern"}
+    ]
+  },
+
+  "few_shots": {
+    "fake_examples": [
+      {
+        "code": "let test_fake () =\n  let _ = encode () in\n  assert true",
+        "score": 0.25,
+        "analysis": "Ignores encode result (let _ =), empty assertion (assert true)",
+        "language": "ocaml"
+      },
+      {
+        "code": "def test_fake():\n    result = process()\n    assert True",
+        "score": 0.35,
+        "analysis": "Ignores result, assert True is meaningless",
+        "language": "python"
+      },
+      {
+        "code": "it('should work', () => {\n  const x = compute();\n  expect(true).toBe(true);\n});",
+        "score": 0.30,
+        "analysis": "Computes but doesn't verify result",
+        "language": "javascript"
+      }
+    ],
+    "real_examples": [
+      {
+        "code": "let test_nack_roundtrip () =\n  let encoded = encode_nack ~sender_ssrc:0x12345678l ~media_ssrc:0xABCDEF01l\n    [{ pid = 1000; blp = 0x000F }] in\n  let decoded = decode_nack encoded in\n  assert (decoded.sender_ssrc = 0x12345678l);\n  assert (decoded.media_ssrc = 0xABCDEF01l);\n  Alcotest.check int \"pid\" 1000 (List.hd decoded.nacks).pid",
+        "score": 0.85,
+        "analysis": "Roundtrip test, multiple real assertions, uses test framework",
+        "language": "ocaml"
+      },
+      {
+        "code": "def test_roundtrip():\n    original = {'id': 123, 'name': 'test'}\n    encoded = encode(original)\n    decoded = decode(encoded)\n    assert decoded == original\n    assert decoded['id'] == 123",
+        "score": 0.80,
+        "analysis": "Roundtrip verification with specific field checks",
+        "language": "python"
+      },
+      {
+        "code": "it('should encode and decode correctly', () => {\n  const input = { id: 1, value: 'test' };\n  const encoded = encode(input);\n  const decoded = decode(encoded);\n  expect(decoded).toEqual(input);\n  expect(decoded.id).toBe(1);\n});",
+        "score": 0.82,
+        "analysis": "Full roundtrip with structural and value assertions",
+        "language": "javascript"
+      }
+    ],
+    "edge_cases": [
+      {
+        "code": "let test_empty () =\n  assert (encode [] = Bytes.empty)",
+        "score": 0.60,
+        "analysis": "Tests edge case (empty input) with real assertion",
+        "language": "ocaml"
+      },
+      {
+        "code": "let test_max_value () =\n  assert (encode 0xFFFFFFFF = expected_max)",
+        "score": 0.65,
+        "analysis": "Tests boundary condition",
+        "language": "ocaml"
+      }
+    ]
+  },
+
+  "llm_judge_prompt": "Analyze this test code for fake test patterns.\n\nScore 0.0-1.0 where:\n- 0.0 = Fake test (assert true, no real assertions, ignores results)\n- 0.5 = Partial test (some assertions but missing edge cases)\n- 1.0 = Real test (meaningful assertions, tests actual behavior)\n\nCode:\n```\n{{code}}\n```\n\nReply with ONLY a number between 0.0 and 1.0:",
+
+  "threshold_recommendations": {
+    "strict": 0.8,
+    "normal": 0.7,
+    "lenient": 0.5
+  }
+}

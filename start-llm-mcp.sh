@@ -92,25 +92,25 @@ stop_existing_on_port() {
 }
 
 # Resolve executable path
-# Priority: 1. Release binary  2. Workspace build  3. Local build  4. Installed  5. Auto-download
+# Priority: 1. Local build (freshest)  2. Workspace build  3. Installed  4. Release binary  5. Auto-download
 RELEASE_BINARY="$SCRIPT_DIR/llm-mcp-macos-arm64"
 WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/llm-mcp/bin/main_eio.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
 INSTALLED_EXE="$(command -v llm-mcp || true)"
 LLM_EXE=""
 
-# 1. Pre-downloaded release binary (fastest, no build needed)
-if [ -x "$RELEASE_BINARY" ]; then
-    LLM_EXE="$RELEASE_BINARY"
+# 1. Local build (always freshest, has latest features)
+if [ -x "$LOCAL_EXE" ]; then
+    LLM_EXE="$LOCAL_EXE"
 # 2. Workspace build
 elif [ -x "$WORKSPACE_EXE" ]; then
     LLM_EXE="$WORKSPACE_EXE"
-# 3. Local build
-elif [ -x "$LOCAL_EXE" ]; then
-    LLM_EXE="$LOCAL_EXE"
-# 4. System-installed
+# 3. System-installed
 elif [ -n "$INSTALLED_EXE" ]; then
     LLM_EXE="$INSTALLED_EXE"
+# 4. Release binary (fallback, may be outdated)
+elif [ -x "$RELEASE_BINARY" ]; then
+    LLM_EXE="$RELEASE_BINARY"
 fi
 
 # 5. Auto-download from GitHub releases if nothing found

@@ -80,6 +80,76 @@ v0.1에서는 `inputs`를 직접 파싱하지 않고, LLM 프롬프트의 `{{ref
 - map: 출력 변환(Functor)
 - bind: 결과 기반 라우팅(Monad)
 - merge: 결과 합성(Monoid)
+- spawn: 격리 실행 (Clean Context)
+
+## 3.1 Spawn 노드 (Clean Context)
+
+Spawn 노드는 **컨텍스트 오염(Context Contamination)** 문제를 해결한다. 이전 노드의 결과, 파일 내용, 대화 히스토리가 다음 분석에 영향을 주지 않도록 깨끗한 컨텍스트에서 실행한다.
+
+### 동기
+
+Vision 분석, 코드 검증 등의 작업에서 이전 컨텍스트가 결과를 오염시키는 문제:
+- 파일을 읽은 후 이미지를 분석하면, 파일 내용이 이미지 해석에 영향
+- 이전 대화가 객관적 분석을 방해
+- 반복 실행(iteration) 시 이전 결과가 다음 시도를 오염
+
+### 스키마
+
+```json
+{
+  "id": "isolated_vision",
+  "type": "spawn",
+  "clean": true,
+  "inner": { ... },
+  "pass_vars": ["target_url", "threshold"],
+  "inherit_cache": true
+}
+```
+
+| 필드 | 타입 | 기본값 | 설명 |
+|------|------|--------|------|
+| clean | bool | true | true면 빈 컨텍스트로 시작 |
+| inner | node | (필수) | 격리 컨텍스트에서 실행할 노드 |
+| pass_vars | string[] | [] | clean=true여도 전달할 변수 |
+| inherit_cache | bool | true | 부모 캐시 상속 여부 |
+
+### Mermaid DSL
+
+```
+[[Spawn:clean,inner_node_id]]
+[[Spawn:clean,var1|var2,inner_node_id]]
+```
+
+- `clean`: `true` 또는 `false`
+- `var1|var2`: 전달할 변수 (`|`로 구분)
+- `inner_node_id`: 내부 실행 노드 참조
+
+### 실행 흐름
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Parent Context                                          │
+│   outputs: {n1: "...", n2: "...", file_content: "..."}  │
+│   cache: {api_result: "cached"}                         │
+└─────────────────────────────────────────────────────────┘
+                         │
+                         ▼ Spawn (clean=true, pass_vars=["threshold"])
+┌─────────────────────────────────────────────────────────┐
+│ Spawned Context (Clean)                                 │
+│   outputs: {threshold: "0.95"}  ← pass_vars만 복사      │
+│   cache: {api_result: "cached"} ← inherit_cache=true    │
+│                                                         │
+│   [Execute inner node in isolation]                     │
+│                                                         │
+│   result: "analysis without contamination"              │
+└─────────────────────────────────────────────────────────┘
+                         │
+                         ▼ Copy result back
+┌─────────────────────────────────────────────────────────┐
+│ Parent Context                                          │
+│   outputs: {..., spawn_result: "analysis..."}           │
+└─────────────────────────────────────────────────────────┘
+```
 
 ## 4. 실행 모델
 
@@ -247,6 +317,108 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 }
 ```
 
+### 예시 E: Spawn (Clean Context Vision 분석)
+
+Context Contamination 없이 이미지를 분석하는 패턴:
+
+**JSON DSL:**
+```json
+{
+  "chain": {
+    "id": "clean_vision_analysis",
+    "nodes": [
+      {
+        "id": "fetch_design",
+        "type": "tool",
+        "name": "figma.fetch",
+        "args": { "node_id": "{{input.figma_node}}" }
+      },
+      {
+        "id": "generate_html",
+        "type": "llm",
+        "model": "codex",
+        "prompt": "Generate HTML from: {{fetch_design.output}}"
+      },
+      {
+        "id": "clean_compare",
+        "type": "spawn",
+        "clean": true,
+        "pass_vars": ["input"],
+        "inherit_cache": true,
+        "inner": {
+          "id": "vision_judge",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "Compare these two images and return SSIM score. Target: {{input.target_url}}, Generated: {{input.generated_url}}. Be objective - no prior context should influence your judgment."
+        }
+      }
+    ],
+    "output": "clean_compare"
+  }
+}
+```
+
+**핵심 포인트:**
+- `fetch_design`, `generate_html`의 결과가 `clean_compare` 내부에서 보이지 않음
+- `pass_vars: ["input"]`으로 필요한 URL만 전달
+- Vision 분석이 코드나 DSL에 오염되지 않음
+
+**Mermaid DSL:**
+```mermaid
+flowchart LR
+    fetch["Tool:figma.fetch"]
+    gen["LLM:codex 'Generate HTML'"]
+    spawn[["Spawn:true,input,vision_judge"]]
+    vision["LLM:gemini 'Compare images'"]
+
+    fetch --> gen
+    gen --> spawn
+    spawn -.-> vision
+
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    class spawn spawn
+```
+
+### 예시 F: Spawn으로 반복 격리 (Iteration Loop)
+
+이전 시도가 다음 시도를 오염시키지 않도록:
+
+```json
+{
+  "chain": {
+    "id": "isolated_iteration",
+    "nodes": [
+      {
+        "id": "attempt_1",
+        "type": "spawn",
+        "clean": true,
+        "pass_vars": ["requirement"],
+        "inner": { "id": "impl_1", "type": "llm", "model": "codex", "prompt": "Implement: {{requirement}}" }
+      },
+      {
+        "id": "score_1",
+        "type": "tool",
+        "name": "tests.run",
+        "args": { "code": "{{attempt_1.output}}" }
+      },
+      {
+        "id": "attempt_2",
+        "type": "spawn",
+        "clean": true,
+        "pass_vars": ["requirement", "score_1"],
+        "inner": { "id": "impl_2", "type": "llm", "model": "codex", "prompt": "Score was {{score_1}}. Implement differently: {{requirement}}" }
+      }
+    ],
+    "output": "attempt_2"
+  }
+}
+```
+
+**핵심 포인트:**
+- `attempt_1`의 코드가 `attempt_2` 내부에서 보이지 않음 (오염 방지)
+- 점수(`score_1`)만 `pass_vars`로 전달하여 피드백 제공
+- 각 시도가 독립적으로 창의적 접근 가능
+
 ## 8. 리얼월드 예제 (시간/품질 제약 포함)
 
 ### 예제 1: BDD 자동 탐색 → 테스트 생성 → 브랜치 커버리지 95%
@@ -327,10 +499,11 @@ v0.1에서는 실행 레이어에서 정책을 강제하고, DSL 정적 검증�
 
 현재 (v0.1 in llm-mcp):
 - 구현: chain.run / chain.validate MCP tool 노출
-- 구현: core node 타입 파싱
+- 구현: core node 타입 파싱 (22개 노드 타입)
 - 구현: 기본 검증(빈 nodes, depth, quorum size)
 - 구현: exec_fn 기반 LLM 실행 스텁
 - 구현: tool 노드 실행 wiring(MCP/내장 도구)
+- 구현: **Spawn 노드** (Clean Context 격리 실행)
 
 스텁/부분:
 - fanout/quorum/gate/merge는 동작하지만 병렬성/합성은 단순화
