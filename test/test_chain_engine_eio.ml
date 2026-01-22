@@ -12,8 +12,8 @@ let compile_exn chain =
   | Ok plan -> plan
   | Error msg -> failwith ("compile failed: " ^ msg)
 
-let exec_fn ~model ~prompt ?tools () =
-  ignore tools;  (* tools field added for Ollama interop *)
+let exec_fn ~model ?system ~prompt ?tools () =
+  ignore (system, tools);  (* system and tools fields for extended API *)
   if String.contains prompt '!' then Error "forced failure"
   else Ok (Printf.sprintf "[%s]%s" model prompt)
 

@@ -416,7 +416,7 @@ let test_default_config () =
 
 let test_node_type_name () =
   Alcotest.(check string) "llm" "llm"
-    (node_type_name (Llm { model = "test"; prompt = "test"; timeout = None; tools = None }));
+    (node_type_name (Llm { model = "test"; system = None; prompt = "test"; timeout = None; tools = None }));
   Alcotest.(check string) "tool" "tool"
     (node_type_name (Tool { name = "test"; args = `Null }));
   Alcotest.(check string) "pipeline" "pipeline"
@@ -442,7 +442,7 @@ let test_make_llm_node () =
   let node = make_llm_node ~id:"test" ~model:"gemini" ~prompt:"hello" () in
   Alcotest.(check string) "id" "test" node.id;
   match node.node_type with
-  | Llm { model; prompt; timeout; tools } ->
+  | Llm { model; system = _; prompt; timeout; tools } ->
       Alcotest.(check string) "model" "gemini" model;
       Alcotest.(check string) "prompt" "hello" prompt;
       Alcotest.(check (option int)) "timeout" None timeout;
@@ -1002,11 +1002,11 @@ let test_compile_pipeline_topological_order () =
   let chain = {
     id = "topo_test";
     nodes = [
-      { id = "c"; node_type = Llm { model = "gemini"; prompt = "c"; timeout = None; tools = None };
+      { id = "c"; node_type = Llm { model = "gemini"; system = None; prompt = "c"; timeout = None; tools = None };
         input_mapping = [("input", "{{b.output}}")] };
-      { id = "a"; node_type = Llm { model = "gemini"; prompt = "a"; timeout = None; tools = None };
+      { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "a"; timeout = None; tools = None };
         input_mapping = [] };
-      { id = "b"; node_type = Llm { model = "claude"; prompt = "b"; timeout = None; tools = None };
+      { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "b"; timeout = None; tools = None };
         input_mapping = [("input", "{{a.output}}")] };
     ];
     output = "c";
