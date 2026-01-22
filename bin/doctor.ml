@@ -1,4 +1,4 @@
-(** doctor - llm-mcp Pre-flight Health Check
+(** doctor - llm-mcp Pre-flight Health Check (Eio)
 
     Comprehensive system health check before running chains or tests.
 
@@ -14,8 +14,6 @@
       4. Environment variables
       5. Chain compiler
 *)
-
-open Lwt.Syntax
 
 (** ANSI colors *)
 let green s = Printf.sprintf "\027[32m%s\027[0m" s
@@ -98,34 +96,48 @@ let check_codex () =
     { name = "Codex"; status = `Warn;
       message = "Not found (npm i -g @openai/codex)"; latency_ms = None }
 
+(** Get Neo4j config from environment *)
+let get_neo4j_config () =
+  let uri =
+    try Sys.getenv "NEO4J_URI"
+    with Not_found ->
+      try Sys.getenv "RAILWAY_NEO4J_URL"
+      with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+  in
+  let username = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
+  let password =
+    try Sys.getenv "NEO4J_PASSWORD"
+    with Not_found -> failwith "NEO4J_PASSWORD not set"
+  in
+  Neo4j_bolt_eio.Bolt.config_from_uri ~username ~password uri
+
 (** 6. Check Neo4j connectivity *)
-let check_neo4j () =
+let check_neo4j ~sw ~net ~clock =
   let start_time = Unix.gettimeofday () in
-  Lwt_main.run (
-    let* result =
-      Lwt.catch
-        (fun () ->
-          let* conn_result = Neo4j_bolt.Bolt.connect () in
-          match conn_result with
-          | Error _ -> Lwt.return (Error "Connection failed")
-          | Ok conn ->
-              let* query_result = Neo4j_bolt.Bolt.query conn
-                ~cypher:"RETURN 1 as ping" ~params:(`Assoc []) () in
-              let* () = Neo4j_bolt.Bolt.close conn in
-              match query_result with
-              | Ok _ -> Lwt.return (Ok ())
-              | Error _ -> Lwt.return (Error "Query failed"))
-        (fun _ -> Lwt.return (Error "Exception"))
-    in
-    let latency = (Unix.gettimeofday () -. start_time) *. 1000.0 in
-    match result with
-    | Ok () ->
-      Lwt.return { name = "Neo4j"; status = `Ok;
-                   message = "Connected"; latency_ms = Some latency }
-    | Error msg ->
-      Lwt.return { name = "Neo4j"; status = `Fail;
-                   message = msg; latency_ms = None }
-  )
+  try
+    let config = get_neo4j_config () in
+    match Neo4j_bolt_eio.Bolt.connect ~sw ~net ~clock ~config () with
+    | Error e ->
+        { name = "Neo4j"; status = `Fail;
+          message = Printf.sprintf "Connection failed: %s" (Neo4j_bolt_eio.Bolt.error_to_string e);
+          latency_ms = None }
+    | Ok conn ->
+        let result = Neo4j_bolt_eio.Bolt.query ~clock conn
+            ~cypher:"RETURN 1 as ping" ~params:(`Assoc []) () in
+        Neo4j_bolt_eio.Bolt.close conn;
+        let latency = (Unix.gettimeofday () -. start_time) *. 1000.0 in
+        match result with
+        | Ok _ ->
+            { name = "Neo4j"; status = `Ok;
+              message = "Connected"; latency_ms = Some latency }
+        | Error e ->
+            { name = "Neo4j"; status = `Fail;
+              message = Printf.sprintf "Query failed: %s" (Neo4j_bolt_eio.Bolt.error_to_string e);
+              latency_ms = None }
+  with exn ->
+    { name = "Neo4j"; status = `Fail;
+      message = Printf.sprintf "Exception: %s" (Printexc.to_string exn);
+      latency_ms = None }
 
 (** 7. Check required environment variables *)
 let check_env_vars () =
@@ -178,7 +190,7 @@ let print_json results =
   print_endline (Yojson.Safe.pretty_to_string json)
 
 (** Main doctor function *)
-let run_doctor ~json_output ~quick =
+let run_doctor ~json_output ~quick ~sw ~net ~clock =
   let results =
     [ check_server ();
       check_ollama ();
@@ -187,7 +199,7 @@ let run_doctor ~json_output ~quick =
       check_codex ();
     ] @
     (if quick then [] else [
-      check_neo4j ();
+      check_neo4j ~sw ~net ~clock;
       check_env_vars ();
     ])
   in
@@ -224,4 +236,9 @@ let () =
     ("--quick", Arg.Set quick, "Quick check (server + backends only)");
   ] in
   Arg.parse specs (fun _ -> ()) "llm-mcp-doctor: Pre-flight health check";
-  run_doctor ~json_output:!json_output ~quick:!quick
+  Eio_main.run @@ fun env ->
+  Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  run_doctor ~json_output:!json_output ~quick:!quick ~sw ~net ~clock

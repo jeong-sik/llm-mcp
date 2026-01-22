@@ -1,13 +1,11 @@
 (** previously_on - "Previously on Second Brain..." X-Files style session summary
 
-    OCaml port of scripts/previously-on.py
+    OCaml port of scripts/previously-on.py (Eio version)
     Queries Neo4j for recent sessions, pending PRs, and related memories.
 
     Usage:
       previously-on [--limit N] [--days N] [--style narrative|bullet]
 *)
-
-open Lwt.Syntax
 
 (** Extract records from query result
     Records come as: {"records": [[[field1, field2]], [[field1, field2]]]}
@@ -118,8 +116,24 @@ let rec take n lst =
   | _, 0 -> []
   | x :: xs, n -> x :: take (n - 1) xs
 
+(** Get connection config from environment *)
+let get_config () =
+  try
+    let uri = Sys.getenv "NEO4J_URI" in
+    let username = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
+    let password = Sys.getenv "NEO4J_PASSWORD" in
+    Some (Neo4j_bolt_eio.Bolt.config_from_uri ~username ~password uri)
+  with Not_found ->
+    None
+
+(** Connect to Neo4j *)
+let connect ~sw ~net ~clock =
+  match get_config () with
+  | None -> Error (Neo4j_bolt_eio.Bolt.ConnectionError "NEO4J_URI not set")
+  | Some config -> Neo4j_bolt_eio.Bolt.connect ~sw ~net ~clock ~config ()
+
 (** Get recent sessions from Neo4j *)
-let get_recent_sessions conn ~limit ~days =
+let get_recent_sessions ~clock conn ~limit ~days =
   let cypher = Printf.sprintf {|
     MATCH (s:Session)
     WHERE s.date >= date() - duration({days: %d})
@@ -136,13 +150,12 @@ let get_recent_sessions conn ~limit ~days =
            projects,
            prs
   |} days limit in
-  let* result = Neo4j_bolt.Bolt.query conn ~cypher () in
-  match result with
-  | Error _ -> Lwt.return []
-  | Ok data -> Lwt.return (extract_records data)
+  match Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params:(`Assoc []) () with
+  | Error _ -> []
+  | Ok data -> extract_records data
 
 (** Get pending PRs *)
-let get_pending_prs conn =
+let get_pending_prs ~clock conn =
   let cypher = {|
     MATCH (pr:PullRequest)
     WHERE pr.status = 'draft' OR pr.status = 'open'
@@ -150,10 +163,9 @@ let get_pending_prs conn =
     ORDER BY pr.number DESC
     LIMIT 5
   |} in
-  let* result = Neo4j_bolt.Bolt.query conn ~cypher () in
-  match result with
-  | Error _ -> Lwt.return []
-  | Ok data -> Lwt.return (extract_records data)
+  match Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params:(`Assoc []) () with
+  | Error _ -> []
+  | Ok data -> extract_records data
 
 (** Format a single session as one-liner *)
 let format_session_oneliner session idx =
@@ -253,17 +265,16 @@ let format_bullet sessions =
   end
 
 (** Main logic *)
-let run ~limit ~days ~style =
-  let* conn_result = Neo4j_bolt.Bolt.connect () in
-  match conn_result with
+let run ~sw ~net ~clock ~limit ~days ~style =
+  match connect ~sw ~net ~clock with
   | Error e ->
-      Printf.eprintf "⚠️ Neo4j 연결 실패: %s\n" (Neo4j_bolt.Bolt.error_to_string e);
-      Lwt.return 0  (* Exit cleanly to not block session start *)
+      Printf.eprintf "⚠️ Neo4j 연결 실패: %s\n" (Neo4j_bolt_eio.Bolt.error_to_string e);
+      0  (* Exit cleanly to not block session start *)
   | Ok conn ->
-      Lwt.catch (fun () ->
-        let* sessions = get_recent_sessions conn ~limit ~days in
-        let* pending_prs = get_pending_prs conn in
-        let* () = Neo4j_bolt.Bolt.close conn in
+      try
+        let sessions = get_recent_sessions ~clock conn ~limit ~days in
+        let pending_prs = get_pending_prs ~clock conn in
+        Neo4j_bolt_eio.Bolt.close conn;
 
         let output = match style with
           | "bullet" -> format_bullet sessions
@@ -271,12 +282,11 @@ let run ~limit ~days ~style =
         in
 
         if output <> "" then print_endline output;
-        Lwt.return 0
-      ) (fun exn ->
+        0
+      with exn ->
         Printf.eprintf "⚠️ Previously on... 로딩 실패: %s\n" (Printexc.to_string exn);
-        let* _ = Neo4j_bolt.Bolt.close conn in
-        Lwt.return 0
-      )
+        Neo4j_bolt_eio.Bolt.close conn;
+        0
 
 (** CLI entry point *)
 let () =
@@ -292,5 +302,10 @@ let () =
 
   Arg.parse specs (fun _ -> ()) "previously-on [OPTIONS]";
 
-  let code = Lwt_main.run (run ~limit:!limit ~days:!days ~style:!style) in
+  Eio_main.run @@ fun env ->
+  Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let code = run ~sw ~net ~clock ~limit:!limit ~days:!days ~style:!style in
   exit code

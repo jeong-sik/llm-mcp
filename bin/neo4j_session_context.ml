@@ -12,8 +12,6 @@
       📋 PK-12345: JIRA summary
 *)
 
-open Lwt.Syntax
-
 (** Truncate string with ellipsis *)
 let truncate s max_len =
   if String.length s <= max_len then s
@@ -28,8 +26,25 @@ let extract_records result =
        | _ -> [])
   | _ -> []
 
+(** Get Neo4j URI from environment *)
+let get_neo4j_uri () =
+  try Sys.getenv "NEO4J_URI"
+  with Not_found ->
+    try Sys.getenv "RAILWAY_NEO4J_URL"
+    with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+
+(** Get Neo4j config from environment *)
+let get_config () =
+  let uri = get_neo4j_uri () in
+  let username = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
+  let password =
+    try Sys.getenv "NEO4J_PASSWORD"
+    with Not_found -> failwith "NEO4J_PASSWORD environment variable not set"
+  in
+  Neo4j_bolt_eio.Bolt.config_from_uri ~username ~password uri
+
 (** Query 1: Active WorkStreams *)
-let query_workstreams conn =
+let query_workstreams ~clock conn =
   let cypher = {|
     MATCH (ws:WorkStream)
     WHERE ws.status = 'in_progress'
@@ -39,12 +54,11 @@ let query_workstreams conn =
     LIMIT 3
     RETURN ws.title as title, session_count as count
   |} in
-  let* result = Neo4j_bolt.Bolt.query conn ~cypher () in
-  match result with
-  | Error _ -> Lwt.return []
+  match Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params:(`Assoc []) () with
+  | Error _ -> []
   | Ok data ->
       let records = extract_records data in
-      let items = List.filter_map (fun row ->
+      List.filter_map (fun row ->
         match row with
         | `List [`String title; count_val] ->
             let cnt = match count_val with
@@ -55,11 +69,10 @@ let query_workstreams conn =
             let title' = truncate title 45 in
             Some (Printf.sprintf "🔄 %s (세션 %d개)" title' cnt)
         | _ -> None
-      ) records in
-      Lwt.return items
+      ) records
 
 (** Query 2: High-priority decisions *)
-let query_decisions conn =
+let query_decisions ~clock conn =
   let cypher = {|
     MATCH (d:Decision)
     WHERE d.priority IN ['High', 'Critical']
@@ -68,22 +81,20 @@ let query_decisions conn =
     ORDER BY d.title
     LIMIT 3
   |} in
-  let* result = Neo4j_bolt.Bolt.query conn ~cypher () in
-  match result with
-  | Error _ -> Lwt.return []
+  match Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params:(`Assoc []) () with
+  | Error _ -> []
   | Ok data ->
       let records = extract_records data in
-      let items = List.filter_map (fun row ->
+      List.filter_map (fun row ->
         match row with
         | `List [`String title] ->
             let title' = truncate title 50 in
             Some (Printf.sprintf "🎯 %s" title')
         | _ -> None
-      ) records in
-      Lwt.return items
+      ) records
 
 (** Query 3: JIRA issues in progress *)
-let query_jira_issues conn =
+let query_jira_issues ~clock conn =
   let cypher = {|
     MATCH (j:JIRAIssue)
     WHERE j.status = 'In Progress'
@@ -92,35 +103,44 @@ let query_jira_issues conn =
     ORDER BY j.key DESC
     LIMIT 3
   |} in
-  let* result = Neo4j_bolt.Bolt.query conn ~cypher () in
-  match result with
-  | Error _ -> Lwt.return []
+  match Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params:(`Assoc []) () with
+  | Error _ -> []
   | Ok data ->
       let records = extract_records data in
-      let items = List.filter_map (fun row ->
+      List.filter_map (fun row ->
         match row with
         | `List [`String key; `String summary] ->
             let summary' = truncate summary 35 in
             Some (Printf.sprintf "📋 %s: %s" key summary')
         | _ -> None
-      ) records in
-      Lwt.return items
+      ) records
 
 (** Main: Get session context *)
-let get_session_context () =
-  let* conn_result = Neo4j_bolt.Bolt.connect () in
-  match conn_result with
-  | Error e ->
-      Printf.eprintf "⚠️  Neo4j connect failed: %s\n" (Neo4j_bolt.Bolt.error_to_string e);
-      Lwt.return ""
-  | Ok conn ->
-      let* workstreams = query_workstreams conn in
-      let* decisions = query_decisions conn in
-      let* jira = query_jira_issues conn in
-      let* () = Neo4j_bolt.Bolt.close conn in
-      let all = workstreams @ decisions @ jira in
-      Lwt.return (String.concat "\n" all)
+let get_session_context ~sw ~net ~clock =
+  try
+    let config = get_config () in
+    match Neo4j_bolt_eio.Bolt.connect ~sw ~net ~clock ~config () with
+    | Error e ->
+        Printf.eprintf "⚠️  Neo4j connect failed: %s\n" (Neo4j_bolt_eio.Bolt.error_to_string e);
+        ""
+    | Ok conn ->
+        let workstreams = query_workstreams ~clock conn in
+        let decisions = query_decisions ~clock conn in
+        let jira = query_jira_issues ~clock conn in
+        Neo4j_bolt_eio.Bolt.close conn;
+        let all = workstreams @ decisions @ jira in
+        String.concat "\n" all
+  with exn ->
+    Printf.eprintf "⚠️  Error: %s\n" (Printexc.to_string exn);
+    ""
 
 let () =
-  let context = Lwt_main.run (get_session_context ()) in
+  let context =
+    Eio_main.run @@ fun env ->
+    Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    get_session_context ~sw ~net ~clock
+  in
   if context <> "" then print_endline context

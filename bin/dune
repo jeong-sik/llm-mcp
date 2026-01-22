@@ -27,8 +27,8 @@
  (public_name log-refinement)
  (package llm_mcp)
  (modules log_refinement)
- (libraries lwt lwt.unix cmdliner caqti caqti-lwt caqti-lwt.unix caqti-driver-postgresql yojson uri)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main cmdliner caqti caqti-eio caqti-eio.unix caqti-driver-postgresql mirage-crypto-rng-eio yojson uri unix)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name build_query_context)
@@ -50,8 +50,8 @@
  (public_name memory-retriever)
  (package llm_mcp)
  (modules memory_retriever)
- (libraries lwt lwt.unix cohttp-lwt-unix yojson cmdliner unix)
- (preprocess (pps lwt_ppx)))
+ (libraries eio eio_main cohttp-eio tls-eio ca-certs mirage-crypto-rng-eio yojson cmdliner uri unix)
+ (ocamlopt_flags (:standard -alert -deprecated)))
 
 (executable
  (name claude_cli)

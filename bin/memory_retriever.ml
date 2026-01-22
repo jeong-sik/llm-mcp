@@ -1,4 +1,4 @@
-(** memory_retriever - Semantic search for related memories on each prompt
+(** memory_retriever - Semantic search for related memories on each prompt (Eio)
 
     OCaml port of .claude/hooks/memory_retriever.py
     Searches Qdrant vector DB for memories similar to user's query.
@@ -7,8 +7,6 @@
     Usage:
       memory_retriever --query "your search query" [--limit 3] [--format xml|json|text]
 *)
-
-open Lwt.Syntax
 
 (** Environment variable helpers *)
 let get_env_or key default =
@@ -50,15 +48,67 @@ type memory = {
   date: string;
 }
 
+(** {1 HTTPS/TLS Support} *)
+
+(** Create HTTPS context for secure connections using system CA certificates *)
+let make_https_ctx () =
+  match Ca_certs.authenticator () with
+  | Error (`Msg m) ->
+    Printf.eprintf "[memory-retriever] Warning: Failed to load system CAs: %s\n%!" m;
+    None
+  | Ok authenticator ->
+    match Tls.Config.client ~authenticator () with
+    | Error (`Msg m) ->
+      Printf.eprintf "[memory-retriever] Warning: TLS config error: %s\n%!" m;
+      None
+    | Ok tls_config ->
+      Some (fun uri raw ->
+          let host =
+            match Uri.host uri with
+            | None -> None
+            | Some h ->
+              match Domain_name.of_string h with
+              | Error _ -> None
+              | Ok dn ->
+                match Domain_name.host dn with
+                | Error _ -> None
+                | Ok host -> Some host
+          in
+          Tls_eio.client_of_flow tls_config ?host raw)
+
+(** Create Cohttp_eio client *)
+let make_client env =
+  let net = Eio.Stdenv.net env in
+  let https = make_https_ctx () in
+  Cohttp_eio.Client.make ~https net
+
+(** {1 HTTP Helpers} *)
+
+(** HTTP POST with Eio *)
+let http_post ~sw ~client uri ~headers ~body =
+  let headers = Cohttp.Header.of_list headers in
+  let body_eio = Cohttp_eio.Body.of_string body in
+  let response, body_stream = Cohttp_eio.Client.post client ~sw ~headers ~body:body_eio uri in
+  let body_str = Eio.Buf_read.(of_flow ~max_size:max_int body_stream |> take_all) in
+  (response, body_str)
+
+(** HTTP GET with Eio *)
+let http_get ~sw ~client uri =
+  let response, body_stream = Cohttp_eio.Client.get client ~sw uri in
+  let body_str = Eio.Buf_read.(of_flow ~max_size:max_int body_stream |> take_all) in
+  (response, body_str)
+
+(** {1 Embedding and Search Functions} *)
+
 (** Get embedding from RunPod BGE-M3 *)
-let get_embedding text =
+let get_embedding ~sw ~client text =
   let token = runpod_api_token () in
   if String.length token = 0 then begin
     prerr_endline "[memory-retriever] RUNPOD_API_TOKEN not set";
-    Lwt.return None
+    None
   end else begin
     let uri = Uri.of_string (runpod_api_url ()) in
-    let headers = Cohttp.Header.of_list [
+    let headers = [
       ("Content-Type", "application/json");
       ("Authorization", "Bearer " ^ token);
     ] in
@@ -70,65 +120,65 @@ let get_embedding text =
     ] in
     let body = Yojson.Safe.to_string payload in
 
-    let* response, body_stream = Cohttp_lwt_unix.Client.post
-      ~headers
-      ~body:(Cohttp_lwt.Body.of_string body)
-      uri
-    in
-    let* body_str = Cohttp_lwt.Body.to_string body_stream in
-    let status = Cohttp.Response.status response in
+    try
+      let response, body_str = http_post ~sw ~client uri ~headers ~body in
+      let status = Http.Response.status response in
 
-    if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then begin
-      try
-        let json = Yojson.Safe.from_string body_str in
-        let open Yojson.Safe.Util in
-        let status_str = json |> member "status" |> to_string in
-        if status_str = "COMPLETED" then begin
-          let output = json |> member "output" in
-          (* Try Infinity Embedding format first *)
-          let embeddings =
-            try
-              let data = output |> member "data" |> to_list in
-              List.map (fun item -> item |> member "embedding" |> to_list |> List.map to_float) data
-            with _ ->
-              (* Fallback to custom handler format *)
-              try output |> member "embeddings" |> to_list |> List.map (fun e -> to_list e |> List.map to_float)
-              with _ -> []
-          in
-          match embeddings with
-          | embedding :: _ -> Lwt.return (Some embedding)
-          | [] -> Lwt.return None
-        end
-        else Lwt.return None
-      with _ -> Lwt.return None
-    end
-    else begin
-      prerr_endline (Printf.sprintf "[memory-retriever] RunPod error: %s" body_str);
-      Lwt.return None
-    end
+      if Cohttp.Code.is_success (Http.Status.to_int status) then begin
+        try
+          let json = Yojson.Safe.from_string body_str in
+          let open Yojson.Safe.Util in
+          let status_str = json |> member "status" |> to_string in
+          if status_str = "COMPLETED" then begin
+            let output = json |> member "output" in
+            (* Try Infinity Embedding format first *)
+            let embeddings =
+              try
+                let data = output |> member "data" |> to_list in
+                List.map (fun item -> item |> member "embedding" |> to_list |> List.map to_float) data
+              with _ ->
+                (* Fallback to custom handler format *)
+                try output |> member "embeddings" |> to_list |> List.map (fun e -> to_list e |> List.map to_float)
+                with _ -> []
+            in
+            match embeddings with
+            | embedding :: _ -> Some embedding
+            | [] -> None
+          end
+          else None
+        with _ -> None
+      end
+      else begin
+        prerr_endline (Printf.sprintf "[memory-retriever] RunPod error: %s" body_str);
+        None
+      end
+    with exn ->
+      prerr_endline (Printf.sprintf "[memory-retriever] HTTP error: %s" (Printexc.to_string exn));
+      None
   end
 
 (** Check if Qdrant collection exists *)
-let qdrant_has_collection collection_name =
+let qdrant_has_collection ~sw ~client collection_name =
   let uri = Uri.of_string (qdrant_url () ^ "/collections") in
-  let* response, body_stream = Cohttp_lwt_unix.Client.get uri in
-  let* body_str = Cohttp_lwt.Body.to_string body_stream in
-  let status = Cohttp.Response.status response in
-  if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then begin
-    try
-      let json = Yojson.Safe.from_string body_str in
-      let open Yojson.Safe.Util in
-      let collections = json |> member "result" |> member "collections" |> to_list in
-      let names = List.map (fun c -> c |> member "name" |> to_string) collections in
-      Lwt.return (List.mem collection_name names)
-    with _ -> Lwt.return false
-  end
-  else Lwt.return false
+  try
+    let response, body_str = http_get ~sw ~client uri in
+    let status = Http.Response.status response in
+    if Cohttp.Code.is_success (Http.Status.to_int status) then begin
+      try
+        let json = Yojson.Safe.from_string body_str in
+        let open Yojson.Safe.Util in
+        let collections = json |> member "result" |> member "collections" |> to_list in
+        let names = List.map (fun c -> c |> member "name" |> to_string) collections in
+        List.mem collection_name names
+      with _ -> false
+    end
+    else false
+  with _ -> false
 
 (** Search Qdrant collection *)
-let qdrant_search collection_name query_vector =
+let qdrant_search ~sw ~client collection_name query_vector =
   let uri = Uri.of_string (qdrant_url () ^ "/collections/" ^ collection_name ^ "/points/search") in
-  let headers = Cohttp.Header.of_list [("Content-Type", "application/json")] in
+  let headers = [("Content-Type", "application/json")] in
   let payload = `Assoc [
     ("vector", `List (List.map (fun f -> `Float f) query_vector));
     ("limit", `Int max_results_per_collection);
@@ -137,55 +187,51 @@ let qdrant_search collection_name query_vector =
   ] in
   let body = Yojson.Safe.to_string payload in
 
-  let* response, body_stream = Cohttp_lwt_unix.Client.post
-    ~headers
-    ~body:(Cohttp_lwt.Body.of_string body)
-    uri
-  in
-  let* body_str = Cohttp_lwt.Body.to_string body_stream in
-  let status = Cohttp.Response.status response in
+  try
+    let response, body_str = http_post ~sw ~client uri ~headers ~body in
+    let status = Http.Response.status response in
 
-  if Cohttp.Code.is_success (Cohttp.Code.code_of_status status) then begin
-    try
-      let json = Yojson.Safe.from_string body_str in
-      let open Yojson.Safe.Util in
-      let results = json |> member "result" |> to_list in
-      let memories = List.filter_map (fun r ->
-        try
-          let score = r |> member "score" |> to_float in
-          let payload = r |> member "payload" in
+    if Cohttp.Code.is_success (Http.Status.to_int status) then begin
+      try
+        let json = Yojson.Safe.from_string body_str in
+        let open Yojson.Safe.Util in
+        let results = json |> member "result" |> to_list in
+        List.filter_map (fun r ->
+          try
+            let score = r |> member "score" |> to_float in
+            let payload = r |> member "payload" in
 
-          (* Handle different payload structures across collections *)
-          let get_str keys =
-            List.fold_left (fun acc key ->
-              match acc with
-              | Some _ -> acc
-              | None ->
-                  try Some (payload |> member key |> to_string)
-                  with _ -> None
-            ) None keys
-            |> Option.value ~default:""
-          in
+            (* Handle different payload structures across collections *)
+            let get_str keys =
+              List.fold_left (fun acc key ->
+                match acc with
+                | Some _ -> acc
+                | None ->
+                    try Some (payload |> member key |> to_string)
+                    with _ -> None
+              ) None keys
+              |> Option.value ~default:""
+            in
 
-          let title = get_str ["title"; "topic"; "pattern_name"; "filename"; "name"] in
-          let content = get_str ["content"; "tldr"; "text"; "summary"] in
-          let source = get_str ["source"; "session_id"; "file_path"; "filename"] in
-          let date = get_str ["date"; "created_at"] in
+            let title = get_str ["title"; "topic"; "pattern_name"; "filename"; "name"] in
+            let content = get_str ["content"; "tldr"; "text"; "summary"] in
+            let source = get_str ["source"; "session_id"; "file_path"; "filename"] in
+            let date = get_str ["date"; "created_at"] in
 
-          Some {
-            score;
-            collection = collection_name;
-            title = if title = "" then "Untitled" else title;
-            content;
-            source;
-            date;
-          }
-        with _ -> None
-      ) results in
-      Lwt.return memories
-    with _ -> Lwt.return []
-  end
-  else Lwt.return []
+            Some {
+              score;
+              collection = collection_name;
+              title = if title = "" then "Untitled" else title;
+              content;
+              source;
+              date;
+            }
+          with _ -> None
+        ) results
+      with _ -> []
+    end
+    else []
+  with _ -> []
 
 (** Truncate text with ellipsis *)
 let truncate text max_len =
@@ -198,32 +244,32 @@ let truncate text max_len =
   end
 
 (** Search memories across all collections *)
-let search_memories query limit =
+let search_memories ~sw ~client query limit =
   let start_time = Unix.gettimeofday () in
 
   (* Get query embedding *)
-  let* embedding_opt = get_embedding query in
+  let embedding_opt = get_embedding ~sw ~client query in
   match embedding_opt with
   | None ->
       prerr_endline "[memory-retriever] Failed to get embedding";
-      Lwt.return []
+      []
   | Some query_vector ->
       (* Search each collection *)
       let rec search_collections_loop acc remaining =
         match remaining with
-        | [] -> Lwt.return acc
+        | [] -> acc
         | collection :: rest ->
             (* Check timeout *)
             let elapsed = Unix.gettimeofday () -. start_time in
             if elapsed > timeout_seconds then
-              Lwt.return acc
+              acc
             else begin
               (* Check if collection exists *)
-              let* exists = qdrant_has_collection collection in
+              let exists = qdrant_has_collection ~sw ~client collection in
               if not exists then
                 search_collections_loop acc rest
               else begin
-                let* memories = qdrant_search collection query_vector in
+                let memories = qdrant_search ~sw ~client collection query_vector in
                 let memories = List.map (fun m ->
                   { m with content = truncate m.content 200 }
                 ) memories in
@@ -231,7 +277,7 @@ let search_memories query limit =
               end
             end
       in
-      let* all_memories = search_collections_loop [] search_collections in
+      let all_memories = search_collections_loop [] search_collections in
 
       (* Sort by score and limit *)
       let sorted = List.sort (fun a b -> compare b.score a.score) all_memories in
@@ -239,7 +285,9 @@ let search_memories query limit =
         then List.filteri (fun i _ -> i < limit) sorted
         else sorted
       in
-      Lwt.return limited
+      limited
+
+(** {1 Output Formatters} *)
 
 (** Format memories as XML for context injection *)
 let format_as_xml memories =
@@ -298,7 +346,8 @@ let format_as_text memories =
     String.concat "\n\n" lines
   end
 
-(** CLI argument definitions *)
+(** {1 CLI} *)
+
 open Cmdliner
 
 let query_arg =
@@ -319,7 +368,11 @@ let json_flag =
 
 let main query limit format_str json_flag =
   let format = if json_flag then "json" else format_str in
-  let memories = Lwt_main.run (search_memories query limit) in
+  Eio_main.run @@ fun env ->
+  Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let client = make_client env in
+  let memories = search_memories ~sw ~client query limit in
 
   let output = match format with
     | "json" -> format_as_json memories

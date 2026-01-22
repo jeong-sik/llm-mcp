@@ -1,4 +1,4 @@
-(** subagent_logger - Neo4j SubAgent Completion Logger
+(** subagent_logger - Neo4j SubAgent Completion Logger (Eio)
 
     Fast OCaml-based Neo4j logging for subagent completion.
     Creates Session/SubAgent nodes and RAN_SUBAGENT relationship.
@@ -11,10 +11,25 @@
       NEO4J_PASSWORD - Password for neo4j user
 *)
 
-open Lwt.Syntax
+(** Get Neo4j URI from environment *)
+let get_neo4j_uri () =
+  try Sys.getenv "NEO4J_URI"
+  with Not_found ->
+    try Sys.getenv "RAILWAY_NEO4J_URL"
+    with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+
+(** Get Neo4j config from environment *)
+let get_config () =
+  let uri = get_neo4j_uri () in
+  let username = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
+  let password =
+    try Sys.getenv "NEO4J_PASSWORD"
+    with Not_found -> failwith "NEO4J_PASSWORD environment variable not set"
+  in
+  Neo4j_bolt_eio.Bolt.config_from_uri ~username ~password uri
 
 (** Log subagent completion to Neo4j *)
-let log_subagent ~session_id ~agent_id =
+let log_subagent ~sw ~net ~clock ~session_id ~agent_id =
   let cypher = {|
     MERGE (s:Session {id: $session_id})
     MERGE (a:SubAgent {id: $agent_id})
@@ -27,21 +42,25 @@ let log_subagent ~session_id ~agent_id =
     ("agent_id", `String agent_id);
   ] in
 
-  let* conn_result = Neo4j_bolt.Bolt.connect () in
-  match conn_result with
-  | Error e ->
-      Printf.eprintf "Connect failed: %s\n" (Neo4j_bolt.Bolt.error_to_string e);
-      Lwt.return 1
-  | Ok conn ->
-      let* query_result = Neo4j_bolt.Bolt.query conn ~cypher ~params () in
-      let* () = Neo4j_bolt.Bolt.close conn in
-      match query_result with
-      | Ok _ ->
-          (* Silent success - hook runs in background *)
-          Lwt.return 0
-      | Error e ->
-          Printf.eprintf "Query failed: %s\n" (Neo4j_bolt.Bolt.error_to_string e);
-          Lwt.return 1
+  try
+    let config = get_config () in
+    match Neo4j_bolt_eio.Bolt.connect ~sw ~net ~clock ~config () with
+    | Error e ->
+        Printf.eprintf "Connect failed: %s\n" (Neo4j_bolt_eio.Bolt.error_to_string e);
+        1
+    | Ok conn ->
+        let query_result = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params () in
+        Neo4j_bolt_eio.Bolt.close conn;
+        match query_result with
+        | Ok _ ->
+            (* Silent success - hook runs in background *)
+            0
+        | Error e ->
+            Printf.eprintf "Query failed: %s\n" (Neo4j_bolt_eio.Bolt.error_to_string e);
+            1
+  with exn ->
+    Printf.eprintf "Error: %s\n" (Printexc.to_string exn);
+    1
 
 (** Main entry point with argument parsing *)
 let main () =
@@ -61,6 +80,11 @@ let main () =
     Printf.eprintf "Usage: %s\n" usage;
     1
   end else
-    Lwt_main.run (log_subagent ~session_id:!session_id ~agent_id:!agent_id)
+    Eio_main.run @@ fun env ->
+    Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    log_subagent ~sw ~net ~clock ~session_id:!session_id ~agent_id:!agent_id
 
 let () = exit (main ())

@@ -11,8 +11,6 @@
       NEO4J_PASSWORD - Password for neo4j user
 *)
 
-open Lwt.Syntax
-
 (** Extract string from JSON *)
 let extract_string json key =
   match Yojson.Safe.Util.member key json with
@@ -51,8 +49,25 @@ let take n lst =
   in
   aux [] n lst
 
+(** Get Neo4j URI from environment *)
+let get_neo4j_uri () =
+  try Sys.getenv "NEO4J_URI"
+  with Not_found ->
+    try Sys.getenv "RAILWAY_NEO4J_URL"
+    with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+
+(** Get Neo4j config from environment *)
+let get_config () =
+  let uri = get_neo4j_uri () in
+  let username = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
+  let password =
+    try Sys.getenv "NEO4J_PASSWORD"
+    with Not_found -> failwith "NEO4J_PASSWORD environment variable not set"
+  in
+  Neo4j_bolt_eio.Bolt.config_from_uri ~username ~password uri
+
 (** Save session to Neo4j *)
-let save_session ~session_id ~transcript =
+let save_session ~sw ~net ~clock ~session_id ~transcript =
   (* Extract entities *)
   let prs = find_all_matches {|#(\d{3,5})|} transcript |> take 5 in
   let issues = find_all_matches {|(PK-\d{5})|} transcript |> take 5 in
@@ -64,11 +79,11 @@ let save_session ~session_id ~transcript =
   in
 
   (* Connect to Neo4j *)
-  let* conn_result = Neo4j_bolt.Bolt.connect () in
-  match conn_result with
+  let config = get_config () in
+  match Neo4j_bolt_eio.Bolt.connect ~sw ~net ~clock ~config () with
   | Error e ->
-      let msg = Printf.sprintf "Connect failed: %s" (Neo4j_bolt.Bolt.error_to_string e) in
-      Lwt.return (Error msg)
+      let msg = Printf.sprintf "Connect failed: %s" (Neo4j_bolt_eio.Bolt.error_to_string e) in
+      Error msg
   | Ok conn ->
       (* Create Session node *)
       let cypher = {|
@@ -81,10 +96,10 @@ let save_session ~session_id ~transcript =
         ("session_id", `String session_id);
         ("date", `String today);
       ] in
-      let* _ = Neo4j_bolt.Bolt.query conn ~cypher ~params () in
+      let _ = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params () in
 
       (* Create Project relationships *)
-      let* _ = Lwt_list.iter_s (fun project ->
+      List.iter (fun project ->
         let cypher = {|
           MATCH (s:Session {session_id: $session_id})
           MERGE (p:Project {name: $project})
@@ -94,12 +109,12 @@ let save_session ~session_id ~transcript =
           ("session_id", `String session_id);
           ("project", `String project);
         ] in
-        let* _ = Neo4j_bolt.Bolt.query conn ~cypher ~params () in
-        Lwt.return_unit
-      ) projects in
+        let _ = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params () in
+        ()
+      ) projects;
 
       (* Create PR relationships *)
-      let* _ = Lwt_list.iter_s (fun pr_num ->
+      List.iter (fun pr_num ->
         let pr_num_clean =
           if String.length pr_num > 0 && pr_num.[0] = '#' then
             String.sub pr_num 1 (String.length pr_num - 1)
@@ -114,12 +129,12 @@ let save_session ~session_id ~transcript =
           ("session_id", `String session_id);
           ("pr_num", `Int (int_of_string pr_num_clean));
         ] in
-        let* _ = Neo4j_bolt.Bolt.query conn ~cypher ~params () in
-        Lwt.return_unit
-      ) (take 3 prs) in
+        let _ = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params () in
+        ()
+      ) (take 3 prs);
 
       (* Create JIRA relationships *)
-      let* _ = Lwt_list.iter_s (fun issue_key ->
+      List.iter (fun issue_key ->
         let cypher = {|
           MATCH (s:Session {session_id: $session_id})
           MERGE (i:JiraIssue {key: $issue_key})
@@ -129,21 +144,21 @@ let save_session ~session_id ~transcript =
           ("session_id", `String session_id);
           ("issue_key", `String issue_key);
         ] in
-        let* _ = Neo4j_bolt.Bolt.query conn ~cypher ~params () in
-        Lwt.return_unit
-      ) (take 3 issues) in
+        let _ = Neo4j_bolt_eio.Bolt.query ~clock conn ~cypher ~params () in
+        ()
+      ) (take 3 issues);
 
-      let* () = Neo4j_bolt.Bolt.close conn in
+      Neo4j_bolt_eio.Bolt.close conn;
 
       (* Build context output *)
       let context = ref [] in
-      context := Printf.sprintf "📊 Neo4j: Session %s... saved" (String.sub session_id 0 (min 8 (String.length session_id))) :: !context;
+      context := Printf.sprintf "Neo4j: Session %s... saved" (String.sub session_id 0 (min 8 (String.length session_id))) :: !context;
       if projects <> [] then
         context := Printf.sprintf "   Projects: %s" (String.concat ", " projects) :: !context;
       if prs <> [] then
         context := Printf.sprintf "   PRs: %s" (String.concat ", " prs) :: !context;
 
-      Lwt.return (Ok (List.rev !context))
+      Ok (List.rev !context)
 
 (** Read all stdin *)
 let read_stdin () =
@@ -168,11 +183,11 @@ let output_json context warnings =
   print_endline (Yojson.Safe.to_string result)
 
 (** Main *)
-let main () =
+let main ~sw ~net ~clock =
   let input = read_stdin () in
   if String.trim input = "" then begin
     output_json [] ["No input data"];
-    Lwt.return 0
+    0
   end else
     try
       let json = Yojson.Safe.from_string input in
@@ -180,21 +195,30 @@ let main () =
 
       if session_id = "" then begin
         output_json [] ["No session_id"];
-        Lwt.return 0
+        0
       end else begin
         let transcript = extract_string json "transcript" in
-        let* result = save_session ~session_id ~transcript in
+        let result = save_session ~sw ~net ~clock ~session_id ~transcript in
         match result with
         | Ok context ->
             output_json context [];
-            Lwt.return 0
+            0
         | Error msg ->
             output_json [] [msg];
-            Lwt.return 1
+            1
       end
     with
     | Yojson.Json_error msg ->
         output_json [] [Printf.sprintf "JSON parse error: %s" msg];
-        Lwt.return 1
+        1
 
-let () = exit (Lwt_main.run (main ()))
+let () =
+  let exit_code =
+    Eio_main.run @@ fun env ->
+    Mirage_crypto_rng_eio.run (module Mirage_crypto_rng.Fortuna) env @@ fun () ->
+    Eio.Switch.run @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    main ~sw ~net ~clock
+  in
+  exit exit_code
