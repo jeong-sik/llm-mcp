@@ -1,7 +1,7 @@
 (** Ouroboros v52.0: Neural Forager (Profiler) - OCaml
     Measures system performance and identifies bottlenecks. *)
 
-open Llm_mcp.Common
+open Common
 
 let profile_log = Filename.concat me_root "logs/evolution/profiler.jsonl"
 

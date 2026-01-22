@@ -1,7 +1,7 @@
 (** Ouroboros v6.0: Synesthesia (Emotion Engine) - OCaml
     Analyzes input to update system mood. *)
 
-open Llm_mcp.Common
+open Common
 
 let emotion_file = Filename.concat (Filename.concat (Filename.concat me_root "lib") "state") "emotion.json"
 

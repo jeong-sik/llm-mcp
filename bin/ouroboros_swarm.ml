@@ -1,7 +1,7 @@
 (** Ouroboros v14.0: Hive Link (Swarm Communication) - OCaml
     Broadcasts heartbeat and checks other nodes via Git. *)
 
-open Llm_mcp.Common
+open Common
 
 let swarm_dir = Filename.concat (Filename.concat me_root "logs") "swarm"
 let synapse_dir = Filename.concat swarm_dir "synapses"

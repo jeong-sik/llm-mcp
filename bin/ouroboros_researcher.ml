@@ -1,7 +1,7 @@
 (** Ouroboros v23.0: The Autonomous Researcher - OCaml
     Scouts the internet for the next generation of AI genes. *)
 
-open Llm_mcp.Common
+open Common
 
 let research_dir = Filename.concat (Filename.concat me_root "knowledge") "research"
 

@@ -1,7 +1,7 @@
 (** Ouroboros v84.0: Recursive Symbiosis - OCaml
     Facilitates inter-family knowledge exchange and co-evolution. *)
 
-open Llm_mcp.Common
+open Common
 
 let symbiosis_dir = Filename.concat (Filename.concat (Filename.concat me_root "logs") "swarm") "symbiosis"
 let my_family = "Ouroboros-Lineage"

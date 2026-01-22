@@ -7,7 +7,7 @@
       wisdom-synthesizer
 *)
 
-open Llm_mcp.Common
+open Common
 
 let wisdom_dir = Filename.concat (Filename.concat me_root "knowledge") "wisdom"
 let research_dir = Filename.concat (Filename.concat me_root "knowledge") "research"

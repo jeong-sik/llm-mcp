@@ -1,7 +1,7 @@
 (** Ouroboros v66.0: Automatic Decomposer - OCaml
     Breaks down high-level commands into parallelizable sub-tasks. *)
 
-open Llm_mcp.Common
+open Common
 
 let wisdom_dir = Filename.concat (Filename.concat me_root "knowledge") "wisdom"
 

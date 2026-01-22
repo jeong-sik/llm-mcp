@@ -46,8 +46,8 @@ let read_session_start_time state_dir =
       ]
 
 (* Use Common module for git commands and timestamps *)
-let run_git_command = Llm_mcp.Common.run_git_command
-let iso_timestamp = Llm_mcp.Common.iso_timestamp
+let run_git_command = Common.run_git_command
+let iso_timestamp = Common.iso_timestamp
 
 (** Get Git commits since given timestamp *)
 let get_git_commits repo_path since_timestamp =
@@ -61,7 +61,7 @@ let get_modified_files repo_path =
 
 (** Collect session metadata *)
 let collect_metadata session_input =
-  let me_root = Llm_mcp.Common.me_root in
+  let me_root = Common.me_root in
   let state_dir = Filename.concat (Filename.concat me_root ".claude") "state" in
 
   (* Current time *)
@@ -161,9 +161,9 @@ let main () =
   let metadata = collect_metadata session_input in
 
   (* Determine output path *)
-  let me_root = Llm_mcp.Common.me_root in
-  let month_dir = Llm_mcp.Common.month_dir () in
-  let day = Llm_mcp.Common.day_str () in
+  let me_root = Common.me_root in
+  let month_dir = Common.month_dir () in
+  let day = Common.day_str () in
 
   let output_path = Filename.concat
     (Filename.concat (Filename.concat me_root "claude") month_dir)

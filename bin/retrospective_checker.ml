@@ -10,14 +10,14 @@
 let completion_marker = "복명 완료"
 
 (* Use Common module utilities *)
-let list_md_files dir = Llm_mcp.Common.list_files_with_suffix dir ".md"
-let read_file = Llm_mcp.Common.read_file_opt
-let contains s sub = Llm_mcp.Common.contains ~substring:sub s
-let get_date_parts () = (Llm_mcp.Common.month_dir (), Llm_mcp.Common.day_str ())
+let list_md_files dir = Common.list_files_with_suffix dir ".md"
+let read_file = Common.read_file_opt
+let contains s sub = Common.contains ~substring:sub s
+let get_date_parts () = (Common.month_dir (), Common.day_str ())
 
 (** Check retrospective status *)
 let check_retrospective () =
-  let me_root = Llm_mcp.Common.me_root in
+  let me_root = Common.me_root in
   let (month_dir, day) = get_date_parts () in
   let sessions_dir = Filename.concat
     (Filename.concat (Filename.concat me_root "claude") month_dir)
@@ -58,7 +58,7 @@ let check_retrospective () =
   ]
 
 (** Format output as human-readable text *)
-let format_output = Llm_mcp.Common.format_result_output
+let format_output = Common.format_result_output
 
 (** Main function *)
 let main () =

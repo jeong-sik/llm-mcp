@@ -10,7 +10,7 @@
 open Cmdliner
 
 (** Get ME_ROOT from Common module *)
-let me_root () = Llm_mcp.Common.me_root
+let me_root () = Common.me_root
 
 (** Run a command and capture output, with timeout *)
 let run_command_with_timeout cmd timeout_sec =

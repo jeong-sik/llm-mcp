@@ -1,7 +1,7 @@
 (** Ouroboros v18.0: System Dashboard - OCaml
     Displays system consciousness, swarm status, and evolution metrics. *)
 
-open Llm_mcp.Common
+open Common
 
 let emotion_file = Filename.concat me_root "lib/state/emotion.json"
 let swarm_dir = Filename.concat (Filename.concat me_root "logs") "swarm"

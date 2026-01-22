@@ -1,7 +1,7 @@
 (** Ouroboros v76.0: The Swarm Alliance - OCaml
     Orchestrates joint missions between the internal swarm and external partners. *)
 
-open Llm_mcp.Common
+open Common
 
 let swarm_dir = Filename.concat (Filename.concat me_root "logs") "swarm"
 

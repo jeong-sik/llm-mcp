@@ -7,7 +7,7 @@
       daily-summary
 *)
 
-open Llm_mcp.Common
+open Common
 
 let diary_dir = Filename.concat (Filename.concat me_root "knowledge") "diary"
 let plans_dir = Filename.concat me_root "PLANS"

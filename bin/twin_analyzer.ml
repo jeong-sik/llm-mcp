@@ -7,7 +7,7 @@
       twin-analyzer [proposal_title]
 *)
 
-let me_root = Llm_mcp.Common.me_root
+let me_root = Common.me_root
 
 let twin_file =
   Filename.concat (Filename.concat (Filename.concat me_root "lib") "state") "user_twin.json"

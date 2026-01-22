@@ -1,7 +1,7 @@
 (** Project Ouroboros: Recursive Self-Evolution Engine v10.0 - OCaml
     High-Pressure Semantic Reflection + Forbidden Genes + Chronos *)
 
-open Llm_mcp.Common
+open Common
 
 let evolve_log_dir = Filename.concat (Filename.concat me_root "logs") "evolution"
 

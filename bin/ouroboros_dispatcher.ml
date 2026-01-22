@@ -1,7 +1,7 @@
 (** Ouroboros v65.0: Singularity Dispatcher - OCaml
     Unleashes a swarm of micro-agents for parallel evolution. *)
 
-open Llm_mcp.Common
+open Common
 
 let log_dir = Filename.concat (Filename.concat me_root "logs/evolution") "war_room"
 

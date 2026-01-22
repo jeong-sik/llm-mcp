@@ -2,7 +2,7 @@
 
 (** Job Dispatcher for MASC Session Hook *)
 
-open Llm_mcp.Common
+open Common
 open Yojson.Safe.Util
 
 (* Run shell command and return stdout *)
@@ -14,7 +14,7 @@ let run_cmd cmd =
 
 (* Check embedding sync status *)
 let check_embedding_sync () =
-  let me_root = Llm_mcp.Common.me_root in
+  let me_root = Common.me_root in
   let last_sync_file = Filename.concat me_root "memory/cache/.last-embedding-sync" in
   
   if not (Sys.file_exists last_sync_file) then
@@ -35,7 +35,7 @@ let check_embedding_sync () =
 
 (* Check WebSearch pending *)
 let check_websearch () =
-  let me_root = Llm_mcp.Common.me_root in
+  let me_root = Common.me_root in
   let script = Filename.concat me_root "scripts/auto-websearch.py" in
   
   if Sys.file_exists script then
