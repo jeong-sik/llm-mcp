@@ -405,95 +405,68 @@ let validate_schema_tests = [
 
 (* ============================================================================
    Split Tests (Chunking for parallel processing)
+   Uses REAL Chain_adapter_eio.apply_adapter_transform - not duplicated code!
    ============================================================================ *)
 
-(* Mirror the split logic from chain_adapter_eio *)
-let split_by_delimiter delim text =
-  match delim with
-  | "line" -> String.split_on_char '\n' text
-  | "paragraph" ->
-      let re = Str.regexp "\n\n+" in
-      Str.split re text
-  | "sentence" ->
-      let re = Str.regexp "[.!?][ \n]+" in
-      Str.split re text
-  | custom ->
-      let re = Str.regexp_string custom in
-      Str.split re text
-
-let merge_chunks_by_size chunks max_chars overlap_chars =
-  let rec merge acc current_chunk = function
-    | [] ->
-        if String.length current_chunk > 0 then
-          List.rev (current_chunk :: acc)
-        else
-          List.rev acc
-    | chunk :: rest ->
-        let chunk = String.trim chunk in
-        if String.length chunk = 0 then
-          merge acc current_chunk rest
-        else if String.length current_chunk = 0 then
-          merge acc chunk rest
-        else if String.length current_chunk + String.length chunk + 1 <= max_chars then
-          merge acc (current_chunk ^ " " ^ chunk) rest
-        else
-          let overlap_text =
-            if overlap_chars > 0 && String.length current_chunk > overlap_chars then
-              let start = String.length current_chunk - overlap_chars in
-              let overlap_start =
-                try
-                  let space_pos = String.rindex_from current_chunk (start + overlap_chars - 1) ' ' in
-                  if space_pos >= start then space_pos + 1 else start
-                with Not_found -> start
-              in
-              String.sub current_chunk overlap_start (String.length current_chunk - overlap_start)
-            else
-              ""
-          in
-          let new_chunk =
-            if String.length overlap_text > 0 then
-              overlap_text ^ " " ^ chunk
-            else
-              chunk
-          in
-          merge (current_chunk :: acc) new_chunk rest
-  in
-  merge [] "" chunks
+(* Helper to extract chunk count from Split transform result *)
+let parse_split_result result =
+  match result with
+  | Ok json_str ->
+      (try
+        let json = Yojson.Safe.from_string json_str in
+        match json with
+        | `List items -> List.length items
+        | _ -> 0
+      with _ -> 0)
+  | Error _ -> 0
 
 let test_split_by_line () =
+  (* Split algorithm: delimiter split THEN merge until max_chars (chunk_size * 4)
+     To prevent merging, use tiny chunk_size so each line exceeds max_chars *)
   let input = "line1\nline2\nline3" in
-  let chunks = split_by_delimiter "line" input in
-  Alcotest.(check int) "3 lines" 3 (List.length chunks);
-  Alcotest.(check string) "first line" "line1" (List.nth chunks 0)
+  let transform = Split { delimiter = "line"; chunk_size = 1; overlap = 0 } in  (* 1*4=4 chars max, each line is 5 chars *)
+  let result = Chain_adapter_eio.apply_adapter_transform transform input in
+  let count = parse_split_result result in
+  Alcotest.(check int) "3 lines" 3 count
 
 let test_split_by_paragraph () =
   let input = "para1\n\npara2\n\n\npara3" in
-  let chunks = split_by_delimiter "paragraph" input in
-  Alcotest.(check int) "3 paragraphs" 3 (List.length chunks)
+  let transform = Split { delimiter = "paragraph"; chunk_size = 1; overlap = 0 } in  (* 1*4=4 chars max *)
+  let result = Chain_adapter_eio.apply_adapter_transform transform input in
+  let count = parse_split_result result in
+  Alcotest.(check int) "3 paragraphs" 3 count
 
 let test_split_by_sentence () =
+  (* Sentences: "First sentence", " Second sentence", " Third sentence", " Done" *)
   let input = "First sentence. Second sentence! Third sentence? Done" in
-  let chunks = split_by_delimiter "sentence" input in
-  Alcotest.(check int) "4 parts" 4 (List.length chunks)
+  let transform = Split { delimiter = "sentence"; chunk_size = 1; overlap = 0 } in  (* 1*4=4 chars max *)
+  let result = Chain_adapter_eio.apply_adapter_transform transform input in
+  let count = parse_split_result result in
+  Alcotest.(check int) "4 parts" 4 count
 
 let test_split_chunk_merging () =
-  (* Small chunks should merge until they reach max_chars *)
-  let chunks = ["a"; "b"; "c"; "d"] in
-  let merged = merge_chunks_by_size chunks 10 0 in
-  (* "a b c d" = 7 chars, fits in 10 *)
-  Alcotest.(check int) "merged into 1" 1 (List.length merged)
+  (* Small chunks should merge until they reach max_chars (chunk_size * 4) *)
+  let input = "a\nb\nc\nd" in
+  let transform = Split { delimiter = "line"; chunk_size = 10; overlap = 0 } in  (* 10*4=40 chars max *)
+  let result = Chain_adapter_eio.apply_adapter_transform transform input in
+  let count = parse_split_result result in
+  (* "a b c d" = 7 chars, fits in 40 *)
+  Alcotest.(check int) "merged into 1" 1 count
 
 let test_split_chunk_overflow () =
-  let chunks = ["hello"; "world"; "this"; "is"; "test"] in
-  let merged = merge_chunks_by_size chunks 12 0 in
+  let input = "hello\nworld\nthis\nis\ntest" in
+  let transform = Split { delimiter = "line"; chunk_size = 3; overlap = 0 } in  (* 3*4=12 chars max *)
+  let result = Chain_adapter_eio.apply_adapter_transform transform input in
+  let count = parse_split_result result in
   (* "hello world" = 11, "this is" = 7, "test" = 4 *)
-  Alcotest.(check bool) "multiple chunks" true (List.length merged > 1)
+  Alcotest.(check bool) "multiple chunks" true (count > 1)
 
 let test_split_with_overlap () =
-  let chunks = ["chunk one here"; "chunk two here"] in
-  let merged = merge_chunks_by_size chunks 15 4 in
-  (* Each chunk is ~14 chars, with 4 char overlap *)
-  Alcotest.(check bool) "has chunks" true (List.length merged >= 1)
+  let input = "chunk one here\nchunk two here" in
+  let transform = Split { delimiter = "line"; chunk_size = 4; overlap = 1 } in  (* 4*4=16 chars, 1*4=4 overlap *)
+  let result = Chain_adapter_eio.apply_adapter_transform transform input in
+  let count = parse_split_result result in
+  Alcotest.(check bool) "has chunks" true (count >= 1)
 
 let split_tests = [
   "split by line", `Quick, test_split_by_line;

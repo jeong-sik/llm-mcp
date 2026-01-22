@@ -92,9 +92,10 @@
  (libraries llm_mcp.common alcotest))
 
 ; Adapter Transform tests (Conditional, JsonPath, etc.)
+; Uses llm_mcp.eio for Chain_adapter_eio.apply_adapter_transform
 (test
  (name test_adapter_transforms)
- (libraries llm_mcp.common alcotest str))
+ (libraries llm_mcp.common llm_mcp.eio alcotest str))
 
 ; Chain Composer tests (Neural Layer)
 (test
