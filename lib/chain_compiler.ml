@@ -93,17 +93,34 @@ let topological_sort (deps : (string, string list) Hashtbl.t) : (string list, st
     Hashtbl.add reverse_deps node []
   ) deps;
 
+  (* Collect missing dependencies for error reporting *)
+  let missing_deps = ref [] in
+
   (* Calculate in-degrees *)
   Hashtbl.iter (fun node node_deps ->
     List.iter (fun dep ->
       (* node depends on dep, so dep -> node in reverse *)
-      let current = Hashtbl.find reverse_deps dep in
-      Hashtbl.replace reverse_deps dep (node :: current);
-      (* Increment in-degree of node *)
-      let deg = Hashtbl.find in_degree node in
-      Hashtbl.replace in_degree node (deg + 1)
+      (* Check if dep exists in the graph (not an external/missing reference) *)
+      match Hashtbl.find_opt reverse_deps dep with
+      | Some current ->
+          Hashtbl.replace reverse_deps dep (node :: current);
+          (* Increment in-degree of node *)
+          let deg = Hashtbl.find in_degree node in
+          Hashtbl.replace in_degree node (deg + 1)
+      | None ->
+          (* dep is not a node in the graph - could be external input or error *)
+          missing_deps := (node, dep) :: !missing_deps
     ) node_deps
   ) deps;
+
+  (* Report missing dependencies if any *)
+  if !missing_deps <> [] then
+    let msg = !missing_deps
+      |> List.map (fun (node, dep) -> Printf.sprintf "'%s' depends on unknown node '%s'" node dep)
+      |> String.concat "; "
+    in
+    Error (Printf.sprintf "Missing dependencies: %s" msg)
+  else
 
   (* Start with nodes that have no dependencies *)
   let queue = Queue.create () in
