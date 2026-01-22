@@ -16,6 +16,8 @@
    ollama_parser
    tool_config
    tool_parsers
+   fewshot_injector
+   fewshot_judge
    ; Chain Engine (Phase 3-4)
    chain_types
    chain_evaluator
@@ -75,7 +77,9 @@
    chain_executor_eio
    chain_orchestrator_eio
    ; Chain Engine (Phase 5 - requires Eio)
-   chain_batch)
+   chain_batch
+   ; Logging (Eio)
+   run_log_eio)
  (libraries
    ; Shared modules
    llm_mcp.common
