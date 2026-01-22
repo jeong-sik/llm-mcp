@@ -145,42 +145,49 @@ module Compose = struct
       let name = Printf.sprintf "quorum(%d/%d)" required (List.length validators)
 
       let validate state =
-        (* 모든 Validator 병렬 실행 *)
-        let promises = List.map (fun (module V : VALIDATOR with type state = s and type context = c) ->
-            Eio.Fiber.fork_promise ~sw (fun () -> V.validate state)
-          ) validators
-        in
+        (* Handle empty validators list - edge case *)
+        if validators = [] then
+          failwith "quorum: validators list cannot be empty"
+        else
+            (* 모든 Validator 병렬 실행 *)
+            let promises = List.map (fun (module V : VALIDATOR with type state = s and type context = c) ->
+                Eio.Fiber.fork_promise ~sw (fun () -> V.validate state)
+              ) validators
+            in
 
-        let results = List.map Eio.Promise.await_exn promises in
+            let results = List.map Eio.Promise.await_exn promises in
 
-        (* Pass 개수 카운트 *)
-        let pass_count = List.fold_left (fun acc r ->
-            match r.verdict with
-            | Pass _ -> acc + 1
-            | Warn _ -> acc + 1  (* Warn도 통과로 취급 *)
-            | _ -> acc
-          ) 0 results
-        in
+            (* Pass 개수 카운트 *)
+            let pass_count = List.fold_left (fun acc r ->
+                match r.verdict with
+                | Pass _ -> acc + 1
+                | Warn _ -> acc + 1  (* Warn도 통과로 취급 *)
+                | _ -> acc
+              ) 0 results
+            in
 
-        let verdict =
-          if pass_count >= required then
-            Pass (Printf.sprintf "%d/%d validators passed" pass_count (List.length validators))
-          else
-            Fail (Printf.sprintf "Only %d/%d passed (required: %d)"
-                    pass_count (List.length validators) required)
-        in
+            let verdict =
+              if pass_count >= required then
+                Pass (Printf.sprintf "%d/%d validators passed" pass_count (List.length validators))
+              else
+                Fail (Printf.sprintf "Only %d/%d passed (required: %d)"
+                        pass_count (List.length validators) required)
+            in
 
-        let avg_confidence =
-          let sum = List.fold_left (fun acc r -> acc +. r.confidence) 0.0 results in
-          sum /. float_of_int (List.length results)
-        in
+            (* Safe: results is non-empty because validators is non-empty *)
+            let avg_confidence =
+              let sum = List.fold_left (fun acc r -> acc +. r.confidence) 0.0 results in
+              sum /. float_of_int (List.length results)
+            in
 
-        { verdict;
-          confidence = avg_confidence;
-          context = (List.hd results).context;
-          children = results;
-          metadata = [("pass_count", string_of_int pass_count)];
-        }
+            (* Safe: results is non-empty because validators is non-empty (checked above) *)
+            let first = List.hd results in  (* Safe due to non-empty check *)
+            { verdict;
+              confidence = avg_confidence;
+              context = first.context;
+              children = results;
+              metadata = [("pass_count", string_of_int pass_count)];
+            }
     end)
 
   (** Monadic bind: V1 결과에 따라 V2를 동적 선택 (>>=) *)
@@ -273,17 +280,21 @@ module Meta = struct
       let name = Printf.sprintf "Meta<%s>" meta_name
 
       let validate state =
-        (* 모든 하위 Validator 병렬 실행 *)
-        let promises = List.map (fun (module V : VALIDATOR with type state = s and type context = c) ->
-            Eio.Fiber.fork_promise ~sw (fun () -> (V.name, V.validate state))
-          ) validators
-        in
+        (* Handle empty validators list *)
+        if validators = [] then
+          failwith "Meta.create: validators list cannot be empty"
+        else
+            (* 모든 하위 Validator 병렬 실행 *)
+            let promises = List.map (fun (module V : VALIDATOR with type state = s and type context = c) ->
+                Eio.Fiber.fork_promise ~sw (fun () -> (V.name, V.validate state))
+              ) validators
+            in
 
-        let named_results = List.map Eio.Promise.await_exn promises in
-        let results = List.map snd named_results in
+            let named_results = List.map Eio.Promise.await_exn promises in
+            let results = List.map snd named_results in
 
-        (* 정책에 따른 최종 판정 *)
-        let verdict = match policy with
+            (* 정책에 따른 최종 판정 *)
+            let verdict = match policy with
           | AllMustPass ->
             let all_pass = List.for_all (fun r ->
                 match r.verdict with Pass _ | Warn _ -> true | _ -> false
@@ -326,24 +337,26 @@ module Meta = struct
               Fail (Printf.sprintf "Weighted score too low: %.2f/%.2f" score max_score)
         in
 
-        let avg_confidence =
-          let sum = List.fold_left (fun acc r -> acc +. r.confidence) 0.0 results in
-          sum /. float_of_int (List.length results)
-        in
+            (* Safe: results is non-empty because validators is non-empty (checked above) *)
+            let avg_confidence =
+              let sum = List.fold_left (fun acc r -> acc +. r.confidence) 0.0 results in
+              sum /. float_of_int (List.length results)
+            in
 
-        { verdict;
-          confidence = avg_confidence;
-          context = (List.hd results).context;
-          children = results;
-          metadata = [
-            ("policy", match policy with
-              | AllMustPass -> "all_must_pass"
-              | MajorityPass -> "majority"
-              | AnyPass -> "any"
-              | WeightedVote _ -> "weighted");
-            ("validator_count", string_of_int (List.length validators));
-          ];
-        }
+            let first = List.hd results in  (* Safe due to non-empty check *)
+            { verdict;
+              confidence = avg_confidence;
+              context = first.context;
+              children = results;
+              metadata = [
+                ("policy", match policy with
+                  | AllMustPass -> "all_must_pass"
+                  | MajorityPass -> "majority"
+                  | AnyPass -> "any"
+                  | WeightedVote _ -> "weighted");
+                ("validator_count", string_of_int (List.length validators));
+              ];
+            }
     end)
 
   (** 2단계 Meta-Validator: Validator의 Validator
