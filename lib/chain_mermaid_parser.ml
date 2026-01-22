@@ -347,7 +347,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
         let (prompt_clean, has_tools) = extract_tools_flag raw_prompt in
         let prompt = if prompt_clean = "" then "{{input}}" else prompt_clean in
         let tools = make_tools_value has_tools in
-        Ok (Llm { model; prompt; timeout = None; tools })
+        Ok (Llm { model; system = None; prompt; timeout = None; tools })
       else if Str.string_match tool_content_re text 0 then
         (* Explicit Tool syntax in content: tool:name\nargs *)
         let name = Str.matched_group 1 text in
@@ -372,7 +372,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then "{{input}}" else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model; prompt; timeout = None; tools })
+          Ok (Llm { model; system = None; prompt; timeout = None; tools })
         else if List.mem id_lower known_tools then
           Ok (Tool { name = id; args = `Null })
         else
@@ -381,7 +381,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then id else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model = "gemini"; prompt; timeout = None; tools })
+          Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools })
 
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
@@ -530,10 +530,10 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         if Str.string_match quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; prompt = trim prompt; timeout = None; tools })
+          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools })
         else if Str.string_match simple_model_re rest 0 then
           let model = Str.matched_group 1 rest in
-          Ok (Llm { model = trim model; prompt = "{{input}}"; timeout = None; tools })
+          Ok (Llm { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools })
         else
           Error (Printf.sprintf "Invalid LLM format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
@@ -551,7 +551,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           Error (Printf.sprintf "Invalid Tool format: %s" content)
       else
         (* Default: treat as LLM with content as prompt, model = gemini *)
-        Ok (Llm { model = "gemini"; prompt = content_clean; timeout = None; tools })
+        Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools })
 
 (** Parse edge line: A --> B or A & B --> C *)
 let parse_edge_line (line : string) : mermaid_edge list =
@@ -1035,6 +1035,7 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Fallback _ -> "fallback"
   | Race _ -> "race"
   | ChainExec { chain_source; _ } -> Printf.sprintf "exec_%s" (String.sub chain_source 0 (min 8 (String.length chain_source)))
+  | Adapter { input_ref; _ } -> Printf.sprintf "adapt_%s" (String.sub input_ref 0 (min 8 (String.length input_ref)))
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -1098,6 +1099,14 @@ let node_type_to_text (nt : node_type) : string =
   | ChainExec { chain_source; max_depth; sandbox; _ } ->
       let sandbox_str = if sandbox then " 🔒" else "" in
       Printf.sprintf "Exec {{%s}} (depth:%d)%s" chain_source max_depth sandbox_str
+  | Adapter { input_ref; transform; _ } ->
+      let transform_name = match transform with
+        | Extract _ -> "extract" | Template _ -> "template" | Summarize _ -> "summarize"
+        | Truncate _ -> "truncate" | JsonPath _ -> "jsonpath" | Regex _ -> "regex"
+        | ValidateSchema _ -> "validate" | ParseJson -> "parse_json" | Stringify -> "stringify"
+        | Chain _ -> "chain" | Conditional _ -> "conditional" | Custom n -> n
+      in
+      Printf.sprintf "Adapt[%s → %s]" input_ref transform_name
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -1107,6 +1116,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
+  | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
 
 (** Map node type to CSS class name for Mermaid styling *)
 let node_type_to_class (nt : node_type) : string =
@@ -1129,6 +1139,7 @@ let node_type_to_class (nt : node_type) : string =
   | Fallback _ -> "fallback"
   | Race _ -> "race"
   | ChainExec _ -> "meta"
+  | Adapter _ -> "adapter"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1287,7 +1298,7 @@ let chain_to_ascii (chain : chain) : string =
       | Evaluator _ -> "⚖️" | Threshold _ -> "📊"
       | Map _ -> "📍" | Bind _ -> "🔄" | Subgraph _ -> "📦"
       | Retry _ -> "🔁" | Fallback _ -> "🛟" | Race _ -> "🏁"
-      | ChainExec _ -> "🔮"
+      | ChainExec _ -> "🔮" | Adapter _ -> "🔌"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

@@ -74,6 +74,7 @@ The Chain Engine applies category theory principles to create mathematically sou
 | `retry` | Retry on failure | Backoff strategies |
 | `fallback` | Try alternatives | Primary → fallbacks |
 | `race` | Parallel race | First result wins |
+| `adapter` | Data transformation | Inter-node refinement |
 
 ## DSL Syntax
 
@@ -102,10 +103,17 @@ The Chain Engine applies category theory principles to create mathematically sou
   "id": "summarize",
   "type": "llm",
   "model": "gemini",
+  "system": "You are a professional summarizer. Be concise and accurate.",
   "prompt": "Summarize: {{input}}",
   "timeout": 30
 }
 ```
+
+**Fields:**
+- `model`: Model identifier (gemini, claude, codex, ollama:*)
+- `system` (optional): System instruction for role/persona definition
+- `prompt`: User prompt with `{{var}}` placeholders
+- `timeout` (optional): Timeout in seconds
 
 ### Tool Node
 
@@ -317,6 +325,83 @@ Execute nodes in parallel, return first successful result:
       "type": "llm",
       "model": "claude",
       "prompt": "Answer quickly: {{input}}"
+    }
+  ]
+}
+```
+
+### Adapter Node (Data Transformation)
+
+Transform data between nodes with various strategies:
+
+```json
+{
+  "id": "extract_result",
+  "type": "adapter",
+  "input_ref": "{{api_response.output}}",
+  "transform": {
+    "type": "extract",
+    "path": "data.result.content"
+  },
+  "on_error": "passthrough"
+}
+```
+
+**Transform Types:**
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `extract` | Extract JSON field | `{"type": "extract", "path": "data.items[0]"}` |
+| `template` | Apply template | `{"type": "template", "template": "Result: {{value}}"}` |
+| `summarize` | Summarize with token limit | `{"type": "summarize", "max_tokens": 100}` |
+| `truncate` | Truncate characters | `{"type": "truncate", "max_chars": 500}` |
+| `jsonpath` | JSONPath query | `{"type": "jsonpath", "path": "$.data"}` |
+| `regex` | Regex replace | `{"type": "regex", "pattern": "\\s+", "replacement": " "}` |
+| `validate_schema` | Schema validation | `{"type": "validate_schema", "schema": "response"}` |
+| `parse_json` | Parse string as JSON | `"parse_json"` |
+| `stringify` | Convert to string | `"stringify"` |
+| `chain` | Chain transforms | `{"type": "chain", "transforms": [...]}` |
+| `conditional` | Conditional transform | `{"type": "conditional", "condition": "...", "on_true": ..., "on_false": ...}` |
+| `custom` | Custom function | `{"type": "custom", "func": "myTransform"}` |
+
+**Error Handling:**
+- `fail`: Stop pipeline on error (default)
+- `passthrough`: Pass original input on error
+- `{"default": "fallback value"}`: Use default value on error
+
+**Example: Pipeline with Adapters**
+
+```json
+{
+  "id": "refined_pipeline",
+  "type": "pipeline",
+  "nodes": [
+    {
+      "id": "analyze",
+      "type": "llm",
+      "model": "gemini",
+      "system": "You are a JSON analyzer. Always return valid JSON.",
+      "prompt": "Analyze this text and return JSON: {{input}}"
+    },
+    {
+      "id": "parse_output",
+      "type": "adapter",
+      "input_ref": "{{analyze.output}}",
+      "transform": "parse_json",
+      "on_error": {"default": "{}"}
+    },
+    {
+      "id": "extract_summary",
+      "type": "adapter",
+      "input_ref": "{{parse_output.output}}",
+      "transform": {"type": "extract", "path": "summary"},
+      "on_error": "passthrough"
+    },
+    {
+      "id": "format_result",
+      "type": "adapter",
+      "input_ref": "{{extract_summary.output}}",
+      "transform": {"type": "template", "template": "## Summary\n\n{{value}}"}
     }
   ]
 }
