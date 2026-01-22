@@ -33,7 +33,7 @@ type trace_event =
   | NodeStart
   | NodeComplete of { duration_ms : int; success : bool }
   | NodeError of string
-  | ChainStart of { chain_id : string }
+  | ChainStart of { chain_id : string; mermaid_dsl : string option }
   | ChainComplete of { chain_id : string; success : bool }
 
 (** Internal trace entry for execution *)
@@ -110,8 +110,8 @@ let add_trace ctx node_id event =
     ctx.traces := entry :: !(ctx.traces));
   (* Also emit to global telemetry for stats collection - ALWAYS, not just when tracing *)
   (match event with
-   | ChainStart { chain_id } ->
-       Chain_telemetry.emit (Chain_telemetry.chain_start ~chain_id ~nodes:0)
+   | ChainStart { chain_id; mermaid_dsl } ->
+       Chain_telemetry.emit (Chain_telemetry.chain_start ~chain_id ~nodes:0 ?mermaid_dsl ())
    | ChainComplete { chain_id; success = _ } ->
        let duration_ms = int_of_float ((Unix.gettimeofday () -. ctx.start_time) *. 1000.0) in
        Chain_telemetry.emit (Chain_telemetry.ChainComplete {
@@ -939,7 +939,8 @@ and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~
 (** Execute inline subgraph (recursive) *)
 and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain : chain) : (string, string) result =
   record_start ctx parent.id;
-  add_trace ctx parent.id (ChainStart { chain_id = chain.id });
+  let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid chain) in
+  add_trace ctx parent.id (ChainStart { chain_id = chain.id; mermaid_dsl });
   let start = Unix.gettimeofday () in
 
   (* Execute subgraph nodes sequentially for now *)
@@ -1527,8 +1528,9 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
   let start_time = Unix.gettimeofday () in
   let ctx = make_context ~start_time ~trace_enabled:trace ~timeout in
 
-  (* Record chain start *)
-  add_trace ctx plan.chain.Chain_types.id (ChainStart { chain_id = plan.chain.Chain_types.id });
+  (* Record chain start with mermaid visualization *)
+  let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid plan.chain) in
+  add_trace ctx plan.chain.Chain_types.id (ChainStart { chain_id = plan.chain.Chain_types.id; mermaid_dsl });
 
   (* Helper to build chain_result *)
   let make_result ~success ~output =
