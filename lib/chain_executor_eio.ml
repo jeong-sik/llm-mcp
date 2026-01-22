@@ -975,20 +975,81 @@ and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~
       record_error ctx parent.id msg;
       Error msg)
 
-(** Execute inline subgraph (recursive) *)
+(** Execute a single parallel group (nodes that can run concurrently) *)
+and execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec (group : string list) (node_map : (string, node) Hashtbl.t) : (string, string) result =
+  if List.length group = 1 then
+    (* Single node - execute directly *)
+    let node_id = List.hd group in
+    match Hashtbl.find_opt node_map node_id with
+    | Some node -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
+    | None -> Error (Printf.sprintf "Node '%s' not found in subgraph" node_id)
+  else
+    (* Multiple nodes - execute in parallel with Eio.Fiber.all *)
+    let results = ref [] in
+    let mutex = Eio.Mutex.create () in
+    let has_error = ref None in
+
+    Eio.Fiber.all (List.map (fun node_id ->
+      fun () ->
+        match Hashtbl.find_opt node_map node_id with
+        | Some node ->
+            let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
+            Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+              results := (node_id, result) :: !results;
+              match result with
+              | Error msg when !has_error = None -> has_error := Some msg
+              | _ -> ()
+            )
+        | None ->
+            Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+              has_error := Some (Printf.sprintf "Node '%s' not found" node_id)
+            )
+    ) group);
+
+    (* Return first error if any, otherwise success with last output *)
+    match !has_error with
+    | Some msg -> Error msg
+    | None ->
+        let outputs = List.filter_map (fun (_, r) ->
+          match r with Ok o -> Some o | Error _ -> None
+        ) !results in
+        Ok (String.concat "\n" outputs)
+
+(** Execute inline subgraph with dependency-based parallelization *)
 and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain : chain) : (string, string) result =
   record_start ctx parent.id;
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid chain) in
   add_trace ctx parent.id (ChainStart { chain_id = chain.id; mermaid_dsl });
   let start = Unix.gettimeofday () in
 
-  (* Execute subgraph nodes sequentially for now.
-     TODO: Implement dependency-based parallel execution:
-     1. Analyze node dependencies via Chain_compiler.analyze_dependencies
-     2. Group independent nodes into parallel batches
-     3. Execute batches with Eio.Fiber.all, sequential between batches
-     4. Currently Fanout/Quorum/Race handle parallelism at their level *)
-  let result = execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes in
+  (* Compile chain to get parallel groups *)
+  let result = match Chain_compiler.compile chain with
+  | Error msg ->
+      (* Fallback to sequential if compilation fails *)
+      Printf.eprintf "[subgraph] Compilation failed, falling back to sequential: %s\n%!" msg;
+      execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec chain.nodes
+  | Ok plan ->
+      (* Build node lookup map *)
+      let node_map = Hashtbl.create (List.length chain.nodes) in
+      List.iter (fun (n : node) -> Hashtbl.add node_map n.id n) chain.nodes;
+
+      (* Execute parallel groups sequentially (groups are independent within, dependent between) *)
+      let parallel_groups = plan.parallel_groups in
+      Printf.eprintf "[subgraph] Executing %d parallel groups for chain '%s'\n%!"
+        (List.length parallel_groups) chain.id;
+
+      let rec execute_groups groups =
+        match groups with
+        | [] -> Ok ""
+        | group :: rest ->
+            Printf.eprintf "[subgraph] Group [%s] (%d nodes)\n%!"
+              (String.concat ", " group) (List.length group);
+            match execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec group node_map with
+            | Error msg -> Error msg
+            | Ok _ -> execute_groups rest
+      in
+      execute_groups parallel_groups
+  in
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
   let success = Result.is_ok result in
@@ -996,11 +1057,11 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
   record_complete ctx parent.id ~duration_ms ~success;
 
   (match result with
-  | Ok output ->
+  | Ok _ ->
       (* Get output from specified output node *)
       let final = match Hashtbl.find_opt ctx.outputs chain.output with
         | Some o -> o
-        | None -> output
+        | None -> ""
       in
       Hashtbl.add ctx.outputs parent.id final;
       Ok final

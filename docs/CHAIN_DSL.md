@@ -552,6 +552,67 @@ Inside the inner node, access the current item via `{{node_id_item}}`:
 | `timeout` | 300 | Default timeout (seconds) |
 | `trace` | false | Enable execution tracing |
 
+## Automatic Parallel Execution
+
+The Chain Compiler automatically identifies nodes that can execute in parallel based on dependency analysis:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 Parallel Group Detection                     │
+├─────────────────────────────────────────────────────────────┤
+│  Chain Definition:                                           │
+│    a → c                                                     │
+│    b → c                                                     │
+│                                                              │
+│  Compiler Output:                                            │
+│    Group 1: [a, b]  ← parallel (no dependencies)            │
+│    Group 2: [c]     ← sequential (depends on a, b)          │
+│                                                              │
+│  Execution:                                                  │
+│    Time 0: Eio.Fiber.all [a; b]  ← concurrent               │
+│    Time 1: execute c             ← after both complete      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### How It Works
+
+1. **Dependency Graph Construction**: `Chain_compiler.build_dependency_graph` analyzes `{{node.output}}` references
+2. **Topological Sort**: Ensures correct execution order
+3. **Parallel Group Identification**: `identify_parallel_groups` finds nodes with no mutual dependencies
+4. **Eio.Fiber.all Execution**: Nodes in the same group run concurrently
+
+### Example
+
+```json
+{
+  "id": "parallel_test",
+  "nodes": [
+    { "id": "a", "type": "llm", "model": "codex", "prompt": "say A" },
+    { "id": "b", "type": "llm", "model": "codex", "prompt": "say B" },
+    { "id": "c", "type": "llm", "model": "codex", "prompt": "combine: {{a.output}} and {{b.output}}" }
+  ],
+  "output": "c"
+}
+```
+
+Validation output: `"Chain 'parallel_test' is valid: 3 nodes, depth 1, 2 parallel groups"`
+
+- **Group 1**: `[a, b]` - Both execute in parallel
+- **Group 2**: `[c]` - Waits for Group 1 completion
+
+### Performance Benefits
+
+| Scenario | Sequential | Parallel | Speedup |
+|----------|-----------|----------|---------|
+| 2 independent LLM calls (3s each) | 6s | 3s | 2x |
+| 3 independent reviews | 9s | 3s | 3x |
+| Diamond pattern (a→b,c→d) | 4 steps | 2 steps | 2x |
+
+**Note**: Actual speedup depends on:
+- API rate limits (`max_concurrency` setting)
+- Resource contention
+- Network latency
+
 ## Registry API
 
 The registry stores reusable chains for `chain_ref` references:
@@ -857,9 +918,42 @@ dune exec test/test_chain_engine.exe
 dune runtest
 ```
 
-## MCP Tools (Planned)
+## MCP Tools
 
-- `chain.run` - Execute a chain
-- `chain.validate` - Validate chain syntax
-- `chain.register` - Register a chain in the registry
-- `chain.list` - List registered chains
+| Tool | Status | Description |
+|------|--------|-------------|
+| `chain.run` | ✅ Implemented | Execute a chain with LLM/tool calls |
+| `chain.validate` | ✅ Implemented | Validate chain syntax and show parallel groups |
+| `chain.to_mermaid` | ✅ Implemented | Convert chain JSON to Mermaid diagram |
+| `chain.convert` | ✅ Implemented | Convert between JSON and Mermaid formats |
+| `chain.visualize` | ✅ Implemented | Generate visual diagram of chain |
+| `chain.list` | ✅ Implemented | List registered chains |
+| `chain.orchestrate` | ✅ Implemented | Advanced orchestration with goals |
+
+### Streaming Events (`/chain/events`)
+
+Real-time SSE endpoint for chain execution monitoring:
+
+```bash
+curl -N "http://localhost:8932/chain/events" \
+  -H "Accept: text/event-stream"
+```
+
+Event types:
+- `ChainStart`: Chain execution started (includes Mermaid DSL)
+- `NodeStart`: Node execution started
+- `NodeComplete`: Node finished (tokens, verdict, confidence)
+- `ChainComplete`: Chain finished (total tokens, duration)
+- `Error`: Error occurred
+
+### Statistics (`/chain/stats`)
+
+```bash
+curl "http://localhost:8932/chain/stats" | jq .
+```
+
+Returns:
+- Total chains executed
+- Token usage by model
+- Average/P95 latency
+- Error counts

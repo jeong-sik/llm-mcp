@@ -14,6 +14,11 @@
 
 open Chain_category
 
+(** {1 Helper for Stdlib.Mutex} *)
+let with_mutex mutex f =
+  Mutex.lock mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+
 (** {1 Event Types} *)
 
 (** Chain start event payload *)
@@ -84,7 +89,7 @@ type event_handler = chain_event -> unit
 (** Global subscription registry *)
 let next_sub_id = ref 0
 let subscribers : (subscription_id, event_handler) Hashtbl.t = Hashtbl.create 16
-let subscribers_mutex = Eio.Mutex.create ()
+let subscribers_mutex = Mutex.create ()
 
 (** {1 Running Chains Tracking} *)
 
@@ -98,11 +103,11 @@ type running_chain_info = {
 }
 
 let running_chains : (string, running_chain_info) Hashtbl.t = Hashtbl.create 16
-let running_chains_mutex = Eio.Mutex.create ()
+let running_chains_mutex = Mutex.create ()
 
 (** Register a chain as running *)
 let register_running_chain ~chain_id ~total_nodes =
-  Eio.Mutex.use_rw ~protect:true running_chains_mutex (fun () ->
+  with_mutex running_chains_mutex (fun () ->
     let info = {
       chain_id;
       started_at = Unix.gettimeofday ();
@@ -115,7 +120,7 @@ let register_running_chain ~chain_id ~total_nodes =
 
 (** Update chain progress *)
 let update_chain_progress ~chain_id ~nodes_completed =
-  Eio.Mutex.use_rw ~protect:true running_chains_mutex (fun () ->
+  with_mutex running_chains_mutex (fun () ->
     match Hashtbl.find_opt running_chains chain_id with
     | Some info ->
         info.nodes_completed <- nodes_completed;
@@ -127,13 +132,13 @@ let update_chain_progress ~chain_id ~nodes_completed =
 
 (** Unregister a completed chain *)
 let unregister_running_chain ~chain_id =
-  Eio.Mutex.use_rw ~protect:true running_chains_mutex (fun () ->
+  with_mutex running_chains_mutex (fun () ->
     Hashtbl.remove running_chains chain_id
   )
 
 (** Get all running chains *)
 let get_running_chains () : (string * float * float) list =
-  Eio.Mutex.use_ro running_chains_mutex (fun () ->
+  with_mutex running_chains_mutex (fun () ->
     Hashtbl.fold (fun _id info acc ->
       (info.chain_id, info.started_at, info.progress) :: acc
     ) running_chains []
@@ -150,7 +155,7 @@ let gen_sub_id () =
 (** Emit an event to all subscribers *)
 let emit event =
   (* Get handlers snapshot under lock *)
-  let handlers = Eio.Mutex.use_ro subscribers_mutex (fun () ->
+  let handlers = with_mutex subscribers_mutex (fun () ->
     Hashtbl.fold (fun _ handler acc -> handler :: acc) subscribers []
   ) in
   (* Call handlers outside of lock to avoid deadlocks *)
@@ -163,7 +168,7 @@ let emit event =
 
 (** Subscribe to chain events *)
 let subscribe handler =
-  Eio.Mutex.use_rw ~protect:true subscribers_mutex (fun () ->
+  with_mutex subscribers_mutex (fun () ->
     let id = gen_sub_id () in
     Hashtbl.add subscribers id handler;
     { sub_id = id; active = true }
@@ -172,7 +177,7 @@ let subscribe handler =
 (** Unsubscribe from chain events *)
 let unsubscribe sub =
   if sub.active then
-    Eio.Mutex.use_rw ~protect:true subscribers_mutex (fun () ->
+    with_mutex subscribers_mutex (fun () ->
       Hashtbl.remove subscribers sub.sub_id;
       sub.active <- false
     )
@@ -182,7 +187,7 @@ let is_active sub = sub.active
 
 (** Get number of active subscribers *)
 let subscriber_count () =
-  Eio.Mutex.use_ro subscribers_mutex (fun () ->
+  with_mutex subscribers_mutex (fun () ->
     Hashtbl.length subscribers
   )
 
@@ -239,12 +244,12 @@ let error ~node_id ~message ~retries =
 
 (** Event log buffer for persistence *)
 let event_log : chain_event list ref = ref []
-let event_log_mutex = Eio.Mutex.create ()
+let event_log_mutex = Mutex.create ()
 let max_log_size = ref 10000
 
 (** Logging subscriber that buffers events *)
 let logging_handler event =
-  Eio.Mutex.use_rw ~protect:true event_log_mutex (fun () ->
+  with_mutex event_log_mutex (fun () ->
     event_log := event :: !event_log;
     (* Trim if exceeds max size *)
     if List.length !event_log > !max_log_size then
@@ -270,14 +275,14 @@ let disable_logging () =
 
 (** Get recent events from log *)
 let get_recent_events ?(limit=100) () =
-  Eio.Mutex.use_ro event_log_mutex (fun () ->
+  with_mutex event_log_mutex (fun () ->
     let events = List.filteri (fun i _ -> i < limit) !event_log in
     List.rev events  (* Return in chronological order *)
   )
 
 (** Clear event log *)
 let clear_log () =
-  Eio.Mutex.use_rw ~protect:true event_log_mutex (fun () ->
+  with_mutex event_log_mutex (fun () ->
     event_log := []
   )
 
