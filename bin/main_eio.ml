@@ -286,6 +286,82 @@ let handle_get_mcp ~clock headers reqd =
     ping_loop ()
   )
 
+(** Handle GET /chain/events - SSE stream for real-time chain progress *)
+let handle_chain_events ~clock reqd =
+  (* Create a simple SSE stream without MCP session *)
+  let headers = Httpun.Headers.of_list [
+    ("content-type", "text/event-stream");
+    ("cache-control", "no-cache");
+    ("connection", "keep-alive");
+    ("x-accel-buffering", "no");
+    ("access-control-allow-origin", "*");
+  ] in
+  let response = Httpun.Response.create ~headers `OK in
+  let body = Httpun.Reqd.respond_with_streaming reqd response in
+
+  (* Send initial priming event *)
+  let prime = sprintf "retry: 5000\nid: 0\n\n" in
+  Httpun.Body.Writer.write_string body prime;
+  Httpun.Body.Writer.flush body ignore;
+
+  (* Subscribe to chain telemetry events *)
+  let subscription = Chain_telemetry.subscribe (fun event ->
+    let event_type, json_data = match event with
+      | Chain_telemetry.ChainStart payload ->
+          ("chain_start", `Assoc [
+            ("chain_id", `String payload.Chain_telemetry.start_chain_id);
+            ("nodes", `Int payload.start_nodes);
+            ("timestamp", `Float payload.start_timestamp);
+          ])
+      | Chain_telemetry.NodeStart payload ->
+          ("node_start", `Assoc [
+            ("node_id", `String payload.Chain_telemetry.node_start_id);
+            ("node_type", `String payload.node_start_type);
+            ("parent", match payload.node_parent with Some p -> `String p | None -> `Null);
+          ])
+      | Chain_telemetry.NodeComplete payload ->
+          ("node_complete", `Assoc [
+            ("node_id", `String payload.Chain_telemetry.node_complete_id);
+            ("duration_ms", `Int payload.node_duration_ms);
+            ("tokens", `Int payload.node_tokens.Chain_category.total_tokens);
+            ("confidence", `Float payload.node_confidence);
+          ])
+      | Chain_telemetry.ChainComplete payload ->
+          ("chain_complete", `Assoc [
+            ("chain_id", `String payload.Chain_telemetry.complete_chain_id);
+            ("duration_ms", `Int payload.complete_duration_ms);
+            ("tokens", `Int payload.complete_tokens.Chain_category.total_tokens);
+            ("nodes_executed", `Int payload.nodes_executed);
+            ("nodes_skipped", `Int payload.nodes_skipped);
+          ])
+      | Chain_telemetry.Error payload ->
+          ("chain_error", `Assoc [
+            ("node_id", `String payload.Chain_telemetry.error_node_id);
+            ("message", `String payload.error_message);
+            ("retries", `Int payload.error_retries);
+            ("timestamp", `Float payload.error_timestamp);
+          ])
+    in
+    let data = Yojson.Safe.to_string json_data in
+    try
+      send_sse_event body ~event:event_type ~data;
+    with _ -> ()  (* Ignore write errors, connection may be closed *)
+  ) in
+
+  (* Keep connection alive with periodic pings until client disconnects *)
+  let rec ping_loop () =
+    try
+      Eio.Time.sleep clock 15.0;
+      let timestamp = string_of_float (Unix.gettimeofday ()) in
+      send_sse_event body ~event:"ping" ~data:timestamp;
+      ping_loop ()
+    with _ ->
+      (* Client disconnected, clean up *)
+      Chain_telemetry.unsubscribe subscription;
+      Httpun.Body.Writer.close body
+  in
+  ping_loop ()
+
 let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
   let protocol_version = get_protocol_version headers in
 
@@ -413,6 +489,10 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
         ]
       ) status)) in
       Response.json body reqd
+
+  (* Chain events SSE endpoint for real-time progress monitoring *)
+  | `GET, "/chain/events" ->
+      handle_chain_events ~clock reqd
 
   | `GET, "/mcp" ->
       handle_get_mcp ~clock headers reqd

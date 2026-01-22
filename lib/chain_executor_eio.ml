@@ -100,14 +100,14 @@ let make_context ~start_time ~trace_enabled ~timeout = {
 
 let add_trace ctx node_id event =
   (* Record to local trace *)
-  if ctx.trace_enabled then
+  (if ctx.trace_enabled then
     let entry = {
       timestamp = Unix.gettimeofday () -. ctx.start_time;
       node_id;
       event;
     } in
-    ctx.traces := entry :: !(ctx.traces);
-  (* Also emit to global telemetry for stats collection *)
+    ctx.traces := entry :: !(ctx.traces));
+  (* Also emit to global telemetry for stats collection - ALWAYS, not just when tracing *)
   (match event with
    | ChainStart { chain_id } ->
        Chain_telemetry.emit (Chain_telemetry.chain_start ~chain_id ~nodes:0)
