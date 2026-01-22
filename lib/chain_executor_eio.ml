@@ -620,19 +620,29 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
   | Conditional { condition; on_true; on_false } ->
       (* Expression-based condition evaluation
          Supported operators:
-         - "contains:text" - input contains text
-         - "eq:value" - input equals value (string comparison)
-         - "neq:value" - input not equals value
-         - "gt:number" - input > number (numeric comparison)
+         - "contains:text" - input contains text (no trimming)
+         - "eq:value" - input equals value (input trimmed, value not trimmed)
+         - "neq:value" - input not equals value (input trimmed)
+         - "gt:number" - input > number (both trimmed for parsing)
          - "gte:number" - input >= number
          - "lt:number" - input < number
          - "lte:number" - input <= number
-         - "empty" - input is empty or whitespace
-         - "nonempty" - input is not empty
-         - "startswith:prefix" - input starts with prefix
-         - "endswith:suffix" - input ends with suffix
-         - "matches:regex" - input matches regex pattern
+         - "empty" - input is empty or whitespace only
+         - "nonempty" - input has non-whitespace content
+         - "startswith:prefix" - input starts with prefix (no trimming)
+         - "endswith:suffix" - input ends with suffix (no trimming)
+         - "matches:regex" - input matches regex pattern (max 100 chars, ReDoS-protected)
          - Plain text - input contains the text (legacy behavior)
+
+         Whitespace handling:
+         - eq/neq: Input is trimmed before comparison
+         - gt/gte/lt/lte: Both sides trimmed for numeric parsing
+         - contains/startswith/endswith/matches: No trimming (exact match)
+         - empty/nonempty: Checks after trimming
+
+         Security:
+         - matches: patterns limited to 100 chars
+         - matches: catastrophic backtracking patterns (e.g., (a+)+) are rejected
       *)
       let evaluate_condition cond inp =
         let try_parse_float s =
@@ -683,11 +693,27 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
           String.sub inp (String.length inp - String.length suffix) (String.length suffix) = suffix
         else if String.length cond >= 8 && String.sub cond 0 8 = "matches:" then
           let pattern = String.sub cond 8 (String.length cond - 8) in
-          (try
-            let re = Str.regexp pattern in
-            (* Use search_forward for contains-like matching *)
-            Str.search_forward re inp 0 >= 0
-          with Not_found | Failure _ -> false)
+          (* ReDoS protection: limit pattern length and block catastrophic patterns *)
+          let max_pattern_len = 100 in
+          let has_redos_pattern p =
+            (* Detect patterns that can cause exponential backtracking:
+               - Nested quantifiers: (a+)+, (a[*])+, (a+)[*], (a[*])[*]
+               - Overlapping alternations with quantifiers *)
+            try
+              let redos_re = Str.regexp "\\([+*]\\)[+*]\\|[+*])\\+\\|[+*])\\*" in
+              Str.search_forward redos_re p 0 >= 0
+            with Not_found -> false
+          in
+          if String.length pattern > max_pattern_len then
+            false  (* Pattern too long - reject for safety *)
+          else if has_redos_pattern pattern then
+            false  (* Potentially catastrophic pattern - reject *)
+          else
+            (try
+              let re = Str.regexp pattern in
+              (* Use search_forward for contains-like matching *)
+              Str.search_forward re inp 0 >= 0
+            with Not_found | Failure _ -> false)
         else
           (* Legacy: plain text means "contains" *)
           try Str.search_forward (Str.regexp_string cond) inp 0 >= 0
