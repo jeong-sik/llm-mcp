@@ -760,10 +760,14 @@ let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions
 
 let wants_sse headers =
-  Mcp_protocol.Http_negotiation.accepts_sse_header (get_header headers "accept")
+  match get_header headers "accept" with
+  | Some accept -> Mcp_protocol.Http_negotiation.accepts_sse_header accept
+  | None -> false
 
 let accepts_streamable_mcp headers =
-  Mcp_protocol.Http_negotiation.accepts_streamable_mcp (get_header headers "accept")
+  match get_header headers "accept" with
+  | Some accept -> Mcp_protocol.Http_negotiation.accepts_streamable_mcp accept
+  | None -> false
 
 let get_last_event_id headers =
   match get_header headers "last-event-id" with
