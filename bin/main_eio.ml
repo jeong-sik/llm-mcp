@@ -760,10 +760,14 @@ let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions
 
 let wants_sse headers =
-  Mcp_protocol.Http_negotiation.accepts_sse_header (get_header headers "accept")
+  match get_header headers "accept" with
+  | Some accept -> Mcp_protocol.Http_negotiation.accepts_sse_header accept
+  | None -> false
 
 let accepts_streamable_mcp headers =
-  Mcp_protocol.Http_negotiation.accepts_streamable_mcp (get_header headers "accept")
+  match get_header headers "accept" with
+  | Some accept -> Mcp_protocol.Http_negotiation.accepts_streamable_mcp accept
+  | None -> false
 
 let get_last_event_id headers =
   match get_header headers "last-event-id" with
@@ -1258,18 +1262,18 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       let total_duration_ms = ref 0 in
       let duration_count = ref 0 in
       List.iter (fun json ->
-        let event = json |> Yojson.Safe.Util.(member "event" |> to_string_option) in
-        let chain_id = json |> Yojson.Safe.Util.(member "chain_id" |> to_string_option) in
+        let event = Yojson.Safe.Util.(json |> member "event" |> to_string_option) in
+        let chain_id = Yojson.Safe.Util.(json |> member "chain_id" |> to_string_option) in
         let tokens =
-          match json |> Yojson.Safe.Util.(member "tokens") with
+          match Yojson.Safe.Util.(json |> member "tokens") with
           | `Int n -> Some n
           | `Assoc _ as obj ->
-              let input = obj |> Yojson.Safe.Util.(member "input" |> to_int_option) |> Option.value ~default:0 in
-              let output = obj |> Yojson.Safe.Util.(member "output" |> to_int_option) |> Option.value ~default:0 in
+              let input = Yojson.Safe.Util.(obj |> member "input" |> to_int_option) |> Option.value ~default:0 in
+              let output = Yojson.Safe.Util.(obj |> member "output" |> to_int_option) |> Option.value ~default:0 in
               Some (input + output)
           | _ -> None
         in
-        let duration_ms = json |> Yojson.Safe.Util.(member "duration_ms" |> to_int_option) in
+        let duration_ms = Yojson.Safe.Util.(json |> member "duration_ms" |> to_int_option) in
         (match event with
          | Some "chain_complete" ->
              incr success_count;
@@ -1318,8 +1322,9 @@ chain_duration_total_ms %d
         !gemini_tokens !claude_tokens !codex_tokens !ollama_tokens !total_tokens
         avg_duration !total_duration_ms
       in
-      let headers = Headers.of_list [("content-type", "text/plain; version=0.0.4; charset=utf-8")] in
-      Httpaf.Reqd.respond_with_string reqd (Httpaf.Response.create ~headers `OK) metrics
+      let headers = Httpun.Headers.of_list [("content-type", "text/plain; version=0.0.4; charset=utf-8")] in
+      let response = Httpun.Response.create ~headers `OK in
+      Httpun.Reqd.respond_with_string reqd response metrics
 
   (* Chain events SSE endpoint for real-time progress monitoring *)
   | `GET, "/chain/events" ->
