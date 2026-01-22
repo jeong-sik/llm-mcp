@@ -190,6 +190,12 @@ type node_type =
       inner : node;
       collect_strategy : [ `List | `Concat | `First | `Last ];
     }
+  | Spawn of {
+      clean : bool;
+      inner : node;
+      pass_vars : string list;
+      inherit_cache : bool;
+    }
 
 (** A single execution node *)
 and node = {
