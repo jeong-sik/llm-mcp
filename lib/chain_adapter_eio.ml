@@ -36,8 +36,8 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
                    (match List.assoc_opt key fields with
                     | Some v -> extract_path v rest
                     | None -> Error (Printf.sprintf "Key '%s' not found in path '%s'" key path))
-               | `List items when String.length key > 0 && key.[0] = '[' ->
-                   (* Handle array index: [0], [1], etc. *)
+               | `List items when String.length key >= 3 && key.[0] = '[' && key.[String.length key - 1] = ']' ->
+                   (* Handle array index: [0], [1], etc. - requires at least "[N]" format *)
                    let idx_str = String.sub key 1 (String.length key - 2) in
                    (try
                      let idx = int_of_string idx_str in
