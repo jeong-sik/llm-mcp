@@ -41,7 +41,7 @@ type chain_config = {
 
 (** Default configuration values *)
 let default_config = {
-  max_depth = 4;
+  max_depth = 8;  (* Increased for MCTS support which has nested structures *)
   max_concurrency = 3;
   timeout = 300;
   trace = false;

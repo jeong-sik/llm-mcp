@@ -56,6 +56,27 @@ let keyword_map = [
   ("haskell lens", "haskell-modern.md");
   ("monad transformer", "haskell-modern.md");
   ("mtl", "haskell-modern.md");
+
+  (* MCP Protocol *)
+  ("mcp server", "mcp-protocol.md");
+  ("mcp tool", "mcp-protocol.md");
+  ("mcp protocol", "mcp-protocol.md");
+  ("inputschema", "mcp-protocol.md");
+  ("tools/call", "mcp-protocol.md");
+  ("tools/list", "mcp-protocol.md");
+  ("modelcontextprotocol", "mcp-protocol.md");
+  ("mcp resource", "mcp-protocol.md");
+  ("mcp prompt", "mcp-protocol.md");
+
+  (* Vertex AI SDK *)
+  ("vertex ai", "vertex-ai-sdk.md");
+  ("vertexai", "vertex-ai-sdk.md");
+  ("generativemodel", "vertex-ai-sdk.md");
+  ("gemini-1.5", "vertex-ai-sdk.md");
+  ("google cloud ai", "vertex-ai-sdk.md");
+  ("generate_content", "vertex-ai-sdk.md");
+  ("generatecontent", "vertex-ai-sdk.md");
+  ("@google-cloud/vertexai", "vertex-ai-sdk.md");
 ]
 
 (** Check if haystack contains needle (case-insensitive) *)

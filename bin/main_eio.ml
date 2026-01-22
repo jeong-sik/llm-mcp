@@ -58,7 +58,11 @@ let dashboard_html = {|<!DOCTYPE html>
     .chain-tab:hover { background: #2a2a4e; color: #eee; }
     .chain-tab.active { background: #4ade80; color: #000; border-color: #4ade80; font-weight: bold; }
     .mermaid-container #mermaid-graph { background: #1a1a2e; padding: 20px; border-radius: 8px; min-height: 200px; max-height: 500px; overflow: auto; }
-    .mermaid-container #mermaid-graph svg { max-width: 100%; max-height: 450px; }
+    .mermaid-container #mermaid-graph svg { max-width: 100%; height: auto; }
+    .mermaid-container #mermaid-graph svg text { font-size: 12px !important; }
+    .mermaid-container #mermaid-graph svg .nodeLabel { font-size: 11px !important; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+    .mermaid-container #mermaid-graph svg .node rect, .mermaid-container #mermaid-graph svg .node polygon { rx: 4; ry: 4; }
+    .mermaid-container #mermaid-graph svg .edgeLabel { font-size: 10px !important; }
     .mermaid-container .no-chain { color: #666; font-style: italic; text-align: center; padding: 50px; }
     .mermaid-container .node-legend { display: flex; gap: 20px; margin-top: 15px; font-size: 12px; }
     .mermaid-container .legend-item { display: flex; align-items: center; gap: 6px; }
@@ -174,8 +178,22 @@ let dashboard_html = {|<!DOCTYPE html>
       mermaid.initialize({
         startOnLoad: false,
         theme: 'dark',
-        themeVariables: { primaryColor: '#16213e', primaryTextColor: '#eee', lineColor: '#4ade80' },
-        flowchart: { nodeSpacing: 30, rankSpacing: 40, curve: 'basis', htmlLabels: true, useMaxWidth: false }
+        themeVariables: {
+          primaryColor: '#16213e',
+          primaryTextColor: '#eee',
+          lineColor: '#4ade80',
+          fontSize: '12px',
+          fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace'
+        },
+        flowchart: {
+          nodeSpacing: 30,
+          rankSpacing: 40,
+          curve: 'basis',
+          htmlLabels: true,
+          useMaxWidth: true,
+          padding: 10,
+          wrappingWidth: 150
+        }
       });
     }
 
