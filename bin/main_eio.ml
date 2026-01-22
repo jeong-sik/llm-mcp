@@ -1098,14 +1098,25 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
       "Invalid Accept header: must include application/json and text/event-stream" in
     Response.json ~status:`Bad_request body reqd
   end else begin
-    let wants_stream = wants_sse headers in
+    let wants_stream_headers = wants_sse headers in
     let session_id_from_header = get_session_id_header headers in
 
     log_debug "LLM_MCP_DEBUG: POST /mcp (Eio) protocol=%s stream=%b session_header=%s\n%!"
-      protocol_version wants_stream
+      protocol_version wants_stream_headers
       (Option.value session_id_from_header ~default:"<none>");
 
     Request.read_body_async reqd (fun body_str ->
+      let method_name =
+        try
+          let json = Yojson.Safe.from_string body_str in
+          match Yojson.Safe.Util.(json |> member "method") with
+          | `String m -> Some m
+          | _ -> None
+        with _ -> None
+      in
+      let wants_stream =
+        wants_stream_headers && (method_name = Some "tools/call")
+      in
       (* Convert Httpun.Headers to (string * string) list for Mcp_server_eio *)
       let headers_list = Httpun.Headers.to_list headers in
 
