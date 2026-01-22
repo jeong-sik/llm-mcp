@@ -13,6 +13,89 @@ open Chain_types
 (** Helper: Result bind operator *)
 let ( let* ) = Result.bind
 
+(** {1 Safe JSON Parsing Helpers - Explicit Error Handling} *)
+
+(** Parse float from JSON with explicit error message *)
+let require_float json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Float f -> Ok f
+  | `Int i -> Ok (float_of_int i)
+  | `Null -> Error (Printf.sprintf "Missing required field '%s'" field_name)
+  | other -> Error (Printf.sprintf "Field '%s' must be a number, got: %s"
+                      field_name (Yojson.Safe.to_string other))
+
+(** Parse int with default, logging when fallback is used *)
+let parse_int_with_default json field_name default =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Int i -> i
+  | `Null -> default  (* explicit null = use default *)
+  | other ->
+      (* Log unexpected type but continue with default *)
+      Printf.eprintf "[WARN] chain_parser: Field '%s' expected int, got %s, using default %d\n%!"
+        field_name (Yojson.Safe.to_string other) default;
+      default
+
+(** Parse bool with default *)
+let parse_bool_with_default json field_name default =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Bool b -> b
+  | `Null -> default
+  | _ -> default
+
+(** Parse string list with default empty *)
+let parse_string_list_opt json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+  | `Null -> []
+  | _ -> []
+
+(** Parse assoc list as string pairs *)
+let parse_string_assoc_opt json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Assoc pairs -> List.filter_map (fun (k, v) ->
+      match v with `String s -> Some (k, s) | _ -> None) pairs
+  | `Null -> []
+  | _ -> []
+
+(** Parse optional float from JSON *)
+let parse_float_opt json field_name =
+  let open Yojson.Safe.Util in
+  match json |> member field_name with
+  | `Float f -> Some f
+  | `Int i -> Some (float_of_int i)
+  | _ -> None
+
+(** Parse backoff strategy from JSON with sensible defaults *)
+let parse_backoff_strategy json =
+  let open Yojson.Safe.Util in
+  match json |> member "backoff" with
+  | `Null -> Exponential 1.0  (* sensible default *)
+  | `String s ->
+      (match String.split_on_char ':' s with
+       | ["exponential"; v] -> (match float_of_string_opt v with Some f -> Exponential f | None -> Exponential 1.0)
+       | ["constant"; v] -> (match float_of_string_opt v with Some f -> Constant f | None -> Constant 1.0)
+       | ["linear"; v] -> (match float_of_string_opt v with Some f -> Linear f | None -> Linear 1.0)
+       | _ -> Exponential 1.0)
+  | `Float f -> Exponential f
+  | `Int i -> Exponential (float_of_int i)
+  | `Assoc _ as obj ->
+      let typ = match obj |> member "type" with `String s -> s | _ -> "exponential" in
+      let get_float key default = match obj |> member key with
+        | `Float f -> f | `Int i -> float_of_int i | _ -> default
+      in
+      (match typ with
+       | "constant" -> Constant (get_float "seconds" 1.0)
+       | "exponential" -> Exponential (get_float "base" 2.0)
+       | "linear" -> Linear (get_float "base" 1.0)
+       | "jitter" -> Jitter (get_float "min" 0.5, get_float "max" 2.0)
+       | _ -> Exponential 2.0)
+  | _ -> Exponential 1.0
+
 (** Parse merge strategy from string *)
 let parse_merge_strategy = function
   | "first" -> Ok First
@@ -252,29 +335,18 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let* metric = require_string json "metric" in
       let* operator_str = require_string json "operator" in
       let* operator = parse_threshold_op operator_str in
-      let value =
-        try json |> member "value" |> to_float
-        with _ ->
-          try float_of_int (json |> member "value" |> to_int)
-          with _ -> 0.0
-      in
+      let* value = require_float json "value" in  (* Now explicit error on missing/invalid *)
       let input_json = json |> member "input_node" in
       let* input_node = parse_node input_json in
       let on_pass =
-        try
-          let pass_json = json |> member "on_pass" in
-          match parse_node pass_json with
-          | Ok n -> Some n
-          | Error _ -> None
-        with _ -> None
+        match json |> member "on_pass" with
+        | `Null -> None
+        | pass_json -> (match parse_node pass_json with Ok n -> Some n | Error _ -> None)
       in
       let on_fail =
-        try
-          let fail_json = json |> member "on_fail" in
-          match parse_node fail_json with
-          | Ok n -> Some n
-          | Error _ -> None
-        with _ -> None
+        match json |> member "on_fail" with
+        | `Null -> None
+        | fail_json -> (match parse_node fail_json with Ok n -> Some n | Error _ -> None)
       in
       Ok (Threshold { metric; operator; value; input_node; on_pass; on_fail })
 
@@ -282,33 +354,14 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let* goal_metric = require_string json "goal_metric" in
       let* goal_operator_str = require_string json "goal_operator" in
       let* goal_operator = parse_threshold_op goal_operator_str in
-      let goal_value =
-        try json |> member "goal_value" |> to_float
-        with _ ->
-          try float_of_int (json |> member "goal_value" |> to_int)
-          with _ -> 0.0
-      in
+      let* goal_value = require_float json "goal_value" in  (* Explicit error on missing *)
       let action_json = json |> member "action_node" in
       let* action_node = parse_node action_json in
       let* measure_func = require_string json "measure_func" in
-      let max_iterations =
-        try json |> member "max_iterations" |> to_int
-        with _ -> 10
-      in
-      let strategy_hints =
-        try
-          json |> member "strategy_hints" |> to_assoc
-          |> List.map (fun (k, v) -> (k, to_string v))
-        with _ -> []
-      in
-      let conversational =
-        try json |> member "conversational" |> to_bool
-        with _ -> false
-      in
-      let relay_models =
-        try json |> member "relay_models" |> to_list |> List.map to_string
-        with _ -> []
-      in
+      let max_iterations = parse_int_with_default json "max_iterations" 10 in
+      let strategy_hints = parse_string_assoc_opt json "strategy_hints" in
+      let conversational = parse_bool_with_default json "conversational" false in
+      let relay_models = parse_string_list_opt json "relay_models" in
       Ok (GoalDriven {
         goal_metric; goal_operator; goal_value;
         action_node; measure_func; max_iterations; strategy_hints;
@@ -316,95 +369,65 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       })
 
   | "evaluator" ->
-      let candidates_json =
-        try json |> member "candidates" |> to_list
-        with _ -> []
+      let candidates_json = match json |> member "candidates" with
+        | `List l -> l | `Null -> [] | _ -> []
       in
       let* candidates = parse_nodes candidates_json in
       let* scoring_func = require_string json "scoring_func" in
-      let scoring_prompt =
-        try Some (json |> member "scoring_prompt" |> to_string)
-        with _ -> None
+      let scoring_prompt = match json |> member "scoring_prompt" with
+        | `String s -> Some s | _ -> None
       in
-      let select_strategy_json =
-        try json |> member "select_strategy"
-        with _ -> `String "best"
+      let select_strategy_json = match json |> member "select_strategy" with
+        | `Null -> `String "best" | v -> v
       in
       let* select_strategy = parse_select_strategy select_strategy_json in
-      let min_score =
-        try Some (json |> member "min_score" |> to_float)
-        with _ ->
-          try Some (float_of_int (json |> member "min_score" |> to_int))
-          with _ -> None
+      let min_score = match json |> member "min_score" with
+        | `Float f -> Some f
+        | `Int i -> Some (float_of_int i)
+        | _ -> None
       in
       Ok (Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score })
 
   (* Resilience Nodes *)
   | "retry" ->
-      let* inner_node = parse_node (json |> member "node") in
-      let max_attempts = try json |> member "max_attempts" |> to_int with _ -> 3 in
-      let backoff = try
-        match json |> member "backoff" with
-        | `String s -> (match String.split_on_char ':' s with
-            | ["exponential"; v] -> Exponential (float_of_string v)
-            | ["constant"; v] -> Constant (float_of_string v)
-            | ["linear"; v] -> Linear (float_of_string v)
-            | _ -> Exponential 1.0)
-        | `Float f -> Exponential f
-        | `Assoc _ as obj ->
-            (* Handle JSON object format from chain_to_json *)
-            let typ = try obj |> member "type" |> to_string with _ -> "exponential" in
-            (match typ with
-             | "constant" ->
-                 let secs = try obj |> member "seconds" |> to_float
-                   with _ -> try float_of_int (obj |> member "seconds" |> to_int) with _ -> 1.0 in
-                 Constant secs
-             | "exponential" ->
-                 let base = try obj |> member "base" |> to_float
-                   with _ -> try float_of_int (obj |> member "base" |> to_int) with _ -> 2.0 in
-                 Exponential base
-             | "linear" ->
-                 let base = try obj |> member "base" |> to_float
-                   with _ -> try float_of_int (obj |> member "base" |> to_int) with _ -> 1.0 in
-                 Linear base
-             | "jitter" ->
-                 let min_s = try obj |> member "min" |> to_float with _ -> 0.5 in
-                 let max_s = try obj |> member "max" |> to_float with _ -> 2.0 in
-                 Jitter (min_s, max_s)
-             | _ -> Exponential 2.0)
-        | _ -> Exponential 1.0
-        with _ -> Exponential 1.0
-      in
-      let retry_on = try json |> member "retry_on" |> to_list |> List.map to_string with _ -> [] in
-      Ok (Retry { node = inner_node; max_attempts; backoff; retry_on })
+      let* input_node = parse_node (json |> member "node") in
+      let max_attempts = parse_int_with_default json "max_attempts" 3 in
+      let backoff = parse_backoff_strategy json in
+      let retry_on = parse_string_list_opt json "retry_on" in
+      Ok (Retry { node = input_node; max_attempts; backoff; retry_on })
 
   | "fallback" ->
       let* primary = parse_node (json |> member "primary") in
-      let* fallbacks = parse_nodes (try json |> member "fallbacks" |> to_list with _ -> []) in
+      let fallbacks_json = match json |> member "fallbacks" with
+        | `List l -> l | _ -> []
+      in
+      let* fallbacks = parse_nodes fallbacks_json in
       Ok (Fallback { primary; fallbacks })
 
   | "race" ->
-      let* nodes = parse_nodes (try json |> member "nodes" |> to_list with _ -> []) in
-      let timeout = try Some (json |> member "timeout" |> to_float)
-        with _ -> try Some (float_of_int (json |> member "timeout" |> to_int)) with _ -> None
+      let nodes_json = match json |> member "nodes" with
+        | `List l -> l | _ -> []
+      in
+      let* nodes = parse_nodes nodes_json in
+      let timeout = match json |> member "timeout" with
+        | `Float f -> Some f
+        | `Int i -> Some (float_of_int i)
+        | _ -> None
       in
       Ok (Race { nodes; timeout })
 
   | "chain_exec" | "chainexec" | "meta" ->
       (* Meta-chain: execute a dynamically generated chain *)
-      let chain_source = try json |> member "chain_source" |> to_string
-        with _ -> try json |> member "source" |> to_string
-        with _ -> "{{input}}"
+      let chain_source = match json |> member "chain_source" with
+        | `String s -> s
+        | `Null -> (match json |> member "source" with `String s -> s | _ -> "{{input}}")
+        | _ -> "{{input}}"
       in
-      let validate = try json |> member "validate" |> to_bool with _ -> true in
-      let max_depth = try json |> member "max_depth" |> to_int with _ -> 3 in
-      let sandbox = try json |> member "sandbox" |> to_bool with _ -> true in
-      let context_inject = try
-        json |> member "context_inject" |> to_assoc
-        |> List.map (fun (k, v) -> (k, to_string v))
-      with _ -> []
-      in
-      let pass_outputs = try json |> member "pass_outputs" |> to_bool with _ -> true in
+      let validate = parse_bool_with_default json "validate" true in
+      let max_depth = parse_int_with_default json "max_depth" 3 in
+      let sandbox = parse_bool_with_default json "sandbox" true in
+      let context_inject = parse_string_assoc_opt json "context_inject" in
+      let pass_outputs = parse_bool_with_default json "pass_outputs" true in
       Ok (ChainExec { chain_source; validate; max_depth; sandbox; context_inject; pass_outputs })
 
   | unknown ->
@@ -447,6 +470,58 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
 let parse_chain (json : Yojson.Safe.t) : (chain, string) result =
   parse_chain_inner json
 
+(** Check if a node_type contains unresolved placeholder references *)
+let rec has_placeholder_in_node_type = function
+  | ChainRef "_" -> true
+  | Pipeline nodes | Fanout nodes -> List.exists has_placeholder_node nodes
+  | Race { nodes; _ } -> List.exists has_placeholder_node nodes
+  | Quorum { nodes; _ } -> List.exists has_placeholder_node nodes
+  | Gate { then_node; else_node; _ } ->
+      has_placeholder_node then_node ||
+      (match else_node with Some n -> has_placeholder_node n | None -> false)
+  | GoalDriven { action_node; _ } -> has_placeholder_node action_node
+  | Retry { node; _ } -> has_placeholder_node node
+  | Fallback { primary; fallbacks; _ } ->
+      has_placeholder_node primary || List.exists has_placeholder_node fallbacks
+  | Map { inner; _ } -> has_placeholder_node inner
+  | Threshold { input_node; _ } -> has_placeholder_node input_node
+  | Evaluator { candidates; _ } -> List.exists has_placeholder_node candidates
+  | _ -> false
+
+and has_placeholder_node (n : Chain_types.node) =
+  n.id = "_placeholder" || has_placeholder_in_node_type n.node_type
+
+(** Collect all placeholder node IDs for error reporting *)
+let rec collect_placeholders_in_node_type acc = function
+  | ChainRef "_" -> "_chainref" :: acc
+  | Pipeline nodes | Fanout nodes ->
+      List.fold_left collect_placeholders_in_node acc nodes
+  | Race { nodes; _ } ->
+      List.fold_left collect_placeholders_in_node acc nodes
+  | Quorum { nodes; _ } ->
+      List.fold_left collect_placeholders_in_node acc nodes
+  | Gate { then_node; else_node; _ } ->
+      let acc = collect_placeholders_in_node acc then_node in
+      (match else_node with Some n -> collect_placeholders_in_node acc n | None -> acc)
+  | GoalDriven { action_node; _ } ->
+      collect_placeholders_in_node acc action_node
+  | Retry { node; _ } ->
+      collect_placeholders_in_node acc node
+  | Fallback { primary; fallbacks; _ } ->
+      let acc = collect_placeholders_in_node acc primary in
+      List.fold_left collect_placeholders_in_node acc fallbacks
+  | Map { inner; _ } ->
+      collect_placeholders_in_node acc inner
+  | Threshold { input_node; _ } ->
+      collect_placeholders_in_node acc input_node
+  | Evaluator { candidates; _ } ->
+      List.fold_left collect_placeholders_in_node acc candidates
+  | _ -> acc
+
+and collect_placeholders_in_node acc (n : Chain_types.node) =
+  let acc = if n.id = "_placeholder" then n.id :: acc else acc in
+  collect_placeholders_in_node_type acc n.node_type
+
 (** Validate chain structure *)
 let validate_chain (c : Chain_types.chain) : (unit, string) result =
   (* Check output node exists *)
@@ -455,15 +530,24 @@ let validate_chain (c : Chain_types.chain) : (unit, string) result =
     Error (Printf.sprintf "Output node '%s' not found in chain" c.Chain_types.output)
   (* Check for duplicate IDs *)
   else
-    let rec check_dups seen = function
-      | [] -> Ok ()
-      | id :: rest ->
-          if List.mem id seen then
-            Error (Printf.sprintf "Duplicate node ID: %s" id)
-          else
-            check_dups (id :: seen) rest
+    let* () =
+      let rec check_dups seen = function
+        | [] -> Ok ()
+        | id :: rest ->
+            if List.mem id seen then
+              Error (Printf.sprintf "Duplicate node ID: %s" id)
+            else
+              check_dups (id :: seen) rest
+      in
+      check_dups [] node_ids
     in
-    check_dups [] node_ids
+    (* Check for unresolved placeholder nodes *)
+    let placeholders = List.fold_left collect_placeholders_in_node [] c.Chain_types.nodes in
+    if placeholders <> [] then
+      Error (Printf.sprintf "Unresolved placeholder nodes found: %s. This usually indicates incomplete Mermaid edge resolution."
+               (String.concat ", " (List.sort_uniq String.compare placeholders)))
+    else
+      Ok ()
 
 (* ============================================================================
    Chain to JSON Serializer (for JSON <-> Mermaid round-trip)
@@ -592,7 +676,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("goal_metric", `String goal_metric);
           ("goal_operator", `String (threshold_op_to_string goal_operator));
           ("goal_value", `Float goal_value);
-          ("action", node_to_json action_node);
+          ("action_node", node_to_json action_node);
           ("measure_func", `String measure_func);
           ("max_iterations", `Int max_iterations);
           ("conversational", `Bool conversational);
