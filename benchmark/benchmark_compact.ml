@@ -6,7 +6,7 @@
    3. Token savings estimation (4 chars ≈ 1 token for English)
 *)
 
-open Llm_mcp.Types
+open Types
 
 (* =========================================================================
    Test Data

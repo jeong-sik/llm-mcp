@@ -4,8 +4,8 @@ open Alcotest
 
 (** Test session ID generation *)
 let test_generate_session_id () =
-  let id1 = Llm_mcp.Mcp_session.generate_session_id () in
-  let id2 = Llm_mcp.Mcp_session.generate_session_id () in
+  let id1 = Mcp_session.generate_session_id () in
+  let id2 = Mcp_session.generate_session_id () in
   (* 16 bytes * 2 hex chars = 32 chars *)
   check int "id length" 32 (String.length id1);
   check bool "ids are unique" true (id1 <> id2);
@@ -17,22 +17,22 @@ let test_generate_session_id () =
 (** Test session ID validation *)
 let test_is_valid_session_id () =
   check bool "valid hex" true
-    (Llm_mcp.Mcp_session.is_valid_session_id "abc123def456");
+    (Mcp_session.is_valid_session_id "abc123def456");
   check bool "valid with uppercase" true
-    (Llm_mcp.Mcp_session.is_valid_session_id "ABC123");
+    (Mcp_session.is_valid_session_id "ABC123");
   check bool "empty is invalid" false
-    (Llm_mcp.Mcp_session.is_valid_session_id "");
+    (Mcp_session.is_valid_session_id "");
   check bool "space is invalid" false
-    (Llm_mcp.Mcp_session.is_valid_session_id "abc 123");
+    (Mcp_session.is_valid_session_id "abc 123");
   check bool "newline is invalid" false
-    (Llm_mcp.Mcp_session.is_valid_session_id "abc\n123");
+    (Mcp_session.is_valid_session_id "abc\n123");
   (* Visible ASCII only: 0x21-0x7E *)
   check bool "tab is invalid" false
-    (Llm_mcp.Mcp_session.is_valid_session_id "abc\t123")
+    (Mcp_session.is_valid_session_id "abc\t123")
 
 (** Test session creation *)
 let test_create_session () =
-  let session = Llm_mcp.Mcp_session.create_session () in
+  let session = Mcp_session.create_session () in
   check int "session id length" 32 (String.length session.id);
   check bool "not initialized" false session.initialized;
   check string "default protocol" "2025-11-25" session.negotiated_protocol
@@ -40,20 +40,20 @@ let test_create_session () =
 (** Test session creation with custom ID *)
 let test_create_session_with_id () =
   let custom_id = "my-custom-session-id-12345" in
-  let session = Llm_mcp.Mcp_session.create_session ~id:custom_id () in
+  let session = Mcp_session.create_session ~id:custom_id () in
   check string "custom id used" custom_id session.id
 
 (** Test session creation with invalid ID falls back to generated *)
 let test_create_session_invalid_id () =
   let invalid_id = "has space here" in
-  let session = Llm_mcp.Mcp_session.create_session ~id:invalid_id () in
+  let session = Mcp_session.create_session ~id:invalid_id () in
   check bool "generated new id" true (session.id <> invalid_id);
   check int "generated id length" 32 (String.length session.id)
 
 (** Test session retrieval *)
 let test_get_session () =
-  let session = Llm_mcp.Mcp_session.create_session () in
-  let retrieved = Llm_mcp.Mcp_session.get_session session.id in
+  let session = Mcp_session.create_session () in
+  let retrieved = Mcp_session.get_session session.id in
   check bool "found session" true (Option.is_some retrieved);
   match retrieved with
   | Some s -> check string "same id" session.id s.id
@@ -61,44 +61,44 @@ let test_get_session () =
 
 (** Test session not found *)
 let test_get_session_not_found () =
-  let result = Llm_mcp.Mcp_session.get_session "nonexistent-session" in
+  let result = Mcp_session.get_session "nonexistent-session" in
   check bool "not found" true (Option.is_none result)
 
 (** Test mark initialized *)
 let test_mark_initialized () =
-  let session = Llm_mcp.Mcp_session.create_session () in
+  let session = Mcp_session.create_session () in
   check bool "initially not initialized" false session.initialized;
-  Llm_mcp.Mcp_session.mark_initialized session;
+  Mcp_session.mark_initialized session;
   check bool "now initialized" true session.initialized
 
 (** Test set negotiated protocol *)
 let test_set_negotiated_protocol () =
-  let session = Llm_mcp.Mcp_session.create_session () in
-  Llm_mcp.Mcp_session.set_negotiated_protocol session "2024-11-05";
+  let session = Mcp_session.create_session () in
+  Mcp_session.set_negotiated_protocol session "2024-11-05";
   check string "protocol updated" "2024-11-05" session.negotiated_protocol
 
 (** Test delete session *)
 let test_delete_session () =
-  let session = Llm_mcp.Mcp_session.create_session () in
+  let session = Mcp_session.create_session () in
   let id = session.id in
   check bool "exists before delete" true
-    (Option.is_some (Llm_mcp.Mcp_session.get_session id));
-  Llm_mcp.Mcp_session.delete_session id;
+    (Option.is_some (Mcp_session.get_session id));
+  Mcp_session.delete_session id;
   check bool "gone after delete" true
-    (Option.is_none (Llm_mcp.Mcp_session.get_session id))
+    (Option.is_none (Mcp_session.get_session id))
 
 (** Test is_valid_session *)
 let test_is_valid_session () =
-  let session = Llm_mcp.Mcp_session.create_session () in
+  let session = Mcp_session.create_session () in
   check bool "valid session" true
-    (Llm_mcp.Mcp_session.is_valid_session session.id);
+    (Mcp_session.is_valid_session session.id);
   check bool "invalid session id" false
-    (Llm_mcp.Mcp_session.is_valid_session "nonexistent")
+    (Mcp_session.is_valid_session "nonexistent")
 
 (** Test protocol version constant *)
 let test_protocol_version () =
   check string "protocol version format" "2025-11-25"
-    Llm_mcp.Mcp_session.protocol_version
+    Mcp_session.protocol_version
 
 let () =
   run "Llm_mcp.Mcp_session" [

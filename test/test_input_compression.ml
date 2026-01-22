@@ -1,7 +1,7 @@
 (* Compact Protocol v2.0 - Input Compression Tests *)
 
 open Alcotest
-open Llm_mcp.Types
+open Types
 
 (* =========================================================================
    Tool Caching Tests

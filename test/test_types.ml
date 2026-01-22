@@ -1,7 +1,7 @@
 (** Tests for Types module *)
 
 open Alcotest
-open Llm_mcp.Types
+open Types
 
 (** Test thinking_level conversion *)
 let test_thinking_level_of_string () =

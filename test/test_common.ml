@@ -4,7 +4,7 @@ open Alcotest
 
 (** Test me_path builds correct paths *)
 let test_me_path () =
-  let path = Llm_mcp.Common.me_path ["logs"; "test.log"] in
+  let path = Common.me_path ["logs"; "test.log"] in
   check bool "contains logs" true (String.length path > 0);
   check bool "ends with test.log" true
     (Filename.basename path = "test.log");
@@ -15,40 +15,40 @@ let test_me_path () =
 (** Test take function *)
 let test_take () =
   let lst = [1; 2; 3; 4; 5] in
-  check (list int) "take 3" [1; 2; 3] (Llm_mcp.Common.take 3 lst);
-  check (list int) "take 0" [] (Llm_mcp.Common.take 0 lst);
-  check (list int) "take 10" [1; 2; 3; 4; 5] (Llm_mcp.Common.take 10 lst);
-  check (list int) "take from empty" [] (Llm_mcp.Common.take 3 [])
+  check (list int) "take 3" [1; 2; 3] (Common.take 3 lst);
+  check (list int) "take 0" [] (Common.take 0 lst);
+  check (list int) "take 10" [1; 2; 3; 4; 5] (Common.take 10 lst);
+  check (list int) "take from empty" [] (Common.take 3 [])
 
 (** Test contains substring *)
 let test_contains () =
   check bool "contains hello" true
-    (Llm_mcp.Common.contains ~substring:"hello" "hello world");
+    (Common.contains ~substring:"hello" "hello world");
   check bool "contains world" true
-    (Llm_mcp.Common.contains ~substring:"world" "hello world");
+    (Common.contains ~substring:"world" "hello world");
   check bool "not contains foo" false
-    (Llm_mcp.Common.contains ~substring:"foo" "hello world");
+    (Common.contains ~substring:"foo" "hello world");
   check bool "empty substring" true
-    (Llm_mcp.Common.contains ~substring:"" "anything")
+    (Common.contains ~substring:"" "anything")
 
 (** Test assoc_opt *)
 let test_assoc_opt () =
   let lst = [("a", 1); ("b", 2); ("c", 3)] in
-  check (option int) "found a" (Some 1) (Llm_mcp.Common.assoc_opt "a" lst);
-  check (option int) "found c" (Some 3) (Llm_mcp.Common.assoc_opt "c" lst);
-  check (option int) "not found" None (Llm_mcp.Common.assoc_opt "z" lst)
+  check (option int) "found a" (Some 1) (Common.assoc_opt "a" lst);
+  check (option int) "found c" (Some 3) (Common.assoc_opt "c" lst);
+  check (option int) "not found" None (Common.assoc_opt "z" lst)
 
 (** Test json_escape *)
 let test_json_escape () =
-  check string "no escape needed" "hello" (Llm_mcp.Common.json_escape "hello");
-  check string "escape quotes" "say \\\"hi\\\"" (Llm_mcp.Common.json_escape "say \"hi\"");
-  check string "escape newline" "line1\\nline2" (Llm_mcp.Common.json_escape "line1\nline2");
-  check string "escape backslash" "path\\\\to" (Llm_mcp.Common.json_escape "path\\to");
-  check string "escape tab" "col1\\tcol2" (Llm_mcp.Common.json_escape "col1\tcol2")
+  check string "no escape needed" "hello" (Common.json_escape "hello");
+  check string "escape quotes" "say \\\"hi\\\"" (Common.json_escape "say \"hi\"");
+  check string "escape newline" "line1\\nline2" (Common.json_escape "line1\nline2");
+  check string "escape backslash" "path\\\\to" (Common.json_escape "path\\to");
+  check string "escape tab" "col1\\tcol2" (Common.json_escape "col1\tcol2")
 
 (** Test date formatting *)
 let test_date_str () =
-  let date = Llm_mcp.Common.date_str () in
+  let date = Common.date_str () in
   (* Format: YYYY-MM-DD *)
   check int "length 10" 10 (String.length date);
   check bool "has dashes" true (date.[4] = '-' && date.[7] = '-');
@@ -57,7 +57,7 @@ let test_date_str () =
 
 (** Test ISO timestamp *)
 let test_iso_timestamp () =
-  let ts = Llm_mcp.Common.iso_timestamp () in
+  let ts = Common.iso_timestamp () in
   (* Format: YYYY-MM-DDTHH:MM:SS *)
   check int "length 19" 19 (String.length ts);
   check bool "has T separator" true (ts.[10] = 'T');
@@ -65,30 +65,30 @@ let test_iso_timestamp () =
 
 (** Test timestamp is integer *)
 let test_timestamp () =
-  let ts = Llm_mcp.Common.timestamp () in
+  let ts = Common.timestamp () in
   (* Should be a reasonable Unix timestamp (> 2020-01-01) *)
   check bool "reasonable timestamp" true (ts > 1577836800)
 
 (** Test date_n_days_ago *)
 let test_date_n_days_ago () =
-  let today = Llm_mcp.Common.date_str () in
-  let zero_days = Llm_mcp.Common.date_n_days_ago 0 in
+  let today = Common.date_str () in
+  let zero_days = Common.date_n_days_ago 0 in
   check string "0 days ago is today" today zero_days;
-  let yesterday = Llm_mcp.Common.date_n_days_ago 1 in
+  let yesterday = Common.date_n_days_ago 1 in
   check int "yesterday length" 10 (String.length yesterday)
 
 (** Test read_file_opt on non-existent file *)
 let test_read_file_opt_missing () =
-  let result = Llm_mcp.Common.read_file_opt "/nonexistent/path/file.txt" in
+  let result = Common.read_file_opt "/nonexistent/path/file.txt" in
   check (option string) "missing file returns None" None result
 
 (** Test read_file_opt and write_file round-trip *)
 let test_file_roundtrip () =
   let tmp = Filename.temp_file "test_common_" ".txt" in
   let content = "test content with unicode: 한글 🎉" in
-  let wrote = Llm_mcp.Common.write_file tmp content in
+  let wrote = Common.write_file tmp content in
   check bool "write succeeded" true wrote;
-  let read = Llm_mcp.Common.read_file_opt tmp in
+  let read = Common.read_file_opt tmp in
   check (option string) "read matches written" (Some content) read;
   Sys.remove tmp
 
