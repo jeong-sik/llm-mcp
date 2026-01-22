@@ -1226,6 +1226,101 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       let body = Yojson.Safe.to_string (`List recent) in
       Response.json body reqd
 
+  (* Prometheus metrics endpoint for monitoring integration *)
+  | `GET, "/metrics" ->
+      let history_file = match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+        | Some path -> path
+        | None -> "data/chain_history.jsonl"
+      in
+      let records =
+        try
+          let ic = open_in history_file in
+          Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+            let rec read_lines acc =
+              match input_line ic with
+              | line ->
+                  (try read_lines (Yojson.Safe.from_string line :: acc)
+                   with _ -> read_lines acc)
+              | exception End_of_file -> List.rev acc
+            in
+            read_lines []
+          )
+        with _ -> []
+      in
+      (* Aggregate metrics from history *)
+      let success_count = ref 0 in
+      let failure_count = ref 0 in
+      let total_tokens = ref 0 in
+      let gemini_tokens = ref 0 in
+      let claude_tokens = ref 0 in
+      let codex_tokens = ref 0 in
+      let ollama_tokens = ref 0 in
+      let total_duration_ms = ref 0 in
+      let duration_count = ref 0 in
+      List.iter (fun json ->
+        let event = json |> Yojson.Safe.Util.(member "event" |> to_string_option) in
+        let chain_id = json |> Yojson.Safe.Util.(member "chain_id" |> to_string_option) in
+        let tokens =
+          match json |> Yojson.Safe.Util.(member "tokens") with
+          | `Int n -> Some n
+          | `Assoc _ as obj ->
+              let input = obj |> Yojson.Safe.Util.(member "input" |> to_int_option) |> Option.value ~default:0 in
+              let output = obj |> Yojson.Safe.Util.(member "output" |> to_int_option) |> Option.value ~default:0 in
+              Some (input + output)
+          | _ -> None
+        in
+        let duration_ms = json |> Yojson.Safe.Util.(member "duration_ms" |> to_int_option) in
+        (match event with
+         | Some "chain_complete" ->
+             incr success_count;
+             (match tokens with Some t -> total_tokens := !total_tokens + t | None -> ());
+             (match duration_ms with Some d -> total_duration_ms := !total_duration_ms + d; incr duration_count | None -> ());
+             let contains_model model id =
+               try ignore (Str.search_forward (Str.regexp_string model) id 0); true
+               with Not_found -> false
+             in
+             (match chain_id with
+              | Some id when contains_model "gemini" id ->
+                  (match tokens with Some t -> gemini_tokens := !gemini_tokens + t | None -> ())
+              | Some id when contains_model "claude" id ->
+                  (match tokens with Some t -> claude_tokens := !claude_tokens + t | None -> ())
+              | Some id when contains_model "codex" id ->
+                  (match tokens with Some t -> codex_tokens := !codex_tokens + t | None -> ())
+              | Some id when contains_model "ollama" id ->
+                  (match tokens with Some t -> ollama_tokens := !ollama_tokens + t | None -> ())
+              | _ -> ())
+         | Some "chain_error" -> incr failure_count
+         | _ -> ())
+      ) records;
+      let avg_duration = if !duration_count > 0 then float_of_int !total_duration_ms /. float_of_int !duration_count else 0.0 in
+      let metrics = Printf.sprintf {|# HELP chain_executions_total Total chain executions
+# TYPE chain_executions_total counter
+chain_executions_total{status="success"} %d
+chain_executions_total{status="failure"} %d
+
+# HELP chain_tokens_total Total tokens used
+# TYPE chain_tokens_total counter
+chain_tokens_total{model="gemini"} %d
+chain_tokens_total{model="claude"} %d
+chain_tokens_total{model="codex"} %d
+chain_tokens_total{model="ollama"} %d
+chain_tokens_total{model="all"} %d
+
+# HELP chain_duration_avg_ms Average chain execution duration in milliseconds
+# TYPE chain_duration_avg_ms gauge
+chain_duration_avg_ms %.2f
+
+# HELP chain_duration_total_ms Total chain execution duration in milliseconds
+# TYPE chain_duration_total_ms counter
+chain_duration_total_ms %d
+|}
+        !success_count !failure_count
+        !gemini_tokens !claude_tokens !codex_tokens !ollama_tokens !total_tokens
+        avg_duration !total_duration_ms
+      in
+      let headers = Headers.of_list [("content-type", "text/plain; version=0.0.4; charset=utf-8")] in
+      Httpaf.Reqd.respond_with_string reqd (Httpaf.Response.create ~headers `OK) metrics
+
   (* Chain events SSE endpoint for real-time progress monitoring *)
   | `GET, "/chain/events" ->
       handle_chain_events ~clock reqd
