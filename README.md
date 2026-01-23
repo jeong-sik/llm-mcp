@@ -142,7 +142,7 @@ Budget defaults:
 
 ### Compact Protocol v1.3 🚀
 
-LLM-to-LLM 통신 최적화를 위한 다중 포맷 응답 시스템. MAGI 멀티-에이전트 협업 시 토큰 비용을 **최대 70%** 절감합니다.
+LLM-to-LLM 통신 최적화를 위한 다중 포맷 응답 시스템입니다.
 
 > 📖 **상세 스펙**: [`docs/PROTOCOL.md`](docs/PROTOCOL.md)
 
@@ -151,10 +151,10 @@ LLM-to-LLM 통신 최적화를 위한 다중 포맷 응답 시스템. MAGI 멀�
 | Format | Prefix | Overhead | Best For |
 |--------|--------|----------|----------|
 | Verbose | `{` | 0% (baseline) | 디버깅, 사람이 읽을 때 |
-| Compact DSL | `RES\|` | **-40~50%** ✨ | 짧은 응답 (<50 bytes) |
+| Compact DSL | `RES\|` | lower | 짧은 응답 (<50 bytes) |
 | Binary | `M` | +33% | Base64 호환성 우선 |
 | Base85 | `A` | +25% | 중간 응답 (50-500 bytes) |
-| Compressed | `Z` | **-50~70%** ✨ | 긴 응답 (>500 bytes) |
+| Compressed | `Z` | lower | 긴 응답 (>500 bytes) |
 | Auto | - | varies | 자동 최적 선택 |
 
 #### Usage
