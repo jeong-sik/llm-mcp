@@ -305,7 +305,9 @@ let test_llm_calling_tool () =
         system = None;
         prompt = "What is 15 multiplied by 7? Use the calculate tool to find the answer.";
         timeout = Some 60;
-        tools = Some (`List [calculator_tool_def])
+        tools = Some (`List [calculator_tool_def]);
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -369,7 +371,9 @@ let test_goaldriven_llm_with_tool () =
         system = None;
         prompt = "Calculate 20 * 5 using the calculator tool. After getting the result, respond with 'Result: [number]. accuracy: 0.95' format.";
         timeout = Some 60;
-        tools = Some (`List [calculator_tool_def])
+        tools = Some (`List [calculator_tool_def]);
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in

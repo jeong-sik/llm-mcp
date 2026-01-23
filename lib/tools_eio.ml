@@ -30,6 +30,10 @@ let parse_chain_convert_args = Tool_parsers.parse_chain_convert_args
 let parse_chain_orchestrate_args = Tool_parsers.parse_chain_orchestrate_args
 let parse_gh_pr_diff_args = Tool_parsers.parse_gh_pr_diff_args
 let parse_slack_post_args = Tool_parsers.parse_slack_post_args
+let parse_chain_checkpoints_args = Tool_parsers.parse_chain_checkpoints_args
+let parse_chain_resume_args = Tool_parsers.parse_chain_resume_args
+let parse_prompt_register_args = Tool_parsers.parse_prompt_register_args
+let parse_prompt_get_args = Tool_parsers.parse_prompt_get_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -1087,6 +1091,233 @@ This chain will execute the goal using a stub model.|}
 
   | SlackPost { channel; text; thread_ts } ->
       execute_slack_post ~sw ~proc_mgr ~clock ~channel ~text ~thread_ts
+
+  | ChainCheckpoints { chain_id; max_age_hours; cleanup } ->
+      let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
+      let store = Checkpoint_store.create () in
+      if cleanup then
+        (* Cleanup mode: delete old checkpoints *)
+        let max_hours = Option.value max_age_hours ~default:168 in  (* Default: 1 week *)
+        let deleted = Checkpoint_store.cleanup_old store ~max_age_hours:max_hours in
+        { model = "chain.checkpoints";
+          returncode = 0;
+          response = sprintf "Deleted %d checkpoints older than %d hours" deleted max_hours;
+          extra = [("deleted", string_of_int deleted); ("max_age_hours", string_of_int max_hours)]; }
+      else
+        (* List mode: show checkpoints *)
+        let checkpoints = match chain_id with
+          | Some cid -> Checkpoint_store.list_checkpoints store ~chain_id:cid
+          | None -> Checkpoint_store.list_all store
+        in
+        let filtered = match max_age_hours with
+          | Some hours ->
+              let now = Unix.gettimeofday () in
+              let max_age_secs = float_of_int hours *. 3600.0 in
+              List.filter (fun cp -> now -. cp.Checkpoint_store.timestamp < max_age_secs) checkpoints
+          | None -> checkpoints
+        in
+        let json_list = filtered |> List.map (fun cp ->
+          `Assoc [
+            ("run_id", `String cp.Checkpoint_store.run_id);
+            ("chain_id", `String cp.Checkpoint_store.chain_id);
+            ("node_id", `String cp.Checkpoint_store.node_id);
+            ("timestamp", `Float cp.Checkpoint_store.timestamp);
+            ("outputs_count", `Int (List.length cp.Checkpoint_store.outputs));
+          ]
+        ) in
+        let response = Yojson.Safe.pretty_to_string (`List json_list) in
+        { model = "chain.checkpoints";
+          returncode = 0;
+          response;
+          extra = [("count", string_of_int (List.length filtered))]; }
+
+  | ChainResume { run_id; trace } ->
+      let store = Checkpoint_store.create () in
+      (match Checkpoint_store.load store ~run_id with
+       | Error msg ->
+           { model = "chain.resume";
+             returncode = -1;
+             response = sprintf "Failed to load checkpoint: %s" msg;
+             extra = [("run_id", run_id)]; }
+       | Ok cp ->
+           (* Load the original chain from registry or reparse *)
+           let chain_id = cp.Checkpoint_store.chain_id in
+           (match Chain_registry.lookup chain_id with
+            | None ->
+                { model = "chain.resume";
+                  returncode = -1;
+                  response = sprintf "Chain '%s' not found in registry. Cannot resume without chain definition." chain_id;
+                  extra = [("run_id", run_id); ("chain_id", chain_id)]; }
+            | Some chain ->
+                (match Chain_compiler.compile chain with
+                 | Error msg ->
+                     { model = "chain.resume";
+                       returncode = -1;
+                       response = sprintf "Failed to compile chain: %s" msg;
+                       extra = [("run_id", run_id); ("chain_id", chain_id)]; }
+                 | Ok plan ->
+                     let node_timeout = chain.Chain_types.config.Chain_types.timeout in
+                     let starts_with ~prefix s =
+                       let prefix_len = String.length prefix in
+                       String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+                     in
+                     let split_tool_name name =
+                       match String.index_opt name '.' with
+                       | None -> None
+                       | Some idx ->
+                           let server = String.sub name 0 idx in
+                           let tool_len = String.length name - idx - 1 in
+                           if server = "" || tool_len <= 0 then None
+                           else Some (server, String.sub name (idx + 1) tool_len)
+                     in
+                     (* Create exec_fn that routes to appropriate LLM *)
+                     let exec_fn ~model ?system ~prompt ?tools () =
+                       let _ = system in
+                       let parsed_tools = match tools with
+                         | None -> None
+                         | Some json ->
+                             let open Yojson.Safe.Util in
+                             match json with
+                             | `List items ->
+                                 let schemas = List.filter_map (fun item ->
+                                   try
+                                     Some {
+                                       Types.name = item |> member "name" |> to_string;
+                                      description = (match item |> member "description" |> to_string_option with Some s -> s | None -> "");
+                                      input_schema = item |> member "parameters";
+                                     }
+                                   with _ -> None
+                                 ) items in
+                                 if List.length schemas > 0 then Some schemas else None
+                             | _ -> None
+                       in
+                       let model_name = String.lowercase_ascii model in
+                       let result =
+                         if starts_with ~prefix:"gemini" model_name then
+                           execute ~sw ~proc_mgr ~clock (Gemini {
+                             prompt; model; thinking_level = High; yolo = false; timeout = node_timeout; stream = false
+                           })
+                         else if starts_with ~prefix:"claude" model_name then
+                           execute ~sw ~proc_mgr ~clock (Claude {
+                             prompt; model; long_context = false; system_prompt = None;
+                             output_format = Text; allowed_tools = []; working_directory = "";
+                             timeout = node_timeout; stream = false
+                           })
+                         else if starts_with ~prefix:"codex" model_name || starts_with ~prefix:"gpt" model_name then
+                           execute ~sw ~proc_mgr ~clock (Codex {
+                             prompt; model; reasoning_effort = RHigh; sandbox = ReadOnly;
+                             working_directory = None; timeout = node_timeout; stream = false
+                           })
+                         else if starts_with ~prefix:"ollama" model_name then
+                           let ollama_model = match String.index_opt model ':' with
+                             | Some idx -> String.sub model (idx + 1) (String.length model - idx - 1)
+                             | None -> "devstral"
+                           in
+                           execute ~sw ~proc_mgr ~clock (Ollama {
+                             prompt; model = ollama_model; system_prompt = None;
+                             temperature = 0.7; timeout = node_timeout; stream = false; tools = parsed_tools
+                           })
+                         else
+                           { model = sprintf "unknown:%s" model; returncode = 1;
+                             response = sprintf "Unknown model: %s" model; extra = [] }
+                       in
+                       if result.returncode = 0 then Ok result.response
+                       else Error (sprintf "LLM error: %s" result.response)
+                     in
+                     let tool_exec ~name ~args:tool_args =
+                       match split_tool_name name with
+                       | Some (server_name, tool_name) ->
+                           let output = call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments:tool_args ~timeout:node_timeout in
+                           Ok output
+                       | None ->
+                           Error (sprintf "Unknown tool: %s" name)
+                     in
+                     (* Create checkpoint config for resume *)
+                     let checkpoint_config = Chain_executor_eio.make_checkpoint_config
+                       ~store ~enabled:true ~resume_from:run_id ()
+                     in
+                     let result = Chain_executor_eio.execute
+                       ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec
+                       ~checkpoint:checkpoint_config plan
+                     in
+                     { model = "chain.resume";
+                       returncode = if result.Chain_types.success then 0 else -1;
+                       response = result.Chain_types.output;
+                       extra = [
+                         ("run_id", run_id);
+                         ("chain_id", chain_id);
+                         ("resumed_from_node", cp.Checkpoint_store.node_id);
+                         ("duration_ms", string_of_int result.Chain_types.duration_ms);
+                       ]; })))
+
+  (* ============= Prompt Registry Tools ============= *)
+
+  | PromptRegister { id; template; version } ->
+      let version = Option.value version ~default:"1.0.0" in
+      let variables = Prompt_registry.extract_variables template in
+      let entry : Prompt_registry.prompt_entry = {
+        id;
+        template;
+        version;
+        variables;
+        metrics = None;
+        created_at = Unix.gettimeofday ();
+        deprecated = false;
+      } in
+      Prompt_registry.register entry;
+      { model = "prompt.register";
+        returncode = 0;
+        response = sprintf "Registered prompt '%s' v%s with %d variables: %s"
+          id version
+          (List.length variables)
+          (String.concat ", " variables);
+        extra = [
+          ("id", id);
+          ("version", version);
+          ("variables", String.concat ", " variables);
+        ]; }
+
+  | PromptList ->
+      let all = Prompt_registry.list_all () in
+      let json_list = List.map (fun (e : Prompt_registry.prompt_entry) ->
+        `Assoc [
+          ("id", `String e.id);
+          ("version", `String e.version);
+          ("variables", `List (List.map (fun v -> `String v) e.variables));
+          ("deprecated", `Bool e.deprecated);
+          ("metrics", match e.metrics with
+            | Some m -> `Assoc [
+                ("usage_count", `Int m.Prompt_registry.usage_count);
+                ("avg_score", `Float m.Prompt_registry.avg_score);
+              ]
+            | None -> `Null);
+        ]
+      ) all in
+      { model = "prompt.list";
+        returncode = 0;
+        response = Yojson.Safe.pretty_to_string (`List json_list);
+        extra = [("count", string_of_int (List.length all))]; }
+
+  | PromptGet { id; version } ->
+      (match Prompt_registry.get ~id ?version () with
+       | Some entry ->
+           { model = "prompt.get";
+             returncode = 0;
+             response = sprintf "# %s v%s\n\n%s\n\nVariables: %s"
+               entry.Prompt_registry.id
+               entry.Prompt_registry.version
+               entry.Prompt_registry.template
+               (String.concat ", " entry.Prompt_registry.variables);
+             extra = [
+               ("id", entry.Prompt_registry.id);
+               ("version", entry.Prompt_registry.version);
+             ]; }
+       | None ->
+           { model = "prompt.get";
+             returncode = 1;
+             response = sprintf "Prompt '%s'%s not found"
+               id (match version with Some v -> " v" ^ v | None -> "");
+             extra = []; })
 
 (** {1 Convenience Wrappers} *)
 

@@ -215,11 +215,11 @@ let handle_initialize ~store id params =
 (** Handle tools/list request *)
 let handle_list_tools id =
   let tools = List.map (fun (schema : Types.tool_schema) ->
-    P.tool_to_json {
-      P.name = schema.name;
-      description = Some schema.description;
-      input_schema = schema.input_schema;
-    }
+    `Assoc [
+      ("name", `String schema.name);
+      ("description", `String schema.description);
+      ("inputSchema", schema.input_schema);
+    ]
   ) Types.all_schemas in
   make_response ~id (`Assoc [("tools", `List tools)])
 
@@ -243,6 +243,11 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "chain.visualize" -> Tools_eio.parse_chain_visualize_args arguments
     | "chain.convert" -> Tools_eio.parse_chain_convert_args arguments
     | "chain.orchestrate" -> Tools_eio.parse_chain_orchestrate_args arguments
+    | "chain.checkpoints" -> Tools_eio.parse_chain_checkpoints_args arguments
+    | "chain.resume" -> Tools_eio.parse_chain_resume_args arguments
+    | "prompt.register" -> Tools_eio.parse_prompt_register_args arguments
+    | "prompt.list" -> Types.PromptList
+    | "prompt.get" -> Tools_eio.parse_prompt_get_args arguments
     | "gh_pr_diff" -> Tools_eio.parse_gh_pr_diff_args arguments
     | "slack_post" -> Tools_eio.parse_slack_post_args arguments
     | _ -> failwith (sprintf "Unknown tool: %s" name)
