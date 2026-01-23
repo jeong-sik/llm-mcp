@@ -42,28 +42,30 @@ let dashboard_html = {|<!DOCTYPE html>
     .status { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #666; }
     .status.connected { background: #4ade80; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
-    .card { background: #16213e; border-radius: 12px; padding: 20px; }
-    .card-label { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
-    .card-value { font-size: 28px; font-weight: bold; color: #4ade80; }
-    .card-value.warn { color: #fbbf24; }
-    .mermaid-container { background: #16213e; border-radius: 12px; padding: 20px; margin-bottom: 20px; transition: all 0.3s ease; }
-    .mermaid-container.expanded { position: fixed; top: 20px; left: 20px; right: 20px; bottom: 20px; z-index: 1000; overflow: auto; }
-    .mermaid-container .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
-    .mermaid-container h2 { font-size: 16px; color: #888; margin: 0; }
-    .mermaid-container .toggle-btn { background: #4ade80; color: #000; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: bold; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; height: 90px; }
+    .card { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 20px; border: 1px solid #2a2a4e; transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+    .card-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .card-value { font-size: 32px; font-weight: bold; color: #4ade80; text-shadow: 0 0 20px rgba(74,222,128,0.3); }
+    .card-value.warn { color: #fbbf24; text-shadow: 0 0 20px rgba(251,191,36,0.3); }
+    .card-value.error { color: #f87171; text-shadow: 0 0 20px rgba(248,113,113,0.3); }
+    .mermaid-container { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 15px; margin-bottom: 20px; border: 1px solid #2a2a4e; height: 280px; overflow: hidden; }
+    .mermaid-container.expanded { position: fixed; top: 20px; left: 20px; right: 20px; bottom: 20px; z-index: 1000; overflow: auto; height: auto; }
+    .mermaid-container .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; height: 32px; flex-shrink: 0; }
+    .mermaid-container h2 { font-size: 12px; color: #4ade80; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }
+    .mermaid-container .toggle-btn { background: #4ade80; color: #000; border: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; font-size: 10px; font-weight: bold; flex-shrink: 0; }
     .mermaid-container .toggle-btn:hover { background: #22c55e; }
-    .chain-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-    .chain-tab { background: #1a1a2e; color: #888; border: 1px solid #333; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
+    .chain-tabs { display: flex; gap: 5px; flex: 1; justify-content: center; overflow-x: auto; max-width: 60%; }
+    .chain-tab { background: #1a1a2e; color: #888; border: 1px solid #333; padding: 4px 8px; border-radius: 5px; cursor: pointer; font-size: 9px; white-space: nowrap; flex-shrink: 0; }
     .chain-tab:hover { background: #2a2a4e; color: #eee; }
     .chain-tab.active { background: #4ade80; color: #000; border-color: #4ade80; font-weight: bold; }
-    .mermaid-container #mermaid-graph { background: #1a1a2e; padding: 20px; border-radius: 8px; min-height: 200px; max-height: 500px; overflow: auto; }
-    .mermaid-container #mermaid-graph svg { max-width: 100%; height: auto; }
-    .mermaid-container #mermaid-graph svg text { font-size: 12px !important; }
-    .mermaid-container #mermaid-graph svg .nodeLabel { font-size: 11px !important; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+    .mermaid-container #mermaid-graph { background: #1a1a2e; padding: 10px; border-radius: 8px; height: calc(100% - 50px); overflow: auto; }
+    .mermaid-container #mermaid-graph svg { max-width: 100%; height: auto; transform-origin: top left; }
+    .mermaid-container #mermaid-graph svg text { font-size: 11px !important; }
+    .mermaid-container #mermaid-graph svg .nodeLabel { font-size: 10px !important; max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
     .mermaid-container #mermaid-graph svg .node rect, .mermaid-container #mermaid-graph svg .node polygon { rx: 4; ry: 4; }
-    .mermaid-container #mermaid-graph svg .edgeLabel { font-size: 10px !important; }
-    .mermaid-container .no-chain { color: #666; font-style: italic; text-align: center; padding: 50px; }
+    .mermaid-container #mermaid-graph svg .edgeLabel { font-size: 9px !important; }
+    .mermaid-container .no-chain { color: #666; font-style: italic; text-align: center; padding: 40px; }
     .mermaid-container .node-legend { display: flex; gap: 20px; margin-top: 15px; font-size: 12px; }
     .mermaid-container .legend-item { display: flex; align-items: center; gap: 6px; }
     .mermaid-container .legend-dot { width: 12px; height: 12px; border-radius: 3px; }
@@ -71,22 +73,30 @@ let dashboard_html = {|<!DOCTYPE html>
     .mermaid-container .legend-dot.running { background: #fbbf24; }
     .mermaid-container .legend-dot.complete { background: #4ade80; }
     .mermaid-container .legend-dot.error { background: #f87171; }
-    .events { background: #16213e; border-radius: 12px; padding: 20px; max-height: 400px; overflow-y: auto; }
-    .events h2 { font-size: 16px; margin-bottom: 15px; color: #888; }
-    .event { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; font-family: monospace; font-size: 13px; }
-    .event-icon { font-size: 16px; }
-    .event-type { color: #60a5fa; min-width: 120px; }
-    .event-id { color: #a78bfa; min-width: 100px; }
-    .event-detail { color: #888; }
-    .event.chain_start { border-left: 3px solid #4ade80; }
-    .event.chain_complete { border-left: 3px solid #22d3ee; }
+    .two-column { display: flex; gap: 20px; margin-bottom: 20px; height: 320px; }
+    .two-column > * { flex: 1; min-width: 0; flex-shrink: 0; }
+    .events { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 20px; height: 100%; overflow-y: auto; border: 1px solid #2a2a4e; }
+    .events h2 { font-size: 14px; margin-bottom: 15px; color: #4ade80; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .events .empty-state { color: #555; font-style: italic; text-align: center; padding: 40px 20px; animation: pulse 3s ease-in-out infinite; }
+    .events .empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.6; }
+    .event { display: flex; align-items: center; gap: 10px; padding: 12px; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; font-family: monospace; font-size: 13px; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    .event-icon { font-size: 18px; }
+    .event-type { color: #60a5fa; min-width: 110px; font-weight: 500; }
+    .event-id { color: #a78bfa; min-width: 90px; font-size: 11px; }
+    .event-time { color: #555; font-size: 10px; margin-left: auto; }
+    .event-detail { color: #888; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .event.chain_start { border-left: 3px solid #4ade80; background: linear-gradient(90deg, rgba(74,222,128,0.1) 0%, #1a1a2e 100%); }
+    .event.chain_complete { border-left: 3px solid #22d3ee; background: linear-gradient(90deg, rgba(34,211,238,0.1) 0%, #1a1a2e 100%); }
     .event.node_start { border-left: 3px solid #fbbf24; }
     .event.node_complete { border-left: 3px solid #a78bfa; }
-    .event.chain_error { border-left: 3px solid #f87171; background: #2d1f1f; }
-    .history-panel { background: #16213e; border-radius: 12px; padding: 20px; max-height: 300px; overflow-y: auto; margin-top: 20px; }
-    .history-panel h2 { font-size: 16px; margin-bottom: 15px; color: #888; display: flex; align-items: center; gap: 10px; }
-    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-radius: 8px; margin-bottom: 6px; background: #1a1a2e; font-family: monospace; font-size: 12px; cursor: pointer; transition: background 0.2s; }
-    .history-item:hover { background: #2a2a4e; }
+    .event.chain_error { border-left: 3px solid #f87171; background: linear-gradient(90deg, rgba(248,113,113,0.15) 0%, #1a1a2e 100%); }
+    .history-panel { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 20px; height: 100%; overflow-y: auto; min-width: 0; border: 1px solid #2a2a4e; }
+    .history-panel h2 { font-size: 14px; margin-bottom: 15px; color: #60a5fa; display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .history-panel .empty-state { color: #555; font-style: italic; text-align: center; padding: 40px 20px; }
+    .history-panel .empty-state .icon { font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
+    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 8px; margin-bottom: 8px; background: #1a1a2e; font-family: monospace; font-size: 12px; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent; }
+    .history-item:hover { background: #2a2a4e; transform: translateX(4px); border-color: #333; }
     .history-item.chain_complete { border-left: 3px solid #4ade80; }
     .history-item.chain_error { border-left: 3px solid #f87171; }
     .history-item .chain-id { color: #60a5fa; font-weight: bold; }
@@ -95,13 +105,56 @@ let dashboard_html = {|<!DOCTYPE html>
     .history-item .duration { color: #4ade80; }
     .history-item .timestamp { color: #666; font-size: 11px; }
     .history-item .tokens { color: #a78bfa; }
-    .chart-panel { background: #16213e; border-radius: 12px; padding: 20px; margin-top: 20px; }
-    .chart-panel h2 { font-size: 16px; margin-bottom: 15px; color: #888; display: flex; align-items: center; gap: 10px; }
-    .chart-container { height: 200px; position: relative; }
-    .token-summary { display: flex; gap: 20px; margin-bottom: 15px; font-size: 12px; }
-    .token-summary .model-stat { display: flex; align-items: center; gap: 5px; }
+    .chart-panel { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 15px; border: 1px solid #2a2a4e; height: 200px; }
+    .chart-panel h2 { font-size: 12px; margin-bottom: 10px; color: #a78bfa; display: flex; align-items: center; gap: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .chart-container { height: 120px; position: relative; }
+    .chart-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: #666; }
+    .chart-loading::after { content: ''; width: 20px; height: 20px; border: 2px solid #333; border-top-color: #4ade80; border-radius: 50%; animation: spin 1s linear infinite; margin-left: 10px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .chart-error { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #666; }
+    .chart-error .icon { font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
+    .chart-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #555; }
+    .chart-empty .icon { font-size: 32px; margin-bottom: 10px; opacity: 0.5; }
+    .token-summary { display: flex; gap: 20px; margin-bottom: 15px; font-size: 12px; flex-wrap: wrap; }
+    .token-summary .model-stat { display: flex; align-items: center; gap: 5px; padding: 4px 8px; background: #1a1a2e; border-radius: 4px; }
     .token-summary .model-dot { width: 10px; height: 10px; border-radius: 50%; }
     @media (max-width: 900px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+    /* Tab Navigation */
+    .tab-nav { display: flex; gap: 4px; margin-bottom: 20px; background: #16213e; padding: 4px; border-radius: 8px; width: fit-content; }
+    .tab-btn { background: transparent; color: #888; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.2s; }
+    .tab-btn:hover { color: #eee; background: #1a1a2e; }
+    .tab-btn.active { background: #4ade80; color: #000; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    /* Explorer Tab Styles */
+    .explorer-container { background: #16213e; border-radius: 12px; padding: 20px; min-height: 500px; }
+    .chain-group { margin-bottom: 16px; border: 1px solid #2a2a4e; border-radius: 8px; overflow: hidden; }
+    .chain-group-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #1a1a2e; cursor: pointer; transition: background 0.2s; }
+    .chain-group-header:hover { background: #2a2a4e; }
+    .chain-group-header .chain-name { font-weight: 600; color: #4ade80; font-size: 14px; }
+    .chain-group-header .chain-stats { font-size: 12px; color: #888; }
+    .chain-group-header .toggle-icon { color: #888; transition: transform 0.2s; }
+    .chain-group.expanded .toggle-icon { transform: rotate(90deg); }
+    .chain-runs { display: none; padding: 0; }
+    .chain-group.expanded .chain-runs { display: block; }
+    .run-item { padding: 12px 16px; border-top: 1px solid #2a2a4e; background: #16213e; }
+    .run-item:hover { background: #1a1a2e; }
+    .run-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .run-header .run-id { font-size: 12px; color: #60a5fa; }
+    .run-header .run-time { font-size: 11px; color: #666; }
+    .run-header .run-status { font-size: 12px; }
+    .run-header .run-status.success { color: #4ade80; }
+    .run-header .run-status.error { color: #f87171; }
+    .run-nodes { margin-top: 8px; padding-left: 12px; border-left: 2px solid #2a2a4e; }
+    .node-item { padding: 6px 0; font-size: 12px; font-family: monospace; }
+    .node-item .node-model { color: #a78bfa; }
+    .node-item .node-prompt { color: #888; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .node-item .node-status { margin-left: 8px; }
+    .node-detail { margin-top: 8px; padding: 10px; background: #1a1a2e; border-radius: 6px; font-size: 11px; }
+    .node-detail-label { color: #4ade80; font-weight: 500; margin-bottom: 4px; }
+    .node-detail-content { color: #ccc; white-space: pre-wrap; max-height: 100px; overflow-y: auto; }
+    .explorer-empty { text-align: center; padding: 60px 20px; color: #666; }
+    .explorer-empty .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.5; }
   </style>
 </head>
 <body>
@@ -109,6 +162,15 @@ let dashboard_html = {|<!DOCTYPE html>
     <span class="status" id="status"></span>
     <h1>🐫 Chain Engine Dashboard</h1>
   </div>
+
+  <!-- Tab Navigation -->
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('overview')">📊 Overview</button>
+    <button class="tab-btn" onclick="switchTab('explorer')">🔍 Explorer</button>
+  </div>
+
+  <!-- Overview Tab -->
+  <div id="tab-overview" class="tab-content active">
 
   <div class="stats-grid">
     <div class="card">
@@ -124,8 +186,8 @@ let dashboard_html = {|<!DOCTYPE html>
       <div class="card-value" id="avg-duration">-</div>
     </div>
     <div class="card">
-      <div class="card-label">Total Nodes</div>
-      <div class="card-value" id="total-nodes">-</div>
+      <div class="card-label">Total Tokens</div>
+      <div class="card-value" id="total-tokens">-</div>
     </div>
   </div>
 
@@ -145,14 +207,27 @@ let dashboard_html = {|<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="events">
-    <h2>Live Events</h2>
-    <div id="event-list"></div>
-  </div>
+  <div class="two-column">
+    <div class="events">
+      <h2>⚡ Live Events <span id="event-count" style="font-size:11px;color:#555;font-weight:normal;"></span></h2>
+      <div id="event-list">
+        <div class="empty-state">
+          <div class="icon">📡</div>
+          <div>Waiting for chain events...</div>
+          <div style="font-size:11px;margin-top:5px;">Events will appear here in real-time</div>
+        </div>
+      </div>
+    </div>
 
-  <div class="history-panel">
-    <h2>📜 History <button class="toggle-btn" onclick="loadHistory()">↻ Refresh</button></h2>
-    <div id="history-list"></div>
+    <div class="history-panel">
+      <h2>📜 History <button class="toggle-btn" onclick="loadHistory()">↻ Refresh</button></h2>
+      <div id="history-list">
+        <div class="empty-state">
+          <div class="icon">📋</div>
+          <div>No chain history yet</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="chart-panel">
@@ -163,6 +238,24 @@ let dashboard_html = {|<!DOCTYPE html>
     </div>
   </div>
 
+  </div><!-- End Overview Tab -->
+
+  <!-- Explorer Tab -->
+  <div id="tab-explorer" class="tab-content">
+    <div class="explorer-container">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="font-size:14px;color:#4ade80;margin:0;">🔍 Chain Explorer</h2>
+        <button class="toggle-btn" onclick="refreshExplorer()">↻ Refresh</button>
+      </div>
+      <div id="explorer-list">
+        <div class="explorer-empty">
+          <div class="icon">📂</div>
+          <div>Loading chain history...</div>
+        </div>
+      </div>
+    </div>
+  </div><!-- End Explorer Tab -->
+
   <script>
     // Global scope functions for onclick handlers
     window.switchChain = null;  // Will be set after DOMContentLoaded
@@ -171,6 +264,140 @@ let dashboard_html = {|<!DOCTYPE html>
       const btn = document.getElementById('toggle-expand');
       container.classList.toggle('expanded');
       btn.textContent = container.classList.contains('expanded') ? '✕ Close' : '⛶ Expand';
+    }
+
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+      document.querySelector('[onclick*=\"' + tabId + '\"]').classList.add('active');
+      document.getElementById('tab-' + tabId).classList.add('active');
+      if (tabId === 'explorer') refreshExplorer();
+    }
+
+    // Explorer: Parse nodes from mermaid DSL
+    function parseNodesFromDsl(dsl) {
+      if (!dsl) return [];
+      const nodes = [];
+      const nodeRegex = /([a-zA-Z_][a-zA-Z0-9_]*)\[\"([^\"]+)\"\]/g;
+      let match;
+      while ((match = nodeRegex.exec(dsl)) !== null) {
+        const [_, id, content] = match;
+        // Parse: LLM:model 'prompt' or Tool:name {...}
+        const llmMatch = content.match(/LLM:([^\s']+)\s*'([^']*)'?/);
+        const toolMatch = content.match(/Tool:([^\s{]+)/);
+        if (llmMatch) {
+          nodes.push({ id, type: 'llm', model: llmMatch[1], prompt: llmMatch[2] || '' });
+        } else if (toolMatch) {
+          nodes.push({ id, type: 'tool', name: toolMatch[1] });
+        } else {
+          nodes.push({ id, type: 'unknown', content: content.substring(0, 50) });
+        }
+      }
+      return nodes;
+    }
+
+    // Explorer: Render chain groups
+    function refreshExplorer() {
+      const listEl = document.getElementById('explorer-list');
+      listEl.innerHTML = '<div class="explorer-empty"><div class="icon">⏳</div><div>Loading...</div></div>';
+
+      fetch('/chain/history').then(r => r.json()).then(history => {
+        // Sort by timestamp ascending
+        history.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        // Collect mermaid_dsl from chain_start events
+        const dslMap = {};
+        history.forEach(h => {
+          if (h.event === 'chain_start' && h.chain_id && h.mermaid_dsl) {
+            dslMap[h.chain_id + '_' + h.timestamp] = h.mermaid_dsl;
+          }
+        });
+
+        // Group by chain_id
+        const chainGroups = {};
+        history.forEach(h => {
+          if (h.event === 'chain_complete' || h.event === 'chain_error') {
+            const chainId = h.chain_id || h.node_id || 'unknown';
+            if (!chainGroups[chainId]) chainGroups[chainId] = { runs: [], totalTokens: 0 };
+            // Find matching DSL (closest timestamp before this complete event)
+            let matchedDsl = null;
+            Object.keys(dslMap).forEach(key => {
+              if (key.startsWith(chainId + '_')) {
+                const ts = parseFloat(key.split('_')[1]);
+                if (ts <= h.timestamp) matchedDsl = dslMap[key];
+              }
+            });
+            const tokens = h.tokens ? (typeof h.tokens === 'object' ? (h.tokens.total_tokens || 0) : h.tokens) : 0;
+            chainGroups[chainId].runs.push({
+              ...h,
+              parsedNodes: parseNodesFromDsl(matchedDsl),
+              mermaidDsl: matchedDsl
+            });
+            chainGroups[chainId].totalTokens += tokens;
+          }
+        });
+
+        if (Object.keys(chainGroups).length === 0) {
+          listEl.innerHTML = '<div class="explorer-empty"><div class="icon">📂</div><div>No chain history yet</div><div style="font-size:11px;margin-top:8px;color:#555;">Run some chains to see them here</div></div>';
+          return;
+        }
+
+        // Render groups (sorted by most recent run)
+        const sortedChains = Object.entries(chainGroups)
+          .sort((a, b) => {
+            const aLatest = a[1].runs[a[1].runs.length - 1]?.timestamp || 0;
+            const bLatest = b[1].runs[b[1].runs.length - 1]?.timestamp || 0;
+            return bLatest - aLatest;
+          });
+
+        listEl.innerHTML = sortedChains.map(([chainId, data]) => {
+          const runCount = data.runs.length;
+          const latestRun = data.runs[data.runs.length - 1];
+          const isError = latestRun?.event === 'chain_error';
+
+          const runsHtml = data.runs.slice().reverse().map((run, idx) => {
+            const runNum = runCount - idx;
+            const date = new Date(run.timestamp * 1000);
+            const duration = run.duration_ms ? (run.duration_ms / 1000).toFixed(1) + 's' : '-';
+            const tokens = run.tokens ? (typeof run.tokens === 'object' ? (run.tokens.total_tokens || 0) : run.tokens) : 0;
+            const isErr = run.event === 'chain_error';
+            const nodesExecuted = run.nodes_executed || 0;
+
+            const nodesHtml = run.parsedNodes.length > 0
+              ? '<div class=\"run-nodes\">' + run.parsedNodes.map(n => {
+                  if (n.type === 'llm') {
+                    const shortPrompt = n.prompt.length > 60 ? n.prompt.substring(0, 60) + '...' : n.prompt;
+                    return '<div class=\"node-item\"><span class=\"node-model\">🤖 ' + n.model + '</span> <span class=\"node-prompt\">\"' + shortPrompt + '\"</span></div>';
+                  } else if (n.type === 'tool') {
+                    return '<div class=\"node-item\"><span class=\"node-model\">🔧 ' + n.name + '</span></div>';
+                  }
+                  return '<div class=\"node-item\"><span class=\"node-model\">❓ ' + n.content + '</span></div>';
+                }).join('') + '</div>'
+              : (nodesExecuted === 0 ? '<div style=\"font-size:11px;color:#666;margin-top:4px;\">(0 nodes executed)</div>' : '');
+
+            return '<div class=\"run-item\">' +
+              '<div class=\"run-header\">' +
+                '<span class=\"run-id\">#' + runNum + '</span>' +
+                '<span class=\"run-status ' + (isErr ? 'error' : 'success') + '\">' + (isErr ? '❌' : '✅') + ' ' + duration + ' • ' + tokens + ' tok</span>' +
+                '<span class=\"run-time\">' + date.toLocaleDateString() + ' ' + date.toLocaleTimeString() + '</span>' +
+              '</div>' +
+              nodesHtml +
+            '</div>';
+          }).join('');
+
+          return '<div class=\"chain-group ' + (runCount <= 3 ? 'expanded' : '') + '\" onclick=\"this.classList.toggle(\x27expanded\x27)\">' +
+            '<div class=\"chain-group-header\">' +
+              '<span class=\"chain-name\">' + (isError ? '❌ ' : '📂 ') + chainId + '</span>' +
+              '<span class=\"chain-stats\">' + runCount + ' run' + (runCount > 1 ? 's' : '') + ' • ' + data.totalTokens + ' tok</span>' +
+              '<span class=\"toggle-icon\">▶</span>' +
+            '</div>' +
+            '<div class=\"chain-runs\" onclick=\"event.stopPropagation()\">' + runsHtml + '</div>' +
+          '</div>';
+        }).join('');
+      }).catch(err => {
+        listEl.innerHTML = '<div class="explorer-empty"><div class="icon">❌</div><div>Failed to load history</div><div style="font-size:11px;margin-top:8px;color:#f87171;">' + err.message + '</div></div>';
+      });
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -226,17 +453,20 @@ let dashboard_html = {|<!DOCTYPE html>
     }
 
     // Truncate long text in Mermaid DSL and apply direction
-    function truncateMermaidDsl(dsl, maxLen = 40) {
+    function truncateMermaidDsl(dsl, maxLen = 25) {
       const fullTexts = {};  // nodeId -> fullText (for tooltip)
       let truncated = dsl.replace(/\["([^"]+)"\]/g, (match, text) => {
         // Extract node id from context (before the bracket)
         const nodeMatch = dsl.substring(0, dsl.indexOf(match)).match(/(\w+)\s*$/);
         const nodeId = nodeMatch ? nodeMatch[1] : 'node';
         fullTexts[nodeId] = text;
-        if (text.length > maxLen) {
-          return '["' + text.substring(0, maxLen) + '..."]';
+        // Shorten LLM model names (ollama:qwen3:1.7b -> qwen3:1.7b)
+        let shortText = text.replace(/LLM:ollama:([^']+)/, 'ollama:$1')
+                            .replace(/LLM:([a-z]+)\s*'/, '$1: \x27');
+        if (shortText.length > maxLen) {
+          return '["' + shortText.substring(0, maxLen) + '..."]';
         }
-        return match;
+        return '["' + shortText + '"]';
       });
       // Apply graph direction (replace LR/TB/RL/BT with current direction)
       truncated = truncated.replace(/graph\s+(LR|TB|RL|BT)/i, 'graph ' + graphDirection);
@@ -345,12 +575,14 @@ let dashboard_html = {|<!DOCTYPE html>
     function updateChainTabs() {
       const tabsEl = document.getElementById('chain-tabs');
       if (!tabsEl) return;
-      tabsEl.innerHTML = Object.keys(activeChains).map(id => {
+      const chainIds = Object.keys(activeChains);
+      tabsEl.innerHTML = chainIds.map((id, index) => {
         const chain = activeChains[id];
         const isActive = id === currentChainId;
         const elapsed = ((Date.now() - chain.startTime) / 1000).toFixed(0);
-        return '<button class="chain-tab' + (isActive ? ' active' : '') + '" onclick="switchChain(\'' + id + '\')">' +
-          id + ' (' + elapsed + 's)</button>';
+        const shortId = id.length > 15 ? id.substring(0, 12) + '...' : id;
+        return '<button class="chain-tab' + (isActive ? ' active' : '') + '" onclick="switchChain(\'' + id + '\')" title="' + id + '">' +
+          '#' + (index + 1) + ' ' + shortId + ' (' + elapsed + 's)</button>';
       }).join('');
     }
 
@@ -497,24 +729,60 @@ let dashboard_html = {|<!DOCTYPE html>
       });
     }
 
+    let eventCounter = 0;
     function addEvent(type, data) {
+      // Clear empty state on first event
+      const emptyState = eventList.querySelector('.empty-state');
+      if (emptyState) emptyState.remove();
+
+      eventCounter++;
+      const countEl = document.getElementById('event-count');
+      if (countEl) countEl.textContent = '(' + eventCounter + ')';
+
       const div = document.createElement('div');
       div.className = 'event ' + type;
       const id = data.chain_id || data.node_id || '';
       const detail = data.duration_ms ? (data.duration_ms / 1000).toFixed(1) + 's' : (data.message || '');
-      div.innerHTML = '<span class="event-icon">' + icons[type] + '</span><span class="event-type">' + type + '</span><span class="event-id">' + id + '</span><span class="event-detail">' + detail + '</span>';
+      const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      div.innerHTML = '<span class="event-icon">' + icons[type] + '</span><span class="event-type">' + type.replace('_', ' ') + '</span><span class="event-id">' + id + '</span><span class="event-detail">' + detail + '</span><span class="event-time">' + time + '</span>';
       eventList.insertBefore(div, eventList.firstChild);
       if (eventList.children.length > 50) eventList.removeChild(eventList.lastChild);
     }
 
     function fetchStats() {
+      // Try memory stats first, then fallback to history-based stats
       fetch('/chain/stats').then(r => r.json()).then(s => {
-        document.getElementById('total-chains').textContent = s.total_chains;
-        document.getElementById('success-rate').textContent = (s.success_rate * 100).toFixed(0) + '%';
-        document.getElementById('avg-duration').textContent = (s.avg_duration_ms / 1000).toFixed(1) + 's';
-        document.getElementById('total-nodes').textContent = s.total_nodes;
-        document.getElementById('success-rate').classList.toggle('warn', s.success_rate < 0.9);
+        // Only update if we have real data (not all zeros)
+        if (s.total_chains > 0 || s.total_tokens > 0) {
+          document.getElementById('total-chains').textContent = s.total_chains;
+          document.getElementById('success-rate').textContent = (s.success_rate * 100).toFixed(0) + '%';
+          document.getElementById('avg-duration').textContent = (s.avg_duration_ms / 1000).toFixed(1) + 's';
+          document.getElementById('total-tokens').textContent = s.total_tokens || 0;
+          document.getElementById('success-rate').classList.toggle('warn', s.success_rate < 0.9);
+        }
       }).catch(() => {});
+    }
+
+    // Compute stats from history data (persisted across restarts)
+    function computeStatsFromHistory(history) {
+      let totalChains = 0, successCount = 0, failCount = 0, totalDuration = 0, totalTokens = 0;
+      history.forEach(h => {
+        if (h.event === 'chain_complete') {
+          totalChains++;
+          successCount++;
+          if (h.duration_ms) totalDuration += h.duration_ms;
+          if (h.tokens) {
+            totalTokens += typeof h.tokens === 'object' ?
+              (h.tokens.total_tokens || h.tokens.prompt_tokens + h.tokens.completion_tokens || 0) : (h.tokens || 0);
+          }
+        } else if (h.event === 'chain_error') {
+          totalChains++;
+          failCount++;
+        }
+      });
+      const successRate = totalChains > 0 ? successCount / totalChains : 1;
+      const avgDuration = successCount > 0 ? totalDuration / successCount : 0;
+      return { totalChains, successRate, avgDuration, totalTokens };
     }
 
     // Store mermaid DSL from history for replay
@@ -524,8 +792,19 @@ let dashboard_html = {|<!DOCTYPE html>
       fetch('/chain/history').then(r => r.json()).then(history => {
         const listEl = document.getElementById('history-list');
         if (!history || history.length === 0) {
-          listEl.innerHTML = '<div style="color:#666;text-align:center;padding:20px;">No history yet</div>';
+          listEl.innerHTML = '<div class="empty-state"><div class="icon">📋</div><div>No chain history yet</div></div>';
           return;
+        }
+
+        // Update stats from history (fallback for when memory stats are empty)
+        const stats = computeStatsFromHistory(history);
+        const currentChains = document.getElementById('total-chains').textContent;
+        if (currentChains === '-' || currentChains === '0') {
+          document.getElementById('total-chains').textContent = stats.totalChains;
+          document.getElementById('success-rate').textContent = (stats.successRate * 100).toFixed(0) + '%';
+          document.getElementById('avg-duration').textContent = (stats.avgDuration / 1000).toFixed(1) + 's';
+          document.getElementById('total-tokens').textContent = stats.totalTokens;
+          document.getElementById('success-rate').classList.toggle('warn', stats.successRate < 0.9);
         }
         // Store mermaid_dsl from chain_start events
         history.forEach(h => {
@@ -533,7 +812,9 @@ let dashboard_html = {|<!DOCTYPE html>
             historyMermaid[h.chain_id] = h.mermaid_dsl;
           }
         });
-        // Group by chain_id, show only complete/error events
+        // Sort by timestamp ascending so newest entry wins when deduplicating
+        history.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        // Group by chain_id, show only complete/error events (newest overwrites oldest)
         const chains = {};
         history.forEach(h => {
           if (h.event === 'chain_complete' || h.event === 'chain_error') {
@@ -546,7 +827,7 @@ let dashboard_html = {|<!DOCTYPE html>
           const dateStr = date.toLocaleDateString();
           const isError = h.event === 'chain_error';
           const duration = h.duration_ms ? (h.duration_ms / 1000).toFixed(1) + 's' : '-';
-          const tokens = h.tokens ? (typeof h.tokens === 'object' ? h.tokens.input + h.tokens.output : h.tokens) : 0;
+          const tokens = h.tokens ? (typeof h.tokens === 'object' ? (h.tokens.total_tokens || h.tokens.prompt_tokens + h.tokens.completion_tokens || 0) : h.tokens) : 0;
           const chainId = h.chain_id || h.node_id || 'unknown';
           const hasMermaid = historyMermaid[chainId] ? true : false;
           return '<div class="history-item ' + h.event + '">' +
@@ -616,7 +897,7 @@ let dashboard_html = {|<!DOCTYPE html>
             const eventsEl = document.getElementById('event-list');
             if (eventsEl) {
               const duration = chainComplete.duration_ms ? (chainComplete.duration_ms / 1000).toFixed(2) + 's' : '-';
-              const tokens = chainComplete.tokens ? (typeof chainComplete.tokens === 'object' ? chainComplete.tokens.input + chainComplete.tokens.output : chainComplete.tokens) : 0;
+              const tokens = chainComplete.tokens ? (typeof chainComplete.tokens === 'object' ? (chainComplete.tokens.total_tokens || chainComplete.tokens.prompt_tokens + chainComplete.tokens.completion_tokens || 0) : chainComplete.tokens) : 0;
               eventsEl.innerHTML = '<div class="event ' + chainComplete.event + '">' +
                 '<strong>' + (chainComplete.event === 'chain_error' ? '❌ Error' : '✓ Complete') + '</strong><br>' +
                 'Duration: ' + duration + '<br>' +
@@ -645,14 +926,22 @@ let dashboard_html = {|<!DOCTYPE html>
     };
 
     function refreshTokenChart() {
+      const summaryEl = document.getElementById('token-summary');
+      const chartContainer = document.querySelector('.chart-container');
+
+      // Show loading state
+      summaryEl.innerHTML = '<div class="chart-loading">Loading token data</div>';
+
       fetch('/chain/history').then(r => r.json()).then(history => {
         // Aggregate token usage by model from chain_complete events
         const byModel = {};
         const byHour = {};
+        let totalTokens = 0;
 
         history.forEach(h => {
           if (h.event === 'chain_complete' && h.tokens) {
-            const tokens = typeof h.tokens === 'object' ? h.tokens.total_tokens || (h.tokens.input + h.tokens.output) : h.tokens;
+            const tokens = typeof h.tokens === 'object' ? (h.tokens.total_tokens || (h.tokens.prompt_tokens || 0) + (h.tokens.completion_tokens || 0) || 0) : (h.tokens || 0);
+            totalTokens += tokens;
             // Try to extract model from chain_id or use 'unknown'
             let model = 'unknown';
             if (h.chain_id) {
@@ -670,14 +959,26 @@ let dashboard_html = {|<!DOCTYPE html>
           }
         });
 
-        // Update summary
-        const summaryEl = document.getElementById('token-summary');
-        summaryEl.innerHTML = Object.entries(byModel).map(([model, tokens]) =>
-          '<div class="model-stat">' +
-            '<div class="model-dot" style="background:' + (modelColors[model] || '#666') + '"></div>' +
-            '<span>' + model + ': ' + tokens.toLocaleString() + '</span>' +
-          '</div>'
-        ).join('');
+        // Handle empty data
+        if (totalTokens === 0) {
+          summaryEl.innerHTML = '';
+          chartContainer.innerHTML = '<div class="chart-empty"><div class="icon">📊</div><div>No token usage data yet</div><div style="font-size:11px;margin-top:5px;color:#555;">Run some chains to see usage stats</div></div>';
+          return;
+        }
+
+        // Restore canvas if needed
+        if (!document.getElementById('token-chart')) {
+          chartContainer.innerHTML = '<canvas id="token-chart"></canvas>';
+        }
+
+        // Update summary with total
+        summaryEl.innerHTML = '<div class="model-stat" style="font-weight:bold;"><span>Total: ' + totalTokens.toLocaleString() + ' tokens</span></div>' +
+          Object.entries(byModel).map(([model, tokens]) =>
+            '<div class="model-stat">' +
+              '<div class="model-dot" style="background:' + (modelColors[model] || '#666') + '"></div>' +
+              '<span>' + model + ': ' + tokens.toLocaleString() + '</span>' +
+            '</div>'
+          ).join('');
 
         // Create/update chart
         const ctx = document.getElementById('token-chart').getContext('2d');
@@ -710,8 +1011,10 @@ let dashboard_html = {|<!DOCTYPE html>
             }
           });
         }
-      }).catch(() => {
-        document.getElementById('token-summary').innerHTML = '<span style="color:#f87171;">Failed to load token data</span>';
+      }).catch((err) => {
+        console.error('Token chart error:', err);
+        summaryEl.innerHTML = '';
+        chartContainer.innerHTML = '<div class="chart-error"><div class="icon">⚠️</div><div>Failed to load token data</div><div style="font-size:11px;margin-top:5px;"><button class="toggle-btn" onclick="refreshTokenChart()">↻ Retry</button></div></div>';
       });
     }
 
