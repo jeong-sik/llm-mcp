@@ -482,14 +482,20 @@ let ollama_schema : tool_schema = {
   description = {|Run local LLM via Ollama with optional MCP tool support.
 
 Use cases:
-- Run Devstral, DeepSeek-R1, Qwen3-Coder locally (free, no API key)
-- Function calling with tool-capable models (devstral, qwen3, llama3.3)
+- Run Devstral, DeepSeek-R1, Qwen3-Coder, GLM-4.7-Flash locally (free, no API key)
+- Function calling with tool-capable models (devstral, qwen3, llama3.3, glm-4.7-flash)
 - Privacy-first: all processing on local machine
 - 128GB RAM can run multiple 30B+ models simultaneously
 
+Recommended models:
+- glm-4.7-flash: 30B MoE (3B active), fastest reasoning, ~32 tok/s
+- devstral: Code-focused, function calling
+- qwen3-coder:30b: Strong coding, thinking mode
+- deepseek-r1:32b: Deep reasoning
+
 Parameters:
 - prompt: The prompt to send
-- model: Model name (default: devstral). Examples: devstral, deepseek-r1:32b, qwen3-coder:30b
+- model: Model name (default: devstral). Examples: glm-4.7-flash, devstral, qwen3-coder:30b
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - timeout: Timeout in seconds (default: 300)
@@ -507,7 +513,7 @@ Model must support tools capability (devstral, qwen3, llama3.3, etc).|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name (devstral, deepseek-r1:32b, qwen3-coder:30b, etc)");
+        ("description", `String "Model name (glm-4.7-flash, devstral, qwen3-coder:30b, deepseek-r1:32b, etc)");
         ("default", `String "devstral");
       ]);
       ("system_prompt", `Assoc [
