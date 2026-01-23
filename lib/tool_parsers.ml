@@ -61,10 +61,10 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
   let model = json |> member "model" |> to_string_option |> Option.value ~default:"gpt-5.2" in
-  let budget_mode = budget_mode_value json in
+  (* Default to "medium" - xhigh takes too long for most tasks *)
   let reasoning_effort =
     json |> member "reasoning_effort" |> to_string_option
-    |> Option.value ~default:(if budget_mode then "medium" else "xhigh")
+    |> Option.value ~default:"medium"
     |> reasoning_effort_of_string in
   let sandbox =
     json |> member "sandbox" |> to_string_option
@@ -79,7 +79,7 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
 let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"devstral" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"qwen3:30b-a3b" in
   let system_prompt = json |> member "system_prompt" |> to_string_option in
   let temperature =
     try json |> member "temperature" |> to_float
@@ -224,8 +224,10 @@ let build_claude_cmd args =
       let wrapper = me_root ^ "/workspace/yousleepwhen/llm-mcp/scripts/claude-wrapper.sh" in
       let cmd = [wrapper; "-p"; "--model"; model] in
       (* --betas context-1m enables 1M context but requires API key (charges apply)
-         Only add when explicitly requested via long_context=true *)
-      let cmd = if long_context then
+         Only add when: 1) explicitly requested via long_context=true
+                        2) ANTHROPIC_API_KEY is set (API key mode, not Claude Max subscription) *)
+      let has_api_key = Sys.getenv_opt "ANTHROPIC_API_KEY" |> Option.is_some in
+      let cmd = if long_context && has_api_key then
         cmd @ ["--betas"; "context-1m-2025-08-07"]
       else cmd in
       let cmd = cmd @ ["--settings"; {|{"disableAllHooks": true}|}] in
