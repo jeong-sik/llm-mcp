@@ -664,11 +664,12 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let input_ref = parse_string_with_default json "input_ref" "input" in
       let* transform = parse_adapter_transform (json |> member "transform") in
       let on_error =
-        match parse_string_opt json "on_error" with
-        | Some "fail" -> `Fail
-        | Some "passthrough" -> `Passthrough
-        | Some s when String.length s > 8 && String.sub s 0 8 = "default:" ->
+        match json |> member "on_error" with
+        | `String "fail" -> `Fail
+        | `String "passthrough" -> `Passthrough
+        | `String s when String.length s > 8 && String.sub s 0 8 = "default:" ->
             `Default (String.sub s 8 (String.length s - 8))
+        | `Assoc [("default", `String s)] -> `Default s
         | _ -> `Fail
       in
       Ok (Adapter { input_ref; transform; on_error })

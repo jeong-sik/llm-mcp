@@ -1,0 +1,1436 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM-MCP Chain Presets</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+body{margin:0;padding:24px;font-family:ui-sans-serif,system-ui;background:#0f1115;color:#e6e6e6;}
+h1{font-size:22px;margin:0 0 16px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;}
+.card{background:#151821;border:1px solid #2a2f3a;border-radius:12px;padding:14px;}
+.card h2{font-size:14px;margin:0 0 6px;color:#9bd1ff;}
+.meta{font-size:12px;color:#9aa3b2;margin-bottom:8px;}
+.error{border-color:#ff6b6b;}
+pre.mermaid{background:#0f1115;border-radius:8px;padding:8px;overflow:auto;}
+</style>
+</head>
+<body>
+<h1>LLM-MCP Chain Presets</h1>
+<div class="grid">
+<section class="card"><h2>code-migration.json</h2><div class="meta">id: code-migration · nodes: 7</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    analyze-source[&quot;LLM:codex &#39;Analyze this source code for migration:
+
+Source Code ({{input.source_lang}}):
+```
+{{input.source_code}}
+```
+
+Extract:
+1. Core functionality and business logic
+2. Dependencies and imports
+3. Data structures used
+4. Side effects (IO, network, state)
+5. Error handling patterns
+
+Output JSON: {&#39;functions&#39;: [...], &#39;dependencies&#39;: [...], &#39;data_structures&#39;: [...], &#39;side_effects&#39;: [...], &#39;complexity_notes&#39;: [...]}&#39;&quot;]:::llm
+    identify-patterns[&quot;LLM:gemini &#39;Identify migration patterns from {{input.source_lang}} to {{input.target_lang}}:
+
+Source Analysis:
+{{source_analysis}}
+
+For each pattern found, suggest the idiomatic equivalent in {{input.target_lang}}.
+
+Output JSON: {&#39;patterns&#39;: [{&#39;source_pattern&#39;: &#39;...&#39;, &#39;target_pattern&#39;: &#39;...&#39;, &#39;notes&#39;: &#39;...&#39;}]}&#39;&quot;]:::llm
+    generate-migration-plan[&quot;LLM:claude-cli &#39;Create a detailed migration plan:
+
+Source Language: {{input.source_lang}}
+Target Language: {{input.target_lang}}
+
+Source Analysis:
+{{source_analysis}}
+
+Migration Patterns:
+{{migration_patterns}}
+
+Generate a step-by-step plan with:
+1. Order of migration (dependency-aware)
+2. Risk assessment per component
+3. Test strategy
+4. Rollback considerations
+
+Output JSON: {&#39;steps&#39;: [{&#39;order&#39;: N, &#39;component&#39;: &#39;...&#39;, &#39;action&#39;: &#39;...&#39;, &#39;risk&#39;: &#39;low|medium|high&#39;, &#39;test_approach&#39;: &#39;...&#39;}], &#39;estimated_effort&#39;: &#39;...&#39;, &#39;blockers&#39;: [...]}&#39;&quot;]:::llm
+    transform-code[&quot;LLM:codex &#39;Transform the source code from {{input.source_lang}} to {{input.target_lang}}.
+
+Source Code:
+```{{input.source_lang}}
+{{input.source_code}}
+```
+
+Migration Plan:
+{{migration_plan}}
+
+Migration Patterns:
+{{migration_patterns}}
+
+Requirements:
+1. Preserve all functionality
+2. Use idiomatic {{input.target_lang}} patterns
+3. Maintain equivalent error handling
+4. Add comments for non-obvious translations
+
+Output the complete transformed code.&#39;&quot;]:::llm
+    generate-tests[&quot;LLM:claude-cli &#39;Generate equivalence tests for the migration:
+
+Original Code ({{input.source_lang}}):
+```
+{{input.source_code}}
+```
+
+Migrated Code ({{input.target_lang}}):
+```
+{{transformed_code}}
+```
+
+Source Analysis:
+{{source_analysis}}
+
+Generate tests that verify:
+1. Function outputs match for same inputs
+2. Edge cases behave identically
+3. Error conditions are handled the same
+
+Output test code in {{input.target_lang}} test framework.&#39;&quot;]:::llm
+    verify-correctness[&quot;LLM:gemini &#39;Verify the migration correctness:
+
+Original ({{input.source_lang}}):
+```
+{{input.source_code}}
+```
+
+Migrated ({{input.target_lang}}):
+```
+{{transformed_code}}
+```
+
+Source Analysis:
+{{source_analysis}}
+
+Check for:
+1. Missing functionality
+2. Semantic differences
+3. Performance implications
+4. Security considerations
+
+Output JSON: {&#39;issues&#39;: [...], &#39;warnings&#39;: [...], &#39;verified&#39;: true|false, &#39;confidence&#39;: 0.0-1.0}&#39;&quot;]:::llm
+    final-report[&quot;LLM:claude-cli &#39;Generate the final migration report:
+
+## Migration Summary
+- Source: {{input.source_lang}}
+- Target: {{input.target_lang}}
+
+## Transformed Code
+```{{input.target_lang}}
+{{transformed_code}}
+```
+
+## Equivalence Tests
+```
+{{equivalence_tests}}
+```
+
+## Verification Results
+{{verification}}
+
+## Migration Plan Reference
+{{migration_plan}}
+
+Format as a complete migration document with:
+1. Executive Summary
+2. Code (with syntax highlighting hints)
+3. Tests
+4. Known Limitations
+5. Next Steps&#39;&quot;]:::llm
+    analyze-source --&gt; verify-correctness
+    identify-patterns --&gt; generate-migration-plan
+    analyze-source --&gt; generate-migration-plan
+    analyze-source --&gt; generate-tests
+    analyze-source --&gt; identify-patterns
+</pre></section>
+
+<section class="card"><h2>deep-research.json</h2><div class="meta">id: deep-research · nodes: 7</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    query-expansion[&quot;LLM:gemini &#39;Expand this research query into 3-5 specific sub-questions that would help thoroughly answer it.
+
+Query: {{input.query}}
+
+Output as JSON: {&#39;sub_queries&#39;: [&#39;q1&#39;, &#39;q2&#39;, &#39;q3&#39;]}&#39;&quot;]:::llm
+    web-search[[&quot;Fanout&quot;]]:::fanout
+    extract-facts[&quot;LLM:claude-cli &#39;Extract key facts from these search results. For each fact, note the source.
+
+Search Results:
+{{search_results}}
+
+Output as JSON: {&#39;facts&#39;: [{&#39;claim&#39;: &#39;...&#39;, &#39;source&#39;: &#39;...&#39;, &#39;confidence&#39;: 0.0-1.0}]}&#39;&quot;]:::llm
+    fact-check[&quot;LLM:codex &#39;Cross-reference these facts. Identify:
+1. Facts supported by multiple sources (high confidence)
+2. Contradictory claims (needs resolution)
+3. Single-source facts (lower confidence)
+
+Facts:
+{{extracted_facts}}
+
+Output as JSON: {&#39;verified&#39;: [...], &#39;contradictions&#39;: [...], &#39;unverified&#39;: [...]}&#39;&quot;]:::llm
+    synthesize[&quot;LLM:gemini &#39;Synthesize a comprehensive answer to the original query based on verified facts.
+
+Original Query: {{input.query}}
+
+Verified Facts:
+{{fact_check_results.verified}}
+
+Contradictions to address:
+{{fact_check_results.contradictions}}
+
+Write a well-structured research report with:
+1. Executive Summary
+2. Key Findings (with citations)
+3. Areas of Uncertainty
+4. Recommendations for Further Research
+
+Use markdown formatting.&#39;&quot;]:::llm
+    generate-citations[&quot;LLM:gemini &#39;Generate a bibliography from the sources used.
+
+Facts with sources:
+{{extracted_facts}}
+
+Output in APA format.&#39;&quot;]:::llm
+    final-assembly[&quot;LLM:claude-cli &#39;Combine the research report and bibliography into a final document.
+
+Report:
+{{research_report}}
+
+Bibliography:
+{{bibliography}}
+
+Format as a complete research document with proper sections.&#39;&quot;]:::llm
+    fact-check --&gt; synthesize
+    query-expansion --&gt; web-search
+    extract-facts --&gt; generate-citations
+    web-search --&gt; extract-facts
+    generate-citations --&gt; final-assembly
+    synthesize --&gt; final-assembly
+    extract-facts --&gt; fact-check
+</pre></section>
+
+<section class="card"><h2>design_to_tasks.json</h2><div class="meta">id: design_to_tasks · nodes: 3</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    fetch_design[&quot;Tool:figma.get_node_summary {\&quot;node_id\&quot;:\&quot;{{input.node_id}}\&quot;,\&quot;max_children\&quot;:50}&quot;]:::tool
+    plan_tasks[&quot;LLM:gemini &#39;Analyze this Figma node summary and break it down into implementation tasks for MASC.
+
+Figma Summary:
+{{fetch_design.output}}
+
+Output ONLY a valid JSON array of task objects with these fields:
+- title: string
+- priority: integer (1-5, 1=highest)
+- description: string (detailed implementation steps)
+
+Example:
+[{&#39;title&#39;: &#39;Implement Header&#39;, &#39;priority&#39;: 2, &#39;description&#39;: &#39;...&#39;}]&#39;&quot;]:::llm
+    execute_batch[&quot;Tool:masc.batch_add_tasks {\&quot;tasks\&quot;:\&quot;{{plan_tasks.output}}\&quot;}&quot;]:::tool
+    fetch_design --&gt; plan_tasks
+    plan_tasks --&gt; execute_batch
+</pre></section>
+
+<section class="card"><h2>figma-to-prototype.json</h2><div class="meta">id: figma-to-prototype · nodes: 9</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    parse-figma-url[&quot;Tool:figma:figma_parse_url {\&quot;url\&quot;:\&quot;{{input.figma_url}}\&quot;}&quot;]:::tool
+    get-design-structure[&quot;Tool:figma:figma_get_node_summary {\&quot;file_key\&quot;:\&quot;{{figma_meta.file_key}}\&quot;,\&quot;node_id\&quot;:\&quot;{{figma_meta.node_id}}\&quot;}&quot;]:::tool
+    extract-dsl[&quot;Tool:figma:figma_get_node_bundle {\&quot;file_key\&quot;:\&quot;{{figma_meta.file_key}}\&quot;,\&quot;node_id\&quot;:\&quot;{{figma_meta.node_id}}\&quot;,\&quot;depth\&quot;:3}&quot;]:::tool
+    analyze-components[&quot;LLM:gemini &#39;Analyze this Figma DSL and identify:
+1. Component hierarchy
+2. Reusable components
+3. Design tokens (colors, spacing, typography)
+4. Layout patterns (flex, grid, absolute)
+
+Figma DSL:
+{{figma_dsl}}
+
+Output JSON: {&#39;components&#39;: [...], &#39;tokens&#39;: {...}, &#39;patterns&#39;: [...]}&#39;&quot;]:::llm
+    generate-web[&quot;LLM:claude-cli &#39;Generate React + Tailwind code for this Figma design.
+
+Design Structure:
+{{design_structure}}
+
+Component Analysis:
+{{component_analysis}}
+
+Requirements:
+- TypeScript
+- Functional components
+- Tailwind CSS (no inline styles)
+- Responsive (mobile-first)
+- Extract colors to CSS variables
+
+### Example Output (Button 120x48, blue, rounded-8):
+```tsx
+interface ButtonProps {
+  label: string;
+  onClick?: () =&gt; void;
+}
+
+export const Button: React.FC&lt;ButtonProps&gt; = ({ label, onClick }) =&gt; {
+  return (
+    &lt;button
+      onClick={onClick}
+      className=&#39;w-[120px] h-[48px] bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg transition-colors&#39;
+    &gt;
+      {label}
+    &lt;/button&gt;
+  );
+};
+```
+
+Output complete React component code following this pattern.&#39;&quot;]:::llm
+    generate-ios[&quot;LLM:codex &#39;Generate SwiftUI code for this Figma design.
+
+Design Structure:
+{{design_structure}}
+
+Component Analysis:
+{{component_analysis}}
+
+Requirements:
+- SwiftUI (iOS 16+)
+- @ViewBuilder patterns
+- Preview provider
+- SF Symbols where appropriate
+- Dynamic Type support
+
+### Example Output (Button 120x48, blue, rounded-8):
+```swift
+import SwiftUI
+
+struct PrimaryButton: View {
+    let label: String
+    var action: () -&gt; Void = {}
+    
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .frame(width: 120, height: 48)
+                .background(Color.blue)
+                .cornerRadius(8)
+        }
+    }
+}
+
+#Preview {
+    PrimaryButton(label: &#39;Submit&#39;)
+}
+```
+
+IMPORTANT: Use ONLY valid SwiftUI modifiers. These do NOT exist: .text(), .rounded(), .center().
+
+Output complete SwiftUI View code following this pattern.&#39;&quot;]:::llm
+    generate-android[&quot;LLM:gemini &#39;Generate Jetpack Compose code for this Figma design.
+
+Design Structure:
+{{design_structure}}
+
+Component Analysis:
+{{component_analysis}}
+
+Requirements:
+- Kotlin + Jetpack Compose
+- Material3 theme
+- @Preview annotations
+- Modifier patterns
+- State hoisting
+
+### Example Output (Button 120x48, blue, rounded-8):
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun PrimaryButton(
+    label: String,
+    onClick: () -&gt; Unit = {},
+    modifier: Modifier = Modifier
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .width(120.dp)
+            .height(48.dp),
+        shape = RoundedCornerShape(8.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color(0xFF007AFF)
+        )
+    ) {
+        Text(label)
+    }
+}
+
+@Preview
+@Composable
+fun PrimaryButtonPreview() {
+    PrimaryButton(label = &#39;Submit&#39;)
+}
+```
+
+Output complete Composable code following this pattern.&#39;&quot;]:::llm
+    generate-flutter[&quot;LLM:codex &#39;Generate Flutter/Dart code for this Figma design.
+
+Design Structure:
+{{design_structure}}
+
+Component Analysis:
+{{component_analysis}}
+
+Requirements:
+- Flutter 3.x
+- StatelessWidget/StatefulWidget
+- Theme.of(context) for styling
+- Responsive with MediaQuery
+- Extract to separate widgets
+
+### Example Output (Button 120x48, blue, rounded-8):
+```dart
+import &#39;package:flutter/material.dart&#39;;
+
+class PrimaryButton extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+
+  const PrimaryButton({
+    super.key,
+    required this.label,
+    this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 120,
+      height: 48,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF007AFF),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+```
+
+Output complete Flutter Widget code following this pattern.&#39;&quot;]:::llm
+    merge-outputs[&quot;LLM:claude-cli &#39;Compile the generated prototypes into a structured report.
+
+## Web (React + Tailwind)
+{{web_code}}
+
+## iOS (SwiftUI)
+{{ios_code}}
+
+## Android (Jetpack Compose)
+{{android_code}}
+
+## Flutter
+{{flutter_code}}
+
+Create a markdown report with:
+1. Overview of the design
+2. Shared design tokens (colors, spacing)
+3. Platform-specific code blocks
+4. Implementation notes per platform
+5. Known limitations/TODOs&#39;&quot;]:::llm
+    parse-figma-url --&gt; get-design-structure
+    generate-flutter --&gt; merge-outputs
+    generate-android --&gt; merge-outputs
+    generate-ios --&gt; merge-outputs
+    generate-web --&gt; merge-outputs
+    get-design-structure --&gt; generate-flutter
+    analyze-components --&gt; generate-flutter
+    parse-figma-url --&gt; extract-dsl
+    get-design-structure --&gt; generate-ios
+    analyze-components --&gt; generate-ios
+    get-design-structure --&gt; generate-android
+    analyze-components --&gt; generate-android
+    get-design-structure --&gt; generate-web
+    analyze-components --&gt; generate-web
+    extract-dsl --&gt; analyze-components
+</pre></section>
+
+<section class="card"><h2>figma-to-web-component.json</h2><div class="meta">id: figma-to-web-component · nodes: 10</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    parse-url[&quot;Tool:figma:figma_parse_url {\&quot;url\&quot;:\&quot;{{input.figma_url}}\&quot;}&quot;]:::tool
+    export-figma-image[&quot;Tool:figma:figma_export_image {\&quot;file_key\&quot;:\&quot;{{figma_meta.file_key}}\&quot;,\&quot;node_id\&quot;:\&quot;{{figma_meta.node_id}}\&quot;,\&quot;scale\&quot;:2,\&quot;format\&quot;:\&quot;png\&quot;}&quot;]:::tool
+    get-design-structure[&quot;Tool:figma:figma_get_node_summary {\&quot;file_key\&quot;:\&quot;{{figma_meta.file_key}}\&quot;,\&quot;node_id\&quot;:\&quot;{{figma_meta.node_id}}\&quot;}&quot;]:::tool
+    extract-dsl[&quot;Tool:figma:figma_get_node_bundle {\&quot;file_key\&quot;:\&quot;{{figma_meta.file_key}}\&quot;,\&quot;node_id\&quot;:\&quot;{{figma_meta.node_id}}\&quot;,\&quot;depth\&quot;:4,\&quot;include_variables\&quot;:true,\&quot;include_image_fills\&quot;:true}&quot;]:::tool
+    vision-analyze[&quot;LLM:claude-cli &#39;이 Figma 디자인을 분석하세요.
+
+Figma DSL:
+{{figma_dsl}}
+
+구조 요약:
+{{design_summary}}
+
+다음 정보를 추출하세요:
+
+1. **컴포넌트 타입**: 버튼, 카드, 리스트, 폼, 네비게이션 등
+2. **레이아웃 구조**: Flexbox/Grid 패턴, 방향, 정렬
+3. **디자인 토큰**: 색상 (#hex), 간격 (px), 폰트 크기/굵기, border-radius
+4. **텍스트 내용**: DSL의 characters 필드 그대로 (번역/수정 금지)
+5. **인터랙션 힌트**: 버튼 hover, 입력 focus 등
+
+JSON 형식으로 출력:
+{
+  &#39;component_type&#39;: &#39;string&#39;,
+  &#39;layout&#39;: { &#39;direction&#39;: &#39;row|column&#39;, &#39;align&#39;: &#39;...&#39;, &#39;justify&#39;: &#39;...&#39; },
+  &#39;tokens&#39;: { &#39;colors&#39;: [...], &#39;spacing&#39;: [...], &#39;typography&#39;: {...} },
+  &#39;texts&#39;: [...],
+  &#39;suggested_name&#39;: &#39;PascalCase&#39;
+}&#39;&quot;]:::llm
+    component-gate[&quot;LLM:gemini &#39;이 분석 결과가 구현할 만한 컴포넌트인지 판단하세요.
+
+분석:
+{{vision_analysis}}
+
+DSL 구조:
+{{design_summary}}
+
+**판단 기준:**
+- ✅ 구현해야 함: 2개 이상 자식 노드, 의미 있는 UI (버튼, 카드, 폼 등)
+- ❌ 스킵: 빈 Frame, 자식 1개인 wrapper, 순수 장식
+
+**출력 (JSON):**
+{
+  &#39;implementable&#39;: true/false,
+  &#39;reason&#39;: &#39;구현/스킵 이유&#39;,
+  &#39;component_type&#39;: &#39;card|button|list|form|nav|...&#39;,
+  &#39;complexity&#39;: &#39;simple|medium|complex&#39;,
+  &#39;suggested_name&#39;: &#39;ComponentName&#39;
+}&#39;&quot;]:::llm
+    generate-react-code[&quot;LLM:claude-cli &#39;React + Tailwind 컴포넌트를 생성하세요.
+
+## 디자인 분석
+{{vision_analysis}}
+
+## 게이트 결과
+{{gate_result}}
+
+## 상세 DSL
+{{figma_dsl}}
+
+## 요구사항
+1. TypeScript + React.FC
+2. Tailwind CSS만 사용 (inline style 금지)
+3. DSL의 characters 텍스트 그대로 사용 (번역 금지)
+4. 정확한 색상값 사용: #RRGGBB → bg-[#RRGGBB]
+5. 정확한 크기: width × height → w-[320px] h-[200px]
+6. border-radius: r:8 → rounded-lg 또는 rounded-[8px]
+7. 간격: gap:12 → gap-3, padding:16 → p-4
+
+## 출력 형식
+코드만 출력 (설명 없이):
+```tsx
+// 컴포넌트 코드
+```&#39;&quot;]:::llm
+    verify-visual[&quot;Tool:figma:figma_verify_visual {\&quot;file_key\&quot;:\&quot;{{figma_meta.file_key}}\&quot;,\&quot;node_id\&quot;:\&quot;{{figma_meta.node_id}}\&quot;,\&quot;html\&quot;:\&quot;{{react_code}}\&quot;,\&quot;target_ssim\&quot;:0.95,\&quot;max_iterations\&quot;:5}&quot;]:::tool
+    importance-check[&quot;LLM:gemini &#39;시각적 검증 결과를 분석하세요.
+
+## 검증 결과
+{{verification}}
+
+## 디자인 분석
+{{vision_analysis}}
+
+**중요도 판단 기준:**
+1. 차이 영역이 전체의 몇 %인가?
+2. 기능적 요소(버튼, 입력창)인가 vs 장식적 요소(그림자, 테두리)인가?
+3. 사용자가 바로 인지하는 영역인가?
+
+**출력 (JSON):**
+{
+  &#39;overall_passed&#39;: true/false,
+  &#39;ssim_score&#39;: 0.0-1.0,
+  &#39;text_accuracy&#39;: 0.0-1.0,
+  &#39;importance&#39;: &#39;low|medium|high&#39;,
+  &#39;remaining_differences&#39;: [&#39;차이점1&#39;, &#39;차이점2&#39;],
+  &#39;recommendation&#39;: &#39;pass|retry|human_review&#39;,
+  &#39;rationale&#39;: &#39;판단 근거&#39;
+}&#39;&quot;]:::llm
+    final-output[&quot;LLM:gemini &#39;최종 결과를 정리하세요.
+
+## 컴포넌트 정보
+- 타입: {{gate_result.component_type}}
+- 이름: {{gate_result.suggested_name}}
+
+## 생성된 코드
+{{react_code}}
+
+## 검증 결과
+{{verification}}
+
+## 중요도 분석
+{{importance_result}}
+
+## 출력 형식 (Markdown)
+### {{gate_result.suggested_name}}
+
+**검증 결과:** SSIM {{importance_result.ssim_score}}, 텍스트 정확도 {{importance_result.text_accuracy}}
+
+**상태:** {{importance_result.recommendation}}
+
+**코드:**
+```tsx
+// 코드 삽입
+```
+
+**남은 차이점:**
+- (있으면 목록)
+
+**권장 조치:**
+- (있으면 목록)&#39;&quot;]:::llm
+    get-design-structure --&gt; vision-analyze
+    extract-dsl --&gt; vision-analyze
+    parse-url --&gt; get-design-structure
+    get-design-structure --&gt; component-gate
+    vision-analyze --&gt; component-gate
+    parse-url --&gt; verify-visual
+    generate-react-code --&gt; verify-visual
+    parse-url --&gt; extract-dsl
+    component-gate --&gt; final-output
+    importance-check --&gt; final-output
+    generate-react-code --&gt; final-output
+    vision-analyze --&gt; importance-check
+    verify-visual --&gt; importance-check
+    parse-url --&gt; export-figma-image
+    extract-dsl --&gt; generate-react-code
+    component-gate --&gt; generate-react-code
+    vision-analyze --&gt; generate-react-code
+</pre></section>
+
+<section class="card"><h2>incident-response.json</h2><div class="meta">id: incident-response · nodes: 10</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    parse-alert[&quot;LLM:gemini &#39;Parse this incident alert and extract structured information:
+
+Alert:
+{{input.alert_text}}
+
+Extract JSON: {&#39;service&#39;: &#39;...&#39;, &#39;severity&#39;: &#39;P1|P2|P3|P4&#39;, &#39;error_type&#39;: &#39;...&#39;, &#39;affected_users&#39;: &#39;...&#39;, &#39;timestamp&#39;: &#39;...&#39;, &#39;metrics&#39;: {...}}&#39;&quot;]:::llm
+    fetch-recent-logs[&quot;Tool:observability:query_logs {\&quot;service\&quot;:\&quot;{{parsed_alert.service}}\&quot;,\&quot;time_range\&quot;:\&quot;30m\&quot;,\&quot;level\&quot;:\&quot;error\&quot;}&quot;]:::tool
+    fetch-metrics[&quot;Tool:observability:query_metrics {\&quot;service\&quot;:\&quot;{{parsed_alert.service}}\&quot;,\&quot;metrics\&quot;:[\&quot;latency_p99\&quot;,\&quot;error_rate\&quot;,\&quot;request_count\&quot;],\&quot;time_range\&quot;:\&quot;1h\&quot;}&quot;]:::tool
+    fetch-recent-deploys[&quot;Tool:deployment:list_deployments {\&quot;service\&quot;:\&quot;{{parsed_alert.service}}\&quot;,\&quot;time_range\&quot;:\&quot;24h\&quot;}&quot;]:::tool
+    analyze-logs[&quot;LLM:codex &#39;Analyze these error logs to identify patterns and root cause:
+
+Service: {{parsed_alert.service}}
+Error Logs:
+{{error_logs}}
+
+Look for:
+1. Error patterns (repeated exceptions, stack traces)
+2. Correlation with timestamps
+3. Affected components/endpoints
+4. Dependency failures
+
+Output JSON: {&#39;error_patterns&#39;: [...], &#39;likely_component&#39;: &#39;...&#39;, &#39;confidence&#39;: 0.0-1.0}&#39;&quot;]:::llm
+    correlate-deploys[&quot;LLM:gemini &#39;Correlate incident timing with recent deployments:
+
+Alert timestamp: {{parsed_alert.timestamp}}
+Recent deployments:
+{{recent_deploys}}
+
+Determine if any deployment could have caused this incident.
+
+Output JSON: {&#39;deployment_correlated&#39;: true|false, &#39;suspect_deploy&#39;: {...}|null, &#39;time_delta_minutes&#39;: N, &#39;rollback_recommended&#39;: true|false}&#39;&quot;]:::llm
+    generate-hypothesis[&quot;LLM:claude-cli &#39;Generate root cause hypotheses for this incident:
+
+Parsed Alert:
+{{parsed_alert}}
+
+Log Analysis:
+{{log_analysis}}
+
+Metrics:
+{{service_metrics}}
+
+Deployment Correlation:
+{{deploy_correlation}}
+
+Rank top 3 hypotheses by likelihood:
+
+Output JSON: {&#39;hypotheses&#39;: [{&#39;description&#39;: &#39;...&#39;, &#39;likelihood&#39;: 0.0-1.0, &#39;evidence&#39;: [...], &#39;mitigation&#39;: &#39;...&#39;}]}&#39;&quot;]:::llm
+    match-runbook[&quot;Tool:knowledge-base:semantic_search {\&quot;query\&quot;:\&quot;{{parsed_alert.service}} {{parsed_alert.error_type}} incident runbook\&quot;,\&quot;collection\&quot;:\&quot;runbooks\&quot;,\&quot;limit\&quot;:3}&quot;]:::tool
+    draft-communication[&quot;LLM:gemini &#39;Draft incident communication based on:
+
+Severity: {{parsed_alert.severity}}
+Service: {{parsed_alert.service}}
+Root Cause Hypotheses:
+{{root_cause_hypotheses}}
+
+Generate:
+1. Slack message for #incidents channel
+2. Status page update (if P1/P2)
+3. Customer communication template (if needed)
+
+Output markdown with all 3 sections.&#39;&quot;]:::llm
+    assemble-response[&quot;LLM:claude-cli &#39;Assemble the complete incident response package:
+
+## Alert Summary
+{{parsed_alert}}
+
+## Root Cause Analysis
+{{root_cause_hypotheses}}
+
+## Recommended Actions
+Based on runbooks:
+{{matched_runbooks}}
+
+## Communications
+{{communications}}
+
+Format as a structured incident response document with:
+1. **TL;DR** (2 sentences)
+2. **Immediate Actions** (numbered steps)
+3. **Investigation Findings**
+4. **Communication Templates**
+5. **Follow-up Tasks**&#39;&quot;]:::llm
+    parse-alert --&gt; analyze-logs
+    fetch-recent-logs --&gt; analyze-logs
+    parse-alert --&gt; match-runbook
+    draft-communication --&gt; assemble-response
+    match-runbook --&gt; assemble-response
+    fetch-recent-deploys --&gt; correlate-deploys
+    parse-alert --&gt; correlate-deploys
+    parse-alert --&gt; fetch-recent-logs
+    parse-alert --&gt; fetch-recent-deploys
+    parse-alert --&gt; fetch-metrics
+    correlate-deploys --&gt; generate-hypothesis
+    fetch-metrics --&gt; generate-hypothesis
+    analyze-logs --&gt; generate-hypothesis
+    parse-alert --&gt; generate-hypothesis
+</pre></section>
+
+<section class="card"><h2>magi-code-review.json</h2><div class="meta">id: magi-code-review · nodes: 5</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    read-target[&quot;Tool:filesystem:read_file {\&quot;path\&quot;:\&quot;{{input.file_path}}\&quot;}&quot;]:::tool
+    melchior-review[&quot;LLM:codex &#39;You are MELCHIOR, the scientist. Analyze this code for:
+1. Logic errors and bugs
+2. Performance issues
+3. Security vulnerabilities
+
+Code:
+```
+{{source_code}}
+```
+
+Provide structured findings as JSON: {&#39;issues&#39;: [{&#39;severity&#39;: &#39;high|medium|low&#39;, &#39;type&#39;: &#39;bug|perf|security&#39;, &#39;line&#39;: N, &#39;description&#39;: &#39;...&#39;, &#39;suggestion&#39;: &#39;...&#39;}]}&#39;&quot;]:::llm
+    balthasar-review[&quot;LLM:claude-cli &#39;You are BALTHASAR, the mother/values guardian. Analyze this code for:
+1. Code clarity and readability
+2. Maintainability concerns
+3. Best practices violations
+
+Code:
+```
+{{source_code}}
+```
+
+Provide structured findings as JSON: {&#39;issues&#39;: [{&#39;severity&#39;: &#39;high|medium|low&#39;, &#39;type&#39;: &#39;clarity|maintainability|practice&#39;, &#39;line&#39;: N, &#39;description&#39;: &#39;...&#39;, &#39;suggestion&#39;: &#39;...&#39;}]}&#39;&quot;]:::llm
+    casper-review[&quot;LLM:gemini &#39;You are CASPER, the strategist. Analyze this code for:
+1. Architectural concerns
+2. Scalability issues
+3. Integration risks
+
+Code:
+```
+{{source_code}}
+```
+
+Provide structured findings as JSON: {&#39;issues&#39;: [{&#39;severity&#39;: &#39;high|medium|low&#39;, &#39;type&#39;: &#39;architecture|scalability|integration&#39;, &#39;line&#39;: N, &#39;description&#39;: &#39;...&#39;, &#39;suggestion&#39;: &#39;...&#39;}]}&#39;&quot;]:::llm
+    consensus-merge[&quot;LLM:gemini &#39;You are the MAGI System coordinator. Merge these 3 reviews into a unified report.
+
+MELCHIOR (bugs/perf/security):
+{{melchior_findings}}
+
+BALTHASAR (clarity/maintainability):
+{{balthasar_findings}}
+
+CASPER (architecture/scalability):
+{{casper_findings}}
+
+Create a prioritized action plan:
+1. Deduplicate overlapping issues
+2. Rank by severity and consensus (issues found by multiple reviewers = higher priority)
+3. Output markdown report with:
+   - Executive Summary (1 paragraph)
+   - Critical Issues (must fix)
+   - Recommendations (should fix)
+   - Minor Suggestions (nice to have)
+   - Consensus Score (how much the 3 AIs agreed)&#39;&quot;]:::llm
+    read-target --&gt; melchior-review
+    casper-review --&gt; consensus-merge
+    balthasar-review --&gt; consensus-merge
+    melchior-review --&gt; consensus-merge
+    read-target --&gt; balthasar-review
+    read-target --&gt; casper-review
+</pre></section>
+
+<section class="card"><h2>mcts-mantra-explore.json</h2><div class="meta">id: mcts-mantra-explore · nodes: 3</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    exploration[[&quot;Fanout&quot;]]:::fanout
+    merge_issues{&quot;Merge:merge_json_issues&quot;}:::merge
+    prioritize[&quot;LLM:claude &#39;## Issue Prioritizer
+
+Consolidate and prioritize these issues:
+
+{{merge_issues.output}}
+
+Rules:
+1. Remove duplicates (same line, similar description)
+2. Sort by: severity (high→low) → impact → effort
+3. Group by category
+4. Calculate overall health score
+
+Output:
+```json
+{
+  &#39;summary&#39;: {
+    &#39;total_issues&#39;: N,
+    &#39;critical&#39;: N,
+    &#39;high&#39;: N,
+    &#39;medium&#39;: N,
+    &#39;low&#39;: N,
+    &#39;health_score&#39;: 0.0-1.0
+  },
+  &#39;top_priority&#39;: [...top 5 issues...],
+  &#39;by_category&#39;: {
+    &#39;security&#39;: [...],
+    &#39;performance&#39;: [...],
+    &#39;type_safety&#39;: [...],
+    &#39;logic&#39;: [...],
+    &#39;maintainability&#39;: [...]
+  },
+  &#39;quick_wins&#39;: [...issues with low effort, high impact...]
+}
+```&#39;&quot;]:::llm
+    merge_issues --&gt; prioritize
+</pre></section>
+
+<section class="card"><h2>mcts-mantra-hybrid.json</h2><div class="meta">id: mcts-mantra-hybrid · nodes: 5</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    explore[[&quot;Ref:mcts-mantra-explore&quot;]]:::ref
+    should_fix{&quot;Gate:{{explore.summary.health_score}} &lt; 0.9&quot;}:::gate
+    output_clean&gt;/&quot;Adapt[input → template]&quot;/:::adapter
+    fix_loop{&quot;GoalDriven:health_score:gte:0.90:5&quot;}:::goal
+    final_report[&quot;LLM:claude &#39;## Final Report Generator
+
+Generate a summary report:
+
+Original health score: {{explore.summary.health_score}}
+Final health score: {{fix_loop.health_score}}
+Iterations: {{fix_loop.iterations}}
+
+Fixed issues:
+{{fix_loop.fixed_issues}}
+
+Remaining issues:
+{{fix_loop.remaining_issues}}
+
+Output a concise markdown report with:
+1. Executive Summary
+2. What was fixed
+3. What remains (if any)
+4. Recommendations&#39;&quot;]:::llm
+    fix_loop --&gt; final_report
+</pre></section>
+
+<section class="card"><h2>mcts-mantra-review.json</h2><div class="meta">id: mcts-mantra-review · nodes: 5</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    expansion[[&quot;Fanout&quot;]]:::fanout
+    simulation{&quot;Evaluator:anti_fake:best&quot;}:::evaluator
+    selection_gate{&quot;Gate:{{simulation.score}} &gt;= 0.8&quot;}:::gate
+    output_pass&gt;/&quot;Adapt[input → template]&quot;/:::adapter
+    backprop{&quot;GoalDriven:quality_score:gte:0.85:3&quot;}:::goal
+</pre></section>
+
+<section class="card"><h2>mermaid-to-chain.json</h2><div class="meta">id: mermaid-to-chain · nodes: 6</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    parse-mermaid[&quot;LLM:codex &#39;Parse this Mermaid diagram and extract the graph structure:
+
+```mermaid
+{{input.mermaid}}
+```
+
+Extract:
+1. All nodes with their IDs and labels
+2. All edges (dependencies) between nodes
+3. Node types from labels (look for hints like 🔬=codex, 👩=claude, 🎯=gemini, 🔍=tool)
+4. Any metadata in brackets or annotations
+
+Output JSON:
+```json
+{
+  &#39;nodes&#39;: [{&#39;id&#39;: &#39;...&#39;, &#39;label&#39;: &#39;...&#39;, &#39;type&#39;: &#39;llm|tool&#39;, &#39;model&#39;: &#39;...&#39;, &#39;metadata&#39;: {...}}],
+  &#39;edges&#39;: [{&#39;from&#39;: &#39;...&#39;, &#39;to&#39;: &#39;...&#39;}],
+  &#39;direction&#39;: &#39;TD|LR&#39;
+}
+```&#39;&quot;]:::llm
+    infer-node-types[&quot;LLM:gemini &#39;Analyze these parsed nodes and infer their chain node types:
+
+Parsed Graph:
+{{parsed_graph}}
+
+For each node, determine:
+1. Is it an LLM node or Tool node?
+2. If LLM: which model? (codex for code/bugs, claude for quality/clarity, gemini for strategy/synthesis)
+3. If Tool: what server and tool name?
+4. What should the prompt/args be based on the label?
+
+Output JSON with enriched nodes:
+```json
+{
+  &#39;nodes&#39;: [{
+    &#39;id&#39;: &#39;...&#39;,
+    &#39;type&#39;: &#39;llm|tool&#39;,
+    &#39;config&#39;: {
+      &#39;model&#39;: &#39;codex|claude|gemini&#39;,
+      &#39;prompt&#39;: &#39;...&#39;
+    } | {
+      &#39;server&#39;: &#39;...&#39;,
+      &#39;name&#39;: &#39;...&#39;,
+      &#39;args&#39;: {...}
+    }
+  }]
+}
+```&#39;&quot;]:::llm
+    build-dependencies[&quot;LLM:gemini &#39;Build the dependency graph from edges:
+
+Parsed Graph:
+{{parsed_graph}}
+
+For each node, list its dependencies (nodes it depends on based on incoming edges).
+
+Output JSON:
+```json
+{
+  &#39;dependencies&#39;: {
+    &#39;node_id&#39;: [&#39;dep1&#39;, &#39;dep2&#39;],
+    ...
+  },
+  &#39;execution_order&#39;: [&#39;first&#39;, &#39;second&#39;, ...],
+  &#39;parallel_groups&#39;: [[&#39;can_run_together&#39;], ...]
+}
+```&#39;&quot;]:::llm
+    generate-chain-json[&quot;LLM:claude-cli &#39;Generate the final Chain JSON from the analyzed components:
+
+Enriched Nodes:
+{{enriched_nodes}}
+
+Dependency Graph:
+{{dependency_graph}}
+
+Original Mermaid:
+```mermaid
+{{input.mermaid}}
+```
+
+Generate a valid Chain JSON following this schema:
+```json
+{
+  &#39;id&#39;: &#39;generated-chain&#39;,
+  &#39;name&#39;: &#39;...&#39;,
+  &#39;description&#39;: &#39;Generated from Mermaid diagram&#39;,
+  &#39;version&#39;: &#39;1.0.0&#39;,
+  &#39;nodes&#39;: [
+    {
+      &#39;id&#39;: &#39;node-id&#39;,
+      &#39;type&#39;: &#39;llm|tool&#39;,
+      &#39;llm&#39;: { &#39;model&#39;: &#39;...&#39;, &#39;prompt&#39;: &#39;...&#39; },
+      &#39;tool&#39;: { &#39;server&#39;: &#39;...&#39;, &#39;name&#39;: &#39;...&#39;, &#39;args&#39;: {...} },
+      &#39;depends_on&#39;: [&#39;dep1&#39;, &#39;dep2&#39;],
+      &#39;output_key&#39;: &#39;result_name&#39;
+    }
+  ],
+  &#39;input_schema&#39;: {...},
+  &#39;metadata&#39;: {...}
+}
+```
+
+Rules:
+1. Each node needs output_key matching its id (snake_case)
+2. depends_on should reference node IDs from the graph
+3. LLM prompts should use {{previous_output}} for dependencies
+4. Infer reasonable input_schema from the diagram
+
+Output ONLY the JSON, no explanation.&#39;&quot;]:::llm
+    validate-chain[&quot;LLM:codex &#39;Validate this generated Chain JSON:
+
+```json
+{{chain_json}}
+```
+
+Check:
+1. All node IDs are unique
+2. All depends_on references exist
+3. No circular dependencies
+4. All required fields present
+5. JSON is syntactically valid
+
+Output JSON:
+```json
+{
+  &#39;valid&#39;: true|false,
+  &#39;errors&#39;: [...],
+  &#39;warnings&#39;: [...],
+  &#39;fixed_json&#39;: &lt;corrected JSON if needed&gt;
+}
+```&#39;&quot;]:::llm
+    final-output[&quot;LLM:gemini &#39;Prepare the final output:
+
+Validation Result:
+{{validation}}
+
+Original Generated:
+{{chain_json}}
+
+If validation passed, output the chain JSON.
+If validation failed but was fixed, output the fixed JSON.
+If unfixable errors, explain the issues.
+
+Output format:
+```json
+&lt;the final chain JSON&gt;
+```
+
+Followed by a brief summary of the conversion.&#39;&quot;]:::llm
+    generate-chain-json --&gt; validate-chain
+    parse-mermaid --&gt; build-dependencies
+    parse-mermaid --&gt; infer-node-types
+    generate-chain-json --&gt; final-output
+</pre></section>
+
+<section class="card"><h2>pr-review-pipeline.json</h2><div class="meta">id: pr-review-pipeline · nodes: 7</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    fetch-pr-diff[&quot;Tool:github:get_pull_request_diff {\&quot;repo\&quot;:\&quot;{{input.repo}}\&quot;,\&quot;pr_number\&quot;:\&quot;{{input.pr_number}}\&quot;}&quot;]:::tool
+    fetch-pr-files[&quot;Tool:github:get_pull_request_files {\&quot;repo\&quot;:\&quot;{{input.repo}}\&quot;,\&quot;pr_number\&quot;:\&quot;{{input.pr_number}}\&quot;}&quot;]:::tool
+    analyze-complexity[&quot;LLM:gemini &#39;Analyze the complexity of this PR diff. Consider:
+1. Lines of code changed
+2. Number of files affected
+3. Cyclomatic complexity increase
+4. Coupling/cohesion impact
+
+Diff:
+```
+{{pr_diff}}
+```
+
+Files changed:
+{{changed_files}}
+
+Output JSON: {&#39;complexity_score&#39;: 1-10, &#39;risk_areas&#39;: [...], &#39;summary&#39;: &#39;...&#39;}&#39;&quot;]:::llm
+    check-test-coverage[&quot;LLM:claude-cli &#39;Review test coverage for this PR.
+
+Changed files:
+{{changed_files}}
+
+Diff:
+```
+{{pr_diff}}
+```
+
+Identify:
+1. New code paths that need tests
+2. Existing tests that might be affected
+3. Edge cases not covered
+
+Output JSON: {&#39;coverage_gaps&#39;: [...], &#39;suggested_tests&#39;: [...], &#39;score&#39;: 1-10}&#39;&quot;]:::llm
+    security-scan[&quot;LLM:codex &#39;Security review for PR changes.
+
+Diff:
+```
+{{pr_diff}}
+```
+
+Check for:
+1. SQL injection vulnerabilities
+2. XSS vectors
+3. Authentication/authorization issues
+4. Sensitive data exposure
+5. Dependency vulnerabilities
+6. Input validation gaps
+
+Output JSON: {&#39;vulnerabilities&#39;: [{&#39;severity&#39;: &#39;critical|high|medium|low&#39;, &#39;type&#39;: &#39;...&#39;, &#39;location&#39;: &#39;...&#39;, &#39;fix&#39;: &#39;...&#39;}], &#39;safe&#39;: true|false}&#39;&quot;]:::llm
+    doc-check[&quot;LLM:gemini &#39;Check documentation completeness for this PR.
+
+Changed files:
+{{changed_files}}
+
+Diff:
+```
+{{pr_diff}}
+```
+
+Verify:
+1. New public APIs have JSDoc/docstrings
+2. README updates if needed
+3. CHANGELOG entry required?
+4. Breaking changes documented?
+
+Output JSON: {&#39;doc_issues&#39;: [...], &#39;suggestions&#39;: [...], &#39;changelog_needed&#39;: true|false}&#39;&quot;]:::llm
+    synthesize-review[&quot;LLM:claude-cli &#39;Synthesize a comprehensive PR review from these analyses:
+
+Complexity Analysis:
+{{complexity_analysis}}
+
+Test Coverage:
+{{test_coverage}}
+
+Security Findings:
+{{security_findings}}
+
+Documentation Review:
+{{doc_review}}
+
+Generate a PR review comment in markdown with:
+1. **Summary** (1-2 sentences)
+2. **Verdict** (APPROVE / REQUEST_CHANGES / COMMENT)
+3. **Critical Issues** (must fix before merge)
+4. **Suggestions** (nice to have)
+5. **Kudos** (things done well)
+
+Be constructive and specific.&#39;&quot;]:::llm
+    fetch-pr-diff --&gt; security-scan
+    fetch-pr-files --&gt; check-test-coverage
+    fetch-pr-diff --&gt; check-test-coverage
+    fetch-pr-files --&gt; doc-check
+    fetch-pr-diff --&gt; doc-check
+    fetch-pr-files --&gt; analyze-complexity
+    fetch-pr-diff --&gt; analyze-complexity
+    doc-check --&gt; synthesize-review
+    security-scan --&gt; synthesize-review
+    check-test-coverage --&gt; synthesize-review
+    analyze-complexity --&gt; synthesize-review
+</pre></section>
+
+<section class="card"><h2>simple-test.json</h2><div class="meta">id: simple-test · nodes: 3</div><pre class="mermaid">graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef map fill:#81ecec,stroke:#00b894,color:#000
+    classDef bind fill:#74b9ff,stroke:#0984e3,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef groupStyle fill:#dfe6e9,stroke:#b2bec3,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef meta fill:#9b59b6,stroke:#8e44ad,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    ask-codex[&quot;LLM:codex &#39;What is 2+2? Answer with just the number.&#39;&quot;]:::llm
+    ask-gemini[&quot;LLM:gemini &#39;What is 3+3? Answer with just the number.&#39;&quot;]:::llm
+    merge-answers[&quot;LLM:ollama &#39;Codex said 2+2={{codex_answer}}. Gemini said 3+3={{gemini_answer}}. Sum both results and output just the final number.&#39;&quot;]:::llm
+    ask-gemini --&gt; merge-answers
+    ask-codex --&gt; merge-answers
+</pre></section>
+</div>
+<script>mermaid.initialize({startOnLoad:true,theme:'dark',securityLevel:'loose'});</script>
+</body>
+</html>
