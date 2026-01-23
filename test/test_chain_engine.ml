@@ -2263,6 +2263,180 @@ let stream_merge_tests = [
   "stream_merge_nested_depth", `Quick, test_stream_merge_nested_depth;
 ]
 
+(* ============================================================================
+   Checkpoint Store Tests
+   ============================================================================ *)
+
+(** Test checkpoint save and load roundtrip *)
+let test_checkpoint_save_load () =
+  let test_dir = Filename.concat (Sys.getcwd ()) "_test_checkpoints" in
+  (* Clean up any previous test directory *)
+  (try
+    Array.iter (fun f -> Sys.remove (Filename.concat test_dir f))
+      (Sys.readdir test_dir);
+    Unix.rmdir test_dir
+  with Sys_error _ -> ());
+
+  let store = Checkpoint_store.create ~base_dir:test_dir () in
+  let run_id = Checkpoint_store.generate_run_id () in
+  let outputs = [("node1", "output1"); ("node2", "output2")] in
+  let traces = [] in
+
+  let cp = Checkpoint_store.make_checkpoint
+    ~run_id
+    ~chain_id:"test-chain"
+    ~node_id:"node2"
+    ~outputs
+    ~traces
+    ()
+  in
+
+  (* Save checkpoint *)
+  (match Checkpoint_store.save store cp with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail (Printf.sprintf "Save failed: %s" msg));
+
+  (* Load checkpoint *)
+  (match Checkpoint_store.load store ~run_id with
+   | Ok loaded ->
+       Alcotest.(check string) "run_id matches" run_id loaded.Checkpoint_store.run_id;
+       Alcotest.(check string) "chain_id matches" "test-chain" loaded.Checkpoint_store.chain_id;
+       Alcotest.(check string) "node_id matches" "node2" loaded.Checkpoint_store.node_id;
+       Alcotest.(check int) "outputs count" 2 (List.length loaded.Checkpoint_store.outputs)
+   | Error msg -> Alcotest.fail (Printf.sprintf "Load failed: %s" msg));
+
+  (* Cleanup *)
+  Checkpoint_store.delete store ~run_id;
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
+
+(** Test listing checkpoints by chain_id *)
+let test_checkpoint_list_by_chain () =
+  let test_dir = Filename.concat (Sys.getcwd ()) "_test_checkpoints_list" in
+  (try
+    Array.iter (fun f -> Sys.remove (Filename.concat test_dir f))
+      (Sys.readdir test_dir);
+    Unix.rmdir test_dir
+  with Sys_error _ -> ());
+
+  let store = Checkpoint_store.create ~base_dir:test_dir () in
+
+  (* Create checkpoints for different chains *)
+  let cp1 = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"chain-a"
+    ~node_id:"n1"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+  let cp2 = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"chain-a"
+    ~node_id:"n2"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+  let cp3 = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"chain-b"
+    ~node_id:"n1"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+
+  ignore (Checkpoint_store.save store cp1);
+  Unix.sleepf 0.01;  (* Small delay to ensure different timestamps *)
+  ignore (Checkpoint_store.save store cp2);
+  Unix.sleepf 0.01;
+  ignore (Checkpoint_store.save store cp3);
+
+  (* List only chain-a checkpoints *)
+  let chain_a_cps = Checkpoint_store.list_checkpoints store ~chain_id:"chain-a" in
+  Alcotest.(check int) "chain-a count" 2 (List.length chain_a_cps);
+
+  (* List all checkpoints *)
+  let all_cps = Checkpoint_store.list_all store in
+  Alcotest.(check int) "all count" 3 (List.length all_cps);
+
+  (* Cleanup *)
+  Checkpoint_store.delete store ~run_id:cp1.Checkpoint_store.run_id;
+  Checkpoint_store.delete store ~run_id:cp2.Checkpoint_store.run_id;
+  Checkpoint_store.delete store ~run_id:cp3.Checkpoint_store.run_id;
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
+
+(** Test checkpoint cleanup by age *)
+let test_checkpoint_cleanup_old () =
+  let test_dir = Filename.concat (Sys.getcwd ()) "_test_checkpoints_cleanup" in
+  (try
+    Array.iter (fun f -> Sys.remove (Filename.concat test_dir f))
+      (Sys.readdir test_dir);
+    Unix.rmdir test_dir
+  with Sys_error _ -> ());
+
+  let store = Checkpoint_store.create ~base_dir:test_dir () in
+
+  (* Create a checkpoint *)
+  let cp = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"cleanup-test"
+    ~node_id:"n1"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+  ignore (Checkpoint_store.save store cp);
+
+  (* Cleanup with max_age=1000 hours (should not delete anything) *)
+  let deleted = Checkpoint_store.cleanup_old store ~max_age_hours:1000 in
+  Alcotest.(check int) "no deletions expected" 0 deleted;
+
+  (* Verify checkpoint still exists *)
+  let all_cps = Checkpoint_store.list_all store in
+  Alcotest.(check int) "checkpoint still exists" 1 (List.length all_cps);
+
+  (* Cleanup *)
+  Checkpoint_store.delete store ~run_id:cp.Checkpoint_store.run_id;
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
+
+(** Test JSON roundtrip for checkpoint *)
+let test_checkpoint_json_roundtrip () =
+  let outputs = [("a", "result_a"); ("b", "result_b")] in
+  let cp = Checkpoint_store.make_checkpoint
+    ~run_id:"test_run_123"
+    ~chain_id:"test-chain"
+    ~node_id:"final"
+    ~outputs
+    ~traces:[]
+    ~total_tokens:{
+      Chain_category.prompt_tokens = 100;
+      completion_tokens = 50;
+      total_tokens = 150;
+      estimated_cost_usd = 0.001;
+    }
+    ()
+  in
+
+  let json = Checkpoint_store.checkpoint_to_json cp in
+  match Checkpoint_store.checkpoint_of_json json with
+  | Ok loaded ->
+      Alcotest.(check string) "run_id" "test_run_123" loaded.Checkpoint_store.run_id;
+      Alcotest.(check string) "chain_id" "test-chain" loaded.Checkpoint_store.chain_id;
+      Alcotest.(check int) "outputs" 2 (List.length loaded.Checkpoint_store.outputs);
+      (match loaded.Checkpoint_store.total_tokens with
+       | Some t ->
+           Alcotest.(check int) "total_tokens" 150 t.Chain_category.total_tokens
+       | None -> Alcotest.fail "Expected total_tokens")
+  | Error msg -> Alcotest.fail (Printf.sprintf "JSON roundtrip failed: %s" msg)
+
+let checkpoint_tests = [
+  "checkpoint_save_load", `Quick, test_checkpoint_save_load;
+  "checkpoint_list_by_chain", `Quick, test_checkpoint_list_by_chain;
+  "checkpoint_cleanup_old", `Quick, test_checkpoint_cleanup_old;
+  "checkpoint_json_roundtrip", `Quick, test_checkpoint_json_roundtrip;
+]
+
 let () =
   Alcotest.run "Chain Engine" [
     "Chain Types", types_tests;
@@ -2276,4 +2450,5 @@ let () =
     "Cache Node", cache_tests;
     "Batch Node", batch_tests;
     "StreamMerge Node", stream_merge_tests;
+    "Checkpoint Store", checkpoint_tests;
   ]
