@@ -81,6 +81,8 @@
    chain_adapter_eio
    chain_executor_eio
    chain_orchestrator_eio
+   chain_run_store
+   chain_view_page
    ; Chain Engine (Phase 5 - requires Eio)
    chain_batch
    ; Checkpoint/Resume for long-running chains
