@@ -227,6 +227,7 @@ let subroutine_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_]*\)\[\[\([^]]*\)\]\]|}
 let arrow_re = Str.regexp {|[ ]*-->[ ]*|}
 let ampersand_re = Str.regexp {|[ ]*&[ ]*|}
 let quote_re = Str.regexp {|\([^ "]+\)[ ]*"\([^"]*\)"|}
+let single_quote_re = Str.regexp {|\([^ ']+\)[ ]*'\([^']*\)'|}  (* Also accept single quotes *)
 let simple_model_re = Str.regexp {|\([^ ]+\)|}
 let quorum_id_re = Str.regexp {|quorum_\([0-9]+\)|}
 let consensus_id_re = Str.regexp {|consensus_\([0-9]+\)|}
@@ -663,8 +664,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
       let tools = make_tools_value has_tools in
       if String.length content_clean > 4 && String.sub content_clean 0 4 = "LLM:" then
         let rest = String.sub content_clean 4 (String.length content_clean - 4) in
-        (* Parse: model "prompt" or just model *)
+        (* Parse: model "prompt" or model 'prompt' or just model *)
         if Str.string_match quote_re rest 0 then
+          let model = Str.matched_group 1 rest in
+          let prompt = Str.matched_group 2 rest in
+          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools })
+        else if Str.string_match single_quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
           Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools })
@@ -675,11 +680,15 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           Error (Printf.sprintf "Invalid LLM format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
         let rest = String.sub content_clean 5 (String.length content_clean - 5) in
-        (* Parse: name "args" or just name (same pattern as LLM) *)
+        (* Parse: name "args" or name 'args' or just name (same pattern as LLM) *)
         if Str.string_match quote_re rest 0 then
           let name = trim (Str.matched_group 1 rest) in
           let args_str = trim (Str.matched_group 2 rest) in
           (* Create args with "input" key holding the args string *)
+          Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
+        else if Str.string_match single_quote_re rest 0 then
+          let name = trim (Str.matched_group 1 rest) in
+          let args_str = trim (Str.matched_group 2 rest) in
           Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
         else if Str.string_match simple_model_re rest 0 then
           let name = trim (Str.matched_group 1 rest) in
@@ -891,7 +900,8 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
             (String.length content > 4 && String.sub content 0 4 = "Map:") ||
             (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
             (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
-            (String.length content > 5 && String.sub content 0 5 = "MCTS:")
+            (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
+            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:")
           in
           if uses_old_syntax then
             parse_node_content mnode.shape content
@@ -990,7 +1000,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
             (String.length content > 4 && String.sub content 0 4 = "Map:") ||
             (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
             (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
-            (String.length content > 5 && String.sub content 0 5 = "MCTS:")
+            (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
+            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:")
           in
           if uses_old_syntax then
             parse_node_content mnode.shape content
