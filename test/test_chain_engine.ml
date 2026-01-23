@@ -2055,11 +2055,106 @@ let test_stream_merge_mermaid_parse () =
        | _ -> Alcotest.fail (Printf.sprintf "Expected StreamMerge node, got %s" node_type_str))
   | Error e -> Alcotest.fail (Printf.sprintf "Mermaid parse error: %s" e)
 
+(** P1: Test unknown reducer becomes Custom (extensibility design) *)
+let test_stream_merge_unknown_reducer_becomes_custom () =
+  let json_str = {|
+{
+  "id": "custom_test",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "my_custom_func",
+      "nodes": []
+    }
+  ],
+  "output": "merger"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | StreamMerge { reducer; _ } ->
+           (* Unknown strings become Custom reducer - intentional design *)
+           (match reducer with
+            | Custom name ->
+                Alcotest.(check string) "custom name" "my_custom_func" name
+            | _ -> Alcotest.fail "Expected Custom reducer")
+       | _ -> Alcotest.fail "Expected StreamMerge")
+  | Error e -> Alcotest.fail (Printf.sprintf "Unexpected error: %s" e)
+
+(** P1: Test missing required fields *)
+let test_stream_merge_missing_nodes_field () =
+  let json_str = {|
+{
+  "id": "missing_test",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "concat"
+    }
+  ],
+  "output": "merger"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (* If it parses, nodes should default to empty *)
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | StreamMerge { nodes; _ } ->
+           Alcotest.(check int) "default empty nodes" 0 (List.length nodes)
+       | _ -> Alcotest.fail "Expected StreamMerge")
+  | Error _ ->
+      (* Also acceptable: error for missing nodes *)
+      ()
+
+(** P1: Test edge case - min_results > available nodes *)
+let test_stream_merge_impossible_min_results () =
+  let json_str = {|
+{
+  "id": "impossible_test",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "concat",
+      "min_results": 10,
+      "nodes": [
+        {"id": "a", "type": "llm", "model": "gemini", "prompt": "A"}
+      ]
+    }
+  ],
+  "output": "merger"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (* Parser accepts it - runtime should handle this *)
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | StreamMerge { min_results; nodes; _ } ->
+           Alcotest.(check (option int)) "min_results preserved" (Some 10) min_results;
+           Alcotest.(check int) "only 1 node" 1 (List.length nodes)
+       | _ -> Alcotest.fail "Expected StreamMerge")
+  | Error _ ->
+      (* Also acceptable: compile-time validation *)
+      ()
+
 let stream_merge_tests = [
   "parse_stream_merge_basic", `Quick, test_parse_stream_merge_basic;
   "stream_merge_reducers", `Quick, test_stream_merge_reducers;
   "stream_merge_compile_depth", `Quick, test_stream_merge_compile_depth;
   "stream_merge_mermaid_parse", `Quick, test_stream_merge_mermaid_parse;
+  (* P1: Error & Edge cases *)
+  "stream_merge_custom_reducer", `Quick, test_stream_merge_unknown_reducer_becomes_custom;
+  "stream_merge_missing_nodes", `Quick, test_stream_merge_missing_nodes_field;
+  "stream_merge_impossible_min", `Quick, test_stream_merge_impossible_min_results;
 ]
 
 let () =
