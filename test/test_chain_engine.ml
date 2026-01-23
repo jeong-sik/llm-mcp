@@ -2006,8 +2006,8 @@ let test_stream_merge_compile_depth () =
        | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e))
   | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
 
-(** Test StreamMerge Mermaid roundtrip *)
-let test_stream_merge_mermaid_roundtrip () =
+(** Test StreamMerge Mermaid parsing (not a true roundtrip - no serialize back) *)
+let test_stream_merge_mermaid_parse () =
   let mermaid = {|graph LR
     a["LLM:gemini 'Task A'"]
     b["LLM:claude 'Task B'"]
@@ -2059,7 +2059,7 @@ let stream_merge_tests = [
   "parse_stream_merge_basic", `Quick, test_parse_stream_merge_basic;
   "stream_merge_reducers", `Quick, test_stream_merge_reducers;
   "stream_merge_compile_depth", `Quick, test_stream_merge_compile_depth;
-  "stream_merge_mermaid_roundtrip", `Quick, test_stream_merge_mermaid_roundtrip;
+  "stream_merge_mermaid_parse", `Quick, test_stream_merge_mermaid_parse;
 ]
 
 let () =

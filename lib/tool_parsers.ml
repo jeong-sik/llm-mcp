@@ -113,7 +113,12 @@ let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
     | c -> Some c
   in
   let mermaid = json |> member "mermaid" |> to_string_option in
-  let input = json |> member "input" |> to_string_option in
+  (* Handle input as string, object, or null *)
+  let input = match json |> member "input" with
+    | `Null -> None
+    | `String s -> Some s
+    | other -> Some (Yojson.Safe.to_string other)  (* Serialize objects to JSON string *)
+  in
   let trace =
     try json |> member "trace" |> to_bool
     with _ -> false
