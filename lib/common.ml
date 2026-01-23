@@ -127,6 +127,43 @@ let read_lines path =
     )
   with Sys_error _ -> []
 
+(** Read the tail of a file as list of lines with safety limits.
+    - max_bytes: read at most this many bytes from the end of the file
+    - max_lines: keep only the last N lines in memory
+    Returns [] on non-regular files or errors. *)
+let read_lines_tail ~max_bytes ~max_lines path =
+  if max_bytes <= 0 || max_lines <= 0 then []
+  else
+    try
+      let st = Unix.stat path in
+      if st.Unix.st_kind <> Unix.S_REG then []
+      else
+        In_channel.with_open_text path (fun ic ->
+          let size = st.Unix.st_size in
+          let start = if size > max_bytes then size - max_bytes else 0 in
+          if start > 0 then begin
+            In_channel.seek ic (Int64.of_int start);
+            (* Drop partial line to align to next full line. *)
+            ignore (In_channel.input_line ic)
+          end;
+          let q = Queue.create () in
+          begin
+            try
+              while true do
+                match In_channel.input_line ic with
+                | Some line ->
+                    Queue.add line q;
+                    if Queue.length q > max_lines then ignore (Queue.take q)
+                | None -> raise End_of_file
+              done
+            with End_of_file -> ()
+          end;
+          let lines = ref [] in
+          Queue.iter (fun l -> lines := l :: !lines) q;
+          List.rev !lines
+        )
+    with Sys_error _ | Unix.Unix_error _ -> []
+
 (** List files with given suffix in directory *)
 let list_files_with_suffix dir suffix =
   if not (Sys.file_exists dir && Sys.is_directory dir) then []
