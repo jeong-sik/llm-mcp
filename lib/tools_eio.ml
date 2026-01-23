@@ -30,6 +30,10 @@ let parse_chain_convert_args = Tool_parsers.parse_chain_convert_args
 let parse_chain_orchestrate_args = Tool_parsers.parse_chain_orchestrate_args
 let parse_gh_pr_diff_args = Tool_parsers.parse_gh_pr_diff_args
 let parse_slack_post_args = Tool_parsers.parse_slack_post_args
+let parse_chain_checkpoints_args = Tool_parsers.parse_chain_checkpoints_args
+let parse_chain_resume_args = Tool_parsers.parse_chain_resume_args
+let parse_prompt_register_args = Tool_parsers.parse_prompt_register_args
+let parse_prompt_get_args = Tool_parsers.parse_prompt_get_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -1245,6 +1249,75 @@ This chain will execute the goal using a stub model.|}
                          ("resumed_from_node", cp.Checkpoint_store.node_id);
                          ("duration_ms", string_of_int result.Chain_types.duration_ms);
                        ]; })))
+
+  (* ============= Prompt Registry Tools ============= *)
+
+  | PromptRegister { id; template; version } ->
+      let version = Option.value version ~default:"1.0.0" in
+      let variables = Prompt_registry.extract_variables template in
+      let entry : Prompt_registry.prompt_entry = {
+        id;
+        template;
+        version;
+        variables;
+        metrics = None;
+        created_at = Unix.gettimeofday ();
+        deprecated = false;
+      } in
+      Prompt_registry.register entry;
+      { model = "prompt.register";
+        returncode = 0;
+        response = sprintf "Registered prompt '%s' v%s with %d variables: %s"
+          id version
+          (List.length variables)
+          (String.concat ", " variables);
+        extra = [
+          ("id", id);
+          ("version", version);
+          ("variables", String.concat ", " variables);
+        ]; }
+
+  | PromptList ->
+      let all = Prompt_registry.list_all () in
+      let json_list = List.map (fun (e : Prompt_registry.prompt_entry) ->
+        `Assoc [
+          ("id", `String e.id);
+          ("version", `String e.version);
+          ("variables", `List (List.map (fun v -> `String v) e.variables));
+          ("deprecated", `Bool e.deprecated);
+          ("metrics", match e.metrics with
+            | Some m -> `Assoc [
+                ("usage_count", `Int m.Prompt_registry.usage_count);
+                ("avg_score", `Float m.Prompt_registry.avg_score);
+              ]
+            | None -> `Null);
+        ]
+      ) all in
+      { model = "prompt.list";
+        returncode = 0;
+        response = Yojson.Safe.pretty_to_string (`List json_list);
+        extra = [("count", string_of_int (List.length all))]; }
+
+  | PromptGet { id; version } ->
+      (match Prompt_registry.get ~id ?version () with
+       | Some entry ->
+           { model = "prompt.get";
+             returncode = 0;
+             response = sprintf "# %s v%s\n\n%s\n\nVariables: %s"
+               entry.Prompt_registry.id
+               entry.Prompt_registry.version
+               entry.Prompt_registry.template
+               (String.concat ", " entry.Prompt_registry.variables);
+             extra = [
+               ("id", entry.Prompt_registry.id);
+               ("version", entry.Prompt_registry.version);
+             ]; }
+       | None ->
+           { model = "prompt.get";
+             returncode = 1;
+             response = sprintf "Prompt '%s'%s not found"
+               id (match version with Some v -> " v" ^ v | None -> "");
+             extra = []; })
 
 (** {1 Convenience Wrappers} *)
 
