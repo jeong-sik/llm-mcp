@@ -1299,14 +1299,17 @@ let node_type_to_text (nt : node_type) : string =
         | EpsilonGreedy e -> Printf.sprintf "eps:%.2f" e
         | Softmax t -> Printf.sprintf "softmax:%.2f" t
       in Printf.sprintf "MCTS:%s:%d (depth:%d,eval:%s)" policy_str max_iterations max_depth evaluator
-  | StreamMerge { nodes; reducer; min_results; timeout; _ } ->
+  | StreamMerge { reducer; min_results; timeout; _ } ->
       let reducer_str = match reducer with
         | First -> "first" | Last -> "last" | Concat -> "concat"
         | WeightedAvg -> "weighted" | Custom s -> s
       in
-      let min_str = match min_results with Some n -> Printf.sprintf ",min:%d" n | None -> "" in
-      let timeout_str = match timeout with Some t -> Printf.sprintf ",timeout:%.1f" t | None -> "" in
-      Printf.sprintf "StreamMerge:%s:%d%s%s" reducer_str (List.length nodes) min_str timeout_str
+      (* Format: StreamMerge:reducer or StreamMerge:reducer,min or StreamMerge:reducer,min,timeout *)
+      (match min_results, timeout with
+       | None, None -> Printf.sprintf "StreamMerge:%s" reducer_str
+       | Some m, None -> Printf.sprintf "StreamMerge:%s,%d" reducer_str m
+       | Some m, Some t -> Printf.sprintf "StreamMerge:%s,%d,%.1f" reducer_str m t
+       | None, Some t -> Printf.sprintf "StreamMerge:%s,1,%.1f" reducer_str t  (* default min=1 when only timeout *))
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
