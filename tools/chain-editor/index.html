@@ -228,6 +228,14 @@
           <div class="name">⚡ Simple Pipeline</div>
           <div class="nodes">3 nodes • A→B→C</div>
         </div>
+        <div class="preset-item" data-preset="figma-prototype">
+          <div class="name">🎨 Figma → Prototype</div>
+          <div class="nodes">6 nodes • figma-to-prototype</div>
+        </div>
+        <div class="preset-item" data-preset="figma-component">
+          <div class="name">🧩 Figma → Web Component</div>
+          <div class="nodes">6 nodes • figma-to-web-component</div>
+        </div>
       </div>
     </div>
 
@@ -313,6 +321,42 @@
           { id: 'C', type: 'llm', label: 'step3', x: 540, y: 150, config: 'LLM:ollama' },
         ],
         connections: [['A', 'B'], ['B', 'C']]
+      },
+      'figma-prototype': {
+        nodes: [
+          { id: 'P', type: 'tool', label: 'parse-url', x: 60, y: 120, config: 'Tool:figma:figma_parse_url' },
+          { id: 'F', type: 'tool', label: 'get-file', x: 260, y: 120, config: 'Tool:figma:figma_get_file' },
+          { id: 'T', type: 'tool', label: 'tokens', x: 460, y: 40, config: 'Tool:figma:figma_export_tokens' },
+          { id: 'S', type: 'llm', label: 'summarize', x: 460, y: 200, config: 'LLM:gemini' },
+          { id: 'C', type: 'llm', label: 'compose', x: 660, y: 120, config: 'LLM:claude' },
+          { id: 'M', type: 'merge', label: 'merge', x: 860, y: 120, config: 'Merge:concat' },
+        ],
+        connections: [
+          ['P', 'F'],
+          ['F', 'T'],
+          ['F', 'S'],
+          ['T', 'C'],
+          ['S', 'C'],
+          ['C', 'M']
+        ]
+      },
+      'figma-component': {
+        nodes: [
+          { id: 'P', type: 'tool', label: 'parse-url', x: 60, y: 120, config: 'Tool:figma:figma_parse_url' },
+          { id: 'N', type: 'tool', label: 'get-node', x: 260, y: 120, config: 'Tool:figma:figma_get_node' },
+          { id: 'B', type: 'tool', label: 'bundle', x: 460, y: 40, config: 'Tool:figma:figma_get_node_bundle' },
+          { id: 'D', type: 'llm', label: 'design', x: 460, y: 200, config: 'LLM:gemini' },
+          { id: 'H', type: 'llm', label: 'html', x: 660, y: 120, config: 'LLM:claude' },
+          { id: 'V', type: 'merge', label: 'verify', x: 860, y: 120, config: 'Merge:concat' },
+        ],
+        connections: [
+          ['P', 'N'],
+          ['N', 'B'],
+          ['N', 'D'],
+          ['B', 'H'],
+          ['D', 'H'],
+          ['H', 'V']
+        ]
       }
     };
 
