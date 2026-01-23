@@ -398,6 +398,45 @@ let execute_slack_post ~sw ~proc_mgr ~clock ~channel ~text ~thread_ts : tool_res
             response = sprintf "Error: %s" msg;
             extra = [("channel", channel); ("error", msg)]; }
 
+(** {1 Langfuse Tracing Helpers} *)
+
+(** Extract model name from tool_args for tracing *)
+let get_model_name_for_tracing = function
+  | Gemini { model; _ } -> sprintf "gemini:%s" model
+  | Claude { model; _ } -> sprintf "claude:%s" model
+  | Codex { model; _ } -> sprintf "codex:%s" model
+  | Ollama { model; _ } -> sprintf "ollama:%s" model
+  | OllamaList -> "ollama:list"
+  | ChainRun _ -> "chain:run"
+  | ChainValidate _ -> "chain:validate"
+  | ChainList -> "chain:list"
+  | ChainToMermaid _ -> "chain:to_mermaid"
+  | ChainVisualize _ -> "chain:visualize"
+  | ChainConvert _ -> "chain:convert"
+  | ChainOrchestrate _ -> "chain:orchestrate"
+  | ChainCheckpoints _ -> "chain:checkpoints"
+  | ChainResume _ -> "chain:resume"
+  | PromptRegister _ -> "prompt:register"
+  | PromptList -> "prompt:list"
+  | PromptGet _ -> "prompt:get"
+  | GhPrDiff _ -> "tool:gh_pr_diff"
+  | SlackPost _ -> "tool:slack_post"
+
+(** Extract input/prompt from tool_args for tracing *)
+let get_input_for_tracing = function
+  | Gemini { prompt; _ } -> prompt
+  | Claude { prompt; _ } -> prompt
+  | Codex { prompt; _ } -> prompt
+  | Ollama { prompt; _ } -> prompt
+  | OllamaList -> "(list models)"
+  | ChainRun { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
+  | ChainValidate { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
+  | ChainOrchestrate { chain; _ } ->
+      (match chain with
+       | Some j -> sprintf "(orchestrate: %s)" (Yojson.Safe.to_string j)
+       | None -> "(orchestrate: preset)")
+  | _ -> "(non-llm operation)"
+
 (** {1 Main Execute Function} *)
 
 (** Execute a tool and return result - Direct Style *)
@@ -462,8 +501,9 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 response = sprintf "Error: %s" msg;
                 extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; })
 
-  | Ollama { model; temperature; timeout; _ } ->
+  | Ollama { model; temperature; timeout; tools; _ } ->
       (* Force stream=false for non-streaming execute path *)
+      let has_tools = match tools with Some l when List.length l > 0 -> true | _ -> false in
       (match build_ollama_curl_cmd ~force_stream:(Some false) args with
       | Error err ->
           { model = sprintf "ollama (%s)" model;
@@ -476,18 +516,50 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
           match result with
           | Ok r ->
-              let response = match parse_ollama_response r.stdout with
-                | Ok resp -> resp
-                | Error err -> sprintf "Error: %s" err
+              (* Use chat parser when tools are present, otherwise use generate parser *)
+              let (response, extra_fields) =
+                if has_tools then begin
+                  match Ollama_parser.parse_chat_result r.stdout with
+                  | Ok (Ollama_parser.TextResponse (text, thinking)) ->
+                      let extra = match thinking with
+                        | Some t -> [("thinking", t)]
+                        | None -> []
+                      in
+                      (text, extra)
+                  | Ok (Ollama_parser.ToolCalls (calls, thinking)) ->
+                      let calls_json = tool_calls_to_json calls in
+                      let extra = [("tool_calls", calls_json)] in
+                      let extra = match thinking with
+                        | Some t -> ("thinking", t) :: extra
+                        | None -> extra
+                      in
+                      ("", extra)
+                  | Ok (Ollama_parser.TextWithTools (text, calls, thinking)) ->
+                      let calls_json = tool_calls_to_json calls in
+                      let extra = [("tool_calls", calls_json)] in
+                      let extra = match thinking with
+                        | Some t -> ("thinking", t) :: extra
+                        | None -> extra
+                      in
+                      (text, extra)
+                  | Error err -> (sprintf "Error: %s" err, [])
+                end else begin
+                  match parse_ollama_response r.stdout with
+                  | Ok resp -> (resp, [])
+                  | Error err -> (sprintf "Error: %s" err, [])
+                end
               in
+              (* Success if: has response text OR has tool_calls, and not an error *)
+              let has_tool_calls = List.exists (fun (k, _) -> k = "tool_calls") extra_fields in
               let returncode =
-                if String.length response > 0 && not (String.sub response 0 (min 6 (String.length response)) = "Error:")
+                if (String.length response > 0 || has_tool_calls) &&
+                   not (String.length response >= 6 && String.sub response 0 6 = "Error:")
                 then 0 else -1
               in
               { model = sprintf "ollama (%s)" model;
                 returncode;
                 response;
-                extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")]; }
+                extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")] @ extra_fields; }
           | Error (Timeout t) ->
               { model = sprintf "ollama (%s)" model;
                 returncode = -1;
@@ -1334,6 +1406,46 @@ let execute_with_env ~sw ~env args =
   let clock = Eio.Stdenv.clock env in
   execute ~sw ~proc_mgr ~clock args
 
+(** Execute with Langfuse tracing - wraps execute for observability *)
+let execute_with_tracing ~sw ~proc_mgr ~clock args : tool_result =
+  let model_name = get_model_name_for_tracing args in
+  let input_str = get_input_for_tracing args in
+
+  (* Create Langfuse trace and generation if enabled *)
+  let trace =
+    if Langfuse.is_enabled () then
+      Some (Langfuse.create_trace ~name:("tool:" ^ model_name) ())
+    else None
+  in
+  let gen = match trace with
+    | Some t ->
+        Some (Langfuse.create_generation ~trace:t ~name:model_name ~model:model_name ~input:input_str ())
+    | None -> None
+  in
+
+  (* Execute the actual tool *)
+  let result = execute ~sw ~proc_mgr ~clock args in
+
+  (* End Langfuse generation and trace *)
+  (match gen with
+   | Some g ->
+       if result.returncode = 0 then
+         Langfuse.end_generation g ~output:result.response ~prompt_tokens:0 ~completion_tokens:0
+       else
+         Langfuse.error_generation g ~message:result.response
+   | None -> ());
+  (match trace with
+   | Some t ->
+       t.Langfuse.metadata <- [
+         ("model", model_name);
+         ("returncode", string_of_int result.returncode);
+         ("response_length", string_of_int (String.length result.response));
+       ];
+       Langfuse.end_trace t
+   | None -> ());
+
+  result
+
 (** Execute Ollama streaming with Eio env *)
 let execute_ollama_streaming_with_env ~sw ~env ~on_token args =
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -1496,10 +1608,20 @@ let execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request_body =
   | Ok body_str ->
       match Ollama_parser.parse_chat_result body_str with
       | Error e -> TurnError e
-      | Ok (Ollama_parser.TextResponse text) -> TurnDone text
-      | Ok (Ollama_parser.ToolCalls calls) -> TurnContinue calls
-      | Ok (Ollama_parser.TextWithTools (text, calls)) ->
-          if calls = [] then TurnDone text
+      | Ok (Ollama_parser.TextResponse (text, thinking)) ->
+          let response = match thinking with
+            | Some t -> sprintf "[Thinking]\n%s\n\n[Response]\n%s" t text
+            | None -> text
+          in
+          TurnDone response
+      | Ok (Ollama_parser.ToolCalls (calls, _thinking)) -> TurnContinue calls
+      | Ok (Ollama_parser.TextWithTools (text, calls, thinking)) ->
+          if calls = [] then
+            let response = match thinking with
+              | Some t -> sprintf "[Thinking]\n%s\n\n[Response]\n%s" t text
+              | None -> text
+            in
+            TurnDone response
           else TurnContinue calls
 
 (** Execute Ollama with agentic tool calling loop.
