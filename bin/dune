@@ -200,6 +200,13 @@
  (libraries llm_mcp.common unix yojson))
 
 (executable
+ (name chain_presets_viewer)
+ (public_name chain-presets-viewer)
+ (package llm_mcp)
+ (modules chain_presets_viewer)
+ (libraries llm_mcp.common yojson cmdliner))
+
+(executable
  (name ouroboros_governance)
  (public_name ouroboros-governance)
  (package llm_mcp)
