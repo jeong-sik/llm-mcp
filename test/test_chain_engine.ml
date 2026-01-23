@@ -2046,6 +2046,7 @@ let test_stream_merge_mermaid_parse () =
         | Mcts _ -> "Mcts"
         | StreamMerge _ -> "StreamMerge"
         | Subgraph _ -> "Subgraph"
+        | FeedbackLoop _ -> "FeedbackLoop"
       in
       (match merge_node.node_type with
        | StreamMerge { reducer; min_results; timeout; _ } ->
@@ -2263,6 +2264,179 @@ let stream_merge_tests = [
   "stream_merge_nested_depth", `Quick, test_stream_merge_nested_depth;
 ]
 
+(* ═══════════════════════════════════════════════════════════════════════════
+   FEEDBACKLOOP NODE TESTS
+   ═══════════════════════════════════════════════════════════════════════════ *)
+
+(** Test basic FeedbackLoop type construction *)
+let test_feedback_loop_basic () =
+  let generator = Chain_types.make_llm_node
+    ~id:"gen"
+    ~model:"gemini"
+    ~prompt:"Generate a high-quality response"
+    () in
+  let eval_config : Chain_types.evaluator_config = {
+    scoring_func = "llm_judge";
+    scoring_prompt = Some "Score quality 0.0-1.0";
+    select_strategy = Chain_types.Best;
+  } in
+  let node = Chain_types.make_feedback_loop
+    ~id:"feedback"
+    ~generator
+    ~evaluator_config:eval_config
+    ~improver_prompt:"Improve based on: {{feedback}}"
+    ~max_iterations:3
+    ~min_score:0.8 in
+  match node.node_type with
+  | Chain_types.FeedbackLoop { generator = gen; evaluator_config; max_iterations; min_score; _ } ->
+      Alcotest.(check string) "generator id" "gen" gen.id;
+      Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func;
+      Alcotest.(check int) "max_iterations" 3 max_iterations;
+      Alcotest.(check (float 0.01)) "min_score" 0.8 min_score
+  | _ -> Alcotest.fail "Expected FeedbackLoop node"
+
+(** Test FeedbackLoop JSON parsing *)
+let test_feedback_loop_json_parse () =
+  let json = {|{
+    "id": "feedback_test",
+    "nodes": [
+      {
+        "id": "fb",
+        "type": "feedback_loop",
+        "generator": {
+          "id": "gen",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "Generate output"
+        },
+        "evaluator_config": {
+          "scoring_func": "llm_judge",
+          "scoring_prompt": "Rate quality",
+          "select_strategy": "best"
+        },
+        "improver_prompt": "Fix: {{feedback}}",
+        "max_iterations": 5,
+        "min_score": 0.75
+      }
+    ],
+    "output": "fb"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      Alcotest.(check int) "node count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Chain_types.FeedbackLoop { generator; max_iterations; min_score; evaluator_config; _ } ->
+           Alcotest.(check string) "generator id" "gen" generator.id;
+           Alcotest.(check int) "max_iterations" 5 max_iterations;
+           Alcotest.(check (float 0.01)) "min_score" 0.75 min_score;
+           Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func
+       | _ -> Alcotest.fail "Expected FeedbackLoop node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test FeedbackLoop Mermaid parsing *)
+let test_feedback_loop_mermaid_parse () =
+  let mermaid = {|graph LR
+    fb[["FeedbackLoop:llm_judge,3,0.7"]]
+  |} in
+  match Chain_mermaid_parser.parse_chain mermaid with
+  | Ok chain ->
+      (* Check that we have at least one node *)
+      Alcotest.(check bool) "has nodes" true (List.length chain.nodes > 0);
+      (* Find the FeedbackLoop node - it might have a different ID after parsing *)
+      let fb_node = List.find_opt (fun (n : Chain_types.node) ->
+        match n.node_type with Chain_types.FeedbackLoop _ -> true | _ -> false
+      ) chain.nodes in
+      (match fb_node with
+       | Some node ->
+           (match node.node_type with
+            | Chain_types.FeedbackLoop { max_iterations; min_score; evaluator_config; _ } ->
+                Alcotest.(check int) "max_iterations" 3 max_iterations;
+                Alcotest.(check (float 0.01)) "min_score" 0.7 min_score;
+                Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func
+            | _ -> Alcotest.fail "Not a FeedbackLoop")
+       | None ->
+           (* Debug: print node types found *)
+           let node_types = List.map (fun n -> Chain_types.node_type_name n.Chain_types.node_type) chain.nodes in
+           Alcotest.fail (Printf.sprintf "FeedbackLoop not found. Nodes: %s" (String.concat ", " node_types)))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test FeedbackLoop JSON serialization roundtrip *)
+let test_feedback_loop_json_roundtrip () =
+  let generator = Chain_types.make_llm_node
+    ~id:"gen"
+    ~model:"gemini"
+    ~prompt:"Generate"
+    () in
+  let eval_config : Chain_types.evaluator_config = {
+    scoring_func = "anti_fake";
+    scoring_prompt = None;
+    select_strategy = Chain_types.AboveThreshold 0.6;
+  } in
+  let node = Chain_types.make_feedback_loop
+    ~id:"fb"
+    ~generator
+    ~evaluator_config:eval_config
+    ~improver_prompt:"{{feedback}} -> {{previous_output}}"
+    ~max_iterations:2
+    ~min_score:0.9 in
+  let chain : Chain_types.chain = {
+    id = "roundtrip_test";
+    nodes = [node];
+    output = "fb";
+    config = Chain_types.default_config;
+  } in
+  let json_str = Chain_parser.chain_to_json_string chain in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json_str) with
+  | Ok parsed ->
+      let parsed_node = List.hd parsed.nodes in
+      (match parsed_node.node_type with
+       | Chain_types.FeedbackLoop { max_iterations; min_score; evaluator_config; _ } ->
+           Alcotest.(check int) "max_iterations" 2 max_iterations;
+           Alcotest.(check (float 0.01)) "min_score" 0.9 min_score;
+           Alcotest.(check string) "scoring_func" "anti_fake" evaluator_config.scoring_func
+       | _ -> Alcotest.fail "Expected FeedbackLoop after roundtrip")
+  | Error e -> Alcotest.fail (Printf.sprintf "Roundtrip error: %s" e)
+
+(** Test FeedbackLoop compile depth calculation *)
+let test_feedback_loop_compile_depth () =
+  let generator = Chain_types.make_llm_node
+    ~id:"gen"
+    ~model:"gemini"
+    ~prompt:"Generate"
+    () in
+  let eval_config : Chain_types.evaluator_config = {
+    scoring_func = "llm_judge";
+    scoring_prompt = None;
+    select_strategy = Chain_types.Best;
+  } in
+  let node = Chain_types.make_feedback_loop
+    ~id:"fb"
+    ~generator
+    ~evaluator_config:eval_config
+    ~improver_prompt:"Improve"
+    ~max_iterations:4
+    ~min_score:0.8 in
+  let chain : Chain_types.chain = {
+    id = "depth_test";
+    nodes = [node];
+    output = "fb";
+    config = Chain_types.default_config;
+  } in
+  match Chain_compiler.compile chain with
+  | Ok plan ->
+      (* FeedbackLoop depth = 1 + generator_depth * max_iterations = 1 + 1 * 4 = 5 *)
+      Alcotest.(check int) "depth" 5 plan.depth
+  | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e)
+
+let feedback_loop_tests = [
+  "feedback_loop_basic", `Quick, test_feedback_loop_basic;
+  "feedback_loop_json_parse", `Quick, test_feedback_loop_json_parse;
+  "feedback_loop_mermaid_parse", `Quick, test_feedback_loop_mermaid_parse;
+  "feedback_loop_json_roundtrip", `Quick, test_feedback_loop_json_roundtrip;
+  "feedback_loop_compile_depth", `Quick, test_feedback_loop_compile_depth;
+]
+
 let () =
   Alcotest.run "Chain Engine" [
     "Chain Types", types_tests;
@@ -2276,4 +2450,5 @@ let () =
     "Cache Node", cache_tests;
     "Batch Node", batch_tests;
     "StreamMerge Node", stream_merge_tests;
+    "FeedbackLoop Node", feedback_loop_tests;
   ]

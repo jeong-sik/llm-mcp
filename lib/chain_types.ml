@@ -75,6 +75,23 @@ type select_strategy =
   | WeightedRandom    (** Random selection weighted by scores *)
 [@@deriving yojson]
 
+(** Configuration for evaluator in FeedbackLoop *)
+type evaluator_config = {
+  scoring_func : string;             (** Scoring function: "llm_judge", "regex_match", etc. *)
+  scoring_prompt : string option;    (** Prompt for LLM judge scoring *)
+  select_strategy : select_strategy; (** Selection strategy *)
+}
+[@@deriving yojson]
+
+(** Result of evaluation with optional feedback *)
+type evaluator_result = {
+  score : float;               (** Score from 0.0 to 1.0 *)
+  feedback : string option;    (** Feedback for improvement (generated when score < min_score) *)
+  selected_output : string;    (** The selected output content *)
+  selected_id : string;        (** ID of the selected candidate *)
+}
+[@@deriving yojson]
+
 (** Backoff strategy for Retry node *)
 type backoff_strategy =
   | Constant of float         (** Fixed delay between retries (seconds) *)
@@ -250,6 +267,14 @@ type node_type =
       min_results : int option;      (** Minimum results before returning (None = wait for all) *)
       timeout : float option;        (** Timeout in seconds (applies after min_results met) *)
     }
+  (* FeedbackLoop - Iterative quality improvement with evaluator feedback *)
+  | FeedbackLoop of {
+      generator : node;              (** Generator node that produces output *)
+      evaluator_config : evaluator_config;  (** Evaluator configuration *)
+      improver_prompt : string;      (** Prompt template with {{feedback}} and {{previous_output}} *)
+      max_iterations : int;          (** Maximum iteration count *)
+      min_score : float;             (** Minimum acceptable score (0.0-1.0) *)
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -344,6 +369,7 @@ let node_type_name = function
   | Spawn _ -> "spawn"
   | Mcts _ -> "mcts"
   | StreamMerge _ -> "stream_merge"
+  | FeedbackLoop _ -> "feedback_loop"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
@@ -398,6 +424,14 @@ let make_fallback ~id ~primary ~fallbacks =
 (** Helper: Create a race node (first result wins) *)
 let make_race ~id ~nodes ?timeout () =
   { id; node_type = Race { nodes; timeout }; input_mapping = [] }
+
+(** Helper: Create a feedback loop node for iterative quality improvement *)
+let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
+    ~max_iterations ~min_score =
+  { id; node_type = FeedbackLoop {
+      generator; evaluator_config; improver_prompt;
+      max_iterations; min_score
+    }; input_mapping = [] }
 
 (** {1 Batch Execution Types - Phase 5} *)
 
@@ -507,6 +541,9 @@ let rec count_parallel_groups (node: node) : int =
   | StreamMerge { nodes; _ } ->
       (* StreamMerge runs nodes in parallel and processes results progressively *)
       1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
+  | FeedbackLoop { generator; _ } ->
+      (* FeedbackLoop wraps generator - count generator's parallel groups *)
+      count_parallel_groups generator
   | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ -> 0
 
 (** Count total parallel groups in a chain *)
