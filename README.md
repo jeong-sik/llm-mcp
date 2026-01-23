@@ -20,10 +20,14 @@ Claude Code 안에서 다른 LLM 호출할 때 쓰려고 만든 CLI 래퍼.
 ## 시작하기
 
 ```bash
-# 의존성 설치
+# 1. 외부 의존성 pin (opam에 없음)
+opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git -y
+opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git -y
+
+# 2. 의존성 설치
 opam install . --deps-only
 
-# 빌드
+# 3. 빌드
 dune build
 
 # 실행 (HTTP 모드)
