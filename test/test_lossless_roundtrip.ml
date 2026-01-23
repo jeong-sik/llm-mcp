@@ -265,7 +265,7 @@ let test_goaldriven_mermaid_parsing () =
 let test_goaldriven_strict_roundtrip () =
   let action_node = {
     id = "action";
-    node_type = Llm { model = "gemini"; system = None; prompt = "Improve code"; timeout = None; tools = None };
+    node_type = Llm { model = "gemini"; system = None; prompt = "Improve code"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
   let goal_node = {

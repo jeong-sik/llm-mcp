@@ -559,7 +559,7 @@ type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 (** Execute a single LLM node *)
 let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, string) result =
   match llm with
-  | Llm { model; system; prompt; timeout = _; tools } ->
+  | Llm { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _ } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
@@ -601,6 +601,25 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
            | Some gen -> Langfuse.end_generation gen ~output ~prompt_tokens ~completion_tokens
            | None -> ());
 
+          (* Update Prompt Registry metrics if prompt_ref was used *)
+          (match prompt_ref with
+           | Some ref ->
+               (* Parse ref format: "id" or "id@version" *)
+               let (id, version) = match String.split_on_char '@' ref with
+                 | [id; ver] -> (id, ver)
+                 | [id] ->
+                     (* Look up the version that was actually used *)
+                     (match Prompt_registry.get ~id () with
+                      | Some entry -> (id, entry.version)
+                      | None -> (id, "1.0"))
+                 | _ -> (ref, "1.0")
+               in
+               (* Calculate a simple quality score based on output length *)
+               (* In real usage, this could be replaced with a proper evaluation *)
+               let score = min 1.0 (float_of_int (String.length output) /. 500.0) in
+               Prompt_registry.update_metrics ~id ~version ~score ()
+           | None -> ());
+
           record_complete ctx node.id ~duration_ms ~success:true;
           Hashtbl.add ctx.outputs node.id output;
           Ok output
@@ -608,6 +627,20 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
           (* End Langfuse generation with error *)
           (match langfuse_gen with
            | Some gen -> Langfuse.error_generation gen ~message:msg
+           | None -> ());
+
+          (* Update Prompt Registry metrics with low score on error *)
+          (match prompt_ref with
+           | Some ref ->
+               let (id, version) = match String.split_on_char '@' ref with
+                 | [id; ver] -> (id, ver)
+                 | [id] ->
+                     (match Prompt_registry.get ~id () with
+                      | Some entry -> (id, entry.version)
+                      | None -> (id, "1.0"))
+                 | _ -> (ref, "1.0")
+               in
+               Prompt_registry.update_metrics ~id ~version ~score:0.0 ()
            | None -> ());
 
           record_complete ctx node.id ~duration_ms ~success:false;
