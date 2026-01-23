@@ -152,11 +152,21 @@ let execute_turn ~sw ~net _state request_body =
   | Ok body_str ->
       match parse_chat_result body_str with
       | Error e -> TurnError e
-      | Ok (TextResponse text) -> TurnDone text
-      | Ok (ToolCalls calls) -> TurnContinue calls
-      | Ok (TextWithTools (text, calls)) ->
+      | Ok (TextResponse (text, thinking)) ->
+          let response = match thinking with
+            | Some t -> Printf.sprintf "[Thinking]\n%s\n\n[Response]\n%s" t text
+            | None -> text
+          in
+          TurnDone response
+      | Ok (ToolCalls (calls, _thinking)) -> TurnContinue calls
+      | Ok (TextWithTools (text, calls, thinking)) ->
           (* Model provided both text and tool calls - process tool calls *)
-          if calls = [] then TurnDone text
+          if calls = [] then
+            let response = match thinking with
+              | Some t -> Printf.sprintf "[Thinking]\n%s\n\n[Response]\n%s" t text
+              | None -> text
+            in
+            TurnDone response
           else TurnContinue calls
 
 (** Run agent loop *)
