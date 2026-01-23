@@ -449,6 +449,180 @@ let test_inputs_full_roundtrip () =
             | _ -> false
   )
 
+(* Complex nested nodes should survive lossless Mermaid roundtrip *)
+let test_complex_lossless_roundtrip () =
+  let make_llm id model prompt =
+    { id;
+      node_type = Llm {
+        model; system = Some "system";
+        prompt; timeout = Some 42; tools = None;
+        prompt_ref = None;
+        prompt_vars = [];
+      };
+      input_mapping = [];
+    }
+  in
+  let tool_node = {
+    id = "tool_parse";
+    node_type = Tool {
+      name = "figma:figma_parse_url";
+      args = `Assoc [("url", `String "https://figma.com/file/abc/xyz")];
+    };
+    input_mapping = [];
+  } in
+  let retry_node = {
+    id = "retry_api";
+    node_type = Retry {
+      node = tool_node;
+      max_attempts = 2;
+      backoff = Exponential 1.5;
+      retry_on = ["timeout"; "5xx"];
+    };
+    input_mapping = [];
+  } in
+  let fallback_node = {
+    id = "fallback_llm";
+    node_type = Fallback {
+      primary = make_llm "primary" "claude" "Primary";
+      fallbacks = [make_llm "fb1" "gemini" "Backup1"; make_llm "fb2" "ollama" "Backup2"];
+    };
+    input_mapping = [("input", "retry_api")];
+  } in
+  let sub_chain = {
+    id = "sub_chain";
+    nodes = [
+      make_llm "sub_a" "gemini" "Sub A";
+      make_llm "sub_b" "claude" "Sub B";
+    ];
+    output = "sub_b";
+    config = { Chain_types.default_config with timeout = 77; trace = true; max_concurrency = 2; direction = TB };
+  } in
+  let subgraph_node = {
+    id = "subgraph";
+    node_type = Subgraph sub_chain;
+    input_mapping = [("input", "fallback_llm")];
+  } in
+  let feedback_node = {
+    id = "feedback";
+    node_type = FeedbackLoop {
+      generator = make_llm "gen" "gemini" "Generate";
+      evaluator_config = { scoring_func = "llm_judge"; scoring_prompt = Some "Score 0-1"; select_strategy = Best };
+      improver_prompt = "Fix: {{feedback}}";
+      max_iterations = 3;
+      min_score = 0.9;
+    };
+    input_mapping = [];
+  } in
+  let mcts_node = {
+    id = "mcts";
+    node_type = Mcts {
+      strategies = [make_llm "s1" "gemini" "S1"; make_llm "s2" "claude" "S2"];
+      simulation = make_llm "sim" "gemini" "Sim";
+      evaluator = "llm_judge";
+      evaluator_prompt = None;
+      policy = UCB1 1.41;
+      max_iterations = 5;
+      max_depth = 3;
+      expansion_threshold = 2;
+      early_stop = Some 0.95;
+      parallel_sims = 2;
+    };
+    input_mapping = [];
+  } in
+  let stream_node = {
+    id = "stream";
+    node_type = StreamMerge {
+      nodes = [make_llm "sm1" "gemini" "S"; make_llm "sm2" "claude" "M"];
+      reducer = Concat;
+      initial = "";
+      min_results = Some 1;
+      timeout = Some 1.5;
+    };
+    input_mapping = [("from", "subgraph")];
+  } in
+  let adapter_node = {
+    id = "adapt";
+    node_type = Adapter {
+      input_ref = "{{stream}}";
+      transform = Template "Result: {{value}}";
+      on_error = `Default "N/A";
+    };
+    input_mapping = [];
+  } in
+  let chain_exec_node = {
+    id = "exec";
+    node_type = ChainExec {
+      chain_source = "chain_json";
+      validate = true;
+      max_depth = 2;
+      sandbox = true;
+      context_inject = [("input", "subgraph")];
+      pass_outputs = false;
+    };
+    input_mapping = [];
+  } in
+  let cache_node = {
+    id = "cache";
+    node_type = Cache {
+      key_expr = "{{input}}";
+      ttl_seconds = 30;
+      inner = make_llm "cache_inner" "gemini" "Cache";
+    };
+    input_mapping = [];
+  } in
+  let batch_node = {
+    id = "batch";
+    node_type = Batch {
+      batch_size = 2;
+      parallel = true;
+      inner = make_llm "batch_inner" "gemini" "Batch";
+      collect_strategy = `Concat;
+    };
+    input_mapping = [];
+  } in
+  let spawn_node = {
+    id = "spawn";
+    node_type = Spawn {
+      clean = true;
+      inner = make_llm "spawn_inner" "gemini" "Spawn";
+      pass_vars = ["input"; "config"];
+      inherit_cache = false;
+    };
+    input_mapping = [];
+  } in
+  let chain1 = {
+    id = "complex_lossless";
+    nodes = [
+      retry_node;
+      fallback_node;
+      subgraph_node;
+      feedback_node;
+      mcts_node;
+      stream_node;
+      adapter_node;
+      chain_exec_node;
+      cache_node;
+      batch_node;
+      spawn_node;
+    ];
+    output = "stream";
+    config = { Chain_types.default_config with timeout = 123; trace = true; max_concurrency = 4; direction = LR };
+  } in
+  Alcotest.(check bool) "complex lossless roundtrip" true (
+    let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+    match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+    | Error e -> failwith ("Mermaid parse failed: " ^ e)
+    | Ok chain2 ->
+        let json1 = Json_parser.chain_to_json_string ~pretty:true chain1 in
+        let json2 = Json_parser.chain_to_json_string ~pretty:true chain2 in
+        if json1 <> json2 then begin
+          Printf.printf "FAIL: complex lossless mismatch\n";
+          Printf.printf "---- json1 ----\n%s\n" json1;
+          Printf.printf "---- json2 ----\n%s\n" json2;
+        end;
+        json1 = json2
+  )
+
 let () =
   Alcotest.run "Lossless Roundtrip" [
     "roundtrip", [
@@ -462,6 +636,7 @@ let () =
       Alcotest.test_case "Lossy mode (no metadata)" `Quick test_lossy_mode;
       Alcotest.test_case "Fallback ID when no metadata" `Quick test_fallback_id;
       Alcotest.test_case "Partial metadata" `Quick test_partial_metadata;
+      Alcotest.test_case "Complex lossless (nested/resilience)" `Quick test_complex_lossless_roundtrip;
       Alcotest.test_case "inputs assoc format (chain_to_json compat)" `Quick test_inputs_assoc_format;
       Alcotest.test_case "inputs full roundtrip" `Quick test_inputs_full_roundtrip;
     ];
