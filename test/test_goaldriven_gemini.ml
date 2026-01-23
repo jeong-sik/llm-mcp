@@ -91,6 +91,8 @@ Example: {"score": 0.85}
 No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in
@@ -148,6 +150,8 @@ Example: {"metrics": {"accuracy": 0.9}, "status": "ok"}
 No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in
@@ -206,6 +210,8 @@ Return exactly: {"value": 0.75}
 No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in
@@ -268,6 +274,8 @@ Return ONLY: {"count": N, "progress": X} where X = N/3.0
 No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in

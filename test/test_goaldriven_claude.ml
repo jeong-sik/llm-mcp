@@ -96,6 +96,8 @@ Example: {"score": 0.85}
 No explanation, just JSON.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in
@@ -153,6 +155,8 @@ Example: {"metrics": {"accuracy": 0.9}, "status": "ok"}
 No explanation, just JSON.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in
@@ -211,6 +215,8 @@ Return: {"value": 0.75}
 No explanation, just JSON.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in
@@ -273,6 +279,8 @@ Return: {"count": N, "progress": N/3}
 No explanation, just JSON.|};
       timeout = Some 30;
       tools = None;
+      prompt_ref = None;
+      prompt_vars = [];
     };
     input_mapping = [];
   } in

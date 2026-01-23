@@ -364,7 +364,6 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
   match type_str with
   | "llm" ->
       let* model = require_string json "model" in
-      let* prompt = require_string json "prompt" in
       let system = parse_string_opt json "system" in
       let timeout = parse_int_opt json "timeout" in
       let tools =
@@ -372,7 +371,40 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | `Null -> None
         | v -> Some v
       in
-      Ok (Llm { model; system; prompt; timeout; tools })
+      (* Prompt Registry support: prompt_ref takes precedence *)
+      let prompt_ref = parse_string_opt json "prompt_ref" in
+      let prompt_vars =
+        match json |> member "prompt_vars" with
+        | `Assoc pairs ->
+            List.filter_map (fun (k, v) ->
+              match v with `String s -> Some (k, s) | _ -> None) pairs
+        | _ -> []
+      in
+      (* If prompt_ref is set, load from registry; otherwise require prompt field *)
+      let* prompt =
+        match prompt_ref with
+        | Some ref ->
+            (* Parse ref format: "id" or "id@version" *)
+            let (id, version) = match String.split_on_char '@' ref with
+              | [id; ver] -> (id, Some ver)
+              | [id] -> (id, None)
+              | _ -> (ref, None)
+            in
+            (match Prompt_registry.get ~id ?version () with
+             | Some entry ->
+                 (* Apply prompt_vars to the template *)
+                 (match Prompt_registry.render_template ~template:entry.template ~vars:prompt_vars () with
+                  | Ok rendered -> Ok rendered
+                  | Error e -> Error (Printf.sprintf "Failed to render prompt_ref '%s': %s" ref e))
+             | None ->
+                 (* If prompt_ref not found, fall back to prompt field if present *)
+                 match parse_string_opt json "prompt" with
+                 | Some p -> Ok p
+                 | None -> Error (Printf.sprintf "Prompt '%s' not found in registry and no fallback prompt" ref))
+        | None ->
+            require_string json "prompt"
+      in
+      Ok (Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars })
 
   | "tool" ->
       let* name = require_string json "name" in
@@ -847,7 +879,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
     else [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
   in
   let type_fields = match n.node_type with
-    | Llm { model; system; prompt; timeout; tools } ->
+    | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars } ->
         let fields = [
           ("type", `String "llm");
           ("model", `String model);
@@ -864,6 +896,14 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         let fields = match tools with
           | Some t -> fields @ [("tools", t)]
           | None -> fields
+        in
+        let fields = match prompt_ref with
+          | Some r -> fields @ [("prompt_ref", `String r)]
+          | None -> fields
+        in
+        let fields = if prompt_vars <> [] then
+          fields @ [("prompt_vars", `Assoc (List.map (fun (k, v) -> (k, `String v)) prompt_vars))]
+        else fields
         in
         fields
 
