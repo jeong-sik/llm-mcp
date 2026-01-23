@@ -203,6 +203,21 @@ let parse_slack_post_args (json : Yojson.Safe.t) : tool_args =
   let thread_ts = json |> member "thread_ts" |> to_string_option in
   SlackPost { channel; text; thread_ts }
 
+(** Parse JSON arguments for chain.checkpoints tool *)
+let parse_chain_checkpoints_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let chain_id = json |> member "chain_id" |> to_string_option in
+  let max_age_hours = json |> member "max_age_hours" |> to_int_option in
+  let cleanup = json |> member "cleanup" |> to_bool_option |> Option.value ~default:false in
+  ChainCheckpoints { chain_id; max_age_hours; cleanup }
+
+(** Parse JSON arguments for chain.resume tool *)
+let parse_chain_resume_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let run_id = json |> member "run_id" |> to_string in
+  let trace = json |> member "trace" |> to_bool_option |> Option.value ~default:false in
+  ChainResume { run_id; trace }
+
 (** {1 Command Builders} *)
 
 (** Build thinking prompt prefix based on thinking level *)

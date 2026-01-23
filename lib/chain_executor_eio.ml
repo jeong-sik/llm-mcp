@@ -75,6 +75,15 @@ type conversation_ctx = {
   mutable summaries: string list;       (** Previous conversation summaries *)
 }
 
+(** Checkpoint configuration for resume support *)
+type checkpoint_config = {
+  checkpoint_store: Checkpoint_store.checkpoint_store option;  (** Store for saving/loading checkpoints *)
+  checkpoint_enabled: bool;                                     (** Whether to save checkpoints after each node *)
+  resume_from: string option;                                   (** run_id to resume from, or None for fresh start *)
+  run_id: string;                                               (** Current run's unique identifier *)
+  fs: Eio.Fs.dir_ty Eio.Path.t option;                         (** Eio filesystem for checkpoint I/O *)
+}
+
 (** Context passed through execution *)
 type exec_context = {
   outputs: (string, string) Hashtbl.t;      (** Node outputs by ID *)
@@ -87,10 +96,20 @@ type exec_context = {
   cache: (string, string * float) Hashtbl.t;  (** Node cache: key -> (result, timestamp) *)
   mutable total_tokens: Chain_category.token_usage; (** Accumulated token usage *)
   langfuse_trace: Langfuse.trace option;     (** Langfuse trace for observability *)
+  checkpoint: checkpoint_config;             (** Checkpoint/resume configuration *)
+}
+
+(** Default checkpoint configuration - no checkpointing *)
+let default_checkpoint_config = {
+  checkpoint_store = None;
+  checkpoint_enabled = false;
+  resume_from = None;
+  run_id = Checkpoint_store.generate_run_id ();
+  fs = None;
 }
 
 (** Create a new execution context *)
-let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace () = {
+let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace ?checkpoint () = {
   outputs = Hashtbl.create 16;
   traces = ref [];
   start_time;
@@ -101,7 +120,79 @@ let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace () = {
   cache = Hashtbl.create 32;
   total_tokens = Chain_category.Token_monoid.empty;
   langfuse_trace;
+  checkpoint = Option.value checkpoint ~default:default_checkpoint_config;
 }
+
+(** Create checkpoint configuration for execution *)
+let make_checkpoint_config ?fs ?store ?(enabled = false) ?resume_from () =
+  let store = match store with
+    | Some s -> Some s
+    | None when enabled -> Some (Checkpoint_store.create ())
+    | None -> None
+  in
+  {
+    checkpoint_store = store;
+    checkpoint_enabled = enabled;
+    resume_from;
+    run_id = Checkpoint_store.generate_run_id ();
+    fs;
+  }
+
+(** Save checkpoint for current execution state *)
+let save_checkpoint ctx ~chain_id ~node_id =
+  match ctx.checkpoint.checkpoint_store, ctx.checkpoint.fs with
+  | Some store, Some fs when ctx.checkpoint.checkpoint_enabled ->
+      let outputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
+      let traces = [] in  (* Don't include internal traces in checkpoint *)
+      let cp = Checkpoint_store.make_checkpoint
+        ~run_id:ctx.checkpoint.run_id
+        ~chain_id
+        ~node_id
+        ~outputs
+        ~traces
+        ~total_tokens:ctx.total_tokens
+        ()
+      in
+      (match Checkpoint_store.save_eio ~fs store cp with
+       | Ok () -> ()
+       | Error msg -> Printf.eprintf "[checkpoint] Save failed: %s\n%!" msg)
+  | Some store, None when ctx.checkpoint.checkpoint_enabled ->
+      (* Fallback to non-Eio save *)
+      let outputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
+      let traces = [] in
+      let cp = Checkpoint_store.make_checkpoint
+        ~run_id:ctx.checkpoint.run_id
+        ~chain_id
+        ~node_id
+        ~outputs
+        ~traces
+        ~total_tokens:ctx.total_tokens
+        ()
+      in
+      (match Checkpoint_store.save store cp with
+       | Ok () -> ()
+       | Error msg -> Printf.eprintf "[checkpoint] Save failed: %s\n%!" msg)
+  | _ -> ()
+
+(** Load checkpoint and restore outputs to context *)
+let restore_from_checkpoint ctx ~chain_id:_ =
+  match ctx.checkpoint.checkpoint_store, ctx.checkpoint.resume_from with
+  | Some store, Some run_id ->
+      (match Checkpoint_store.load store ~run_id with
+       | Ok cp ->
+           (* Restore outputs to context *)
+           List.iter (fun (k, v) -> Hashtbl.replace ctx.outputs k v) cp.outputs;
+           (* Restore token usage if available *)
+           (match cp.total_tokens with
+            | Some tokens -> ctx.total_tokens <- tokens
+            | None -> ());
+           Ok cp.node_id  (* Return last completed node *)
+       | Error msg -> Error msg)
+  | _ -> Error "No checkpoint to resume from"
+
+(** Check if a node was already completed in a resumed checkpoint *)
+let node_completed_in_checkpoint ctx node_id =
+  Hashtbl.mem ctx.outputs node_id
 
 (** {1 Trace Helpers} *)
 
@@ -2339,7 +2430,7 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 (** {1 Main Execution Entry Point} *)
 
 (** Execute a compiled execution plan *)
-let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_plan) : chain_result =
+let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : execution_plan) : chain_result =
   let start_time = Unix.gettimeofday () in
 
   (* Create Langfuse trace for observability if enabled *)
@@ -2352,7 +2443,14 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
     else None
   in
 
-  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ?langfuse_trace ()  in
+  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ?langfuse_trace ?checkpoint ()  in
+
+  (* Restore state from checkpoint if resuming *)
+  (match ctx.checkpoint.resume_from with
+   | Some _ ->
+       let _ = restore_from_checkpoint ctx ~chain_id:plan.chain.Chain_types.id in
+       ()  (* Outputs are now restored *)
+   | None -> ())
 
   (* Record chain start with mermaid visualization *)
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid plan.chain) in
@@ -2386,7 +2484,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
     }
   in
 
-  (* Execute each step in the plan *)
+  (* Execute each step in the plan with checkpoint support *)
   let rec execute_steps () = function
     | [] ->
         (* Get output from the designated output node *)
@@ -2399,24 +2497,48 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
     | step :: rest ->
         let result = match step with
           | Sequential node ->
-              execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
+              (* Skip if node already completed in checkpoint *)
+              if node_completed_in_checkpoint ctx node.Chain_types.id then
+                Ok (Hashtbl.find ctx.outputs node.Chain_types.id)
+              else begin
+                let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
+                (* Save checkpoint after successful node completion *)
+                (match r with
+                 | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id:node.Chain_types.id
+                 | Error _ -> ());
+                r
+              end
           | Parallel nodes ->
-              (* Execute all nodes in parallel *)
-              let results = ref [] in
-              let mutex = Eio.Mutex.create () in
-              Eio.Fiber.all (List.map (fun node ->
-                fun () ->
-                  let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
-                  Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-                    results := (node.Chain_types.id, r) :: !results
-                  )
-              ) nodes);
-              (* Check all succeeded *)
-              let errors = List.filter_map (fun (id, r) ->
-                match r with Error e -> Some (id ^ ": " ^ e) | Ok _ -> None
-              ) !results in
-              if List.length errors = 0 then Ok ""
-              else Error (String.concat "; " errors)
+              (* Filter out already-completed nodes *)
+              let nodes_to_execute = List.filter (fun n ->
+                not (node_completed_in_checkpoint ctx n.Chain_types.id)
+              ) nodes in
+              if List.length nodes_to_execute = 0 then
+                Ok ""  (* All nodes already completed *)
+              else begin
+                (* Execute remaining nodes in parallel *)
+                let results = ref [] in
+                let mutex = Eio.Mutex.create () in
+                Eio.Fiber.all (List.map (fun node ->
+                  fun () ->
+                    let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
+                    Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+                      results := (node.Chain_types.id, r) :: !results
+                    )
+                ) nodes_to_execute);
+                (* Save checkpoint for all successfully completed parallel nodes *)
+                List.iter (fun (node_id, r) ->
+                  match r with
+                  | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id
+                  | Error _ -> ()
+                ) !results;
+                (* Check all succeeded *)
+                let errors = List.filter_map (fun (id, r) ->
+                  match r with Error e -> Some (id ^ ": " ^ e) | Ok _ -> None
+                ) !results in
+                if List.length errors = 0 then Ok ""
+                else Error (String.concat "; " errors)
+              end
         in
         match result with
         | Ok _ ->

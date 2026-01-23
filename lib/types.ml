@@ -140,6 +140,15 @@ type tool_args =
       text : string;                       (* Message text to post *)
       thread_ts : string option;           (* Thread timestamp for reply (optional) *)
     }
+  | ChainCheckpoints of {
+      chain_id : string option;            (* Filter by chain ID, or list all if None *)
+      max_age_hours : int option;          (* Filter by age, cleanup if specified with cleanup=true *)
+      cleanup : bool;                      (* Delete old checkpoints instead of listing *)
+    }
+  | ChainResume of {
+      run_id : string;                     (* Run ID to resume from *)
+      trace : bool;                        (* Enable execution tracing *)
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
