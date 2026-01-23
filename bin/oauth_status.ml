@@ -26,16 +26,16 @@ let get_accounts () =
   let cred_dir = Filename.concat root ".credentials" in
   [
     {
-      name = "yousleepwhen";
+      name = "personal";
       token_path = Filename.concat cred_dir "google-unified-token.json";
-      email = "yousleepwhen@gmail.com";
-      label = "Google (개인)";
+      email = "user@example.com";
+      label = "Google (Personal)";
     };
     {
-      name = "vincent.dev";
-      token_path = Filename.concat cred_dir "google-unified-token-vincent.json";
-      email = "vincent.dev@kidsnote.com";
-      label = "Google (회사)";
+      name = "work";
+      token_path = Filename.concat cred_dir "google-unified-token-work.json";
+      email = "user@company.example.com";
+      label = "Google (Work)";
     };
   ]
 

@@ -29,8 +29,8 @@ let detect_projects transcript =
   let lower = String.lowercase_ascii transcript in
   let projects = ref [] in
   if String.length lower > 0 then begin
-    if Re.execp (Re.Pcre.regexp ~flags:[`CASELESS] "kidsnote|PK-") transcript then
-      projects := "Kidsnote" :: !projects;
+    if Re.execp (Re.Pcre.regexp ~flags:[`CASELESS] "project-a|PRJ-") transcript then
+      projects := "ProjectA" :: !projects;
     if Re.execp (Re.Pcre.regexp ~flags:[`CASELESS] "neo4j") transcript then
       projects := "Neo4j" :: !projects;
     if Re.execp (Re.Pcre.regexp ~flags:[`CASELESS] "agent-api") transcript then
@@ -54,7 +54,7 @@ let get_neo4j_uri () =
   try Sys.getenv "NEO4J_URI"
   with Not_found ->
     try Sys.getenv "RAILWAY_NEO4J_URL"
-    with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+    with Not_found -> "neo4j+s://your-neo4j-host.example.com:7687"
 
 (** Get Neo4j config from environment *)
 let get_config () =

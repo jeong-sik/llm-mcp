@@ -8,7 +8,7 @@
       neo4j-health --json     # JSON output with latency
 
     Environment:
-      NEO4J_URI - Connection URI (default: neo4j+s://turntable.proxy.rlwy.net:11490)
+      NEO4J_URI - Connection URI (default: neo4j+s://your-neo4j-host.example.com:7687)
       NEO4J_PASSWORD - Password for neo4j user
 *)
 
@@ -17,7 +17,7 @@ let get_neo4j_uri () =
   try Sys.getenv "NEO4J_URI"
   with Not_found ->
     try Sys.getenv "RAILWAY_NEO4J_URL"
-    with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+    with Not_found -> "neo4j+s://your-neo4j-host.example.com:7687"
 
 (** Get Neo4j config from environment *)
 let get_config () =
