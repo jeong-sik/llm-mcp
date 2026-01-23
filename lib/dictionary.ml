@@ -369,8 +369,40 @@ let decompress_with_dict (dict : t) (data : string) : (string, string) result =
 
 (** Directory for pre-trained dictionaries *)
 let dict_dir () : string =
-  let me_root = try Sys.getenv "ME_ROOT" with Not_found -> Sys.getenv "HOME" ^ "/me" in
-  Filename.concat me_root "workspace/yousleepwhen/llm-mcp/data/dicts"
+  let default_me_root () =
+    let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
+    Filename.concat home "me"
+  in
+  let find_repo_root me_root =
+    match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
+    | Some path -> Some path
+    | None ->
+        let candidates =
+          [Filename.concat me_root "llm-mcp"; Filename.concat me_root "workspace/llm-mcp"]
+        in
+        let rec find_in_workspace workspace entries =
+          match entries with
+          | [] -> None
+          | dir :: rest ->
+              let candidate = Filename.concat (Filename.concat workspace dir) "llm-mcp" in
+              if Sys.file_exists candidate then Some candidate
+              else find_in_workspace workspace rest
+        in
+        (match List.find_opt Sys.file_exists candidates with
+        | Some path -> Some path
+        | None ->
+            let workspace = Filename.concat me_root "workspace" in
+            (match Sys.readdir workspace with
+            | entries -> find_in_workspace workspace (Array.to_list entries)
+            | exception _ -> None))
+  in
+  match Sys.getenv_opt "LLM_MCP_DICTS_DIR" with
+  | Some dir -> dir
+  | None ->
+      let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
+      (match find_repo_root me_root with
+      | Some root -> Filename.concat root "data/dicts"
+      | None -> Filename.concat (Sys.getcwd ()) "data/dicts")
 
 (** Load pre-trained dictionary for content type *)
 let load_for_type (content_type : content_type) : t option =

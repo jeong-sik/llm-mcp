@@ -102,7 +102,7 @@ let get_neo4j_config () =
     try Sys.getenv "NEO4J_URI"
     with Not_found ->
       try Sys.getenv "RAILWAY_NEO4J_URL"
-      with Not_found -> "neo4j+s://turntable.proxy.rlwy.net:11490"
+      with Not_found -> "neo4j+s://your-neo4j-host.example.com:7687"
   in
   let username = try Sys.getenv "NEO4J_USER" with Not_found -> "neo4j" in
   let password =

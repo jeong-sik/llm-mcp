@@ -1,7 +1,7 @@
 # MASC: Efficient Multi-Agent AI Coordination with Bandwidth-Optimized Communication
 
 **Target**: OSDI 2026 / ATC 2026 / EuroSys 2026
-**Author**: Vincent (jeong-sik)
+**Author**: [Author Name]
 **Date**: January 12, 2026
 
 ---

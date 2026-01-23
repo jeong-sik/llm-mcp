@@ -251,12 +251,42 @@ let build_gemini_cmd args =
       Ok (cmd @ [enhanced_prompt])
   | _ -> Error "Invalid args for Gemini"
 
+let default_me_root () =
+  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
+  Filename.concat home "me"
+
+let find_repo_root me_root =
+  match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
+  | Some path -> path
+  | None ->
+      let candidates =
+        [Filename.concat me_root "llm-mcp"; Filename.concat me_root "workspace/llm-mcp"]
+      in
+      match List.find_opt Sys.file_exists candidates with
+      | Some path -> path
+      | None ->
+          let workspace = Filename.concat me_root "workspace" in
+          let rec find_in_workspace entries =
+            match entries with
+            | [] -> None
+            | dir :: rest ->
+                let candidate = Filename.concat (Filename.concat workspace dir) "llm-mcp" in
+                if Sys.file_exists candidate then Some candidate else find_in_workspace rest
+          in
+          (match Sys.readdir workspace with
+          | entries -> (
+              match find_in_workspace (Array.to_list entries) with
+              | Some path -> path
+              | None -> Filename.concat me_root "workspace/llm-mcp")
+          | exception _ -> Filename.concat me_root "workspace/llm-mcp")
+
 (** Build Claude CLI command *)
 let build_claude_cmd args =
   match args with
   | Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; _ } ->
-      let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:"/Users/dancer/me" in
-      let wrapper = me_root ^ "/workspace/yousleepwhen/llm-mcp/scripts/claude-wrapper.sh" in
+      let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
+      let repo_root = find_repo_root me_root in
+      let wrapper = Filename.concat repo_root "scripts/claude-wrapper.sh" in
       let cmd = [wrapper; "-p"; "--model"; model] in
       (* --betas context-1m enables 1M context but requires API key (charges apply)
          Only add when: 1) explicitly requested via long_context=true
