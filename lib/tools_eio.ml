@@ -571,6 +571,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           | Ok plan ->
               (* Use chain's global timeout for all nodes *)
               let node_timeout = parsed_chain.Chain_types.config.Chain_types.timeout in
+              let env_truthy name =
+                match Sys.getenv_opt name with
+                | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
+                | _ -> false
+              in
+              let trace_effective = trace || env_truthy "LLM_MCP_CHAIN_FORCE_TRACE" in
               let starts_with ~prefix s =
                 let prefix_len = String.length prefix in
                 String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
@@ -735,8 +741,9 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               (* Input is passed directly to executor for first node injection *)
               let _ = input in  (* Will be used by executor *)
               let result = Chain_executor_eio.execute
-                ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec plan
+                ~sw ~clock ~timeout:node_timeout ~trace:trace_effective ~exec_fn ~tool_exec plan
               in
+              let run_id = List.assoc_opt "run_id" result.Chain_types.metadata in
               { model = "chain.run";
                 returncode = if result.Chain_types.success then 0 else -1;
                 response = result.Chain_types.output;
@@ -744,7 +751,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   ("chain_id", result.Chain_types.chain_id);
                   ("duration_ms", string_of_int result.Chain_types.duration_ms);
                   ("trace_count", string_of_int (List.length result.Chain_types.trace));
-                ]; })
+                ] @ (match run_id with Some id -> [("run_id", id)] | None -> []); })
 
 
   | ChainValidate { chain; mermaid } ->

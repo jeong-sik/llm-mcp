@@ -49,6 +49,15 @@ module Response = struct
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
+  let html ?(status = `OK) body reqd =
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "text/html; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+      ("access-control-allow-origin", "*");
+    ] in
+    let response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd response body
+
   (** 202 Accepted response for notifications (MCP Streamable HTTP) *)
   let accepted reqd =
     let headers = Httpun.Headers.of_list [

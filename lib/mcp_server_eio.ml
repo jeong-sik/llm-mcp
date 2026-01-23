@@ -462,6 +462,10 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
   let path = Http.Request.path request in
   let meth = Http.Request.meth request in
   let headers = extract_headers request in
+  let starts_with ~prefix s =
+    let p = String.length prefix in
+    String.length s >= p && String.sub s 0 p = prefix
+  in
 
   match (meth, path) with
   (* Health check - no auth required *)
@@ -479,6 +483,23 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
         ("sessions", `Int session_count);
       ]) in
       Http.Response.json body reqd
+
+  (* Chain viewer UI + run history - no auth required *)
+  | (`GET, "/chain/view") ->
+      Http.Response.html Chain_view_page.html reqd
+
+  | (`GET, "/chain/runs") ->
+      let body = Chain_run_store.list_runs_json () |> Yojson.Safe.to_string in
+      Http.Response.json body reqd
+
+  | (`GET, path) when starts_with ~prefix:"/chain/runs/" path ->
+      let prefix_len = String.length "/chain/runs/" in
+      let run_id = String.sub path prefix_len (String.length path - prefix_len) in
+      (match Chain_run_store.get_run_json ~run_id with
+       | Some json ->
+           Http.Response.json (Yojson.Safe.to_string (`Assoc [("run", json)])) reqd
+       | None ->
+           Http.Response.not_found reqd)
 
   (* CORS preflight - no auth required *)
   | (`OPTIONS, _) ->
