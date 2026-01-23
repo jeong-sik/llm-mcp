@@ -2492,7 +2492,8 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
   (* Helper to build chain_result *)
   let make_result ~success ~output =
     let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
-    let trace = traces_to_entries (List.rev !(ctx.traces)) in
+    let trace_raw = traces_to_entries (List.rev !(ctx.traces)) in
+    let trace = Chain_run_store.enrich_trace_entries ~chain:plan.chain ~outputs:ctx.outputs trace_raw in
 
     (* End Langfuse trace if enabled *)
     (match langfuse_trace with
@@ -2506,6 +2507,17 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
          Langfuse.end_trace t
      | None -> ());
 
+    let run_id = ctx.checkpoint.run_id in
+    Chain_run_store.record
+      ~run_id
+      ~chain:plan.chain
+      ~plan
+      ~trace
+      ~outputs:ctx.outputs
+      ~success
+      ~duration_ms
+      ~started_at:start_time;
+
     {
       Chain_types.chain_id = plan.chain.Chain_types.id;
       output;
@@ -2513,7 +2525,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
       trace;
       token_usage = Chain_types.empty_token_usage;
       duration_ms;
-      metadata = [];
+      metadata = [("run_id", run_id)];
     }
   in
 
