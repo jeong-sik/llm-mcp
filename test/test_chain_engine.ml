@@ -409,7 +409,7 @@ let race_chain_json = {|
    ============================================================================ *)
 
 let test_default_config () =
-  Alcotest.(check int) "max_depth" 4 default_config.max_depth;
+  Alcotest.(check int) "max_depth" 8 default_config.max_depth;  (* Increased for MCTS support *)
   Alcotest.(check int) "max_concurrency" 3 default_config.max_concurrency;
   Alcotest.(check int) "timeout" 300 default_config.timeout;
   Alcotest.(check bool) "trace" false default_config.trace
@@ -1893,6 +1893,175 @@ let batch_tests = [
   "batch_compile_depth", `Quick, test_batch_compile_depth;
 ]
 
+(* ===== StreamMerge Node Tests ===== *)
+
+(** Test parsing StreamMerge node from JSON *)
+let test_parse_stream_merge_basic () =
+  let json_str = {|
+{
+  "id": "stream_test",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "concat",
+      "min_results": 1,
+      "timeout": 30.0,
+      "initial": "",
+      "nodes": [
+        {
+          "id": "fast",
+          "type": "llm",
+          "model": "gemini",
+          "prompt": "Quick response: {{input}}"
+        },
+        {
+          "id": "slow",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "Detailed response: {{input}}"
+        }
+      ]
+    }
+  ],
+  "output": "merger"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check int) "node count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | StreamMerge { reducer; min_results; timeout; initial; nodes } ->
+           Alcotest.(check string) "initial" "" initial;
+           Alcotest.(check (option int)) "min_results" (Some 1) min_results;
+           Alcotest.(check (option (float 0.01))) "timeout" (Some 30.0) timeout;
+           Alcotest.(check int) "inner nodes" 2 (List.length nodes);
+           (match reducer with
+            | Concat -> ()
+            | _ -> Alcotest.fail "Expected Concat reducer")
+       | _ -> Alcotest.fail "Expected StreamMerge node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test StreamMerge with different reducers *)
+let test_stream_merge_reducers () =
+  let test_reducer reducer_str expected_check =
+    let json_str = Printf.sprintf {|
+{
+  "id": "reducer_test",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "%s",
+      "nodes": []
+    }
+  ],
+  "output": "merger"
+}
+|} reducer_str in
+    let json = Yojson.Safe.from_string json_str in
+    match parse_chain json with
+    | Ok chain ->
+        let node = List.hd chain.nodes in
+        (match node.node_type with
+         | StreamMerge { reducer; _ } -> expected_check reducer
+         | _ -> Alcotest.fail "Expected StreamMerge node")
+    | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+  in
+  test_reducer "first" (function First -> () | _ -> Alcotest.fail "Expected First");
+  test_reducer "last" (function Last -> () | _ -> Alcotest.fail "Expected Last");
+  test_reducer "concat" (function Concat -> () | _ -> Alcotest.fail "Expected Concat");
+  test_reducer "weighted_avg" (function WeightedAvg -> () | _ -> Alcotest.fail "Expected WeightedAvg");
+  test_reducer "custom_func" (function Custom "custom_func" -> () | _ -> Alcotest.fail "Expected Custom")
+
+(** Test StreamMerge compile depth *)
+let test_stream_merge_compile_depth () =
+  let json_str = {|
+{
+  "id": "depth_test",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "concat",
+      "nodes": [
+        {"id": "a", "type": "llm", "model": "gemini", "prompt": "A"},
+        {"id": "b", "type": "llm", "model": "claude", "prompt": "B"},
+        {"id": "c", "type": "llm", "model": "codex", "prompt": "C"}
+      ]
+    }
+  ],
+  "output": "merger"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (match compile chain with
+       | Ok plan ->
+           (* StreamMerge(1) + max(LLM, LLM, LLM) = 2 *)
+           Alcotest.(check int) "compiled depth" 2 plan.depth
+       | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test StreamMerge Mermaid roundtrip *)
+let test_stream_merge_mermaid_roundtrip () =
+  let mermaid = {|graph LR
+    a["LLM:gemini 'Task A'"]
+    b["LLM:claude 'Task B'"]
+    merge[["StreamMerge:concat,1,30.0"]]
+    a --> merge
+    b --> merge|} in
+  match Chain_mermaid_parser.parse_chain mermaid with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "mermaid_chain" chain.id;
+      (* Should have 3 nodes: a, b, merge *)
+      Alcotest.(check int) "node count" 3 (List.length chain.nodes);
+      (* Find the merge node *)
+      let merge_node = List.find (fun (n : node) -> n.id = "merge") chain.nodes in
+      let node_type_str = match merge_node.node_type with
+        | Llm _ -> "Llm"
+        | Tool _ -> "Tool"
+        | Gate _ -> "Gate"
+        | Merge _ -> "Merge"
+        | Quorum _ -> "Quorum"
+        | Threshold _ -> "Threshold"
+        | Pipeline _ -> "Pipeline"
+        | Fanout _ -> "Fanout"
+        | Retry _ -> "Retry"
+        | Fallback _ -> "Fallback"
+        | Race _ -> "Race"
+        | ChainRef _ -> "ChainRef"
+        | ChainExec _ -> "ChainExec"
+        | Adapter _ -> "Adapter"
+        | Cache _ -> "Cache"
+        | GoalDriven _ -> "GoalDriven"
+        | Evaluator _ -> "Evaluator"
+        | Spawn _ -> "Spawn"
+        | Map _ -> "Map"
+        | Bind _ -> "Bind"
+        | Batch _ -> "Batch"
+        | Mcts _ -> "Mcts"
+        | StreamMerge _ -> "StreamMerge"
+        | Subgraph _ -> "Subgraph"
+      in
+      (match merge_node.node_type with
+       | StreamMerge { reducer; min_results; timeout; _ } ->
+           (match reducer with Concat -> () | _ -> Alcotest.fail "Expected Concat");
+           Alcotest.(check (option int)) "min_results" (Some 1) min_results;
+           Alcotest.(check (option (float 0.01))) "timeout" (Some 30.0) timeout
+       | _ -> Alcotest.fail (Printf.sprintf "Expected StreamMerge node, got %s" node_type_str))
+  | Error e -> Alcotest.fail (Printf.sprintf "Mermaid parse error: %s" e)
+
+let stream_merge_tests = [
+  "parse_stream_merge_basic", `Quick, test_parse_stream_merge_basic;
+  "stream_merge_reducers", `Quick, test_stream_merge_reducers;
+  "stream_merge_compile_depth", `Quick, test_stream_merge_compile_depth;
+  "stream_merge_mermaid_roundtrip", `Quick, test_stream_merge_mermaid_roundtrip;
+]
+
 let () =
   Alcotest.run "Chain Engine" [
     "Chain Types", types_tests;
@@ -1905,4 +2074,5 @@ let () =
     "ChainExec (Meta-Chain)", chain_exec_tests;
     "Cache Node", cache_tests;
     "Batch Node", batch_tests;
+    "StreamMerge Node", stream_merge_tests;
   ]
