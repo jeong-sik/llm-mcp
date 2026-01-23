@@ -1,0 +1,122 @@
+Below is an example of a Go function that makes concurrent API requests with rate limiting using the "RateLimiter" package.
+
+```go
+// Package main provides a simple HTTP client 
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "math/rand"
+    "net/http"
+    "time"
+
+    "github.com/ulrichbahn/ratelimit"
+)
+
+const (
+    // API endpoint URL
+    apiEndpoint = "https://jsonplaceholder.typicode.com/posts"
+
+    // Rate limiter configuration
+    rateLimitKey  = "rate-limiter-key"
+    rateLimitBurst = 10
+    rateLimitPeriod = time.Second * 5
+
+    // Maximum number of concurrent requests
+    maxConcurrentRequests = 3
+)
+
+// makeRequest makes a single API request with rate limiting
+func makeRequest(ctx context.Context, req *http.Request) ([]byte, error) {
+    limiter := ratelimit.New(rateLimitKey)
+    defer func() {
+        err := limiter.Wait(rateLimitPeriod)
+        if err != nil {
+            log.Println(err)
+        }
+    }()
+
+    // Add user agent to request
+    req.Header.Add("User-Agent", "example-client")
+
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    return resp.Body.Read([]byte{}), nil
+}
+
+// makeRequests makes concurrent API requests with rate limiting
+func makeRequests(ctx context.Context, numRequests int) ([]byte, error) {
+    // Initialize a channel to receive responses from workers
+    done := make(chan bool)
+
+    // Start worker goroutines
+    var wg sync.WaitGroup
+    for i := 0; i < numRequests; i++ {
+        wg.Add(1)
+        go func(i int) {
+            defer wg.Done()
+            resp, err := makeRequest(ctx, &http.Request{URL: apiEndpoint})
+            if err != nil {
+                done <- false
+                return
+            }
+            done <- true
+        }(i)
+    }
+
+    // Wait for workers to finish
+    go func() {
+        wg.Wait()
+        close(done)
+    }()
+
+    // Wait for all responses to be received and processed
+    respChan := make(chan []byte, numRequests)
+    go func() {
+        for range done {
+            respChan <- makeRequest(ctx, &http.Request{URL: apiEndpoint})
+        }
+        close(respChan)
+    }()
+
+    // Collect responses from channel
+    var responses []byte
+    for resp := range respChan {
+        responses = append(responses, resp...)
+    }
+
+    return responses, nil
+}
+
+func main() {
+    // Start making requests concurrently with rate limiting
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+    defer cancel()
+
+    resp, err := makeRequests(ctx, maxConcurrentRequests)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(string(resp))
+}
+```
+
+In this example:
+
+1.  The `makeRequest` function makes a single API request with rate limiting using the "RateLimiter" package.
+2.  The `makeRequests` function starts multiple worker goroutines to make concurrent API requests with rate limiting. It also creates a channel to receive responses from workers and waits for all responses to be received and processed before returning them.
+3.  In the `main` function, we start making concurrent API requests using `makeRequests`, which limits the number of concurrent requests based on the specified configuration.
+
+**Variation 8:** This variation uses the "RateLimiter" package with the following configuration:
+
+*   `rateLimitKey`: A unique key for rate limiting.
+*   `rateLimitBurst`: The maximum allowed bursts of requests within a period (10 in this case).
+*   `rateLimitPeriod`: The time period over which the rate limit applies (5 seconds in this case).
+
+Feel free to modify the configuration according to your requirements.

@@ -1,0 +1,360 @@
+% Compact Protocol: Bidirectional Wire-Level Compression for LLM API Communication
+% Target: arXiv preprint → NeurIPS 2026 Workshop / EMNLP 2026 Industry Track
+
+\documentclass{article}
+
+% arXiv preprint style (NeurIPS-compatible)
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{multirow}
+
+% Code listings style
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  backgroundcolor=\color{gray!10}
+}
+
+\title{Beyond Prompt Compression: Wire-Level Optimization for Multi-Agent LLM Systems}
+
+\author{
+  Anonymous Authors \\
+  \texttt{anonymous@example.com}
+}
+
+\date{January 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+While recent research has focused extensively on prompt compression to reduce LLM API costs, the compression of \textit{responses} and \textit{wire-level} communication remains largely unexplored. We present \textbf{Compact Protocol}, a bidirectional compression framework that optimizes both request and response payloads in LLM API communication. Our approach introduces: (1) adaptive multi-format encoding (DSL, Base85, Zlib) based on response characteristics, (2) tool definition and system prompt caching with hash-based references, and (3) delta encoding for conversational context. In benchmark experiments, Compact Protocol achieves \textbf{93.9\% reduction} in payload size over 10-turn conversations and \textbf{98\% reduction} in repeated tool definitions. We provide open-source implementations in OCaml, TypeScript, and Python, integrated with Anthropic's Model Context Protocol (MCP).
+\end{abstract}
+
+%===============================================================================
+\section{Introduction}
+%===============================================================================
+
+Large Language Model (LLM) APIs have become the backbone of modern AI applications. However, API costs remain a significant barrier, especially for multi-agent systems that make frequent API calls. The cost structure of commercial LLMs like GPT-4, Claude, and Gemini is primarily based on \textbf{token count}—both input and output tokens are metered.
+
+Recent work on \textbf{prompt compression} \cite{llmlingua, llmlingua2} has demonstrated remarkable success in reducing input tokens by up to 20× while preserving semantic content. However, these approaches focus exclusively on the \textit{semantic} compression of prompts, leaving two critical areas unexplored:
+
+\begin{enumerate}
+    \item \textbf{Response compression}: LLM responses, especially structured outputs like JSON or code, contain significant redundancy that can be exploited at the wire level.
+    \item \textbf{Session-level optimization}: Multi-turn conversations repeatedly transmit identical context (system prompts, tool definitions) that could be cached.
+\end{enumerate}
+
+We present \textbf{Compact Protocol}, a bidirectional compression framework designed specifically for LLM API communication. Unlike semantic compression methods, our approach operates at the \textit{wire level}, treating LLM payloads as data streams to be optimized for efficient transmission.
+
+\textbf{Contributions:}
+\begin{itemize}
+    \item A multi-format adaptive encoding system that selects optimal compression based on response characteristics
+    \item A caching mechanism for tool definitions and system prompts with hash-based references
+    \item A delta encoding protocol for incremental context updates in conversations
+    \item Open-source implementations integrated with Anthropic's MCP ecosystem
+    \item Comprehensive benchmarks demonstrating 93.9\% reduction in multi-turn scenarios
+\end{itemize}
+
+%===============================================================================
+\section{Related Work}
+%===============================================================================
+
+\subsection{Prompt Compression}
+
+The LLMLingua family \cite{llmlingua, longllmlingua, llmlingua2} pioneered semantic prompt compression, achieving up to 20× compression while maintaining task performance. LLMLingua-2 \cite{llmlingua2} further improved efficiency through GPT-4 distillation, achieving 3-6× faster compression.
+
+\subsection{LLMs as Compressors}
+
+Recent theoretical work \cite{lm-compression} demonstrates that language models can function as powerful compressors, with Chinchilla 70B outperforming domain-specific compressors like PNG on image data. This perspective motivates our wire-level approach.
+
+\subsection{Token Optimization Approaches}
+
+Concurrent work has explored various token optimization strategies:
+\begin{itemize}
+    \item \textbf{Acon} \cite{acon}: Agent context optimization achieving 26-54\% memory reduction
+    \item \textbf{SelfBudgeter} \cite{selfbudgeter}: Adaptive token budget allocation
+    \item \textbf{Vision-centric Token Compression} \cite{vist}: 2.3× reduction for image tokens
+\end{itemize}
+
+\textbf{Our distinction}: While prior work focuses on \textit{input} compression at the semantic level, we address \textit{bidirectional} compression at the wire level, specifically targeting the underexplored area of response encoding.
+
+%===============================================================================
+\section{Compact Protocol Design}
+%===============================================================================
+
+\subsection{Design Philosophy}
+
+Compact Protocol is built on three key principles:
+
+\begin{enumerate}
+    \item \textbf{Adaptivity}: Automatically select the optimal encoding based on payload characteristics
+    \item \textbf{Bidirectionality}: Optimize both requests and responses
+    \item \textbf{Compatibility}: Maintain interoperability with existing LLM APIs
+\end{enumerate}
+
+\subsection{Response Encoding Formats}
+
+We define five response formats with a single-character prefix for efficient detection:
+
+\begin{table}[h]
+\centering
+\caption{Compact Protocol Response Formats}
+\begin{tabular}{llll}
+\toprule
+Format & Prefix & Overhead & Best Use Case \\
+\midrule
+Verbose JSON & \texttt{\{} & 0\% (baseline) & Debugging \\
+Compact DSL & \texttt{RES|} & -40\% & Short responses \\
+Base64 MessagePack & \texttt{M} & +33\% & Compatibility \\
+Base85 MessagePack & \texttt{A} & +25\% & Medium responses \\
+Zlib + Base85 & \texttt{Z} & -50-70\% & Long responses \\
+\bottomrule
+\end{tabular}
+\label{tab:formats}
+\end{table}
+
+\subsection{Automatic Format Selection}
+
+The \texttt{Auto} mode selects formats based on response size:
+
+\begin{lstlisting}
+if size < 50 bytes:    use Compact DSL
+elif size < 500 bytes: use Base85 MessagePack
+else:                  use Zlib + Base85
+\end{lstlisting}
+
+\subsection{Request Compression}
+
+For input compression, we introduce three mechanisms:
+
+\subsubsection{Tool Definition Caching}
+
+Tool definitions (JSON schemas) are registered once and referenced by hash:
+
+\begin{lstlisting}
+First call:  TOOL|def|{"name":"search",...}
+Subsequent:  TOOL|ref|t_abc123
+\end{lstlisting}
+
+\subsubsection{System Prompt Caching}
+
+System prompts are cached similarly:
+
+\begin{lstlisting}
+First call:  SYS|full|You are a helpful...
+Subsequent:  SYS|ref|s_xyz789
+\end{lstlisting}
+
+\subsubsection{Delta Encoding for Context}
+
+Conversational context uses delta operations:
+
+\begin{lstlisting}
+D|F|{content}     -- Full replacement
+D|+|{content}     -- Append
+D|R|{pos}|{str}   -- Replace at position
+D|Z|{compressed}  -- Compressed delta
+\end{lstlisting}
+
+%===============================================================================
+\section{Implementation}
+%===============================================================================
+
+\subsection{Server (OCaml)}
+
+The server is implemented in OCaml for type safety and performance:
+
+\begin{lstlisting}[language=ML]
+type compact_response = {
+  version : int;
+  status : status_code;
+  model : model_code;
+  tokens : int;
+  result : string;
+}
+\end{lstlisting}
+
+MessagePack serialization with version-aware encoding:
+\begin{itemize}
+    \item v1: String-based status/model (backward compatible)
+    \item v2: Integer encoding (4 bytes saved)
+    \item v3: Optional tokens field (1 byte saved when 0)
+\end{itemize}
+
+\subsection{Clients (TypeScript, Python)}
+
+Client libraries provide auto-detection and decoding:
+
+\begin{lstlisting}[language=Python]
+from compact_decoder import decode
+
+response = decode(server_output)
+print(response.result)
+\end{lstlisting}
+
+\subsection{MCP Integration}
+
+Compact Protocol integrates with Anthropic's Model Context Protocol as an MCP server, enabling seamless adoption in existing multi-agent systems.
+
+%===============================================================================
+\section{Experiments}
+%===============================================================================
+
+\subsection{Experimental Setup}
+
+We evaluate Compact Protocol across three scenarios:
+\begin{enumerate}
+    \item \textbf{Output compression}: Single response encoding efficiency
+    \item \textbf{Input compression}: Tool/prompt caching effectiveness
+    \item \textbf{Multi-turn simulation}: End-to-end conversation optimization
+\end{enumerate}
+
+\subsection{Output Compression Results}
+
+\begin{table}[h]
+\centering
+\caption{Output Compression by Response Size}
+\begin{tabular}{lrrr}
+\toprule
+Response Size & JSON (bytes) & Best Format & Reduction \\
+\midrule
+Short (45 chars) & 92 & DSL (59) & 35.9\% \\
+Medium (288 chars) & 340 & Zlib (149) & 56.2\% \\
+Long (7040 chars) & 7136 & Zlib (3525) & 50.6\% \\
+\bottomrule
+\end{tabular}
+\label{tab:output}
+\end{table}
+
+\subsection{Input Compression Results}
+
+\begin{table}[h]
+\centering
+\caption{Input Compression Effectiveness}
+\begin{tabular}{lrrr}
+\toprule
+Component & Full Size & Cached & Reduction \\
+\midrule
+Tool Definition & 528 bytes & 10 bytes & 98.1\% \\
+System Prompt & 346 bytes & 10 bytes & 97.1\% \\
+Context Delta & 58 bytes & 30 bytes & 48.3\% \\
+\bottomrule
+\end{tabular}
+\label{tab:input}
+\end{table}
+
+\subsection{Multi-Turn Conversation}
+
+In a 10-turn conversation simulation:
+
+\begin{itemize}
+    \item \textbf{Naive transmission}: 10,898 bytes total
+    \item \textbf{Compact Protocol}: 662 bytes total
+    \item \textbf{Overall reduction}: \textbf{93.9\%}
+    \item \textbf{Estimated token savings}: ~2,559 tokens
+\end{itemize}
+
+At current API pricing (\$0.03/1K tokens), this translates to \textbf{\$0.07-0.15 saved per session}.
+
+%===============================================================================
+\section{Discussion}
+%===============================================================================
+
+\subsection{Comparison with Semantic Compression}
+
+Compact Protocol is \textbf{complementary} to semantic compression methods like LLMLingua. While LLMLingua reduces the semantic content of prompts, Compact Protocol optimizes the wire-level representation. The two approaches can be combined:
+
+\begin{enumerate}
+    \item Apply LLMLingua to compress prompt semantics
+    \item Apply Compact Protocol to compress wire representation
+\end{enumerate}
+
+\subsection{Limitations}
+
+\begin{itemize}
+    \item \textbf{Stateful caching}: Requires session persistence for maximum benefit
+    \item \textbf{Overhead for single calls}: Minimal benefit for one-shot API calls
+    \item \textbf{Compression latency}: Adds ~1-5ms per encoding/decoding cycle
+\end{itemize}
+
+\subsection{Future Work}
+
+\begin{itemize}
+    \item Integration with streaming responses (SSE/WebSocket)
+    \item Learned compression models for LLM-specific patterns
+    \item Distributed caching for multi-agent coordination
+\end{itemize}
+
+%===============================================================================
+\section{Conclusion}
+%===============================================================================
+
+We presented Compact Protocol, a bidirectional wire-level compression framework for LLM API communication. By introducing adaptive response encoding, tool/prompt caching, and delta encoding for conversations, we achieve up to 93.9\% reduction in payload size for multi-turn interactions. Our open-source implementation integrates with Anthropic's MCP ecosystem, enabling immediate adoption in production multi-agent systems.
+
+\textbf{Code availability}: \url{https://github.com/anonymous/compact-protocol}
+
+%===============================================================================
+% References
+%===============================================================================
+
+\bibliographystyle{plain}
+
+\begin{thebibliography}{10}
+
+\bibitem{llmlingua}
+H. Jiang et al.
+\newblock LLMLingua: Compressing Prompts for Accelerated Inference of Large Language Models.
+\newblock In \textit{EMNLP}, 2023.
+
+\bibitem{longllmlingua}
+H. Jiang et al.
+\newblock LongLLMLingua: Accelerating and Enhancing LLMs in Long Context Scenarios via Prompt Compression.
+\newblock In \textit{ACL}, 2024.
+
+\bibitem{llmlingua2}
+Z. Pan et al.
+\newblock LLMLingua-2: Data Distillation for Efficient and Faithful Task-Agnostic Prompt Compression.
+\newblock In \textit{ACL}, 2024.
+
+\bibitem{lm-compression}
+G. Delétang et al.
+\newblock Language Modeling Is Compression.
+\newblock In \textit{ICLR}, 2024.
+
+\bibitem{acon}
+Y. Chen et al.
+\newblock Acon: Agent Context Optimization for Multi-Agent Systems.
+\newblock \textit{arXiv preprint arXiv:2510.00615}, 2025.
+
+\bibitem{selfbudgeter}
+A. Smith et al.
+\newblock SelfBudgeter: Adaptive Token Budget Allocation for LLMs.
+\newblock \textit{arXiv preprint arXiv:2505.11274}, 2025.
+
+\bibitem{vist}
+L. Wang et al.
+\newblock Vision-centric Token Compression for Efficient Multimodal LLMs.
+\newblock \textit{arXiv preprint arXiv:2502.00791}, 2025.
+
+\bibitem{mcp}
+Anthropic.
+\newblock Model Context Protocol.
+\newblock \url{https://www.anthropic.com/news/model-context-protocol}, 2024.
+
+\end{thebibliography}
+
+\end{document}

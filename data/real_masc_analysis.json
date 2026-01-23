@@ -1,0 +1,33 @@
+{
+  "date": "2026-01-12T15:10:35.498996",
+  "messages": {
+    "total_messages": 415,
+    "total_bytes": 108094,
+    "avg_size": 260.4674698795181,
+    "agents": {
+      "persist-test": 2,
+      "system": 82,
+      "agent-2": 2,
+      "agent-1": 2,
+      "agent-4": 2,
+      "agent-3": 2,
+      "agent-5": 2,
+      "agent-6": 2,
+      "agent-7": 2,
+      "agent-8": 2,
+      "agent-9": 2,
+      "agent-10": 2,
+      "unknown": 1,
+      "test": 1,
+      "claude-opus": 9,
+      "gemini": 3,
+      "claude": 18,
+      "codex": 275,
+      "host": 4
+    },
+    "gzip_ratio": 79.37818267113596,
+    "zstd_ratio": 77.06887811078911,
+    "zstd_dict_ratio": 82.48575600971542
+  },
+  "tasks": {}
+}

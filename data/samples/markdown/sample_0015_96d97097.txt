@@ -1,0 +1,102 @@
+**GET /users/{id}**
+
+Retrieve a user by ID
+
+### Description
+
+This endpoint returns a single user based on the provided ID.
+
+### Parameters
+
+| Parameter | Type | Required | Description |
+| --- | --- | --- | --- |
+| id | integer | Yes | The unique identifier of the user to retrieve |
+
+### Examples
+
+#### Example Request 1: Successful retrieval
+
+```bash
+GET /users/123 HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+#### Example Response 1:
+
+```json
+{
+    "id": 123,
+    "name": "John Doe",
+    "email": "john.doe@example.com"
+}
+```
+
+#### Example Request 2: User not found
+
+```bash
+GET /users/999 HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+#### Example Response 2:
+
+```json
+{
+    "error": {
+        "code": 404,
+        "message": "User not found"
+    }
+}
+```
+
+#### Example Request 3: Bad request (invalid ID)
+
+```bash
+GET /users/abc HTTP/1.1
+Host: example.com
+Accept: application/json
+```
+
+#### Example Response 3:
+
+```json
+{
+    "error": {
+        "code": 400,
+        "message": "Invalid user ID"
+    }
+}
+```
+
+### Code Examples
+
+**Python using Flask**
+
+```python
+from flask import request, jsonify
+
+@app.route('/users/<int:user_id>', methods=['GET'])
+def get_user(user_id):
+    # Replace with your actual database query or logic to retrieve the user
+    return jsonify({"id": 123, "name": "John Doe", "email": "john.doe@example.com"})
+```
+
+**Java using Spring Boot**
+
+```java
+@RestController
+@RequestMapping("/users")
+public class UserController {
+    
+    @GetMapping("/{userId}")
+    public ResponseEntity<User> getUser(@PathVariable int userId) {
+        // Replace with your actual database query or logic to retrieve the user
+        User user = new User(123, "John Doe", "john.doe@example.com");
+        return ResponseEntity.ok(user);
+    }
+}
+```
+
+Note: The above examples are for illustrative purposes only and may need to be adapted to your specific use case.

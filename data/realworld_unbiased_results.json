@@ -1,0 +1,57 @@
+{
+  "benchmark_type": "realworld_unbiased",
+  "date": "2026-01-12",
+  "note": "Dictionary trained on DIFFERENT prompts than test data (no bias)",
+  "training_samples": 8,
+  "test_samples": 7,
+  "dictionary_size": 110000,
+  "model": "qwen3:1.7b (Ollama)",
+  "results": {
+    "brotli-11": {
+      "avg_compression": 71.5,
+      "avg_compress_us": 6915.5,
+      "avg_decompress_us": 30.2,
+      "note": "Best ratio but 72x slower than Compact v4"
+    },
+    "Compact-v4 (zstd-dict)": {
+      "avg_compression": 66.4,
+      "avg_compress_us": 95.8,
+      "avg_decompress_us": 11.9,
+      "note": "Best ratio/speed tradeoff"
+    },
+    "brotli-4": {
+      "avg_compression": 64.6,
+      "avg_compress_us": 137.1,
+      "avg_decompress_us": 26.6
+    },
+    "zstd-19": {
+      "avg_compression": 64.5,
+      "avg_compress_us": 1245.3,
+      "avg_decompress_us": 11.3,
+      "note": "Max zstd without dictionary"
+    },
+    "gzip": {
+      "avg_compression": 64.0,
+      "avg_compress_us": 148.9,
+      "avg_decompress_us": 28.2
+    },
+    "zstd-3": {
+      "avg_compression": 62.3,
+      "avg_compress_us": 31.9,
+      "avg_decompress_us": 12.8,
+      "note": "Default zstd level"
+    },
+    "lz4": {
+      "avg_compression": 45.3,
+      "avg_compress_us": 19.5,
+      "avg_decompress_us": 7.0,
+      "note": "Fastest but worst ratio"
+    }
+  },
+  "key_findings": {
+    "compact_vs_brotli11": "-5.1% ratio BUT 72x faster",
+    "compact_vs_zstd19": "+1.9% ratio AND 13x faster",
+    "compact_vs_zstd3": "+4.1% ratio at same speed",
+    "conclusion": "Best compression/speed ratio for real-time agent communication"
+  }
+}

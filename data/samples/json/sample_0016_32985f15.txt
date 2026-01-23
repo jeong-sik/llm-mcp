@@ -1,0 +1,59 @@
+Here's an example of a JSON configuration file that includes database and cache settings for a web application, following variation 6:
+
+```json
+{
+  "database": {
+    "type": "mysql",
+    "host": "localhost",
+    "username": "root",
+    "password": "password",
+    "port": 3306,
+    "name": "mydb"
+  },
+  "cache": {
+    "enabled": true,
+    "type": "redis",
+    "host": "localhost",
+    "port": 6379,
+    "database": 0
+  },
+  "logging": {
+    "level": "INFO",
+    "pattern": "%date% - %logger% - %message%",
+    "file": "/var/log/myapp.log"
+  }
+}
+```
+
+In this configuration, we have the following settings:
+
+- Database: The database type is MySQL and it's running on `localhost` with username `root`, password `password`, port `3306`, and name `mydb`.
+- Cache: The cache system is Redis, running on `localhost` at port `6379`. We're using Redis's default database number `0`.
+- Logging: The logging level is set to `INFO` and it will log the date, logger, and message in this pattern. The logs are written to a file named `/var/log/myapp.log`.
+
+Please note that these values should be replaced with your actual application's settings.
+
+Here's an additional configuration for Redis cache with a time to live (TTL) of 1 hour:
+
+```json
+{
+  "database": {
+    "type": "mysql",
+    "host": "localhost",
+    "username": "root",
+    "password": "password",
+    "port": 3306,
+    "name": "mydb"
+  },
+  "cache": {
+    "enabled": true,
+    "type": "redis",
+    "host": "localhost",
+    "port": 6379,
+    "database": 0,
+    "ttl": 3600 // Time to live in seconds
+  }
+}
+```
+
+This will set the time to live for cached data to 1 hour, meaning that after 1 hour of inactivity, Redis will delete the key.

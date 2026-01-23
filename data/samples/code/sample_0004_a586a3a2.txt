@@ -1,0 +1,52 @@
+Here's an example of how you can use the `clap` crate in Rust to parse command-line arguments:
+
+First, add the following lines to your `Cargo.toml` file under `[dependencies]`:
+
+```toml
+[dependencies]
+clap = "2.33.0"
+```
+
+Then, create a new file called `main.rs` and add the following code:
+
+```rust
+use clap::{App, Arg};
+
+fn main() {
+    let matches = App::new("example")
+        .version("1.0") // Add version information
+        .author("Your Name") // Add author information
+        .about("This is an example of a command-line tool")
+        .arg(
+            Arg::with_name("input")
+                .long("input-file")
+                .help("Input file to parse")
+                .required(true),
+        )
+        .arg(
+            Arg::with_name("output")
+                .long("output-file")
+                .help("Output file to write to")
+                .short("o")
+                .takes_value(true),
+        )
+        .get_matches();
+
+    let input_file = matches.value_of("input").unwrap();
+    let output_file = matches.value_of("output");
+
+    println!("Input file: {}", input_file);
+    if let Some(output_file) = output_file {
+        println!("Output file: {}", output_file);
+    } else {
+        println!("No output file specified");
+    }
+}
+```
+
+In this example, we're creating a new app with the name "example" and defining two arguments:
+
+- `input`: This is a required argument that represents an input file. It's also known as a positional argument.
+- `output`: This is an optional argument that represents an output file. We've defined it using the `long` method, which allows us to define a long flag (`--output-file`) that can be used with or without a value. The `.takes_value(true)` method ensures that this argument accepts a value.
+
+We then parse the command-line arguments and print out their values if they're provided.

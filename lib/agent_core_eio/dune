@@ -1,0 +1,16 @@
+(library
+ (name agent_core_eio)
+ (public_name llm_mcp.agent_core_eio)
+ (libraries
+   eio
+   eio_main
+   llm_mcp_resilience
+   yojson
+   cohttp
+   cohttp-eio
+   uri
+   tls-eio
+   ca-certs
+   mirage-crypto-rng-eio
+   logs)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

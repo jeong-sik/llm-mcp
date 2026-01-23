@@ -1,0 +1,37 @@
+Here is a simple implementation of the Longest Increasing Subsequence (LIS) problem using dynamic programming in OCaml:
+
+```ocaml
+(* Function to find the LIS for a list *)
+let rec lis = function
+  | [] -> 0
+  | [x] -> 1
+  | x :: xs ->
+       let max_length = lis xs in
+       match List.find (fun y -> y < x) xs with
+       | None -> max_length + 1
+       | Some(y) -> 1 + max (max_length, lis (y :: rest_of_list)) where
+           rest_of_list = List.filter (fun z -> z <= x) xs
+
+(* Function to find the longest increasing subsequence for a list *)
+let longest_increasing_subsequence = function
+  | [] -> []
+  | [x] -> [x]
+  | x :: xs ->
+       let max_length = lis xs in
+       match List.find (fun y -> y < x) xs with
+       | None -> List.map (fun y -> y::xs) (List.map (lis xs) xs)
+       | Some(y) -> List.init (max_length + 1) (fun i ->
+                         if i <= max_length then [x] @ (y :: rest_of_list)
+                       else x::(y::rest_of_list))
+
+(* Example usage *)
+let () =
+  let lst = [3;10;2;1;20] in
+  print_endline ("Longest increasing subsequence is " ^ string_of_int (Array.length (longest_increasing_subsequence lst)))
+  for i := 0 to Array.length (longest_increasing_subsequence lst) - 1 do
+    print_endline ("[" ^ (string_of_int i) ^ "; " ^  List.hd (longest_increasing_subsequence lst).i ^ "]")
+  done
+
+```
+
+In this example, we have two functions: `lis` and `longest_increasing_subsequence`. The function `lis` finds the LIS for a given list. If the list is empty or contains only one element, it returns an empty list (or [1], depending on the definition of your problem). Otherwise, it iterates through each element in the list, finds the LIS of the rest of the list, and adds 1 to it if there are no other elements greater than it. The function `longest_increasing_subsequence` uses `lis` to find the longest increasing subsequence for a given list.

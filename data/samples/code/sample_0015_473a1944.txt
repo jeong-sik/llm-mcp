@@ -1,0 +1,57 @@
+import csv
+from io import StringIO
+
+def read_csv(file_path):
+    """
+    Reads a CSV file and returns its contents as a list of lists.
+    
+    Args:
+        file_path (str): The path to the CSV file.
+    
+    Returns:
+        list: A list of lists, where each sublist represents a row in the CSV file.
+    
+    Raises:
+        FileNotFoundError: If the specified file does not exist.
+        csv.Error: If there is an error parsing the CSV file.
+    """
+    try:
+        with open(file_path, 'r') as f:
+            reader = csv.reader(f)
+            data = list(reader)
+            return data
+    except FileNotFoundError:
+        print(f"The file {file_path} does not exist.")
+        raise
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        raise
+
+def write_csv(file_path, data):
+    """
+    Writes a CSV file from a list of lists.
+    
+    Args:
+        file_path (str): The path to the CSV file.
+        data (list): A list of lists, where each sublist represents a row in the CSV file.
+    
+    Raises:
+        IOError: If there is an error writing to the file.
+    """
+    try:
+        with open(file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(data)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        raise
+
+# Example usage
+file_path = "example.csv"
+data = [
+    ["Name", "Age"],
+    ["John", 25],
+    ["Jane", 30]
+]
+
+write_csv(file_path, data)

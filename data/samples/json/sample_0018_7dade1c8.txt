@@ -1,0 +1,11 @@
+Here is an example of a JSON error response with code, message, and details:
+
+```
+{
+  "code": 404,
+  "message": "Not Found",
+  "details": [
+    "The requested resource was not found in the database."
+  ]
+}
+```

@@ -1,0 +1,22 @@
+Here's an example of a JSON error response with code, message, and details in variation 8:
+
+```
+{
+    "error": {
+        "code": "E001",
+        "message": "Invalid request",
+        "details": [
+            {
+                "field": "username",
+                "reason": "Username cannot be empty"
+            },
+            {
+                "field": "password",
+                "reason": "Password must be at least 8 characters long"
+            }
+        ]
+    }
+}
+```
+
+In this response, the code `E001` indicates a general error, while the message "Invalid request" provides a brief description of the issue. The details section contains two specific errors that occurred during validation: one for an empty username and one for a password that is too short.

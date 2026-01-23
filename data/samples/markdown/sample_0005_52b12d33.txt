@@ -1,0 +1,200 @@
+**Endpoint Documentation**
+
+### GET /users/{id}
+
+Retrieves a user by their ID.
+
+#### Request Parameters:
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| id | integer | Yes |
+
+#### Response:
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The requested user was found and returned. |
+| 404 NOT FOUND | The requested user was not found. |
+
+#### Example Request:
+
+```bash
+GET /users/1 HTTP/1.1
+Host: example.com
+```
+
+#### Example Response (200 OK):
+
+```json
+{
+  "id": 1,
+  "name": "John Doe",
+  "email": "john.doe@example.com"
+}
+```
+
+#### Example Request with Invalid ID:
+
+```bash
+GET /users/999 HTTP/1.1
+Host: example.com
+```
+
+#### Example Response (404 NOT FOUND):
+
+```json
+{
+  "error": "User not found"
+}
+```
+
+### POST /users
+
+Creates a new user.
+
+#### Request Body:
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| name | string | Yes |
+| email | string | Yes |
+
+#### Response:
+
+| Status Code | Description |
+| --- | --- |
+| 201 Created | The requested user was created and returned. |
+| 400 Bad Request | The request body is invalid. |
+
+#### Example Request:
+
+```bash
+POST /users HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "name": "Jane Doe",
+  "email": "jane.doe@example.com"
+}
+```
+
+#### Example Response (201 Created):
+
+```json
+{
+  "id": 2,
+  "name": "Jane Doe",
+  "email": "jane.doe@example.com"
+}
+```
+
+#### Example Request with Invalid Request Body:
+
+```bash
+POST /users HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "invalid_name": "Jane Doe",
+  "email": "jane.doe@example.com"
+}
+```
+
+#### Example Response (400 Bad Request):
+
+```json
+{
+  "error": "Invalid request body"
+}
+```
+
+### PUT /users/{id}
+
+Updates an existing user.
+
+#### Request Parameters:
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| id | integer | Yes |
+
+#### Request Body:
+
+| Parameter | Type | Required |
+| --- | --- | --- |
+| name | string | No |
+| email | string | No |
+
+#### Response:
+
+| Status Code | Description |
+| --- | --- |
+| 200 OK | The requested user was updated and returned. |
+| 404 NOT FOUND | The requested user was not found. |
+| 400 Bad Request | The request body is invalid. |
+
+#### Example Request:
+
+```bash
+PUT /users/1 HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "name": "Jane Doe Updated"
+}
+```
+
+#### Example Response (200 OK):
+
+```json
+{
+  "id": 1,
+  "name": "Jane Doe Updated",
+  "email": "jane.doe@example.com"
+}
+```
+
+#### Example Request with Invalid ID:
+
+```bash
+PUT /users/999 HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "name": "Jane Doe Updated"
+}
+```
+
+#### Example Response (404 NOT FOUND):
+
+```json
+{
+  "error": "User not found"
+}
+```
+
+#### Example Request with Invalid Request Body:
+
+```bash
+PUT /users/1 HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "invalid_name": "Jane Doe Updated",
+  "email": "jane.doe@example.com"
+}
+```
+
+#### Example Response (400 Bad Request):
+
+```json
+{
+  "error": "Invalid request body"
+}
+```

@@ -1,0 +1,62 @@
+# CSV Parser Function
+======================
+```python
+import csv
+from io import StringIO
+
+def parse_csv(file_path):
+    """
+    Parse a CSV file and return its contents as a list of dictionaries.
+
+    Args:
+        file_path (str): The path to the CSV file.
+
+    Returns:
+        list: A list of dictionaries, where each dictionary represents a row in the CSV file.
+    """
+
+    # Initialize an empty list to store the parsed data
+    parsed_data = []
+
+    try:
+        # Open the file in read mode and create a CSV reader object
+        with open(file_path, 'r') as file:
+            csv_reader = csv.DictReader(file)
+
+            # Iterate over each row in the CSV file
+            for row in csv_reader:
+                # Convert the row to a dictionary (already done by csv.DictReader)
+                parsed_row = dict(row)
+
+                # Append the parsed row to the list of data
+                parsed_data.append(parsed_row)
+
+    except FileNotFoundError:
+        print(f"The file {file_path} does not exist.")
+    except PermissionError:
+        print(f"You do not have permission to read the file {file_path}.")
+    except csv.Error as e:
+        print(f"An error occurred while parsing the CSV file: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+    return parsed_data
+```
+
+# Example Usage
+-------------
+
+```python
+# Parse a CSV file and print its contents
+file_path = 'example.csv'
+parsed_data = parse_csv(file_path)
+
+if parsed_data:
+    for row in parsed_data:
+        print(row)
+else:
+    print("No data found in the CSV file.")
+```
+Note: This function assumes that the first line of the CSV file contains column headers. It uses the `csv.DictReader` class to automatically convert each row into a dictionary, where the keys are the column names and the values are the corresponding cell values.
+
+This code includes error handling for common exceptions that may occur while trying to open or read the CSV file, such as `FileNotFoundError`, `PermissionError`, and `csv.Error`. If an unexpected exception occurs, it prints an error message with more information about the exception.

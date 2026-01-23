@@ -1,0 +1,121 @@
+; =============================================================================
+; llm_mcp_common - Shared modules (NO Lwt, NO Eio runtime!)
+; =============================================================================
+(library
+ (name llm_mcp_common)
+ (public_name llm_mcp.common)
+ (wrapped false)
+ (flags (:standard -w -69))
+ (modules
+   ; Version (auto-generated from dune-project)
+   version
+   ; Pure OCaml - shared between Eio and Lwt
+   common
+   types
+   dictionary
+   ollama_parser
+   tool_config
+   tool_parsers
+   fewshot_injector
+   fewshot_judge
+   ; Chain Engine (Phase 3-4)
+   chain_types
+   chain_evaluator
+   chain_composer
+   chain_parser
+   chain_mermaid_parser
+   chain_compiler
+   chain_registry
+   prompt_registry
+   ; Chain Engine (Phase 5 - Category Theory)
+   chain_category
+   chain_stats
+   chain_telemetry
+   ; Observability
+   langfuse
+   ; Session (Pure OCaml - moved from llm_mcp)
+   mcp_session
+   ; SSE Notifications (Pure OCaml - moved from llm_mcp)
+   notification_sse
+   sse)
+ (libraries
+   yojson
+   str
+   unix
+   zstd
+   msgpck
+   compact-protocol
+   grpc-direct-core
+   mcp_protocol
+   base64
+   uri)
+ (ocamlopt_flags (:standard -O3))
+(preprocess (pps ppx_deriving_yojson)))
+
+; =============================================================================
+; llm_mcp_resilience - Shared resilience helpers
+; =============================================================================
+(library
+ (name llm_mcp_resilience)
+ (public_name llm_mcp.resilience)
+ (wrapped false)
+ (modules mcp_resilience)
+ (libraries eio unix))
+
+; =============================================================================
+; llm_mcp_eio - Pure Eio Library (NO Lwt!)
+; =============================================================================
+(library
+ (name llm_mcp_eio)
+ (public_name llm_mcp.eio)
+ (wrapped false)
+ (flags (:standard -w -69))
+ (modules
+   ; Core Eio modules
+   http_server_eio
+   mcp_server_eio
+   tools_eio
+   mcp_client_eio
+   cli_runner_eio
+   ; Chain Engine (Phase 3-4)
+   chain_adapter_eio
+   chain_executor_eio
+   chain_orchestrator_eio
+   chain_run_store
+   chain_view_page
+   ; Chain Engine (Phase 5 - requires Eio)
+   chain_batch
+   ; Checkpoint/Resume for long-running chains
+   checkpoint_store
+   ; Logging (Eio)
+   run_log_eio
+   ; Agent Loop (Eio)
+   agent_loop_eio)
+ (libraries
+   ; Shared modules
+   llm_mcp.common
+   ; Pure Eio - NO LWT!
+   eio
+   eio_main
+   httpun
+   httpun-eio
+   gluten
+   gluten-eio
+   cohttp-eio
+   ipaddr
+   ; Common
+   yojson
+   str
+   unix
+   mcp_protocol
+   msgpck
+   grpc-direct-core
+   zstd
+   compact-protocol
+   llm_mcp_resilience)
+ (ocamlopt_flags (:standard -O3))
+ (preprocess (pps ppx_deriving_yojson)))
+
+; =============================================================================
+; NOTE: llm_mcp (Lwt) library REMOVED - Use llm_mcp.eio instead
+; =============================================================================

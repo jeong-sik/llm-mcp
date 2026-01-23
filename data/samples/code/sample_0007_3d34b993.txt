@@ -1,0 +1,50 @@
+Here is a simple and efficient algorithm in OCaml to find the longest increasing subsequence:
+
+```ocaml
+(* Function to find the length of LIS *)
+let rec lis_length seq =
+  let rec helper i n =
+    if i >= n then 1
+    else (
+      let min_len = helper (i + 1) n in
+       match seq.(i) > seq.((i+1)%n) with
+         | true -> 1 + min_len
+         | false -> min_len)
+  in
+  helper 0 seq.length
+
+(* Function to find the longest increasing subsequence *)
+let rec lis_sequence seq =
+  let length = lis_length seq in
+  let rec helper i n =
+    if i >= n then ([],length)
+    else (
+      match seq.(i) > seq.((i+1)%n) with
+        | true -> 
+          let rec left_helper j m =
+            if j >= m then ([],m)
+            else (
+              let (l, len_left) = left_helper (j + 1) m in
+               if seq.(i) < l.[0] then ((seq.((i+1)%n), seq.(i)), len_left + 1)
+               else ((l, seq.(i)), len_left))
+          in
+          match left_helper 0 length with
+            | ([],len_left) -> (helper (i + 1) n, len_left + 1)
+            | (((a, b), l), len_left) ->
+                let (left, right) = helper i n in
+                ((seq.(i), seq.((i+1)%n)), l) :: (left, right)
+          )
+        | false -> helper (i + 1) n)
+  in
+  match helper 0 seq.length with
+  | ([],length) -> ([], length)
+
+(* Example usage *)
+let () =
+  let seq = [2; 1; 3; 4; 5; 3; 6; 7] in
+  print_int (List.length (lis_sequence seq));;
+```
+
+This function works by maintaining a "best" ending to the sequence at each position `i`, which consists of an increasing subsequence that ends with an element from `[seq.(i)..seq.((i+1)%n)]`. It then chooses to extend this subsequence either from a smaller or larger number, and returns the longest such subsequence.
+
+The time complexity of the algorithm is O(n^2), where n is the length of the input sequence. This is because we are essentially making two decisions at each position in the sequence: one for which element to choose next and another for how to extend that choice.

@@ -1,0 +1,39 @@
+# OCaml/Dune build artifacts
+_build/
+*.install
+*.opam.locked
+
+# Editor
+.merlin
+*.annot
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+*.swp
+*~
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.install
+*.merlin
+.merlin
+_opam/
+
+# Downloaded release binaries
+llm-mcp-macos-arm64
+llm-mcp-linux-x64
+
+# Local logs / outputs
+llm.log
+llm_direct.log
+mz_chain_output*.log
+.worktrees/
+.worktree/
+data/chain_history.jsonl

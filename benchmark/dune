@@ -1,0 +1,4 @@
+(executable
+ (name benchmark_compact)
+ (libraries llm_mcp.common)
+ (ocamlopt_flags (:standard -O3)))

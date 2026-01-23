@@ -1,0 +1,64 @@
+Here is an example of a Rust function that parses command-line arguments using the `clap` crate, which supports variation 9:
+
+```rust
+use clap::{App, Arg};
+use std::env;
+
+fn main() {
+    let matches = App::new("my_app")
+        .version("1.0")
+        .author("Your Name")
+        .about("My app description")
+        .arg(
+            Arg::with_name("help")
+                .long("help")
+                .short("h")
+                .takes_value(false)
+                .help("Display help message"),
+        )
+        .arg(
+            Arg::with_name("output")
+                .long("output")
+                .short("o")
+                .value_name("FILE")
+                .required(true)
+                .help("Output file path"),
+        )
+        .arg(
+            Arg::with_name("version")
+                .long("version")
+                .short("v")
+                .takes_value(false)
+                .help("Display version number"),
+        )
+        .get_matches();
+
+    if matches.is_present("help") {
+        println!("{}", matches.help());
+        std::process::exit(0);
+    }
+
+    let output_file = matches.value_of("output").unwrap();
+    println!("Output file: {}", output_file);
+
+    if matches.is_present("version") {
+        println!("{}", "1.0");
+        std::process::exit(0);
+    }
+}
+```
+
+This example defines three command-line arguments:
+
+- `--help` (-h): a boolean flag that displays the help message.
+- `--output` (-o) FILE: the output file path, which is required.
+- `--version` (-v): a boolean flag that displays the version number.
+
+Note that you need to add the following line in your `Cargo.toml` file:
+
+```toml
+[dependencies]
+clap = "3.2.0"
+```
+
+You can run this program from the command line like so: `./my_app --help`, `./my_app -o output.txt`, or `./my_app -v`.

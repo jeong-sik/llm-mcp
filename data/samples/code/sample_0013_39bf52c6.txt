@@ -1,0 +1,113 @@
+Here's an example of how you can implement a Go function for making concurrent API requests with rate limiting using the RateLimiter package. This implementation follows variation 3, where the rate limit is applied at each request.
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "math/rand"
+    "time"
+
+    "github.com/shopspring/uuid"
+    "github.com/tehpepo/ratelimit"
+)
+
+const (
+    // Maximum number of concurrent requests
+    maxConcurrentRequests = 5
+    // Timeout in milliseconds
+    timeoutMS             = 5000
+)
+
+// APIRequest is a struct to represent an API request
+type APIRequest struct {
+    URL         string
+    Method      string
+    Headers     map[string]string
+}
+
+func main() {
+    apiRequests := []APIRequest{
+        {"https://api.example.com/endpoint1", "GET"},
+        {"https://api.example.com/endpoint2", "POST"},
+        {"https://api.example.com/endpoint3", "PUT"},
+        {"https://api.example.com/endpoint4", "DELETE"},
+        {"https://api.example.com/endpoint5", "GET"},
+    }
+
+    // Initialize rate limiter
+    rl := ratelimit.NewRateLimiter(
+        10,         // Burst size
+        maxConcurrentRequests*1000, // Rate in requests per second
+        timeoutMS, // Time to live in seconds
+    )
+
+    for _, request := range apiRequests {
+        go makeRequest(request, rl)
+    }
+
+    time.Sleep(10 * time.Second) // Wait for all requests to finish
+}
+
+func makeRequest(request APIRequest, rl ratelimit.RateLimiter) {
+    ctx, cancel := context.WithTimeout(context.Background(), timeoutMS*time.Millisecond)
+    defer cancel()
+
+    headers := request.Headers
+
+    if headers == nil {
+        headers = map[string]string{}
+    }
+
+    // Add a random delay between 1 and 2 seconds to simulate network latency
+    time.Sleep(time.Duration(rand.Intn(2000)) * time.Millisecond)
+
+    id := uuid.NewRandom()
+    log.Printf("Request ID: %s", id)
+
+    // Make the API request
+    resp, err := makeAPIRequest(request.URL, request.Method, headers)
+    if err != nil {
+        log.Println(err)
+        return
+    }
+
+    log.Println(resp.Status)
+
+    // Increment the rate limiter
+    rl.Increment()
+}
+
+func makeAPIRequest(url string, method string, headers map[string]string) (*http.Response, error) {
+    client := &http.Client{
+        Timeout: time.Second * 5,
+    }
+    req, err := http.NewRequest(method, url, nil)
+    if err != nil {
+        return nil, err
+    }
+
+    for headerKey, headerValue := range headers {
+        req.Header.Add(headerKey, headerValue)
+    }
+
+    resp, err := client.Do(req)
+    if err != nil {
+        return nil, err
+    }
+
+    return resp, nil
+}
+```
+
+In this code:
+
+1.  We create an array of API requests with their respective URLs, methods, and headers.
+2.  We initialize a RateLimiter instance with the desired burst size (10), rate (5 requests per second), and time to live in seconds (0.5 seconds).
+3.  We use Go's concurrency features to make concurrent API requests for each request in our array using goroutines.
+4.  For each request, we add a random delay between 1 and 2 seconds to simulate network latency.
+5.  We make the actual API request using the `makeAPIRequest` function and return the response status.
+6.  After making the API request, we increment the RateLimiter instance to apply the rate limit.
+
+The provided code uses the RateLimiter package from GitHub to implement the concurrency and rate limiting functionality for the API requests.

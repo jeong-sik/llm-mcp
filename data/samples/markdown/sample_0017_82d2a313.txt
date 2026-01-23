@@ -1,0 +1,105 @@
+**Setting Up Docker Containers (Variation 7): Advanced Use Cases**
+
+Introduction
+------------
+
+In this tutorial, we'll cover advanced use cases for setting up Docker containers. We'll explore how to create complex container networks, use Docker Compose for multi-container applications, and configure persistent storage using volumes.
+
+Prerequisites
+-------------
+
+* Docker installed on your system (version 20.10 or later)
+* Basic knowledge of Docker concepts
+
+Step 1: Create a New Directory for Your Project
+---------------------------------------------
+
+Create a new directory for your project and navigate into it:
+```bash
+mkdir my-docker-project
+cd my-docker-project
+```
+Step 2: Create a `docker-compose.yml` File
+-----------------------------------------
+
+In the `docker-compose.yml` file, define your application's services. For example, let's create a simple web server using Node.js and Express.js:
+```yaml
+version: '3'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=mongodb://user:password@db:27017/
+
+  db:
+    image: mongo:4.4
+    volumes:
+      - ./data:/data/db
+```
+In this example, we define two services: `web` and `db`. The `web` service builds the current directory (containing our application code) and maps port 8080 on the host machine to port 8080 inside the container. The `db` service uses the official MongoDB image and mounts a volume at `/data/db`.
+
+Step 3: Create a Container Network
+-----------------------------------
+
+Create a new file called `networks.yml` with the following content:
+```yaml
+version: '3'
+
+services:
+  web:
+    network:
+      - my-network
+
+  db:
+    network:
+      - my-network
+```
+In this example, we define two services that belong to the same network named `my-network`.
+
+Step 4: Create a Persistent Storage Volume
+-------------------------------------------
+
+Create a new file called `.dockerenv` with the following content:
+```makefile
+VOLUME ["/data/db"]
+```
+This tells Docker to create a volume at `/data/db` that persists even if the container is restarted or deleted.
+
+Step 5: Build and Run Your Application
+--------------------------------------
+
+Build your application image by running the following command:
+```bash
+docker build -t my-app .
+```
+Run your application using Docker Compose:
+```bash
+docker-compose up --build
+```
+This will start both containers in detached mode. You can verify that they are running by checking the output of `docker-compose logs`.
+
+Conclusion
+----------
+
+In this tutorial, we covered advanced use cases for setting up Docker containers. We created a complex container network using `docker-compose`, used persistent storage volumes to store data, and built an application image using Dockerfile instructions.
+
+Best Practices
+--------------
+
+* Use `docker-compose.yml` files to define your application's services and dependencies.
+* Create separate networks for each group of containers that need to communicate with each other.
+* Use persistent storage volumes to store data that persists across container restarts.
+* Build your application image by running the `docker build` command.
+
+Common Issues
+-------------
+
+* Make sure you have the correct version of Docker installed on your system.
+* Check that your `docker-compose.yml` file is correctly formatted and defined.
+* Verify that your containers are properly linked using `depends_on` directives.
+* Ensure that your volumes are correctly configured to persist data across container restarts.
