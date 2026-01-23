@@ -144,15 +144,17 @@ let read_lines_tail ~max_bytes ~max_lines path =
           if start > 0 then begin
             In_channel.seek ic (Int64.of_int start);
             (* Drop partial line to align to next full line. *)
-            (try ignore (In_channel.input_line ic) with End_of_file -> ())
+            ignore (In_channel.input_line ic)
           end;
           let q = Queue.create () in
           begin
             try
               while true do
-                let line = In_channel.input_line ic in
-                Queue.add line q;
-                if Queue.length q > max_lines then ignore (Queue.take q)
+                match In_channel.input_line ic with
+                | Some line ->
+                    Queue.add line q;
+                    if Queue.length q > max_lines then ignore (Queue.take q)
+                | None -> raise End_of_file
               done
             with End_of_file -> ()
           end;
