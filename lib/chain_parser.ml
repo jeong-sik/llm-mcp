@@ -339,15 +339,26 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
       | Tool { args; _ } -> extract_json_mappings args
       | _ -> []
     in
+    (* Parse input_mapping: try "input_mapping" (list format) then "inputs" (assoc format) *)
     let input_mapping =
       match json |> member "input_mapping" with
       | `List pairs ->
+          (* Legacy format: [["key", "source"], ...] *)
           List.filter_map (fun pair ->
             match pair with
             | `List [`String k; `String v] -> Some (k, v)
             | _ -> None
           ) pairs
-      | `Null -> auto_extract_mappings ()
+      | `Null | `Bool false ->
+          (* Try "inputs" format: {"key": "source", ...} - used by chain_to_json output *)
+          (match json |> member "inputs" with
+           | `Assoc pairs -> List.map (fun (k, v) ->
+               match v with
+               | `String s -> (k, s)
+               | _ -> (k, Yojson.Safe.to_string v)
+             ) pairs
+           | `Null -> auto_extract_mappings ()
+           | _ -> auto_extract_mappings ())
       | _ -> []
     in
 

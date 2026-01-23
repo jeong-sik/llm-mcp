@@ -386,6 +386,69 @@ let test_goaldriven_id_inference () =
         has_goal_node
   )
 
+(* Test "inputs" format (assoc dict) is correctly parsed - this is used by chain_to_json output *)
+let test_inputs_assoc_format () =
+  let json = {|{
+    "id": "inputs_assoc_test",
+    "nodes": [
+      {"id": "a", "type": "llm", "model": "gemini", "prompt": "Hello"},
+      {"id": "b", "type": "llm", "model": "claude", "prompt": "Process: {{x}} and {{y}}", "inputs": {"x": "a", "y": "a"}}
+    ],
+    "output": "b",
+    "config": {"timeout": 60, "trace": false, "max_depth": 2}
+  }|} in
+  Alcotest.(check bool) "inputs assoc format" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        (* Verify input_mapping was populated from "inputs" *)
+        let find_b nodes = List.find_opt (fun (n:node) -> n.id = "b") nodes in
+        match find_b chain1.nodes with
+        | Some n ->
+            let mapping = List.sort compare n.input_mapping in
+            let expected = [("x", "a"); ("y", "a")] in
+            if mapping <> expected then
+              Printf.printf "FAIL: mapping mismatch. Got %s, expected %s\n"
+                (String.concat ", " (List.map (fun (k,v) -> k ^ "=" ^ v) mapping))
+                (String.concat ", " (List.map (fun (k,v) -> k ^ "=" ^ v) expected));
+            mapping = expected
+        | None -> false
+  )
+
+(* Test full roundtrip: JSON (inputs) → Chain → JSON → parse again → verify edges *)
+let test_inputs_full_roundtrip () =
+  let json = {|{
+    "id": "inputs_roundtrip",
+    "nodes": [
+      {"id": "a", "type": "llm", "model": "gemini", "prompt": "Start"},
+      {"id": "b", "type": "llm", "model": "claude", "prompt": "Process: {{data}}", "inputs": {"data": "a"}}
+    ],
+    "output": "b"
+  }|} in
+  Alcotest.(check bool) "inputs full roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        (* Serialize back to JSON *)
+        let json2 = Json_parser.chain_to_json chain1 in
+        (* Parse the serialized JSON *)
+        match Json_parser.parse_chain json2 with
+        | Error e -> failwith ("Re-parse failed: " ^ e)
+        | Ok chain2 ->
+            (* Verify mapping survived roundtrip *)
+            let find_b nodes = List.find_opt (fun (n:node) -> n.id = "b") nodes in
+            match find_b chain1.nodes, find_b chain2.nodes with
+            | Some n1, Some n2 ->
+                let m1 = List.sort compare n1.input_mapping in
+                let m2 = List.sort compare n2.input_mapping in
+                if m1 <> m2 then
+                  Printf.printf "FAIL: roundtrip mapping mismatch\n";
+                m1 = m2
+            | _ -> false
+  )
+
 let () =
   Alcotest.run "Lossless Roundtrip" [
     "roundtrip", [
@@ -399,6 +462,8 @@ let () =
       Alcotest.test_case "Lossy mode (no metadata)" `Quick test_lossy_mode;
       Alcotest.test_case "Fallback ID when no metadata" `Quick test_fallback_id;
       Alcotest.test_case "Partial metadata" `Quick test_partial_metadata;
+      Alcotest.test_case "inputs assoc format (chain_to_json compat)" `Quick test_inputs_assoc_format;
+      Alcotest.test_case "inputs full roundtrip" `Quick test_inputs_full_roundtrip;
     ];
     "goaldriven", [
       Alcotest.test_case "GoalDriven explicit syntax" `Quick test_goaldriven_mermaid_parsing;
