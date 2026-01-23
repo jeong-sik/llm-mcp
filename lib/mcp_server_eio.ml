@@ -215,11 +215,11 @@ let handle_initialize ~store id params =
 (** Handle tools/list request *)
 let handle_list_tools id =
   let tools = List.map (fun (schema : Types.tool_schema) ->
-    P.tool_to_json {
-      P.name = schema.name;
-      description = Some schema.description;
-      input_schema = schema.input_schema;
-    }
+    `Assoc [
+      ("name", `String schema.name);
+      ("description", `String schema.description);
+      ("inputSchema", schema.input_schema);
+    ]
   ) Types.all_schemas in
   make_response ~id (`Assoc [("tools", `List tools)])
 
