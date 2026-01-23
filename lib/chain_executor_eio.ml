@@ -2483,7 +2483,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
    | Some _ ->
        let _ = restore_from_checkpoint ctx ~chain_id:plan.chain.Chain_types.id in
        ()  (* Outputs are now restored *)
-   | None -> ())
+   | None -> ());
 
   (* Record chain start with mermaid visualization *)
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid plan.chain) in
@@ -2543,8 +2543,8 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
               end
           | Parallel nodes ->
               (* Filter out already-completed nodes *)
-              let nodes_to_execute = List.filter (fun n ->
-                not (node_completed_in_checkpoint ctx n.Chain_types.id)
+              let nodes_to_execute = List.filter (fun (n : node) ->
+                not (node_completed_in_checkpoint ctx n.id)
               ) nodes in
               if List.length nodes_to_execute = 0 then
                 Ok ""  (* All nodes already completed *)
@@ -2552,11 +2552,11 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
                 (* Execute remaining nodes in parallel *)
                 let results = ref [] in
                 let mutex = Eio.Mutex.create () in
-                Eio.Fiber.all (List.map (fun node ->
+                Eio.Fiber.all (List.map (fun (node : node) ->
                   fun () ->
                     let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
                     Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-                      results := (node.Chain_types.id, r) :: !results
+                      results := (node.id, r) :: !results
                     )
                 ) nodes_to_execute);
                 (* Save checkpoint for all successfully completed parallel nodes *)
