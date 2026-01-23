@@ -48,6 +48,10 @@ is_stdio_mode() {
     return 1
 }
 
+is_launchd_job() {
+    [ "${LAUNCH_JOB_IDENTIFIER:-}" = "com.jeong-sik.llm-mcp" ]
+}
+
 is_llm_mcp_cmd() {
     local cmd="$1"
     case "$cmd" in
@@ -140,6 +144,12 @@ fi
 
 PORT="$(resolve_port "$@")"
 if ! is_stdio_mode "$@"; then
+    if ! is_launchd_job && command -v launchctl >/dev/null 2>&1; then
+        if launchctl list 2>/dev/null | grep -q "com.jeong-sik.llm-mcp"; then
+            echo "launchd com.jeong-sik.llm-mcp is managing llm-mcp; aborting direct start." >&2
+            exit 1
+        fi
+    fi
     stop_existing_on_port "$PORT"
 fi
 
