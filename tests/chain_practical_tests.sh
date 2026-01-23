@@ -21,6 +21,9 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+SCRIPT_DIR=$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+
 test_chain() {
   local name="$1"
   local mermaid="$2"
@@ -97,7 +100,7 @@ echo
 # Check server
 if ! curl -s http://localhost:8932/health > /dev/null 2>&1; then
   echo -e "${RED}ERROR:${NC} llm-mcp server not running on port 8932"
-  echo "Start with: cd ~/me/workspace/yousleepwhen/llm-mcp && ./start-llm-mcp.sh"
+  echo "Start with: cd $REPO_ROOT && ./start-llm-mcp.sh"
   exit 1
 fi
 

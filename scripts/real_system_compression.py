@@ -100,8 +100,10 @@ def main():
     print("=" * 70)
 
     # 1. 세션 디렉토리 찾기
-    session_dir = Path.home() / ".claude" / "projects" / "-Users-dancer-me"
-    masc_dir = Path.home() / "me" / ".masc"
+    me_root = Path(os.getenv("ME_ROOT", str(Path.home() / "me")))
+    project_slug = f"-{me_root.as_posix().lstrip('/')}".replace("/", "-")
+    session_dir = Path.home() / ".claude" / "projects" / project_slug
+    masc_dir = me_root / ".masc"
 
     results = {
         "sessions": [],
