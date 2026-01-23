@@ -26,11 +26,14 @@ Thumbs.db
 .merlin
 _opam/
 
-# Downloaded release binary
+# Downloaded release binaries
 llm-mcp-macos-arm64
 llm-mcp-linux-x64
-# Track the local release artifact
-!llm-mcp-macos-arm64
+
+# Local logs / outputs
+llm.log
+llm_direct.log
+mz_chain_output*.log
 .worktrees/
 .worktree/
 data/chain_history.jsonl
