@@ -836,7 +836,7 @@ module Response = struct
 
   let json_with_session ?(status = `OK) ~session_id ~protocol_version body reqd =
     let headers = Httpun.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
+      ("content-type", "application/json");
       ("content-length", string_of_int (String.length body));
     ] @ mcp_headers session_id protocol_version @ cors_headers) in
     let response = Httpun.Response.create ~headers status in
@@ -844,7 +844,7 @@ module Response = struct
 
   let json ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
+      ("content-type", "application/json");
       ("content-length", string_of_int (String.length body));
     ] @ cors_headers) in
     let response = Httpun.Response.create ~headers status in
@@ -1129,9 +1129,28 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
     log_debug "LLM_MCP_DEBUG: POST /mcp Accept=%s\n%!" accept_dbg;
 
     Request.read_body_async reqd (fun body_str ->
-      (* If client advertises SSE, respond with SSE for all JSON-RPC methods.
-         Some streamable MCP clients treat non-SSE responses as unexpected. *)
-      let wants_stream = wants_stream_headers in
+      let has_method name json =
+        let rec has_method_inner value =
+          match value with
+          | `Assoc fields -> (
+              match List.assoc_opt "method" fields with
+              | Some (`String m) -> String.equal m name
+              | _ -> false)
+          | `List items -> List.exists has_method_inner items
+          | _ -> false
+        in
+        has_method_inner json
+      in
+      let (has_tools_call, has_tools_list) =
+        try
+          let json = Yojson.Safe.from_string body_str in
+          (has_method "tools/call" json, has_method "tools/list" json)
+        with _ -> (false, false)
+      in
+      (* tools/list must return JSON (non-SSE) *)
+      let wants_stream =
+        wants_stream_headers && has_tools_call && (not has_tools_list)
+      in
       (* Convert Httpun.Headers to (string * string) list for Mcp_server_eio *)
       let headers_list = Httpun.Headers.to_list headers in
 

@@ -218,6 +218,21 @@ let parse_chain_resume_args (json : Yojson.Safe.t) : tool_args =
   let trace = json |> member "trace" |> to_bool_option |> Option.value ~default:false in
   ChainResume { run_id; trace }
 
+(** Parse JSON arguments for prompt.register tool *)
+let parse_prompt_register_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let id = json |> member "id" |> to_string in
+  let template = json |> member "template" |> to_string in
+  let version = json |> member "version" |> to_string_option in
+  PromptRegister { id; template; version }
+
+(** Parse JSON arguments for prompt.get tool *)
+let parse_prompt_get_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let id = json |> member "id" |> to_string in
+  let version = json |> member "version" |> to_string_option in
+  PromptGet { id; version }
+
 (** {1 Command Builders} *)
 
 (** Build thinking prompt prefix based on thinking level *)
