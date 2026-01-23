@@ -137,6 +137,8 @@ type node_type =
       prompt : string;
       timeout : int option;
       tools : Yojson.Safe.t option;
+      prompt_ref : string option;
+      prompt_vars : (string * string) list;
     }
   | Tool of { name : string; args : Yojson.Safe.t }
   | Pipeline of node list
@@ -306,7 +308,7 @@ val execution_plan_of_yojson : Yojson.Safe.t -> (execution_plan, string) result
 (** {1 Helper Functions} *)
 
 val node_type_name : node_type -> string
-val make_llm_node : id:string -> model:string -> ?system:string -> prompt:string -> ?timeout:int -> ?tools:Yojson.Safe.t -> unit -> node
+val make_llm_node : id:string -> model:string -> ?system:string -> prompt:string -> ?timeout:int -> ?tools:Yojson.Safe.t -> ?prompt_ref:string -> ?prompt_vars:(string * string) list -> unit -> node
 val make_adapter : id:string -> input_ref:string -> transform:adapter_transform -> ?on_error:[ `Fail | `Passthrough | `Default of string ] -> unit -> node
 val make_tool_node : id:string -> name:string -> args:Yojson.Safe.t -> node
 val make_pipeline : id:string -> node list -> node

@@ -25,7 +25,9 @@ let () =
       system = None;
       prompt = "Improve this Python code and explain what you improved: def add(a,b): return a+b";
       timeout = Some 30;
-      tools = None
+      tools = None;
+      prompt_ref = None;
+      prompt_vars = []
     };
     input_mapping = []
   } in

@@ -111,7 +111,9 @@ let test_multi_stage_pipeline () =
         system = None;
         prompt = "Write a one-sentence definition of 'functional programming'. Be concise.";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -124,7 +126,9 @@ let test_multi_stage_pipeline () =
         system = None;
         prompt = "Improve this definition to be clearer and more precise. Add 'quality: 0.8' at the end. Input: {{input}}";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = [("input", "initial_gen")]
     } in
@@ -156,7 +160,9 @@ let test_multi_stage_pipeline () =
         system = None;
         prompt = "Format this as a dictionary entry with 'Term:' and 'Definition:' labels. Input: {{quality_gate}}";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = [("input", "quality_gate")]
     } in
@@ -217,7 +223,9 @@ At the end, write 'score: 0.85' to indicate quality.
 Iteration: {{iteration}}/{{max_iterations}}
 Strategy: {{strategy}}|};
         timeout = Some 45;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -293,7 +301,9 @@ let test_mermaid_complex_execution () =
         system = None;
         prompt = "Translate 'Hello World' to Korean. End with 'accuracy: 0.9'";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
