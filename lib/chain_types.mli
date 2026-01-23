@@ -220,6 +220,13 @@ type node_type =
       early_stop : float option;
       parallel_sims : int;
     }
+  | StreamMerge of {
+      nodes : node list;
+      reducer : merge_strategy;
+      initial : string;
+      min_results : int option;
+      timeout : float option;
+    }
 
 (** A single execution node *)
 and node = {

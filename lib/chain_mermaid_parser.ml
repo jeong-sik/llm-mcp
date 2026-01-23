@@ -510,8 +510,49 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
             Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; pass_vars; inherit_cache = true })
         | _ ->
             Error (Printf.sprintf "Spawn requires clean,node or clean,pass_vars,node format, got: %s" content))
+      else if String.length content > 12 && String.sub content 0 12 = "StreamMerge:" then
+        (* [[StreamMerge:reducer,min_results,timeout]] - progressive result processing *)
+        let parts = String.sub content 12 (String.length content - 12)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        let parse_reducer s = match String.lowercase_ascii s with
+          | "first" -> First | "last" -> Last | "concat" -> Concat
+          | "weighted" | "weighted_avg" -> WeightedAvg
+          | custom -> Custom custom
+        in
+        (match parts with
+        | [reducer_str] ->
+            Ok (StreamMerge {
+              nodes = [];  (* filled from edges in post-process *)
+              reducer = parse_reducer reducer_str;
+              initial = "";
+              min_results = None;
+              timeout = None;
+            })
+        | [reducer_str; min_str] ->
+            let min_results = try Some (int_of_string min_str) with _ -> None in
+            Ok (StreamMerge {
+              nodes = [];
+              reducer = parse_reducer reducer_str;
+              initial = "";
+              min_results;
+              timeout = None;
+            })
+        | [reducer_str; min_str; timeout_str] ->
+            let min_results = try Some (int_of_string min_str) with _ -> None in
+            let timeout = try Some (float_of_string timeout_str) with _ -> None in
+            Ok (StreamMerge {
+              nodes = [];
+              reducer = parse_reducer reducer_str;
+              initial = "";
+              min_results;
+              timeout;
+            })
+        | _ ->
+            Error (Printf.sprintf "StreamMerge format: reducer or reducer,min or reducer,min,timeout, got: %s" content))
       else
-        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn, got: %s" content)
+        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn/StreamMerge, got: %s" content)
 
   | `Diamond ->
       (* {Quorum:N} or {Gate:condition} *)
@@ -1152,6 +1193,13 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
         | EpsilonGreedy e -> Printf.sprintf "eps_%.2f" e
         | Softmax t -> Printf.sprintf "softmax_%.2f" t
       in Printf.sprintf "mcts_%s_%d" policy_str max_iterations
+  | StreamMerge { nodes; reducer; min_results; _ } ->
+      let reducer_str = match reducer with
+        | First -> "first" | Last -> "last" | Concat -> "concat"
+        | WeightedAvg -> "weighted" | Custom s -> s
+      in
+      let min_str = match min_results with Some n -> Printf.sprintf "_%d" n | None -> "" in
+      Printf.sprintf "stream_merge_%s_%d%s" reducer_str (List.length nodes) min_str
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -1240,6 +1288,14 @@ let node_type_to_text (nt : node_type) : string =
         | EpsilonGreedy e -> Printf.sprintf "eps:%.2f" e
         | Softmax t -> Printf.sprintf "softmax:%.2f" t
       in Printf.sprintf "MCTS:%s:%d (depth:%d,eval:%s)" policy_str max_iterations max_depth evaluator
+  | StreamMerge { nodes; reducer; min_results; timeout; _ } ->
+      let reducer_str = match reducer with
+        | First -> "first" | Last -> "last" | Concat -> "concat"
+        | WeightedAvg -> "weighted" | Custom s -> s
+      in
+      let min_str = match min_results with Some n -> Printf.sprintf ",min:%d" n | None -> "" in
+      let timeout_str = match timeout with Some t -> Printf.sprintf ",timeout:%.1f" t | None -> "" in
+      Printf.sprintf "StreamMerge:%s:%d%s%s" reducer_str (List.length nodes) min_str timeout_str
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -1251,6 +1307,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
   | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
   | Mcts _ -> ("{", "}")  (* MCTS: diamond like decision nodes *)
+  | StreamMerge _ -> ("[[", "]]")  (* StreamMerge: double brackets like Pipeline/Fanout *)
 
 (** Map node type to CSS class name for Mermaid styling *)
 let node_type_to_class (nt : node_type) : string =
@@ -1278,6 +1335,7 @@ let node_type_to_class (nt : node_type) : string =
   | Batch _ -> "batch"
   | Spawn _ -> "spawn"
   | Mcts _ -> "mcts"
+  | StreamMerge _ -> "streammerge"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1443,6 +1501,7 @@ let chain_to_ascii (chain : chain) : string =
       | ChainExec _ -> "🔮" | Adapter _ -> "🔌"
       | Cache _ -> "💾" | Batch _ -> "📦" | Spawn _ -> "🌱"
       | Mcts _ -> "🌳"
+      | StreamMerge _ -> "🌊"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

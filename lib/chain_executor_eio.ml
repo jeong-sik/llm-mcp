@@ -673,6 +673,10 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
       execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~strategies ~simulation ~evaluator ~evaluator_prompt ~policy
         ~max_iterations ~max_depth ~expansion_threshold ~early_stop ~parallel_sims
+  (* StreamMerge: Progressive result processing as nodes complete *)
+  | StreamMerge { nodes = stream_nodes; reducer; initial; min_results; timeout } ->
+      execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~nodes:stream_nodes ~reducer ~initial ~min_results ~timeout
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
@@ -2088,6 +2092,103 @@ and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       Ok output
   | None ->
       let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      record_error ctx parent.id msg;
+      Error msg
+
+(** Execute StreamMerge node - process results progressively as they arrive *)
+and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~nodes ~reducer ~initial ~min_results ~timeout : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* Stream for progressive results: Some (id, output) or None for completion *)
+  let stream = Eio.Stream.create (List.length nodes) in
+  let completed_count = ref 0 in
+  let total_count = List.length nodes in
+  let count_mutex = Eio.Mutex.create () in
+
+  (* Producer: Execute nodes in parallel, push results to stream as they complete *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Fiber.all (List.map (fun (node : node) ->
+      fun () ->
+        match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
+        | Ok output ->
+            Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
+              incr completed_count;
+              Printf.eprintf "[StreamMerge] %s completed (%d/%d)\n%!"
+                node.id !completed_count total_count);
+            Eio.Stream.add stream (Some (node.id, Ok output))
+        | Error msg ->
+            Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
+              incr completed_count);
+            Eio.Stream.add stream (Some (node.id, Error msg))
+    ) nodes);
+    (* Signal completion after all producers done *)
+    Eio.Stream.add stream None
+  );
+
+  (* Consumer: Process results progressively using reducer *)
+  let acc = ref initial in
+  let results_collected = ref 0 in
+  let min_required = match min_results with Some n -> n | None -> total_count in
+  let timeout_sec = match timeout with Some t -> t | None -> infinity in
+  let deadline = start +. timeout_sec in
+
+  let rec consume () =
+    let now = Unix.gettimeofday () in
+    if now > deadline && !results_collected >= min_required then begin
+      (* Timeout reached after min_results met *)
+      Printf.eprintf "[StreamMerge] Timeout reached with %d results\n%!" !results_collected;
+      Ok !acc
+    end else begin
+      match Eio.Stream.take stream with
+      | None ->
+          (* All producers finished *)
+          Printf.eprintf "[StreamMerge] All %d nodes processed\n%!" !results_collected;
+          Ok !acc
+      | Some (id, Error msg) ->
+          Printf.eprintf "[StreamMerge] %s failed: %s\n%!" id msg;
+          consume ()  (* Skip failures, continue processing *)
+      | Some (id, Ok output) ->
+          incr results_collected;
+          (* Apply reducer to accumulate result *)
+          let new_acc = match reducer with
+            | First -> if !acc = initial then output else !acc
+            | Last -> output
+            | Concat ->
+                if !acc = initial then output
+                else !acc ^ "\n" ^ output
+            | WeightedAvg ->
+                if !acc = initial then Printf.sprintf "[%s]: %s" id output
+                else !acc ^ "\n---\n" ^ Printf.sprintf "[%s]: %s" id output
+            | Custom func_name ->
+                if !acc = initial then Printf.sprintf "[%s via %s]: %s" id func_name output
+                else !acc ^ "\n---\n" ^ Printf.sprintf "[%s via %s]: %s" id func_name output
+          in
+          acc := new_acc;
+          Printf.eprintf "[StreamMerge] Accumulated %s (%d collected)\n%!" id !results_collected;
+
+          (* Check if we can return early (min_results met + optional timeout) *)
+          if !results_collected >= min_required && timeout_sec < infinity then begin
+            (* Wait briefly for more results or timeout *)
+            let remaining = deadline -. Unix.gettimeofday () in
+            if remaining <= 0.0 then Ok !acc
+            else consume ()  (* Keep consuming until timeout *)
+          end else
+            consume ()
+    end
+  in
+
+  let result = consume () in
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+
+  match result with
+  | Ok output ->
+      record_complete ctx parent.id ~duration_ms ~success:true;
+      Hashtbl.add ctx.outputs parent.id output;
+      Ok output
+  | Error msg ->
       record_complete ctx parent.id ~duration_ms ~success:false;
       record_error ctx parent.id msg;
       Error msg

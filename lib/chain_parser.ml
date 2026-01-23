@@ -617,6 +617,28 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         max_iterations; max_depth; expansion_threshold; early_stop; parallel_sims
       })
 
+  | "stream_merge" ->
+      (* StreamMerge - progressive result processing from parallel nodes *)
+      let nodes_json = parse_list_with_default json "nodes" in
+      let* nodes = parse_nodes nodes_json in
+      let reducer = match json |> member "reducer" with
+        | `String "first" -> First
+        | `String "last" -> Last
+        | `String "concat" -> Concat
+        | `String "weighted_avg" -> WeightedAvg
+        | `Assoc pairs -> (
+            match List.assoc_opt "name" pairs with
+            | Some (`String name) -> Custom name
+            | _ -> Concat  (* default *)
+          )
+        | `String s -> Custom s  (* treat unknown as custom *)
+        | _ -> Concat
+      in
+      let initial = parse_string_with_default json "initial" "" in
+      let min_results = parse_int_opt json "min_results" in
+      let timeout = parse_float_opt json "timeout" in
+      Ok (StreamMerge { nodes; reducer; initial; min_results; timeout })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -1034,6 +1056,22 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("expansion_threshold", `Int expansion_threshold);
           ("early_stop", match early_stop with Some s -> `Float s | None -> `Null);
           ("parallel_sims", `Int parallel_sims);
+        ]
+    | StreamMerge { nodes; reducer; initial; min_results; timeout } ->
+        let reducer_json = match reducer with
+          | First -> `String "first"
+          | Last -> `String "last"
+          | Concat -> `String "concat"
+          | WeightedAvg -> `String "weighted_avg"
+          | Custom s -> `Assoc [("type", `String "custom"); ("name", `String s)]
+        in
+        [
+          ("type", `String "stream_merge");
+          ("nodes", `List (List.map node_to_json nodes));
+          ("reducer", reducer_json);
+          ("initial", `String initial);
+          ("min_results", match min_results with Some n -> `Int n | None -> `Null);
+          ("timeout", match timeout with Some t -> `Float t | None -> `Null);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)

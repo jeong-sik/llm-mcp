@@ -242,6 +242,14 @@ type node_type =
       early_stop : float option;     (** Stop if score exceeds threshold *)
       parallel_sims : int;           (** Number of parallel simulations *)
     }
+  (* StreamMerge - Process results progressively as they arrive (not waiting for slowest) *)
+  | StreamMerge of {
+      nodes : node list;             (** Nodes to execute in parallel *)
+      reducer : merge_strategy;      (** How to combine results: First, Concat, Custom *)
+      initial : string;              (** Initial accumulator value (e.g., "" or "[]") *)
+      min_results : int option;      (** Minimum results before returning (None = wait for all) *)
+      timeout : float option;        (** Timeout in seconds (applies after min_results met) *)
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -335,6 +343,7 @@ let node_type_name = function
   | Batch _ -> "batch"
   | Spawn _ -> "spawn"
   | Mcts _ -> "mcts"
+  | StreamMerge _ -> "stream_merge"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
@@ -495,6 +504,9 @@ let rec count_parallel_groups (node: node) : int =
       (* MCTS runs strategies in parallel and performs parallel simulations *)
       1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 strategies +
       count_parallel_groups simulation
+  | StreamMerge { nodes; _ } ->
+      (* StreamMerge runs nodes in parallel and processes results progressively *)
+      1 + List.fold_left (fun acc n -> acc + count_parallel_groups n) 0 nodes
   | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ -> 0
 
 (** Count total parallel groups in a chain *)
