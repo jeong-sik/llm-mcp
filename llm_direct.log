@@ -1,5 +1,0 @@
-🐫 llm-mcp (OCaml Eio) MCP 2025-11-25 server
-   HTTP: http://127.0.0.1:8932
-   MCP:  GET  /mcp -> SSE stream (notifications)
-         POST /mcp -> JSON-RPC requests
-   Graceful shutdown: SIGTERM/SIGINT supported
