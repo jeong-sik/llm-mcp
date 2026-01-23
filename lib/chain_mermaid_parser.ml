@@ -352,7 +352,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
         let (prompt_clean, has_tools) = extract_tools_flag raw_prompt in
         let prompt = if prompt_clean = "" then "{{input}}" else prompt_clean in
         let tools = make_tools_value has_tools in
-        Ok (Llm { model; system = None; prompt; timeout = None; tools })
+        Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
       else if Str.string_match tool_content_re text 0 then
         (* Explicit Tool syntax in content: tool:name\nargs *)
         let name = Str.matched_group 1 text in
@@ -377,7 +377,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then "{{input}}" else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model; system = None; prompt; timeout = None; tools })
+          Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
         else if List.mem id_lower known_tools then
           Ok (Tool { name = id; args = `Null })
         else
@@ -386,7 +386,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then id else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools })
+          Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
 
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
@@ -667,7 +667,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         | [policy_type; iter_str] when policy_type = "greedy" ->
             let max_iterations = try int_of_string iter_str with _ -> 10 in
             (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None }; input_mapping = [] } in
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = [] } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
@@ -689,7 +689,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
               | _ -> UCB1 1.41  (* default *)
             in
             (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None }; input_mapping = [] } in
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = [] } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
@@ -718,14 +718,14 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
         if Str.string_match quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools })
+          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
         else if Str.string_match single_quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools })
+          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
         else if Str.string_match simple_model_re rest 0 then
           let model = Str.matched_group 1 rest in
-          Ok (Llm { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools })
+          Ok (Llm { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
         else
           Error (Printf.sprintf "Invalid LLM format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
@@ -747,7 +747,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           Error (Printf.sprintf "Invalid Tool format: %s" content)
       else
         (* Default: treat as LLM with content as prompt, model = gemini *)
-        Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools })
+        Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
 
 (** Parse edge line: A --> B or A & B --> C *)
 let parse_edge_line (line : string) : mermaid_edge list =

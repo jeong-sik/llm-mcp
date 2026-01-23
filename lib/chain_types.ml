@@ -141,6 +141,8 @@ type node_type =
       prompt : string;    (** Prompt template with {{var}} placeholders *)
       timeout : int option;
       tools : Yojson.Safe.t option;  (** MCP tools for function calling (Ollama) *)
+      prompt_ref : string option;  (** Reference to prompt registry entry (id or id@version) *)
+      prompt_vars : (string * string) list;  (** Variable substitutions for prompt_ref *)
     }
   | Tool of {
       name : string;      (** MCP tool name *)
@@ -372,8 +374,8 @@ let node_type_name = function
   | FeedbackLoop _ -> "feedback_loop"
 
 (** Helper: Create a simple LLM node *)
-let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools () =
-  { id; node_type = Llm { model; system; prompt; timeout; tools }; input_mapping = [] }
+let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) () =
+  { id; node_type = Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars }; input_mapping = [] }
 
 (** Helper: Create an adapter node for inter-node data transformation *)
 let make_adapter ~id ~input_ref ~transform ?(on_error=`Fail) () =

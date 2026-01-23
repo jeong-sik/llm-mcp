@@ -26,6 +26,7 @@
    chain_mermaid_parser
    chain_compiler
    chain_registry
+   prompt_registry
    ; Chain Engine (Phase 5 - Category Theory)
    chain_category
    chain_stats
