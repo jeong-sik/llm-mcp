@@ -59,6 +59,8 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         collect_nested_dependencies simulation
     | Chain_types.StreamMerge { nodes; _ } ->
         List.concat_map collect_nested_dependencies nodes
+    | Chain_types.FeedbackLoop { generator; _ } ->
+        collect_nested_dependencies generator
     | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _
     | Chain_types.ChainExec _ | Chain_types.Adapter _ ->
         []
@@ -237,6 +239,9 @@ let rec calculate_depth (node : Chain_types.node) : int =
   | Chain_types.StreamMerge { nodes; _ } ->
       (* StreamMerge depth: 1 + max of inner nodes depth *)
       1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 nodes
+  | Chain_types.FeedbackLoop { generator; max_iterations; _ } ->
+      (* FeedbackLoop depth: 1 + generator depth * max_iterations (worst case) *)
+      1 + (calculate_depth generator) * max_iterations
 
 (** Main entry point: Compile chain to execution plan *)
 let compile (c : Chain_types.chain) : (Chain_types.execution_plan, string) result =

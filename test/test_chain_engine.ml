@@ -5,6 +5,7 @@
     - chain_parser: JSON to AST conversion
     - chain_compiler: DAG compilation and topological sort
     - chain_registry: Chain storage and lookup
+    - prompt_registry: Versioned prompt template management
 *)
 
 open Chain_types
@@ -12,6 +13,7 @@ open Chain_parser
 open Chain_compiler
 open Chain_registry
 open Chain_executor_eio
+open Prompt_registry
 
 (* ============================================================================
    Test Fixtures
@@ -416,7 +418,7 @@ let test_default_config () =
 
 let test_node_type_name () =
   Alcotest.(check string) "llm" "llm"
-    (node_type_name (Llm { model = "test"; system = None; prompt = "test"; timeout = None; tools = None }));
+    (node_type_name (Llm { model = "test"; system = None; prompt = "test"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }));
   Alcotest.(check string) "tool" "tool"
     (node_type_name (Tool { name = "test"; args = `Null }));
   Alcotest.(check string) "pipeline" "pipeline"
@@ -442,7 +444,7 @@ let test_make_llm_node () =
   let node = make_llm_node ~id:"test" ~model:"gemini" ~prompt:"hello" () in
   Alcotest.(check string) "id" "test" node.id;
   match node.node_type with
-  | Llm { model; system = _; prompt; timeout; tools } ->
+  | Llm { model; system = _; prompt; timeout; tools; _ } ->
       Alcotest.(check string) "model" "gemini" model;
       Alcotest.(check string) "prompt" "hello" prompt;
       Alcotest.(check (option int)) "timeout" None timeout;
@@ -1002,11 +1004,11 @@ let test_compile_pipeline_topological_order () =
   let chain = {
     id = "topo_test";
     nodes = [
-      { id = "c"; node_type = Llm { model = "gemini"; system = None; prompt = "c"; timeout = None; tools = None };
+      { id = "c"; node_type = Llm { model = "gemini"; system = None; prompt = "c"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
         input_mapping = [("input", "{{b.output}}")] };
-      { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "a"; timeout = None; tools = None };
+      { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "a"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
         input_mapping = [] };
-      { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "b"; timeout = None; tools = None };
+      { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "b"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
         input_mapping = [("input", "{{a.output}}")] };
     ];
     output = "c";
@@ -1046,67 +1048,67 @@ let test_compile_depth_calculation () =
    ============================================================================ *)
 
 let test_registry_register_lookup () =
-  clear ();  (* Start fresh *)
+  Chain_registry.clear ();  (* Start fresh *)
   let chain = {
     id = "test_reg_chain";
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
     output = "n1";
     config = default_config;
   } in
-  register chain;
-  match lookup "test_reg_chain" with
+  Chain_registry.register chain;
+  match Chain_registry.lookup "test_reg_chain" with
   | Some found ->
       Alcotest.(check string) "found id" chain.id found.id
   | None -> Alcotest.fail "Chain not found"
 
 let test_registry_exists () =
-  clear ();
+  Chain_registry.clear ();
   let chain = {
     id = "exists_test";
     nodes = [];
     output = "";
     config = default_config;
   } in
-  Alcotest.(check bool) "not exists before" false (exists "exists_test");
-  register chain;
-  Alcotest.(check bool) "exists after" true (exists "exists_test")
+  Alcotest.(check bool) "not exists before" false (Chain_registry.exists "exists_test");
+  Chain_registry.register chain;
+  Alcotest.(check bool) "exists after" true (Chain_registry.exists "exists_test")
 
 let test_registry_unregister () =
-  clear ();
+  Chain_registry.clear ();
   let chain = {
     id = "unreg_test";
     nodes = [];
     output = "";
     config = default_config;
   } in
-  register chain;
-  Alcotest.(check bool) "exists" true (exists "unreg_test");
-  let removed = unregister "unreg_test" in
+  Chain_registry.register chain;
+  Alcotest.(check bool) "exists" true (Chain_registry.exists "unreg_test");
+  let removed = Chain_registry.unregister "unreg_test" in
   Alcotest.(check bool) "removed" true removed;
-  Alcotest.(check bool) "not exists" false (exists "unreg_test")
+  Alcotest.(check bool) "not exists" false (Chain_registry.exists "unreg_test")
 
 let test_registry_list () =
-  clear ();
+  Chain_registry.clear ();
   let chain1 = { id = "list_1"; nodes = []; output = ""; config = default_config } in
   let chain2 = { id = "list_2"; nodes = []; output = ""; config = default_config } in
-  register chain1;
-  register chain2;
-  let ids = list_ids () in
+  Chain_registry.register chain1;
+  Chain_registry.register chain2;
+  let ids = Chain_registry.list_ids () in
   Alcotest.(check int) "count" 2 (List.length ids);
   Alcotest.(check bool) "has list_1" true (List.mem "list_1" ids);
   Alcotest.(check bool) "has list_2" true (List.mem "list_2" ids)
 
 let test_registry_version () =
-  clear ();
+  Chain_registry.clear ();
   let chain = { id = "version_test"; nodes = []; output = ""; config = default_config } in
-  register chain;
-  register chain;  (* Re-register same id *)
-  match lookup_entry "version_test" with
+  Chain_registry.register chain;
+  Chain_registry.register chain;  (* Re-register same id *)
+  match Chain_registry.lookup_entry "version_test" with
   | Some entry -> Alcotest.(check int) "version incremented" 2 entry.version
   | None -> Alcotest.fail "Entry not found"
 
 let test_registry_stats () =
-  clear ();
+  Chain_registry.clear ();
   let chain1 = {
     id = "stats_1";
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
@@ -1122,28 +1124,28 @@ let test_registry_stats () =
     output = "n2";
     config = default_config
   } in
-  register chain1;
-  register chain2;
-  let s = stats () in
+  Chain_registry.register chain1;
+  Chain_registry.register chain2;
+  let s = Chain_registry.stats () in
   Alcotest.(check int) "total_chains" 2 s.total_chains;
   Alcotest.(check int) "total_nodes" 3 s.total_nodes
 
 let test_registry_json_export_import () =
-  clear ();
+  Chain_registry.clear ();
   let chain = {
     id = "export_test";
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
     output = "n1";
     config = default_config
   } in
-  register ~description:"Test chain" chain;
-  let json = to_json () in
-  clear ();
-  Alcotest.(check int) "cleared" 0 (count ());
-  match of_json json with
+  Chain_registry.register ~description:"Test chain" chain;
+  let json = Chain_registry.to_json () in
+  Chain_registry.clear ();
+  Alcotest.(check int) "cleared" 0 (Chain_registry.count ());
+  match Chain_registry.of_json json with
   | Ok imported ->
       Alcotest.(check int) "imported" 1 imported;
-      Alcotest.(check bool) "exists after import" true (exists "export_test")
+      Alcotest.(check bool) "exists after import" true (Chain_registry.exists "export_test")
   | Error e -> Alcotest.fail e
 
 (* ============================================================================
@@ -1489,6 +1491,277 @@ let registry_tests = [
   "registry_version", `Quick, test_registry_version;
   "registry_stats", `Quick, test_registry_stats;
   "registry_json_export_import", `Quick, test_registry_json_export_import;
+]
+
+(* ============================================================================
+   Prompt Registry Tests
+   ============================================================================ *)
+
+(** Test extract_variables function *)
+let test_prompt_extract_variables () =
+  (* Single variable *)
+  let vars1 = Prompt_registry.extract_variables "Hello {{name}}" in
+  Alcotest.(check (list string)) "single var" ["name"] vars1;
+
+  (* Multiple variables *)
+  let vars2 = Prompt_registry.extract_variables "{{a}} and {{b}} and {{c}}" in
+  Alcotest.(check (list string)) "multiple vars" ["a"; "b"; "c"] vars2;
+
+  (* Duplicate variables (should dedupe) *)
+  let vars3 = Prompt_registry.extract_variables "{{x}} {{x}} {{y}}" in
+  Alcotest.(check (list string)) "deduped vars" ["x"; "y"] vars3;
+
+  (* No variables *)
+  let vars4 = Prompt_registry.extract_variables "No variables here" in
+  Alcotest.(check (list string)) "no vars" [] vars4;
+
+  (* Nested braces (not valid, should not match) *)
+  let vars5 = Prompt_registry.extract_variables "{{{nested}}}" in
+  Alcotest.(check int) "nested braces count" 1 (List.length vars5)
+
+(** Test prompt registration and lookup *)
+let test_prompt_register_lookup () =
+  Prompt_registry.clear ();
+  let entry : Prompt_registry.prompt_entry = {
+    id = "test-prompt";
+    template = "Hello {{name}}, welcome to {{place}}!";
+    version = "1.0";
+    variables = [];  (* Will be auto-extracted *)
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  Prompt_registry.register entry;
+  match Prompt_registry.get ~id:"test-prompt" () with
+  | Some found ->
+      Alcotest.(check string) "id" "test-prompt" found.id;
+      Alcotest.(check string) "version" "1.0" found.version;
+      (* Variables should be auto-extracted *)
+      Alcotest.(check int) "variables count" 2 (List.length found.variables);
+      Alcotest.(check bool) "has name var" true (List.mem "name" found.variables);
+      Alcotest.(check bool) "has place var" true (List.mem "place" found.variables)
+  | None -> Alcotest.fail "Prompt not found"
+
+(** Test version lookup *)
+let test_prompt_version_lookup () =
+  Prompt_registry.clear ();
+  let v1 : Prompt_registry.prompt_entry = {
+    id = "versioned";
+    template = "Version 1: {{input}}";
+    version = "1.0";
+    variables = ["input"];
+    metrics = None;
+    created_at = 1000.0;
+    deprecated = false;
+  } in
+  let v2 : Prompt_registry.prompt_entry = {
+    id = "versioned";
+    template = "Version 2: {{input}}";
+    version = "2.0";
+    variables = ["input"];
+    metrics = None;
+    created_at = 2000.0;
+    deprecated = false;
+  } in
+  Prompt_registry.register v1;
+  Prompt_registry.register v2;
+
+  (* Get specific version *)
+  (match Prompt_registry.get ~id:"versioned" ~version:"1.0" () with
+   | Some found -> Alcotest.(check string) "v1 template" "Version 1: {{input}}" found.template
+   | None -> Alcotest.fail "v1 not found");
+
+  (* Get latest version (should be 2.0) *)
+  (match Prompt_registry.get ~id:"versioned" () with
+   | Some found -> Alcotest.(check string) "latest version" "2.0" found.version
+   | None -> Alcotest.fail "latest not found");
+
+  (* Get all versions *)
+  let versions = Prompt_registry.get_versions ~id:"versioned" () in
+  Alcotest.(check int) "versions count" 2 (List.length versions)
+
+(** Test template rendering *)
+let test_prompt_render_template () =
+  let template = "Hello {{name}}, your score is {{score}}!" in
+  let vars = [("name", "Alice"); ("score", "95")] in
+  match Prompt_registry.render_template ~template ~vars () with
+  | Ok rendered ->
+      Alcotest.(check string) "rendered" "Hello Alice, your score is 95!" rendered
+  | Error e -> Alcotest.fail e
+
+(** Test render with missing variables *)
+let test_prompt_render_missing_vars () =
+  let template = "Hello {{name}}, your {{missing}} is here" in
+  let vars = [("name", "Bob")] in
+  match Prompt_registry.render_template ~template ~vars () with
+  | Ok _ -> Alcotest.fail "Should have failed with missing variable"
+  | Error _ -> ()  (* Expected error *)
+
+(** Test metrics update *)
+let test_prompt_metrics_update () =
+  Prompt_registry.clear ();
+  let entry : Prompt_registry.prompt_entry = {
+    id = "metrics-test";
+    template = "Test prompt";
+    version = "1.0";
+    variables = [];
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  Prompt_registry.register entry;
+
+  (* Update metrics multiple times *)
+  Prompt_registry.update_metrics ~id:"metrics-test" ~version:"1.0" ~score:0.8 ();
+  Prompt_registry.update_metrics ~id:"metrics-test" ~version:"1.0" ~score:0.6 ();
+  Prompt_registry.update_metrics ~id:"metrics-test" ~version:"1.0" ~score:1.0 ();
+
+  match Prompt_registry.get ~id:"metrics-test" () with
+  | Some found ->
+      (match found.metrics with
+       | Some m ->
+           Alcotest.(check int) "usage_count" 3 m.usage_count;
+           (* avg = (0.8 + 0.6 + 1.0) / 3 = 0.8 *)
+           Alcotest.(check (float 0.01)) "avg_score" 0.8 m.avg_score
+       | None -> Alcotest.fail "metrics should exist")
+  | None -> Alcotest.fail "prompt not found"
+
+(** Test deprecation *)
+let test_prompt_deprecation () =
+  Prompt_registry.clear ();
+  let entry : Prompt_registry.prompt_entry = {
+    id = "deprecate-test";
+    template = "Old prompt";
+    version = "1.0";
+    variables = [];
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  Prompt_registry.register entry;
+
+  (* Deprecate the prompt *)
+  let deprecated = Prompt_registry.deprecate ~id:"deprecate-test" ~version:"1.0" () in
+  Alcotest.(check bool) "deprecate success" true deprecated;
+
+  (* Register a new version *)
+  let entry_v2 : Prompt_registry.prompt_entry = {
+    entry with version = "2.0"; template = "New prompt"
+  } in
+  Prompt_registry.register entry_v2;
+
+  (* Get without version should return non-deprecated 2.0 *)
+  match Prompt_registry.get ~id:"deprecate-test" () with
+  | Some found -> Alcotest.(check string) "non-deprecated version" "2.0" found.version
+  | None -> Alcotest.fail "Should find non-deprecated version"
+
+(** Test registry stats *)
+let test_prompt_registry_stats () =
+  Prompt_registry.clear ();
+  let create_entry id =
+    let entry : Prompt_registry.prompt_entry = {
+      id; template = "Test"; version = "1.0"; variables = [];
+      metrics = None; created_at = Unix.gettimeofday (); deprecated = false;
+    } in
+    Prompt_registry.register entry
+  in
+  create_entry "stat1";
+  create_entry "stat2";
+  create_entry "stat3";
+
+  let stats = Prompt_registry.stats () in
+  Alcotest.(check int) "total_prompts" 3 stats.total_prompts;
+  Alcotest.(check int) "active_prompts" 3 stats.active_prompts;
+  Alcotest.(check int) "deprecated_prompts" 0 stats.deprecated_prompts
+
+(** Test JSON export/import *)
+let test_prompt_json_roundtrip () =
+  Prompt_registry.clear ();
+  let entry : Prompt_registry.prompt_entry = {
+    id = "json-test";
+    template = "Test {{var}}";
+    version = "1.0";
+    variables = ["var"];
+    metrics = Some { usage_count = 5; avg_score = 0.9; last_used = 1000.0 };
+    created_at = 500.0;
+    deprecated = false;
+  } in
+  Prompt_registry.register entry;
+
+  let json = Prompt_registry.to_json () in
+  Prompt_registry.clear ();
+  Alcotest.(check int) "cleared" 0 (Prompt_registry.count ());
+
+  match Prompt_registry.of_json json with
+  | Ok imported ->
+      Alcotest.(check int) "imported" 1 imported;
+      (match Prompt_registry.get ~id:"json-test" () with
+       | Some found ->
+           Alcotest.(check string) "template" "Test {{var}}" found.template;
+           (match found.metrics with
+            | Some m -> Alcotest.(check int) "usage_count" 5 m.usage_count
+            | None -> Alcotest.fail "metrics should exist")
+       | None -> Alcotest.fail "prompt not found after import")
+  | Error e -> Alcotest.fail e
+
+(** Test chain parsing with prompt_ref *)
+let test_parse_llm_with_prompt_ref () =
+  (* First register a prompt *)
+  Prompt_registry.clear ();
+  let entry : Prompt_registry.prompt_entry = {
+    id = "analyze-code";
+    template = "Analyze this {{language}} code: {{code}}";
+    version = "1.0";
+    variables = ["language"; "code"];
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  Prompt_registry.register entry;
+
+  (* Parse a chain that uses prompt_ref *)
+  let json_str = {|
+{
+  "id": "prompt_ref_test",
+  "nodes": [
+    {
+      "id": "analyzer",
+      "type": "llm",
+      "model": "gemini",
+      "prompt_ref": "analyze-code",
+      "prompt_vars": {
+        "language": "OCaml",
+        "code": "let x = 1"
+      }
+    }
+  ],
+  "output": "analyzer"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      Alcotest.(check string) "chain id" "prompt_ref_test" chain.id;
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Llm { prompt; prompt_ref; _ } ->
+           (* prompt should be rendered from template *)
+           Alcotest.(check string) "prompt" "Analyze this OCaml code: let x = 1" prompt;
+           Alcotest.(check (option string)) "prompt_ref" (Some "analyze-code") prompt_ref
+       | _ -> Alcotest.fail "Expected LLM node")
+  | Error e -> Alcotest.fail e
+
+let prompt_registry_tests = [
+  "extract_variables", `Quick, test_prompt_extract_variables;
+  "register_lookup", `Quick, test_prompt_register_lookup;
+  "version_lookup", `Quick, test_prompt_version_lookup;
+  "render_template", `Quick, test_prompt_render_template;
+  "render_missing_vars", `Quick, test_prompt_render_missing_vars;
+  "metrics_update", `Quick, test_prompt_metrics_update;
+  "deprecation", `Quick, test_prompt_deprecation;
+  "registry_stats", `Quick, test_prompt_registry_stats;
+  "json_roundtrip", `Quick, test_prompt_json_roundtrip;
+  "parse_llm_with_prompt_ref", `Quick, test_parse_llm_with_prompt_ref;
 ]
 
 let conversation_tests = [
@@ -2046,6 +2319,7 @@ let test_stream_merge_mermaid_parse () =
         | Mcts _ -> "Mcts"
         | StreamMerge _ -> "StreamMerge"
         | Subgraph _ -> "Subgraph"
+        | FeedbackLoop _ -> "FeedbackLoop"
       in
       (match merge_node.node_type with
        | StreamMerge { reducer; min_results; timeout; _ } ->
@@ -2263,12 +2537,360 @@ let stream_merge_tests = [
   "stream_merge_nested_depth", `Quick, test_stream_merge_nested_depth;
 ]
 
+(* ═══════════════════════════════════════════════════════════════════════════
+   FEEDBACKLOOP NODE TESTS
+   ═══════════════════════════════════════════════════════════════════════════ *)
+
+(** Test basic FeedbackLoop type construction *)
+let test_feedback_loop_basic () =
+  let generator = Chain_types.make_llm_node
+    ~id:"gen"
+    ~model:"gemini"
+    ~prompt:"Generate a high-quality response"
+    () in
+  let eval_config : Chain_types.evaluator_config = {
+    scoring_func = "llm_judge";
+    scoring_prompt = Some "Score quality 0.0-1.0";
+    select_strategy = Chain_types.Best;
+  } in
+  let node = Chain_types.make_feedback_loop
+    ~id:"feedback"
+    ~generator
+    ~evaluator_config:eval_config
+    ~improver_prompt:"Improve based on: {{feedback}}"
+    ~max_iterations:3
+    ~min_score:0.8 in
+  match node.node_type with
+  | Chain_types.FeedbackLoop { generator = gen; evaluator_config; max_iterations; min_score; _ } ->
+      Alcotest.(check string) "generator id" "gen" gen.id;
+      Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func;
+      Alcotest.(check int) "max_iterations" 3 max_iterations;
+      Alcotest.(check (float 0.01)) "min_score" 0.8 min_score
+  | _ -> Alcotest.fail "Expected FeedbackLoop node"
+
+(** Test FeedbackLoop JSON parsing *)
+let test_feedback_loop_json_parse () =
+  let json = {|{
+    "id": "feedback_test",
+    "nodes": [
+      {
+        "id": "fb",
+        "type": "feedback_loop",
+        "generator": {
+          "id": "gen",
+          "type": "llm",
+          "model": "claude",
+          "prompt": "Generate output"
+        },
+        "evaluator_config": {
+          "scoring_func": "llm_judge",
+          "scoring_prompt": "Rate quality",
+          "select_strategy": "best"
+        },
+        "improver_prompt": "Fix: {{feedback}}",
+        "max_iterations": 5,
+        "min_score": 0.75
+      }
+    ],
+    "output": "fb"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      Alcotest.(check int) "node count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Chain_types.FeedbackLoop { generator; max_iterations; min_score; evaluator_config; _ } ->
+           Alcotest.(check string) "generator id" "gen" generator.id;
+           Alcotest.(check int) "max_iterations" 5 max_iterations;
+           Alcotest.(check (float 0.01)) "min_score" 0.75 min_score;
+           Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func
+       | _ -> Alcotest.fail "Expected FeedbackLoop node")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test FeedbackLoop Mermaid parsing *)
+let test_feedback_loop_mermaid_parse () =
+  let mermaid = {|graph LR
+    fb[["FeedbackLoop:llm_judge,3,0.7"]]
+  |} in
+  match Chain_mermaid_parser.parse_chain mermaid with
+  | Ok chain ->
+      (* Check that we have at least one node *)
+      Alcotest.(check bool) "has nodes" true (List.length chain.nodes > 0);
+      (* Find the FeedbackLoop node - it might have a different ID after parsing *)
+      let fb_node = List.find_opt (fun (n : Chain_types.node) ->
+        match n.node_type with Chain_types.FeedbackLoop _ -> true | _ -> false
+      ) chain.nodes in
+      (match fb_node with
+       | Some node ->
+           (match node.node_type with
+            | Chain_types.FeedbackLoop { max_iterations; min_score; evaluator_config; _ } ->
+                Alcotest.(check int) "max_iterations" 3 max_iterations;
+                Alcotest.(check (float 0.01)) "min_score" 0.7 min_score;
+                Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func
+            | _ -> Alcotest.fail "Not a FeedbackLoop")
+       | None ->
+           (* Debug: print node types found *)
+           let node_types = List.map (fun n -> Chain_types.node_type_name n.Chain_types.node_type) chain.nodes in
+           Alcotest.fail (Printf.sprintf "FeedbackLoop not found. Nodes: %s" (String.concat ", " node_types)))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** Test FeedbackLoop JSON serialization roundtrip *)
+let test_feedback_loop_json_roundtrip () =
+  let generator = Chain_types.make_llm_node
+    ~id:"gen"
+    ~model:"gemini"
+    ~prompt:"Generate"
+    () in
+  let eval_config : Chain_types.evaluator_config = {
+    scoring_func = "anti_fake";
+    scoring_prompt = None;
+    select_strategy = Chain_types.AboveThreshold 0.6;
+  } in
+  let node = Chain_types.make_feedback_loop
+    ~id:"fb"
+    ~generator
+    ~evaluator_config:eval_config
+    ~improver_prompt:"{{feedback}} -> {{previous_output}}"
+    ~max_iterations:2
+    ~min_score:0.9 in
+  let chain : Chain_types.chain = {
+    id = "roundtrip_test";
+    nodes = [node];
+    output = "fb";
+    config = Chain_types.default_config;
+  } in
+  let json_str = Chain_parser.chain_to_json_string chain in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json_str) with
+  | Ok parsed ->
+      let parsed_node = List.hd parsed.nodes in
+      (match parsed_node.node_type with
+       | Chain_types.FeedbackLoop { max_iterations; min_score; evaluator_config; _ } ->
+           Alcotest.(check int) "max_iterations" 2 max_iterations;
+           Alcotest.(check (float 0.01)) "min_score" 0.9 min_score;
+           Alcotest.(check string) "scoring_func" "anti_fake" evaluator_config.scoring_func
+       | _ -> Alcotest.fail "Expected FeedbackLoop after roundtrip")
+  | Error e -> Alcotest.fail (Printf.sprintf "Roundtrip error: %s" e)
+
+(** Test FeedbackLoop compile depth calculation *)
+let test_feedback_loop_compile_depth () =
+  let generator = Chain_types.make_llm_node
+    ~id:"gen"
+    ~model:"gemini"
+    ~prompt:"Generate"
+    () in
+  let eval_config : Chain_types.evaluator_config = {
+    scoring_func = "llm_judge";
+    scoring_prompt = None;
+    select_strategy = Chain_types.Best;
+  } in
+  let node = Chain_types.make_feedback_loop
+    ~id:"fb"
+    ~generator
+    ~evaluator_config:eval_config
+    ~improver_prompt:"Improve"
+    ~max_iterations:4
+    ~min_score:0.8 in
+  let chain : Chain_types.chain = {
+    id = "depth_test";
+    nodes = [node];
+    output = "fb";
+    config = Chain_types.default_config;
+  } in
+  match Chain_compiler.compile chain with
+  | Ok plan ->
+      (* FeedbackLoop depth = 1 + generator_depth * max_iterations = 1 + 1 * 4 = 5 *)
+      Alcotest.(check int) "depth" 5 plan.depth
+  | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e)
+
+let feedback_loop_tests = [
+  "feedback_loop_basic", `Quick, test_feedback_loop_basic;
+  "feedback_loop_json_parse", `Quick, test_feedback_loop_json_parse;
+  "feedback_loop_mermaid_parse", `Quick, test_feedback_loop_mermaid_parse;
+  "feedback_loop_json_roundtrip", `Quick, test_feedback_loop_json_roundtrip;
+  "feedback_loop_compile_depth", `Quick, test_feedback_loop_compile_depth;
+]
+
+(* ============================================================================
+   Checkpoint Store Tests
+   ============================================================================ *)
+
+(** Test checkpoint save and load roundtrip *)
+let test_checkpoint_save_load () =
+  let test_dir = Filename.concat (Sys.getcwd ()) "_test_checkpoints" in
+  (* Clean up any previous test directory *)
+  (try
+    Array.iter (fun f -> Sys.remove (Filename.concat test_dir f))
+      (Sys.readdir test_dir);
+    Unix.rmdir test_dir
+  with Sys_error _ -> ());
+
+  let store = Checkpoint_store.create ~base_dir:test_dir () in
+  let run_id = Checkpoint_store.generate_run_id () in
+  let outputs = [("node1", "output1"); ("node2", "output2")] in
+  let traces = [] in
+
+  let cp = Checkpoint_store.make_checkpoint
+    ~run_id
+    ~chain_id:"test-chain"
+    ~node_id:"node2"
+    ~outputs
+    ~traces
+    ()
+  in
+
+  (* Save checkpoint *)
+  (match Checkpoint_store.save store cp with
+   | Ok () -> ()
+   | Error msg -> Alcotest.fail (Printf.sprintf "Save failed: %s" msg));
+
+  (* Load checkpoint *)
+  (match Checkpoint_store.load store ~run_id with
+   | Ok loaded ->
+       Alcotest.(check string) "run_id matches" run_id loaded.Checkpoint_store.run_id;
+       Alcotest.(check string) "chain_id matches" "test-chain" loaded.Checkpoint_store.chain_id;
+       Alcotest.(check string) "node_id matches" "node2" loaded.Checkpoint_store.node_id;
+       Alcotest.(check int) "outputs count" 2 (List.length loaded.Checkpoint_store.outputs)
+   | Error msg -> Alcotest.fail (Printf.sprintf "Load failed: %s" msg));
+
+  (* Cleanup *)
+  Checkpoint_store.delete store ~run_id;
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
+
+(** Test listing checkpoints by chain_id *)
+let test_checkpoint_list_by_chain () =
+  let test_dir = Filename.concat (Sys.getcwd ()) "_test_checkpoints_list" in
+  (try
+    Array.iter (fun f -> Sys.remove (Filename.concat test_dir f))
+      (Sys.readdir test_dir);
+    Unix.rmdir test_dir
+  with Sys_error _ -> ());
+
+  let store = Checkpoint_store.create ~base_dir:test_dir () in
+
+  (* Create checkpoints for different chains *)
+  let cp1 = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"chain-a"
+    ~node_id:"n1"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+  let cp2 = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"chain-a"
+    ~node_id:"n2"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+  let cp3 = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"chain-b"
+    ~node_id:"n1"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+
+  ignore (Checkpoint_store.save store cp1);
+  Unix.sleepf 0.01;  (* Small delay to ensure different timestamps *)
+  ignore (Checkpoint_store.save store cp2);
+  Unix.sleepf 0.01;
+  ignore (Checkpoint_store.save store cp3);
+
+  (* List only chain-a checkpoints *)
+  let chain_a_cps = Checkpoint_store.list_checkpoints store ~chain_id:"chain-a" in
+  Alcotest.(check int) "chain-a count" 2 (List.length chain_a_cps);
+
+  (* List all checkpoints *)
+  let all_cps = Checkpoint_store.list_all store in
+  Alcotest.(check int) "all count" 3 (List.length all_cps);
+
+  (* Cleanup *)
+  Checkpoint_store.delete store ~run_id:cp1.Checkpoint_store.run_id;
+  Checkpoint_store.delete store ~run_id:cp2.Checkpoint_store.run_id;
+  Checkpoint_store.delete store ~run_id:cp3.Checkpoint_store.run_id;
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
+
+(** Test checkpoint cleanup by age *)
+let test_checkpoint_cleanup_old () =
+  let test_dir = Filename.concat (Sys.getcwd ()) "_test_checkpoints_cleanup" in
+  (try
+    Array.iter (fun f -> Sys.remove (Filename.concat test_dir f))
+      (Sys.readdir test_dir);
+    Unix.rmdir test_dir
+  with Sys_error _ -> ());
+
+  let store = Checkpoint_store.create ~base_dir:test_dir () in
+
+  (* Create a checkpoint *)
+  let cp = Checkpoint_store.make_checkpoint
+    ~run_id:(Checkpoint_store.generate_run_id ())
+    ~chain_id:"cleanup-test"
+    ~node_id:"n1"
+    ~outputs:[]
+    ~traces:[]
+    ()
+  in
+  ignore (Checkpoint_store.save store cp);
+
+  (* Cleanup with max_age=1000 hours (should not delete anything) *)
+  let deleted = Checkpoint_store.cleanup_old store ~max_age_hours:1000 in
+  Alcotest.(check int) "no deletions expected" 0 deleted;
+
+  (* Verify checkpoint still exists *)
+  let all_cps = Checkpoint_store.list_all store in
+  Alcotest.(check int) "checkpoint still exists" 1 (List.length all_cps);
+
+  (* Cleanup *)
+  Checkpoint_store.delete store ~run_id:cp.Checkpoint_store.run_id;
+  (try Unix.rmdir test_dir with Unix.Unix_error _ -> ())
+
+(** Test JSON roundtrip for checkpoint *)
+let test_checkpoint_json_roundtrip () =
+  let outputs = [("a", "result_a"); ("b", "result_b")] in
+  let cp = Checkpoint_store.make_checkpoint
+    ~run_id:"test_run_123"
+    ~chain_id:"test-chain"
+    ~node_id:"final"
+    ~outputs
+    ~traces:[]
+    ~total_tokens:{
+      Chain_category.prompt_tokens = 100;
+      completion_tokens = 50;
+      total_tokens = 150;
+      estimated_cost_usd = 0.001;
+    }
+    ()
+  in
+
+  let json = Checkpoint_store.checkpoint_to_json cp in
+  match Checkpoint_store.checkpoint_of_json json with
+  | Ok loaded ->
+      Alcotest.(check string) "run_id" "test_run_123" loaded.Checkpoint_store.run_id;
+      Alcotest.(check string) "chain_id" "test-chain" loaded.Checkpoint_store.chain_id;
+      Alcotest.(check int) "outputs" 2 (List.length loaded.Checkpoint_store.outputs);
+      (match loaded.Checkpoint_store.total_tokens with
+       | Some t ->
+           Alcotest.(check int) "total_tokens" 150 t.Chain_category.total_tokens
+       | None -> Alcotest.fail "Expected total_tokens")
+  | Error msg -> Alcotest.fail (Printf.sprintf "JSON roundtrip failed: %s" msg)
+
+let checkpoint_tests = [
+  "checkpoint_save_load", `Quick, test_checkpoint_save_load;
+  "checkpoint_list_by_chain", `Quick, test_checkpoint_list_by_chain;
+  "checkpoint_cleanup_old", `Quick, test_checkpoint_cleanup_old;
+  "checkpoint_json_roundtrip", `Quick, test_checkpoint_json_roundtrip;
+]
+
 let () =
   Alcotest.run "Chain Engine" [
     "Chain Types", types_tests;
     "Chain Parser", parser_tests;
     "Chain Compiler", compiler_tests;
     "Chain Registry", registry_tests;
+    "Prompt Registry", prompt_registry_tests;
     "Conversation Context", conversation_tests;
     "Self-Recursion", recursion_tests;
     "JSON-Mermaid Roundtrip", roundtrip_tests;
@@ -2276,4 +2898,6 @@ let () =
     "Cache Node", cache_tests;
     "Batch Node", batch_tests;
     "StreamMerge Node", stream_merge_tests;
+    "FeedbackLoop Node", feedback_loop_tests;
+    "Checkpoint Store", checkpoint_tests;
   ]

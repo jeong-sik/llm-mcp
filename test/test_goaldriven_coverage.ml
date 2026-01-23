@@ -60,7 +60,7 @@ let test_operator_gt () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -104,7 +104,7 @@ let test_operator_lt () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -148,7 +148,7 @@ let test_operator_eq () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -192,7 +192,7 @@ let test_operator_neq () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -236,7 +236,7 @@ let test_operator_lte () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -284,7 +284,7 @@ let test_max_iterations_reached () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -329,7 +329,7 @@ let test_single_iteration () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -376,7 +376,7 @@ let test_relay_models_rotation () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "ollama:model_a"; system = None; prompt = "Return value"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "ollama:model_a"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -431,7 +431,7 @@ let test_conversational_mode () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Improve: {{input}}"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Improve: {{input}}"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -482,7 +482,7 @@ let test_measure_func_parse_json () =
 
   let action = {
     id = "action";
-    node_type = Llm { model = "mock"; system = None; prompt = "Return JSON"; timeout = Some 10; tools = None };
+    node_type = Llm { model = "mock"; system = None; prompt = "Return JSON"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping = []
   } in
 
@@ -544,7 +544,7 @@ let test_mermaid_operators_roundtrip () =
   List.iter (fun (op, op_str) ->
     let action = {
       id = "action";
-      node_type = Llm { model = "test"; system = None; prompt = "Test"; timeout = Some 10; tools = None };
+      node_type = Llm { model = "test"; system = None; prompt = "Test"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
       input_mapping = []
     } in
 

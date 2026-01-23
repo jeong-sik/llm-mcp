@@ -364,7 +364,6 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
   match type_str with
   | "llm" ->
       let* model = require_string json "model" in
-      let* prompt = require_string json "prompt" in
       let system = parse_string_opt json "system" in
       let timeout = parse_int_opt json "timeout" in
       let tools =
@@ -372,7 +371,40 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | `Null -> None
         | v -> Some v
       in
-      Ok (Llm { model; system; prompt; timeout; tools })
+      (* Prompt Registry support: prompt_ref takes precedence *)
+      let prompt_ref = parse_string_opt json "prompt_ref" in
+      let prompt_vars =
+        match json |> member "prompt_vars" with
+        | `Assoc pairs ->
+            List.filter_map (fun (k, v) ->
+              match v with `String s -> Some (k, s) | _ -> None) pairs
+        | _ -> []
+      in
+      (* If prompt_ref is set, load from registry; otherwise require prompt field *)
+      let* prompt =
+        match prompt_ref with
+        | Some ref ->
+            (* Parse ref format: "id" or "id@version" *)
+            let (id, version) = match String.split_on_char '@' ref with
+              | [id; ver] -> (id, Some ver)
+              | [id] -> (id, None)
+              | _ -> (ref, None)
+            in
+            (match Prompt_registry.get ~id ?version () with
+             | Some entry ->
+                 (* Apply prompt_vars to the template *)
+                 (match Prompt_registry.render_template ~template:entry.template ~vars:prompt_vars () with
+                  | Ok rendered -> Ok rendered
+                  | Error e -> Error (Printf.sprintf "Failed to render prompt_ref '%s': %s" ref e))
+             | None ->
+                 (* If prompt_ref not found, fall back to prompt field if present *)
+                 match parse_string_opt json "prompt" with
+                 | Some p -> Ok p
+                 | None -> Error (Printf.sprintf "Prompt '%s' not found in registry and no fallback prompt" ref))
+        | None ->
+            require_string json "prompt"
+      in
+      Ok (Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars })
 
   | "tool" ->
       let* name = require_string json "name" in
@@ -639,6 +671,29 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let timeout = parse_float_opt json "timeout" in
       Ok (StreamMerge { nodes; reducer; initial; min_results; timeout })
 
+  | "feedback_loop" ->
+      (* FeedbackLoop - iterative quality improvement with evaluator feedback *)
+      let generator_json = json |> member "generator" in
+      let* generator = parse_node generator_json in
+      (* Parse evaluator_config *)
+      let evaluator_config_json = json |> member "evaluator_config" in
+      let scoring_func = parse_string_with_default evaluator_config_json "scoring_func" "llm_judge" in
+      let scoring_prompt = parse_string_opt evaluator_config_json "scoring_prompt" in
+      let select_strategy = match evaluator_config_json |> member "select_strategy" with
+        | `String "best" -> Best
+        | `String "worst" -> Worst
+        | `String "weighted_random" -> WeightedRandom
+        | `List [`String "above_threshold"; `Float t] -> AboveThreshold t
+        | `List [`String "above_threshold"; `Int t] -> AboveThreshold (float_of_int t)
+        | _ -> Best  (* default *)
+      in
+      let evaluator_config = { scoring_func; scoring_prompt; select_strategy } in
+      let improver_prompt = parse_string_with_default json "improver_prompt"
+        "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}" in
+      let max_iterations = parse_int_with_default json "max_iterations" 3 in
+      let min_score = Option.value (parse_float_opt json "min_score") ~default:0.7 in
+      Ok (FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -847,7 +902,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
     else [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
   in
   let type_fields = match n.node_type with
-    | Llm { model; system; prompt; timeout; tools } ->
+    | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars } ->
         let fields = [
           ("type", `String "llm");
           ("model", `String model);
@@ -864,6 +919,14 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         let fields = match tools with
           | Some t -> fields @ [("tools", t)]
           | None -> fields
+        in
+        let fields = match prompt_ref with
+          | Some r -> fields @ [("prompt_ref", `String r)]
+          | None -> fields
+        in
+        let fields = if prompt_vars <> [] then
+          fields @ [("prompt_vars", `Assoc (List.map (fun (k, v) -> (k, `String v)) prompt_vars))]
+        else fields
         in
         fields
 
@@ -1072,6 +1135,26 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("initial", `String initial);
           ("min_results", match min_results with Some n -> `Int n | None -> `Null);
           ("timeout", match timeout with Some t -> `Float t | None -> `Null);
+        ]
+    | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score } ->
+        let select_strategy_json = match evaluator_config.select_strategy with
+          | Best -> `String "best"
+          | Worst -> `String "worst"
+          | WeightedRandom -> `String "weighted_random"
+          | AboveThreshold t -> `List [`String "above_threshold"; `Float t]
+        in
+        let evaluator_config_json = `Assoc [
+          ("scoring_func", `String evaluator_config.scoring_func);
+          ("scoring_prompt", match evaluator_config.scoring_prompt with Some p -> `String p | None -> `Null);
+          ("select_strategy", select_strategy_json);
+        ] in
+        [
+          ("type", `String "feedback_loop");
+          ("generator", node_to_json generator);
+          ("evaluator_config", evaluator_config_json);
+          ("improver_prompt", `String improver_prompt);
+          ("max_iterations", `Int max_iterations);
+          ("min_score", `Float min_score);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)

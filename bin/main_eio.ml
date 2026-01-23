@@ -756,6 +756,21 @@ let starts_with ~prefix s =
   let plen = String.length prefix in
   String.length s >= plen && String.sub s 0 plen = prefix
 
+let contains_substring ~sub s =
+  let len_s = String.length s in
+  let len_sub = String.length sub in
+  let rec loop i =
+    if i + len_sub > len_s then false
+    else if String.sub s i len_sub = sub then true
+    else loop (i + 1)
+  in
+  loop 0
+
+let truncate_for_log s =
+  let max_len = 200 in
+  if String.length s <= max_len then s
+  else (String.sub s 0 max_len) ^ "..."
+
 let allowed_origins = [
   "http://localhost"; "https://localhost";
   "http://127.0.0.1"; "https://127.0.0.1";
@@ -779,7 +794,9 @@ let is_valid_protocol_version version =
 
 let wants_sse headers =
   match get_header headers "accept" with
-  | Some accept -> Mcp_protocol.Http_negotiation.accepts_sse_header accept
+  | Some accept ->
+      let accept_l = String.lowercase_ascii accept in
+      contains_substring ~sub:"text/event-stream" accept_l
   | None -> false
 
 let accepts_streamable_mcp headers =
@@ -819,7 +836,7 @@ module Response = struct
 
   let json_with_session ?(status = `OK) ~session_id ~protocol_version body reqd =
     let headers = Httpun.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
+      ("content-type", "application/json");
       ("content-length", string_of_int (String.length body));
     ] @ mcp_headers session_id protocol_version @ cors_headers) in
     let response = Httpun.Response.create ~headers status in
@@ -827,7 +844,7 @@ module Response = struct
 
   let json ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([
-      ("content-type", "application/json; charset=utf-8");
+      ("content-type", "application/json");
       ("content-length", string_of_int (String.length body));
     ] @ cors_headers) in
     let response = Httpun.Response.create ~headers status in
@@ -1100,22 +1117,39 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
   end else begin
     let wants_stream_headers = wants_sse headers in
     let session_id_from_header = get_session_id_header headers in
+    let accept_dbg =
+      match get_header headers "accept" with
+      | Some v -> truncate_for_log v
+      | None -> "<none>"
+    in
 
     log_debug "LLM_MCP_DEBUG: POST /mcp (Eio) protocol=%s stream=%b session_header=%s\n%!"
       protocol_version wants_stream_headers
       (Option.value session_id_from_header ~default:"<none>");
+    log_debug "LLM_MCP_DEBUG: POST /mcp Accept=%s\n%!" accept_dbg;
 
     Request.read_body_async reqd (fun body_str ->
-      let method_name =
+      let has_method name json =
+        let rec has_method_inner value =
+          match value with
+          | `Assoc fields -> (
+              match List.assoc_opt "method" fields with
+              | Some (`String m) -> String.equal m name
+              | _ -> false)
+          | `List items -> List.exists has_method_inner items
+          | _ -> false
+        in
+        has_method_inner json
+      in
+      let (has_tools_call, has_tools_list) =
         try
           let json = Yojson.Safe.from_string body_str in
-          match Yojson.Safe.Util.(json |> member "method") with
-          | `String m -> Some m
-          | _ -> None
-        with _ -> None
+          (has_method "tools/call" json, has_method "tools/list" json)
+        with _ -> (false, false)
       in
+      (* tools/list must return JSON (non-SSE) *)
       let wants_stream =
-        wants_stream_headers && (method_name = Some "tools/call")
+        wants_stream_headers && has_tools_call && (not has_tools_list)
       in
       (* Convert Httpun.Headers to (string * string) list for Mcp_server_eio *)
       let headers_list = Httpun.Headers.to_list headers in

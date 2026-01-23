@@ -75,6 +75,15 @@ type conversation_ctx = {
   mutable summaries: string list;       (** Previous conversation summaries *)
 }
 
+(** Checkpoint configuration for resume support *)
+type checkpoint_config = {
+  checkpoint_store: Checkpoint_store.checkpoint_store option;  (** Store for saving/loading checkpoints *)
+  checkpoint_enabled: bool;                                     (** Whether to save checkpoints after each node *)
+  resume_from: string option;                                   (** run_id to resume from, or None for fresh start *)
+  run_id: string;                                               (** Current run's unique identifier *)
+  fs: Eio.Fs.dir_ty Eio.Path.t option;                         (** Eio filesystem for checkpoint I/O *)
+}
+
 (** Context passed through execution *)
 type exec_context = {
   outputs: (string, string) Hashtbl.t;      (** Node outputs by ID *)
@@ -87,10 +96,20 @@ type exec_context = {
   cache: (string, string * float) Hashtbl.t;  (** Node cache: key -> (result, timestamp) *)
   mutable total_tokens: Chain_category.token_usage; (** Accumulated token usage *)
   langfuse_trace: Langfuse.trace option;     (** Langfuse trace for observability *)
+  checkpoint: checkpoint_config;             (** Checkpoint/resume configuration *)
+}
+
+(** Default checkpoint configuration - no checkpointing *)
+let default_checkpoint_config = {
+  checkpoint_store = None;
+  checkpoint_enabled = false;
+  resume_from = None;
+  run_id = Checkpoint_store.generate_run_id ();
+  fs = None;
 }
 
 (** Create a new execution context *)
-let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace () = {
+let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace ?checkpoint () = {
   outputs = Hashtbl.create 16;
   traces = ref [];
   start_time;
@@ -101,7 +120,79 @@ let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace () = {
   cache = Hashtbl.create 32;
   total_tokens = Chain_category.Token_monoid.empty;
   langfuse_trace;
+  checkpoint = Option.value checkpoint ~default:default_checkpoint_config;
 }
+
+(** Create checkpoint configuration for execution *)
+let make_checkpoint_config ?fs ?store ?(enabled = false) ?resume_from () =
+  let store = match store with
+    | Some s -> Some s
+    | None when enabled -> Some (Checkpoint_store.create ())
+    | None -> None
+  in
+  {
+    checkpoint_store = store;
+    checkpoint_enabled = enabled;
+    resume_from;
+    run_id = Checkpoint_store.generate_run_id ();
+    fs;
+  }
+
+(** Save checkpoint for current execution state *)
+let save_checkpoint ctx ~chain_id ~node_id =
+  match ctx.checkpoint.checkpoint_store, ctx.checkpoint.fs with
+  | Some store, Some fs when ctx.checkpoint.checkpoint_enabled ->
+      let outputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
+      let traces = [] in  (* Don't include internal traces in checkpoint *)
+      let cp = Checkpoint_store.make_checkpoint
+        ~run_id:ctx.checkpoint.run_id
+        ~chain_id
+        ~node_id
+        ~outputs
+        ~traces
+        ~total_tokens:ctx.total_tokens
+        ()
+      in
+      (match Checkpoint_store.save_eio ~fs store cp with
+       | Ok () -> ()
+       | Error msg -> Printf.eprintf "[checkpoint] Save failed: %s\n%!" msg)
+  | Some store, None when ctx.checkpoint.checkpoint_enabled ->
+      (* Fallback to non-Eio save *)
+      let outputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
+      let traces = [] in
+      let cp = Checkpoint_store.make_checkpoint
+        ~run_id:ctx.checkpoint.run_id
+        ~chain_id
+        ~node_id
+        ~outputs
+        ~traces
+        ~total_tokens:ctx.total_tokens
+        ()
+      in
+      (match Checkpoint_store.save store cp with
+       | Ok () -> ()
+       | Error msg -> Printf.eprintf "[checkpoint] Save failed: %s\n%!" msg)
+  | _ -> ()
+
+(** Load checkpoint and restore outputs to context *)
+let restore_from_checkpoint ctx ~chain_id:_ =
+  match ctx.checkpoint.checkpoint_store, ctx.checkpoint.resume_from with
+  | Some store, Some run_id ->
+      (match Checkpoint_store.load store ~run_id with
+       | Ok cp ->
+           (* Restore outputs to context *)
+           List.iter (fun (k, v) -> Hashtbl.replace ctx.outputs k v) cp.outputs;
+           (* Restore token usage if available *)
+           (match cp.total_tokens with
+            | Some tokens -> ctx.total_tokens <- tokens
+            | None -> ());
+           Ok cp.node_id  (* Return last completed node *)
+       | Error msg -> Error msg)
+  | _ -> Error "No checkpoint to resume from"
+
+(** Check if a node was already completed in a resumed checkpoint *)
+let node_completed_in_checkpoint ctx node_id =
+  Hashtbl.mem ctx.outputs node_id
 
 (** {1 Trace Helpers} *)
 
@@ -468,7 +559,7 @@ type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 (** Execute a single LLM node *)
 let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, string) result =
   match llm with
-  | Llm { model; system; prompt; timeout = _; tools } ->
+  | Llm { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _ } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
@@ -510,6 +601,25 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
            | Some gen -> Langfuse.end_generation gen ~output ~prompt_tokens ~completion_tokens
            | None -> ());
 
+          (* Update Prompt Registry metrics if prompt_ref was used *)
+          (match prompt_ref with
+           | Some ref ->
+               (* Parse ref format: "id" or "id@version" *)
+               let (id, version) = match String.split_on_char '@' ref with
+                 | [id; ver] -> (id, ver)
+                 | [id] ->
+                     (* Look up the version that was actually used *)
+                     (match Prompt_registry.get ~id () with
+                      | Some entry -> (id, entry.version)
+                      | None -> (id, "1.0"))
+                 | _ -> (ref, "1.0")
+               in
+               (* Calculate a simple quality score based on output length *)
+               (* In real usage, this could be replaced with a proper evaluation *)
+               let score = min 1.0 (float_of_int (String.length output) /. 500.0) in
+               Prompt_registry.update_metrics ~id ~version ~score ()
+           | None -> ());
+
           record_complete ctx node.id ~duration_ms ~success:true;
           Hashtbl.add ctx.outputs node.id output;
           Ok output
@@ -517,6 +627,20 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
           (* End Langfuse generation with error *)
           (match langfuse_gen with
            | Some gen -> Langfuse.error_generation gen ~message:msg
+           | None -> ());
+
+          (* Update Prompt Registry metrics with low score on error *)
+          (match prompt_ref with
+           | Some ref ->
+               let (id, version) = match String.split_on_char '@' ref with
+                 | [id; ver] -> (id, ver)
+                 | [id] ->
+                     (match Prompt_registry.get ~id () with
+                      | Some entry -> (id, entry.version)
+                      | None -> (id, "1.0"))
+                 | _ -> (ref, "1.0")
+               in
+               Prompt_registry.update_metrics ~id ~version ~score:0.0 ()
            | None -> ());
 
           record_complete ctx node.id ~duration_ms ~success:false;
@@ -677,6 +801,10 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | StreamMerge { nodes = stream_nodes; reducer; initial; min_results; timeout } ->
       execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~nodes:stream_nodes ~reducer ~initial ~min_results ~timeout
+  (* FeedbackLoop: Iterative quality improvement with evaluator feedback *)
+  | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score } ->
+      execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~generator ~evaluator_config ~improver_prompt ~max_iterations ~min_score
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
@@ -1979,6 +2107,125 @@ Reply with ONLY a number between 0.0 and 1.0:|}
     end
   end
 
+(** Execute FeedbackLoop node - iterative quality improvement with evaluator feedback *)
+and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~generator ~(evaluator_config : Chain_types.evaluator_config)
+    ~improver_prompt ~max_iterations ~min_score : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* Helper: Score output using evaluator_config.scoring_func *)
+  let score_output output =
+    match evaluator_config.scoring_func with
+    | "llm_judge" ->
+        let prompt = match evaluator_config.scoring_prompt with
+          | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
+          | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
+        in
+        (match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+         | Ok score_str ->
+             let cleaned = String.trim score_str in
+             (try min 1.0 (max 0.0 (float_of_string cleaned))
+              with Failure _ ->
+                let regex = Str.regexp "[0-9]+\\.[0-9]+" in
+                try
+                  let _ = Str.search_forward regex cleaned 0 in
+                  min 1.0 (max 0.0 (float_of_string (Str.matched_string cleaned)))
+                with Not_found | Failure _ -> 0.5)
+         | Error _ -> 0.5)
+    | "regex_match" ->
+        float_of_int (String.length output) /. 1000.0
+    | "json_schema" ->
+        (try
+          let json = Yojson.Safe.from_string output in
+          let depth = ref 0 in
+          let rec count_depth = function
+            | `Assoc fields -> incr depth; List.iter (fun (_, v) -> count_depth v) fields
+            | `List items -> incr depth; List.iter count_depth items
+            | _ -> ()
+          in
+          count_depth json;
+          min 1.0 (0.5 +. (float_of_int !depth *. 0.1))
+        with Yojson.Json_error _ -> 0.0)
+    | _ ->
+        (try
+          let json = Yojson.Safe.from_string output in
+          let open Yojson.Safe.Util in
+          json |> member "score" |> to_float
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> 0.5)
+  in
+
+  (* Helper: Generate feedback for improvement *)
+  let generate_feedback output score =
+    let prompt = Printf.sprintf
+      "The following output scored %.2f out of 1.0 for quality. Provide specific, actionable feedback on how to improve it:\n\n%s\n\nProvide 2-3 concrete suggestions for improvement:"
+      score output
+    in
+    match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+    | Ok feedback -> feedback
+    | Error _ -> "Please improve the quality and accuracy of the output."
+  in
+
+  (* Helper: Substitute variables in improver_prompt *)
+  let substitute_prompt template ~feedback ~previous_output =
+    template
+    |> Str.global_replace (Str.regexp "{{feedback}}") feedback
+    |> Str.global_replace (Str.regexp "{{previous_output}}") previous_output
+  in
+
+  (* Create a mutable copy of the generator for prompt updates *)
+  let current_generator = ref generator in
+
+  let rec iterate iteration =
+    if iteration > max_iterations then begin
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      Error (Printf.sprintf "FeedbackLoop: Max iterations (%d) reached without meeting min_score %.2f"
+               max_iterations min_score)
+    end else begin
+      (* Execute current generator *)
+      match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec !current_generator with
+      | Error msg ->
+          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          record_complete ctx parent.id ~duration_ms ~success:false;
+          Error (Printf.sprintf "FeedbackLoop iteration %d failed: %s" iteration msg)
+      | Ok output ->
+          (* Score the output *)
+          let score = score_output output in
+
+          (* Store feedback in outputs for reference *)
+          Hashtbl.replace ctx.outputs (parent.id ^ ".feedback") "";
+
+          if score >= min_score then begin
+            (* Success: score meets threshold *)
+            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            record_complete ctx parent.id ~duration_ms ~success:true;
+            Hashtbl.add ctx.outputs parent.id output;
+            Ok output
+          end else begin
+            (* Generate feedback and prepare for next iteration *)
+            let feedback = generate_feedback output score in
+            Hashtbl.replace ctx.outputs (parent.id ^ ".feedback") feedback;
+
+            (* Update generator prompt with feedback *)
+            let new_prompt = substitute_prompt improver_prompt ~feedback ~previous_output:output in
+            let updated_generator = match (!current_generator).node_type with
+              | Llm llm_config ->
+                  { !current_generator with
+                    node_type = Llm { llm_config with prompt = new_prompt };
+                    id = Printf.sprintf "%s_iter%d" generator.id iteration }
+              | _ ->
+                  (* For non-LLM generators, we can't easily update prompt *)
+                  (* Just retry with same generator *)
+                  !current_generator
+            in
+            current_generator := updated_generator;
+            iterate (iteration + 1)
+          end
+    end
+  in
+  iterate 1
+
 (* ════════════════════════════════════════════════════════════════════════════
    Resilience Nodes Implementation
    ════════════════════════════════════════════════════════════════════════════ *)
@@ -2216,7 +2463,7 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 (** {1 Main Execution Entry Point} *)
 
 (** Execute a compiled execution plan *)
-let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_plan) : chain_result =
+let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : execution_plan) : chain_result =
   let start_time = Unix.gettimeofday () in
 
   (* Create Langfuse trace for observability if enabled *)
@@ -2229,7 +2476,14 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
     else None
   in
 
-  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ?langfuse_trace ()  in
+  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ?langfuse_trace ?checkpoint ()  in
+
+  (* Restore state from checkpoint if resuming *)
+  (match ctx.checkpoint.resume_from with
+   | Some _ ->
+       let _ = restore_from_checkpoint ctx ~chain_id:plan.chain.Chain_types.id in
+       ()  (* Outputs are now restored *)
+   | None -> ());
 
   (* Record chain start with mermaid visualization *)
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid plan.chain) in
@@ -2263,7 +2517,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
     }
   in
 
-  (* Execute each step in the plan *)
+  (* Execute each step in the plan with checkpoint support *)
   let rec execute_steps () = function
     | [] ->
         (* Get output from the designated output node *)
@@ -2276,24 +2530,48 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
     | step :: rest ->
         let result = match step with
           | Sequential node ->
-              execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
+              (* Skip if node already completed in checkpoint *)
+              if node_completed_in_checkpoint ctx node.Chain_types.id then
+                Ok (Hashtbl.find ctx.outputs node.Chain_types.id)
+              else begin
+                let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
+                (* Save checkpoint after successful node completion *)
+                (match r with
+                 | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id:node.Chain_types.id
+                 | Error _ -> ());
+                r
+              end
           | Parallel nodes ->
-              (* Execute all nodes in parallel *)
-              let results = ref [] in
-              let mutex = Eio.Mutex.create () in
-              Eio.Fiber.all (List.map (fun node ->
-                fun () ->
-                  let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
-                  Eio.Mutex.use_rw mutex ~protect:true (fun () ->
-                    results := (node.Chain_types.id, r) :: !results
-                  )
-              ) nodes);
-              (* Check all succeeded *)
-              let errors = List.filter_map (fun (id, r) ->
-                match r with Error e -> Some (id ^ ": " ^ e) | Ok _ -> None
-              ) !results in
-              if List.length errors = 0 then Ok ""
-              else Error (String.concat "; " errors)
+              (* Filter out already-completed nodes *)
+              let nodes_to_execute = List.filter (fun (n : node) ->
+                not (node_completed_in_checkpoint ctx n.id)
+              ) nodes in
+              if List.length nodes_to_execute = 0 then
+                Ok ""  (* All nodes already completed *)
+              else begin
+                (* Execute remaining nodes in parallel *)
+                let results = ref [] in
+                let mutex = Eio.Mutex.create () in
+                Eio.Fiber.all (List.map (fun (node : node) ->
+                  fun () ->
+                    let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
+                    Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+                      results := (node.id, r) :: !results
+                    )
+                ) nodes_to_execute);
+                (* Save checkpoint for all successfully completed parallel nodes *)
+                List.iter (fun (node_id, r) ->
+                  match r with
+                  | Ok _ -> save_checkpoint ctx ~chain_id:plan.chain.Chain_types.id ~node_id
+                  | Error _ -> ()
+                ) !results;
+                (* Check all succeeded *)
+                let errors = List.filter_map (fun (id, r) ->
+                  match r with Error e -> Some (id ^ ": " ^ e) | Ok _ -> None
+                ) !results in
+                if List.length errors = 0 then Ok ""
+                else Error (String.concat "; " errors)
+              end
         in
         match result with
         | Ok _ ->

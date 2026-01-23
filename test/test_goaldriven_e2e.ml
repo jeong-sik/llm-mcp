@@ -110,7 +110,9 @@ let test_goaldriven_parse_float () =
         system = None;
         prompt = "Output ONLY a single decimal number between 0.7 and 1.0. No other text. Example: 0.85";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -172,7 +174,9 @@ let test_goaldriven_exec_test () =
         system = None;
         prompt = "You are a test coverage reporter. Output exactly: 'coverage: 0.85' (a number between 0.80 and 0.95)";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -233,7 +237,9 @@ let test_goaldriven_llm_judge () =
         system = None;
         prompt = "Write a simple, clean Python function that adds two numbers with type hints and a docstring.";
         timeout = Some 45;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -295,7 +301,9 @@ let test_goaldriven_strategy_hints () =
         (* Uses {{iteration}} and {{strategy}} variables *)
         prompt = "Iteration {{iteration}}/{{max_iterations}}. Strategy: {{strategy}}. Output a quality score as: quality: 0.XX";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in
@@ -361,7 +369,9 @@ let test_goaldriven_mermaid_roundtrip_execute () =
         system = None;
         prompt = "Say 'score: 0.9' exactly";
         timeout = Some 30;
-        tools = None
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = []
       };
       input_mapping = []
     } in

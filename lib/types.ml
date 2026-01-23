@@ -140,6 +140,25 @@ type tool_args =
       text : string;                       (* Message text to post *)
       thread_ts : string option;           (* Thread timestamp for reply (optional) *)
     }
+  | ChainCheckpoints of {
+      chain_id : string option;            (* Filter by chain ID, or list all if None *)
+      max_age_hours : int option;          (* Filter by age, cleanup if specified with cleanup=true *)
+      cleanup : bool;                      (* Delete old checkpoints instead of listing *)
+    }
+  | ChainResume of {
+      run_id : string;                     (* Run ID to resume from *)
+      trace : bool;                        (* Enable execution tracing *)
+    }
+  | PromptRegister of {
+      id : string;
+      template : string;
+      version : string option;
+    }
+  | PromptList
+  | PromptGet of {
+      id : string;
+      version : string option;
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -463,14 +482,20 @@ let ollama_schema : tool_schema = {
   description = {|Run local LLM via Ollama with optional MCP tool support.
 
 Use cases:
-- Run Devstral, DeepSeek-R1, Qwen3-Coder locally (free, no API key)
-- Function calling with tool-capable models (devstral, qwen3, llama3.3)
+- Run Devstral, DeepSeek-R1, Qwen3-Coder, GLM-4.7-Flash locally (free, no API key)
+- Function calling with tool-capable models (devstral, qwen3, llama3.3, glm-4.7-flash)
 - Privacy-first: all processing on local machine
 - 128GB RAM can run multiple 30B+ models simultaneously
 
+Recommended models:
+- glm-4.7-flash: 30B MoE (3B active), fastest reasoning, ~32 tok/s
+- devstral: Code-focused, function calling
+- qwen3-coder:30b: Strong coding, thinking mode
+- deepseek-r1:32b: Deep reasoning
+
 Parameters:
 - prompt: The prompt to send
-- model: Model name (default: devstral). Examples: devstral, deepseek-r1:32b, qwen3-coder:30b
+- model: Model name (default: devstral). Examples: glm-4.7-flash, devstral, qwen3-coder:30b
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - timeout: Timeout in seconds (default: 300)
@@ -488,7 +513,7 @@ Model must support tools capability (devstral, qwen3, llama3.3, etc).|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name (devstral, deepseek-r1:32b, qwen3-coder:30b, etc)");
+        ("description", `String "Model name (glm-4.7-flash, devstral, qwen3-coder:30b, deepseek-r1:32b, etc)");
         ("default", `String "devstral");
       ]);
       ("system_prompt", `Assoc [
@@ -705,6 +730,94 @@ let chain_list_schema : tool_schema = {
   ];
 }
 
+let chain_checkpoints_schema : tool_schema = {
+  name = "chain.checkpoints";
+  description = "List saved checkpoints for chain executions. Can filter by chain_id and cleanup old checkpoints.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("chain_id", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Filter checkpoints by chain ID (optional)");
+      ]);
+      ("cleanup_days", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Delete checkpoints older than N days (optional)");
+      ]);
+    ]);
+  ];
+}
+
+let chain_resume_schema : tool_schema = {
+  name = "chain.resume";
+  description = "Resume a chain execution from a saved checkpoint.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("run_id", `Assoc [
+        ("type", `String "string");
+        ("description", `String "The run_id of the checkpoint to resume from");
+      ]);
+      ("input", `Assoc [
+        ("type", `String "object");
+        ("description", `String "Additional input to merge with checkpoint state (optional)");
+      ]);
+    ]);
+    ("required", `List [`String "run_id"]);
+  ];
+}
+
+let prompt_register_schema : tool_schema = {
+  name = "prompt.register";
+  description = "Register a versioned prompt template in the registry.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("id", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Unique identifier for the prompt");
+      ]);
+      ("template", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Prompt template with {{variable}} placeholders");
+      ]);
+      ("version", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Semantic version (e.g., '1.0.0')");
+      ]);
+    ]);
+    ("required", `List [`String "id"; `String "template"]);
+  ];
+}
+
+let prompt_list_schema : tool_schema = {
+  name = "prompt.list";
+  description = "List all registered prompts with their versions and usage metrics.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+  ];
+}
+
+let prompt_get_schema : tool_schema = {
+  name = "prompt.get";
+  description = "Get a prompt template by ID, optionally specifying a version.";
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("id", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Prompt ID to retrieve");
+      ]);
+      ("version", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Specific version to retrieve (optional, defaults to latest)");
+      ]);
+    ]);
+    ("required", `List [`String "id"]);
+  ];
+}
+
 let chain_orchestrate_schema : tool_schema = {
   name = "chain.orchestrate";
   description = {|Execute a goal-driven orchestration workflow with automatic re-planning.
@@ -831,9 +944,14 @@ let all_schemas = [
   chain_validate_schema;
   chain_convert_schema;
   chain_list_schema;
+  chain_checkpoints_schema;
+  chain_resume_schema;
   chain_to_mermaid_schema;
   chain_visualize_schema;
   chain_orchestrate_schema;
+  prompt_register_schema;
+  prompt_list_schema;
+  prompt_get_schema;
   gh_pr_diff_schema;
   slack_post_schema;
 ]

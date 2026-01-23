@@ -26,6 +26,7 @@
    chain_mermaid_parser
    chain_compiler
    chain_registry
+   prompt_registry
    ; Chain Engine (Phase 5 - Category Theory)
    chain_category
    chain_stats
@@ -82,6 +83,8 @@
    chain_orchestrator_eio
    ; Chain Engine (Phase 5 - requires Eio)
    chain_batch
+   ; Checkpoint/Resume for long-running chains
+   checkpoint_store
    ; Logging (Eio)
    run_log_eio
    ; Agent Loop (Eio)
