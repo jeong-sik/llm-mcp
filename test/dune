@@ -117,6 +117,16 @@
  (name test_lossless_roundtrip)
  (libraries llm_mcp.common alcotest))
 
+; Tool Node tests (Layer 1-4: JSON parsing, Mermaid gen/parse, roundtrip)
+(test
+ (name test_tool_node)
+ (libraries llm_mcp.common alcotest))
+
+; Real Chain Files tests (Layer 5: actual data/chains/*.json roundtrip)
+(test
+ (name test_real_chains)
+ (libraries llm_mcp.common alcotest))
+
 ; GoalDriven E2E integration tests (requires Ollama)
 (executable
  (name test_goaldriven_e2e)

@@ -308,6 +308,11 @@ let rec parse_adapter_transform (json : Yojson.Safe.t) : (adapter_transform, str
        | "custom" ->
            let name = parse_string_with_default json "name" "identity" in
            Ok (Custom name)
+       | "unknown" ->
+           (* No type field: treat the whole object as a template JSON *)
+           (* Convert the object to a JSON template string *)
+           let tpl = Yojson.Safe.to_string json in
+           Ok (Template tpl)
        | unknown -> Error (Printf.sprintf "Unknown transform type: %s" unknown))
   | _ -> Error "Transform must be a string or object"
 
@@ -362,7 +367,22 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
       | _ -> []
     in
 
-    Ok { id; node_type; input_mapping }
+    (* Also parse "depends_on" field as edges (common in real chain files) *)
+    let depends_on_mapping =
+      match json |> member "depends_on" with
+      | `List deps ->
+          List.filter_map (fun d ->
+            match d with
+            | `String dep_id -> Some ("_dep_" ^ dep_id, dep_id)
+            | _ -> None
+          ) deps
+      | _ -> []
+    in
+
+    (* Combine input_mapping with depends_on *)
+    let final_input_mapping = input_mapping @ depends_on_mapping in
+
+    Ok { id; node_type; input_mapping = final_input_mapping }
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error (Printf.sprintf "JSON type error: %s" msg)
@@ -374,18 +394,26 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
   let open Yojson.Safe.Util in
   match type_str with
   | "llm" ->
-      let* model = require_string json "model" in
-      let system = parse_string_opt json "system" in
-      let timeout = parse_int_opt json "timeout" in
+      (* Support both flat and nested format:
+         Flat:   {"type":"llm","model":"gemini","prompt":"..."}
+         Nested: {"type":"llm","llm":{"model":"gemini","prompt":"..."}}
+      *)
+      let llm_json = match json |> member "llm" with
+        | `Assoc _ as llm_obj -> llm_obj
+        | _ -> json
+      in
+      let* model = require_string llm_json "model" in
+      let system = parse_string_opt llm_json "system" in
+      let timeout = parse_int_opt llm_json "timeout" in
       let tools =
-        match json |> member "tools" with
+        match llm_json |> member "tools" with
         | `Null -> None
         | v -> Some v
       in
       (* Prompt Registry support: prompt_ref takes precedence *)
-      let prompt_ref = parse_string_opt json "prompt_ref" in
+      let prompt_ref = parse_string_opt llm_json "prompt_ref" in
       let prompt_vars =
-        match json |> member "prompt_vars" with
+        match llm_json |> member "prompt_vars" with
         | `Assoc pairs ->
             List.filter_map (fun (k, v) ->
               match v with `String s -> Some (k, s) | _ -> None) pairs
@@ -409,22 +437,42 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
                   | Error e -> Error (Printf.sprintf "Failed to render prompt_ref '%s': %s" ref e))
              | None ->
                  (* If prompt_ref not found, fall back to prompt field if present *)
-                 match parse_string_opt json "prompt" with
+                 match parse_string_opt llm_json "prompt" with
                  | Some p -> Ok p
                  | None -> Error (Printf.sprintf "Prompt '%s' not found in registry and no fallback prompt" ref))
         | None ->
-            require_string json "prompt"
+            require_string llm_json "prompt"
       in
       Ok (Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars })
 
   | "tool" ->
-      let* name = require_string json "name" in
-      let args =
-        match json |> member "args" with
-        | `Null -> `Assoc []
-        | v -> v
-      in
-      Ok (Tool { name; args })
+      (* Support both flat and nested format:
+         Flat:   {"type":"tool","name":"eslint","args":{...}}
+         Nested: {"type":"tool","tool":{"server":"figma","name":"parse_url","args":{...}}}
+      *)
+      (match json |> member "tool" with
+       | `Assoc _ as tool_obj ->
+           (* Nested format: extract from "tool" object *)
+           let server_opt = tool_obj |> member "server" |> to_string_option in
+           let* name = require_string tool_obj "name" in
+           let args = match tool_obj |> member "args" with
+             | `Null -> `Assoc []
+             | v -> v
+           in
+           (* Encode server in name if present: "figma:parse_url" *)
+           let full_name = match server_opt with
+             | Some s -> Printf.sprintf "%s:%s" s name
+             | None -> name
+           in
+           Ok (Tool { name = full_name; args })
+       | _ ->
+           (* Flat format: direct fields *)
+           let* name = require_string json "name" in
+           let args = match json |> member "args" with
+             | `Null -> `Assoc []
+             | v -> v
+           in
+           Ok (Tool { name; args }))
 
   | "pipeline" ->
       let nodes_json = json |> member "nodes" |> to_list in
@@ -454,11 +502,23 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
 
   | "gate" ->
       let* condition = require_string json "condition" in
-      let then_json = json |> member "then" in
-      let* then_node = parse_node then_json in
+      (* Support both embedded node object (then/else) and string ID reference (then_node/else_node) *)
+      let* then_node =
+        match json |> member "then" with
+        | `Null ->
+            (* Try then_node as string ID *)
+            (match json |> member "then_node" with
+             | `String id -> Ok { id = "_ref_" ^ id; node_type = ChainRef id; input_mapping = [] }
+             | _ -> Error "Gate requires 'then' (node object) or 'then_node' (string ID)")
+        | then_json -> parse_node then_json
+      in
       let else_node =
         match json |> member "else" with
-        | `Null -> None
+        | `Null ->
+            (* Try else_node as string ID *)
+            (match json |> member "else_node" with
+             | `String id -> Some { id = "_ref_" ^ id; node_type = ChainRef id; input_mapping = [] }
+             | _ -> None)
         | else_json ->
             (match parse_node else_json with
              | Ok n -> Some n
@@ -600,7 +660,8 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
 
   (* Data Transformation Node *)
   | "adapter" ->
-      let* input_ref = require_string json "input_ref" in
+      (* input_ref is optional, defaults to "input" *)
+      let input_ref = parse_string_with_default json "input_ref" "input" in
       let* transform = parse_adapter_transform (json |> member "transform") in
       let on_error =
         match parse_string_opt json "on_error" with
@@ -729,7 +790,16 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
     in
     let nodes_json = json |> member "nodes" |> to_list in
     let* nodes = parse_nodes nodes_json in
-    let output = json |> member "output" |> to_string in
+    (* output field is optional; default to last node ID if not specified *)
+    let output = match json |> member "output" with
+      | `String s -> s
+      | `Null ->
+          (* Find last node in the list as default output *)
+          (match List.rev nodes with
+           | last :: _ -> last.id
+           | [] -> "output")
+      | _ -> "output"
+    in
     let config =
       match json |> member "config" with
       | `Null -> default_config

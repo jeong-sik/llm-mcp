@@ -55,7 +55,7 @@ open Chain_types
 (** Parsed node from Mermaid *)
 type mermaid_node = {
   id : string;
-  shape : [ `Rect | `Diamond | `Subroutine ];
+  shape : [ `Rect | `Diamond | `Subroutine | `Trap ];
   content : string;
 }
 
@@ -221,9 +221,12 @@ let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
 
 (* Pre-compiled regexes for better performance and reliability *)
 (* Support both plain [text] and quoted ["text"] syntax *)
-let rect_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_]*\)\[\([^]]*\)\]|}
-let diamond_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_]*\){\([^}]*\)}|}
-let subroutine_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_]*\)\[\[\([^]]*\)\]\]|}
+(* Node IDs can contain hyphens (kebab-case like vision-analyze, parse-url) *)
+let rect_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)\[\([^]]*\)\]|}
+let diamond_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\){\([^}]*\)}|}
+let subroutine_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)\[\[\([^]]*\)\]\]|}
+(* Trapezoid shape: id>/"content"/ used for Adapter nodes *)
+let trap_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)>/"\([^"]*\)"/|}
 let arrow_re = Str.regexp {|[ ]*-->[ ]*|}
 let ampersand_re = Str.regexp {|[ ]*&[ ]*|}
 let quote_re = Str.regexp {|\([^ "]+\)[ ]*"\([^"]*\)"|}
@@ -261,7 +264,7 @@ let make_tools_value (has_tools : bool) : Yojson.Safe.t option =
   else None
 
 (** Infer node type from node ID and shape *)
-let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]) (text : string)
+let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (text : string)
     : (node_type, string) result =
   let id_lower = String.lowercase_ascii id in
   let text = strip_quotes text in
@@ -388,6 +391,11 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine ]
           let tools = make_tools_value has_tools in
           Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
 
+  | `Trap ->
+      (* Trapezoid nodes: Adapter - parse "Adapt[input_ref → transform_type]" or similar *)
+      (* Default to Template adapter with the text as template *)
+      Ok (Adapter { input_ref = "input"; transform = Template text; on_error = `Fail })
+
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
   let s = trim s in
@@ -397,6 +405,11 @@ let parse_node_definition (s : string) : (string * mermaid_node) option =
     let id = Str.matched_group 1 s in
     let content = Str.matched_group 2 s in
     Some (id, { id; shape = `Subroutine; content = trim content })
+  (* Trapezoid: >/"..."/ used for Adapter nodes *)
+  else if Str.string_match trap_re s 0 then
+    let id = Str.matched_group 1 s in
+    let content = Str.matched_group 2 s in
+    Some (id, { id; shape = `Trap; content = trim content })
   (* Then diamond: {...} *)
   else if Str.string_match diamond_re s 0 then
     let id = Str.matched_group 1 s in
@@ -411,7 +424,7 @@ let parse_node_definition (s : string) : (string * mermaid_node) option =
     None
 
 (** Parse node content into Chain node_type *)
-let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : string)
+let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (content : string)
     : (node_type, string) result =
   let content = trim content in
   match shape with
@@ -730,7 +743,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           Error (Printf.sprintf "Invalid LLM format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
         let rest = String.sub content_clean 5 (String.length content_clean - 5) in
-        (* Parse: name "args" or name 'args' or just name (same pattern as LLM) *)
+        (* Parse: name "args" or name 'args' or name {...json...} or just name *)
         if Str.string_match quote_re rest 0 then
           let name = trim (Str.matched_group 1 rest) in
           let args_str = trim (Str.matched_group 2 rest) in
@@ -740,14 +753,41 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
           let name = trim (Str.matched_group 1 rest) in
           let args_str = trim (Str.matched_group 2 rest) in
           Ok (Tool { name; args = `Assoc [("input", `String args_str)] })
-        else if Str.string_match simple_model_re rest 0 then
-          let name = trim (Str.matched_group 1 rest) in
-          Ok (Tool { name; args = `Assoc [] })
         else
-          Error (Printf.sprintf "Invalid Tool format: %s" content)
+          (* Try to find name followed by JSON: "name {...}" *)
+          let json_start = String.index_opt rest '{' in
+          (match json_start with
+           | Some idx when idx > 0 ->
+               let name = trim (String.sub rest 0 idx) in
+               let json_str = String.sub rest idx (String.length rest - idx) in
+               (* Un-escape Mermaid quotes: \" -> " *)
+               let json_unescaped = Str.global_replace (Str.regexp {|\\"|}) {|"|} json_str in
+               (try
+                  let args = Yojson.Safe.from_string json_unescaped in
+                  Ok (Tool { name; args })
+                with _ ->
+                  (* If JSON parse fails, store as input *)
+                  Ok (Tool { name; args = `Assoc [("input", `String json_unescaped)] }))
+           | _ ->
+               (* No JSON, try simple name *)
+               if Str.string_match simple_model_re rest 0 then
+                 let name = trim (Str.matched_group 1 rest) in
+                 Ok (Tool { name; args = `Assoc [] })
+               else
+                 Error (Printf.sprintf "Invalid Tool format: %s" content))
       else
         (* Default: treat as LLM with content as prompt, model = gemini *)
         Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+
+  | `Trap ->
+      (* Trapezoid: Adapter nodes, content format: "Adapt[input → template]" or similar *)
+      (* Parse the content to extract input_ref and transform type *)
+      if String.length content > 5 && String.sub content 0 5 = "Adapt" then
+        (* Default adapter with template transform *)
+        Ok (Adapter { input_ref = "input"; transform = Template content; on_error = `Fail })
+      else
+        (* Generic adapter using the content as template *)
+        Ok (Adapter { input_ref = "input"; transform = Template content; on_error = `Fail })
 
 (** Parse edge line: A --> B or A & B --> C *)
 let parse_edge_line (line : string) : mermaid_edge list =
@@ -782,21 +822,49 @@ let parse_edge_line (line : string) : mermaid_edge list =
   build_edges [] parts
 
 (** Join lines that have unclosed brackets (handle multiline node content) *)
+(* Parse state: (bracket_count, in_double_quote, in_single_quote) *)
 let join_multiline_brackets (lines : string list) : string list =
-  let count_brackets s open_count =
+  (* Update state by scanning a string, carrying over quote state *)
+  let scan_string s (count, in_double, in_single) =
     let len = String.length s in
-    let rec loop i count =
-      if i >= len then count
-      else match s.[i] with
-        | '[' -> loop (i + 1) (count + 1)
-        | ']' -> loop (i + 1) (count - 1)
-        | '{' -> loop (i + 1) (count + 1)
-        | '}' -> loop (i + 1) (count - 1)
-        | _ -> loop (i + 1) count
+    let rec loop i count in_double in_single =
+      if i >= len then (count, in_double, in_single)
+      else
+        let c = s.[i] in
+        (* Handle escape: skip next char *)
+        if c = '\\' && i + 1 < len then
+          loop (i + 2) count in_double in_single
+        (* Toggle double quote state (only if not in single) *)
+        else if c = '"' && not in_single then
+          loop (i + 1) count (not in_double) in_single
+        (* Toggle single quote state (only if not in double) *)
+        else if c = '\'' && not in_double then
+          loop (i + 1) count in_double (not in_single)
+        (* Count brackets only when not in any quoted string *)
+        else if not in_double && not in_single then
+          match c with
+          | '[' -> loop (i + 1) (count + 1) in_double in_single
+          | ']' -> loop (i + 1) (count - 1) in_double in_single
+          | '{' -> loop (i + 1) (count + 1) in_double in_single
+          | '}' -> loop (i + 1) (count - 1) in_double in_single
+          | _ -> loop (i + 1) count in_double in_single
+        else
+          loop (i + 1) count in_double in_single
     in
-    loop 0 open_count
+    loop 0 count in_double in_single
   in
-  let rec process acc pending_lines bracket_count = function
+
+  let initial_state = (0, false, false) in
+
+  let is_closed (count, in_double, in_single) =
+    count <= 0 && not in_double && not in_single
+  in
+
+  let is_open (count, in_double, in_single) =
+    count > 0 || in_double || in_single
+  in
+
+  let rec process acc pending_lines state = function
     | [] ->
         (* Flush any remaining pending lines *)
         if pending_lines = [] then List.rev acc
@@ -804,30 +872,30 @@ let join_multiline_brackets (lines : string list) : string list =
     | line :: rest ->
         let line = trim line in
         if line = "" then
-          process acc pending_lines bracket_count rest
-        else if bracket_count > 0 then begin
-          (* Continue collecting multiline content *)
-          let new_count = count_brackets line bracket_count in
+          process acc pending_lines state rest
+        else if is_open state then begin
+          (* Continue collecting multiline content (unclosed brackets or quotes) *)
+          let new_state = scan_string line state in
           let new_pending = line :: pending_lines in
-          if new_count <= 0 then
-            (* Brackets closed, flush the joined line *)
+          if is_closed new_state then
+            (* All closed, flush the joined line *)
             let joined = String.concat " " (List.rev new_pending) in
-            process (joined :: acc) [] 0 rest
+            process (joined :: acc) [] initial_state rest
           else
-            process acc new_pending new_count rest
+            process acc new_pending new_state rest
         end
         else begin
-          (* Check if this line opens unclosed brackets *)
-          let count = count_brackets line 0 in
-          if count > 0 then
-            (* Line has unclosed brackets, start collecting *)
-            process acc [line] count rest
+          (* Check if this line opens unclosed brackets or quotes *)
+          let new_state = scan_string line initial_state in
+          if is_open new_state then
+            (* Line has unclosed brackets/quotes, start collecting *)
+            process acc [line] new_state rest
           else
             (* Normal complete line *)
-            process (line :: acc) [] 0 rest
+            process (line :: acc) [] initial_state rest
         end
   in
-  process [] [] 0 lines
+  process [] [] initial_state lines
 
 (** Parse full Mermaid graph text *)
 (** Parse Mermaid text with metadata extraction (for lossless roundtrip) *)
@@ -1284,8 +1352,12 @@ let node_type_to_text (nt : node_type) : string =
        | _ -> base)
   | Tool { name; args } ->
       (match args with
-       | `Null -> Printf.sprintf "Tool:%s" name
-       | json -> Printf.sprintf "Tool:%s %s" name (Yojson.Safe.to_string json))
+       | `Null | `Assoc [] -> Printf.sprintf "Tool:%s" name
+       | json ->
+           (* Escape double quotes for Mermaid: " -> backslash-" *)
+           let json_str = Yojson.Safe.to_string json in
+           let json_escaped = Str.global_replace (Str.regexp {|"|}) {|\\"|} json_str in
+           Printf.sprintf "Tool:%s %s" name json_escaped)
   | Quorum { required; _ } -> Printf.sprintf "Quorum:%d" required
   | Gate { condition; _ } -> Printf.sprintf "Gate:%s" condition
   | Merge { strategy; _ } ->
@@ -1506,14 +1578,21 @@ let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
 
   (* Build edge map: target -> sources *)
   (* input_mapping is (param_name, source_node_id) - we need source_node_id for edges *)
+  (* But source_node_id might be an output_key, not a node ID, so filter by actual node IDs *)
+  let node_ids = List.map (fun (n : node) -> n.id) chain.nodes in
   let edges = Hashtbl.create 16 in
   List.iter (fun (node : node) ->
     List.iter (fun (_, src) ->
-      let existing = match Hashtbl.find_opt edges node.id with
-        | Some l -> l
-        | None -> []
-      in
-      Hashtbl.replace edges node.id (src :: existing)
+      (* Only add edge if src is an actual node ID *)
+      if List.mem src node_ids then begin
+        let existing = match Hashtbl.find_opt edges node.id with
+          | Some l -> l
+          | None -> []
+        in
+        (* Avoid duplicate edges *)
+        if not (List.mem src existing) then
+          Hashtbl.replace edges node.id (src :: existing)
+      end
     ) node.input_mapping
   ) chain.nodes;
 
@@ -1521,7 +1600,13 @@ let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
   List.iter (fun (node : node) ->
     let (shape_open, shape_close) = node_type_to_shape node.node_type in
     let text = node_type_to_text node.node_type in
-    let text_escaped = Str.global_replace (Str.regexp {|"|}) {|'|} text in
+    (* Escape double-quotes to single-quotes, but preserve backslash-escaped ones *)
+    let text_escaped =
+      let placeholder = "\x00ESCAPED_QUOTE\x00" in
+      let step1 = Str.global_replace (Str.regexp {|\\"|}) placeholder text in
+      let step2 = Str.global_replace (Str.regexp {|"|}) {|'|} step1 in
+      Str.global_replace (Str.regexp_string placeholder) {|\\"|} step2
+    in
     let class_suffix = if styled then ":::" ^ node_type_to_class node.node_type else "" in
     Buffer.add_string buf (Printf.sprintf "    %s%s\"%s\"%s%s\n"
       node.id shape_open text_escaped shape_close class_suffix)
