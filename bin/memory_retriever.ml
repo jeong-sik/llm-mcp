@@ -36,13 +36,13 @@ let get_env_or key default =
 
 (** RunPod Configuration *)
 let runpod_api_token () = get_env_or "RUNPOD_API_TOKEN" ""
-let runpod_endpoint_id () = get_env_or "RUNPOD_ENDPOINT_ID" "yxeb20x9h85ys9"
+let runpod_endpoint_id () = get_env_or "RUNPOD_ENDPOINT_ID" "your-endpoint-id"
 let runpod_api_url () =
   Printf.sprintf "https://api.runpod.ai/v2/%s/runsync" (runpod_endpoint_id ())
 
 (** Qdrant Configuration *)
 let qdrant_url () =
-  get_env_or "QDRANT_URL" "https://qdrant-production-498f.up.railway.app"
+  get_env_or "QDRANT_URL" "https://your-qdrant-host.example.com"
 
 (** Collections to search (priority order) *)
 let search_collections = [

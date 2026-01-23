@@ -2,7 +2,7 @@
 
 **Target Venue**: ACL 2026 (Systems Track) or EMNLP 2026
 **Status**: Draft Structure
-**Authors**: Vincent Kim (Kidsnote), Second Brain AI
+**Authors**: [Author Names]
 
 ---
 
