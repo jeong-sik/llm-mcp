@@ -295,7 +295,7 @@ let execute_chain_list () =
    ChainToMermaid
    ============================================================================ *)
 
-let execute_chain_to_mermaid ~chain =
+let execute_chain_to_mermaid ~chain ~lossless =
   match Chain_parser.parse_chain chain with
   | Error msg ->
       { model = "chain.to_mermaid";
@@ -303,7 +303,7 @@ let execute_chain_to_mermaid ~chain =
         response = sprintf "Parse error: %s" msg;
         extra = [("stage", "parse")]; }
   | Ok parsed_chain ->
-      let mermaid_text = Chain_mermaid_parser.chain_to_mermaid parsed_chain in
+      let mermaid_text = Chain_mermaid_parser.chain_to_mermaid ~lossless parsed_chain in
       { model = "chain.to_mermaid";
         returncode = 0;
         response = mermaid_text;
@@ -338,7 +338,7 @@ let execute_chain_visualize ~chain =
    ChainConvert
    ============================================================================ *)
 
-let execute_chain_convert ~from_format ~to_format ~input ~pretty =
+let execute_chain_convert ~from_format ~to_format ~input ~pretty ~lossless =
   match (from_format, to_format) with
   | ("json", "mermaid") ->
       (match Chain_parser.parse_chain input with
@@ -348,7 +348,7 @@ let execute_chain_convert ~from_format ~to_format ~input ~pretty =
              response = sprintf "JSON parse error: %s" msg;
              extra = [("from", "json"); ("to", "mermaid"); ("stage", "parse")]; }
        | Ok chain ->
-           let mermaid = Chain_mermaid_parser.chain_to_mermaid chain in
+           let mermaid = Chain_mermaid_parser.chain_to_mermaid ~lossless chain in
            { model = "chain.convert";
              returncode = 0;
              response = mermaid;
@@ -363,7 +363,7 @@ let execute_chain_convert ~from_format ~to_format ~input ~pretty =
         | `String s -> s
         | _ -> Yojson.Safe.to_string input
       in
-      (match Chain_mermaid_parser.parse_chain mermaid_text with
+      (match Chain_mermaid_parser.parse_mermaid_to_chain mermaid_text with
        | Error msg ->
            { model = "chain.convert";
              returncode = -1;

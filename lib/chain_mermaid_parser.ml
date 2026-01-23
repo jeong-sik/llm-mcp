@@ -88,6 +88,8 @@ type mermaid_meta = {
   chain_timeout : int option;
   chain_trace : bool option;
   chain_max_depth : int option;
+  chain_max_concurrency : int option;
+  chain_json : Yojson.Safe.t option;
   node_input_mappings : (string, (string * string) list) Hashtbl.t;
   node_goaldriven_meta : (string, goaldriven_meta) Hashtbl.t;
 }
@@ -111,6 +113,8 @@ let empty_meta () : mermaid_meta = {
   chain_timeout = None;
   chain_trace = None;
   chain_max_depth = None;
+  chain_max_concurrency = None;
+  chain_json = None;
   node_input_mappings = Hashtbl.create 16;
   node_goaldriven_meta = Hashtbl.create 16;
 }
@@ -142,6 +146,7 @@ let parse_chain_meta (json_str : string) (meta : mermaid_meta) : mermaid_meta =
           chain_timeout = (match get_int "timeout" with Some v -> Some v | None -> meta.chain_timeout);
           chain_trace = (match get_bool "trace" with Some v -> Some v | None -> meta.chain_trace);
           chain_max_depth = (match get_int "max_depth" with Some v -> Some v | None -> meta.chain_max_depth);
+          chain_max_concurrency = (match get_int "max_concurrency" with Some v -> Some v | None -> meta.chain_max_concurrency);
         }
     | _ -> meta
   with Yojson.Json_error _ -> meta  (* Invalid JSON in @chain comment *)
@@ -204,7 +209,13 @@ let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
   else
     let rest = trim (String.sub line 2 (String.length line - 2)) in
     (* Check for @chain or @node: *)
-    if String.length rest >= 7 && String.sub rest 0 7 = "@chain " then
+    if String.length rest >= 12 && String.sub rest 0 12 = "@chain_json " then
+      let json_str = String.sub rest 12 (String.length rest - 12) in
+      (try
+         let json = Yojson.Safe.from_string json_str in
+         { meta with chain_json = Some json }
+       with Yojson.Json_error _ -> meta)
+    else if String.length rest >= 7 && String.sub rest 0 7 = "@chain " then
       let json_str = String.sub rest 7 (String.length rest - 7) in
       parse_chain_meta json_str meta
     else if String.length rest >= 6 && String.sub rest 0 6 = "@node:" then
@@ -1094,185 +1105,182 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
 
 (** Convert Mermaid graph to Chain AST with metadata (for lossless roundtrip) *)
 let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (meta : mermaid_meta) : (chain, string) result =
-  let deps = build_dependency_graph graph.edges in
+  let fallback () =
+    let deps = build_dependency_graph graph.edges in
 
-  (* Convert each mermaid node to chain node *)
-  let node_map = Hashtbl.create 16 in
-  let convert_result = ref (Ok ()) in
+    (* Convert each mermaid node to chain node *)
+    let node_map = Hashtbl.create 16 in
+    let convert_result = ref (Ok ()) in
 
-  List.iter (fun mnode ->
-    match !convert_result with
-    | Error _ -> ()
-    | Ok () ->
-        let parse_result =
-          (* Strip surrounding quotes that may be added by chain_to_mermaid *)
-          let content = strip_quotes mnode.content in
-          let uses_old_syntax =
-            (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
-            (String.length content > 4 && String.sub content 0 4 = "Ref:") ||
-            (String.length content > 7 && String.sub content 0 7 = "Quorum:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Gate:") ||
-            (String.length content > 6 && String.sub content 0 6 = "Merge:") ||
-            (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
-            (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
-            (String.length content > 4 && String.sub content 0 4 = "Map:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
-            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
-            (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
-            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:") ||
-            (String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:")
+    List.iter (fun mnode ->
+      match !convert_result with
+      | Error _ -> ()
+      | Ok () ->
+          let parse_result =
+            (* Strip surrounding quotes that may be added by chain_to_mermaid *)
+            let content = strip_quotes mnode.content in
+            let uses_old_syntax =
+              (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
+              (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
+              (String.length content > 4 && String.sub content 0 4 = "Ref:") ||
+              (String.length content > 7 && String.sub content 0 7 = "Quorum:") ||
+              (String.length content > 5 && String.sub content 0 5 = "Gate:") ||
+              (String.length content > 6 && String.sub content 0 6 = "Merge:") ||
+              (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
+              (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
+              (String.length content > 4 && String.sub content 0 4 = "Map:") ||
+              (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
+              (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
+              (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
+              (String.length content > 12 && String.sub content 0 12 = "StreamMerge:") ||
+              (String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:")
+            in
+            if uses_old_syntax then
+              parse_node_content mnode.shape content
+            else
+              infer_type_from_id mnode.id mnode.shape content
           in
-          if uses_old_syntax then
-            parse_node_content mnode.shape content
-          else
-            infer_type_from_id mnode.id mnode.shape content
+          match parse_result with
+          | Error e -> convert_result := Error e
+          | Ok node_type ->
+              let node_type = match node_type with
+                | Quorum { required; nodes = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    let input_nodes = List.map (fun input_id ->
+                      { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                    ) input_ids in
+                    Quorum { required; nodes = input_nodes }
+                | Merge { strategy; nodes = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    let input_nodes = List.map (fun input_id ->
+                      { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                    ) input_ids in
+                    Merge { strategy; nodes = input_nodes }
+                | GoalDriven gd ->
+                    (* Apply metadata if available *)
+                    (match Hashtbl.find_opt meta.node_goaldriven_meta mnode.id with
+                    | Some gd_meta ->
+                        (* Build action_node from metadata or edges *)
+                        let action_node_id = match gd_meta.gd_action_node_id with
+                          | Some id -> id
+                          | None ->
+                              (* Fall back to first edge source *)
+                              match Hashtbl.find_opt deps mnode.id with
+                              | Some (id :: _) -> id
+                              | _ -> "_placeholder"
+                        in
+                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
+                        GoalDriven {
+                          gd with
+                          action_node;
+                          measure_func = (match gd_meta.gd_measure_func with Some f -> f | None -> gd.measure_func);
+                          strategy_hints = if gd_meta.gd_strategy_hints <> [] then gd_meta.gd_strategy_hints else gd.strategy_hints;
+                          conversational = gd_meta.gd_conversational;
+                          relay_models = if gd_meta.gd_relay_models <> [] then gd_meta.gd_relay_models else gd.relay_models;
+                        }
+                    | None ->
+                        (* No metadata, use first edge as action_node *)
+                        let action_node_id = match Hashtbl.find_opt deps mnode.id with
+                          | Some (id :: _) -> id
+                          | _ -> "_placeholder"
+                        in
+                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
+                        GoalDriven { gd with action_node })
+                | other -> other
+              in
+              (* Use metadata input_mapping if available, otherwise infer from deps *)
+              let input_mapping =
+                match Hashtbl.find_opt meta.node_input_mappings mnode.id with
+                | Some mapping -> mapping  (* Use metadata - preserves original keys! *)
+                | None ->
+                    (* Fall back to inferred mapping *)
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some inputs -> List.map (fun inp -> (inp, inp)) inputs
+                    | None -> []
+              in
+              let node = { id = mnode.id; node_type; input_mapping } in
+              Hashtbl.replace node_map mnode.id node
+    ) graph.nodes;
+
+    match !convert_result with
+    | Error e -> Error e
+    | Ok () ->
+        let nodes_raw = Hashtbl.fold (fun _ node acc -> node :: acc) node_map [] in
+
+        (* Post-process: Resolve node types that need edge information *)
+        let nodes = List.map (fun (node : node) ->
+          match node.node_type with
+          | GoalDriven gd ->
+              let action_node_id = gd.action_node.id in
+              (match Hashtbl.find_opt node_map action_node_id with
+               | Some actual_node ->
+                   (* Replace ChainRef placeholder with actual node *)
+                   { node with node_type = GoalDriven { gd with action_node = actual_node } }
+               | None ->
+                   (* Keep original if not found (will error at runtime) *)
+                   node)
+          | Mcts mcts ->
+              (* Fill strategies from incoming edges *)
+              let input_ids = match Hashtbl.find_opt deps node.id with
+                | Some ids -> ids
+                | None -> []
+              in
+              let strategies = List.filter_map (fun id -> Hashtbl.find_opt node_map id) input_ids in
+              { node with node_type = Mcts { mcts with strategies } }
+          | _ -> node
+        ) nodes_raw in
+
+        (* Use metadata output if available, otherwise find output node *)
+        let output_nodes = find_output_nodes graph in
+        let output = match meta.chain_output with
+          | Some out -> out  (* Use metadata *)
+          | None ->
+              match output_nodes with
+              | [single] -> single
+              | first :: _ -> first
+              | [] ->
+                  match List.rev graph.nodes with
+                  | last :: _ -> last.id
+                  | [] -> "output"
         in
-        match parse_result with
-        | Error e -> convert_result := Error e
-        | Ok node_type ->
-            let node_type = match node_type with
-              | Quorum { required; nodes = _ } ->
-                  let input_ids =
-                    match Hashtbl.find_opt deps mnode.id with
-                    | Some ids -> ids
-                    | None -> []
-                  in
-                  let input_nodes = List.map (fun input_id ->
-                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
-                  ) input_ids in
-                  Quorum { required; nodes = input_nodes }
-              | Merge { strategy; nodes = _ } ->
-                  let input_ids =
-                    match Hashtbl.find_opt deps mnode.id with
-                    | Some ids -> ids
-                    | None -> []
-                  in
-                  let input_nodes = List.map (fun input_id ->
-                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
-                  ) input_ids in
-                  Merge { strategy; nodes = input_nodes }
-              | GoalDriven gd ->
-                  (* Apply metadata if available *)
-                  (match Hashtbl.find_opt meta.node_goaldriven_meta mnode.id with
-                  | Some gd_meta ->
-                      (* Build action_node from metadata or edges *)
-                      let action_node_id = match gd_meta.gd_action_node_id with
-                        | Some id -> id
-                        | None ->
-                            (* Fall back to first edge source *)
-                            match Hashtbl.find_opt deps mnode.id with
-                            | Some (id :: _) -> id
-                            | _ -> "_placeholder"
-                      in
-                      let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
-                      GoalDriven {
-                        gd with
-                        action_node;
-                        measure_func = (match gd_meta.gd_measure_func with Some f -> f | None -> gd.measure_func);
-                        strategy_hints = if gd_meta.gd_strategy_hints <> [] then gd_meta.gd_strategy_hints else gd.strategy_hints;
-                        conversational = gd_meta.gd_conversational;
-                        relay_models = if gd_meta.gd_relay_models <> [] then gd_meta.gd_relay_models else gd.relay_models;
-                      }
-                  | None ->
-                      (* No metadata, use first edge as action_node *)
-                      let action_node_id = match Hashtbl.find_opt deps mnode.id with
-                        | Some (id :: _) -> id
-                        | _ -> "_placeholder"
-                      in
-                      let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
-                      GoalDriven { gd with action_node })
-              | other -> other
-            in
-            (* Use metadata input_mapping if available, otherwise infer from deps *)
-            let input_mapping =
-              match Hashtbl.find_opt meta.node_input_mappings mnode.id with
-              | Some mapping -> mapping  (* Use metadata - preserves original keys! *)
-              | None ->
-                  (* Fall back to inferred mapping *)
-                  match Hashtbl.find_opt deps mnode.id with
-                  | Some inputs -> List.map (fun inp -> (inp, inp)) inputs
-                  | None -> []
-            in
-            let node = { id = mnode.id; node_type; input_mapping } in
-            Hashtbl.replace node_map mnode.id node
-  ) graph.nodes;
 
-  match !convert_result with
-  | Error e -> Error e
-  | Ok () ->
-      let nodes_raw = Hashtbl.fold (fun _ node acc -> node :: acc) node_map [] in
+        (* Use metadata chain_id if available *)
+        let final_id = match meta.chain_id with
+          | Some mid -> mid
+          | None -> id
+        in
 
-      (* Post-process: Resolve node types that need edge information *)
-      let nodes = List.map (fun (node : node) ->
-        match node.node_type with
-        | GoalDriven gd ->
-            let action_node_id = gd.action_node.id in
-            (match Hashtbl.find_opt node_map action_node_id with
-             | Some actual_node ->
-                 (* Replace ChainRef placeholder with actual node *)
-                 { node with node_type = GoalDriven { gd with action_node = actual_node } }
-             | None ->
-                 (* Keep original if not found (will error at runtime) *)
-                 node)
-        | Mcts mcts ->
-            (* Fill strategies from incoming edges *)
-            let input_ids = match Hashtbl.find_opt deps node.id with
-              | Some ids -> ids
-              | None -> []
-            in
-            let strategies = List.filter_map (fun id -> Hashtbl.find_opt node_map id) input_ids in
-            { node with node_type = Mcts { mcts with strategies } }
-        | _ -> node
-      ) nodes_raw in
+        (* Build config with metadata values *)
+        let config = {
+          max_depth = (match meta.chain_max_depth with Some d -> d | None -> default_config.max_depth);
+          max_concurrency = (match meta.chain_max_concurrency with Some c -> c | None -> default_config.max_concurrency);
+          timeout = (match meta.chain_timeout with Some t -> t | None -> default_config.timeout);
+          trace = (match meta.chain_trace with Some t -> t | None -> default_config.trace);
+          direction = direction_of_string graph.direction;
+        } in
 
-      (* Use metadata output if available, otherwise find output node *)
-      let output_nodes = find_output_nodes graph in
-      let output = match meta.chain_output with
-        | Some out -> out  (* Use metadata *)
-        | None ->
-            match output_nodes with
-            | [single] -> single
-            | first :: _ -> first
-            | [] ->
-                match List.rev graph.nodes with
-                | last :: _ -> last.id
-                | [] -> "output"
-      in
-
-      (* Use metadata chain_id if available *)
-      let final_id = match meta.chain_id with
-        | Some mid -> mid
-        | None -> id
-      in
-
-      (* Build config with metadata values *)
-      let config = {
-        default_config with
-        direction = direction_of_string graph.direction;
-        timeout = (match meta.chain_timeout with Some t -> t | None -> default_config.timeout);
-        trace = (match meta.chain_trace with Some t -> t | None -> default_config.trace);
-        max_depth = (match meta.chain_max_depth with Some d -> d | None -> default_config.max_depth);
-      } in
-
-      Ok { id = final_id; nodes; output; config }
-
-(** Main entry point: Parse Mermaid text into Chain *)
-let parse_chain (text : string) : (chain, string) result =
-  match parse_mermaid_text text with
-  | Error e -> Error e
-  | Ok graph -> mermaid_to_chain graph
-
-(** Parse with custom chain ID *)
-let parse_chain_with_id ~id (text : string) : (chain, string) result =
-  match parse_mermaid_text text with
-  | Error e -> Error e
-  | Ok graph -> mermaid_to_chain ~id graph
+        Ok { id = final_id; nodes; output; config }
+  in
+  match meta.chain_json with
+  | Some json ->
+      (match Chain_parser.parse_chain json with
+       | Ok chain -> Ok chain
+       | Error _ -> fallback ())
+  | None -> fallback ()
 
 (** Parse Mermaid text into Chain with metadata (lossless roundtrip)
 
     This function preserves all metadata embedded in Mermaid comments:
-    - %% @chain {"id":"...", "output":"...", "timeout":300, "trace":true, "max_depth":4}
+    - %% @chain {"id":"...", "output":"...", "timeout":300, "trace":true, "max_depth":4, "max_concurrency":3}
+    - %% @chain_json { ... full chain JSON ... }
     - %% @node:nodeid {"input_mapping":[["key1","val1"],["key2","val2"]]}
 
     Usage:
@@ -1285,6 +1293,14 @@ let parse_mermaid_to_chain ?(id = "mermaid_chain") (text : string) : (chain, str
   match parse_mermaid_text_with_meta text with
   | Error e -> Error e
   | Ok (graph, meta) -> mermaid_to_chain_with_meta ~id graph meta
+
+(** Main entry point: Parse Mermaid text into Chain *)
+let parse_chain (text : string) : (chain, string) result =
+  parse_mermaid_to_chain text
+
+(** Parse with custom chain ID *)
+let parse_chain_with_id ~id (text : string) : (chain, string) result =
+  parse_mermaid_to_chain ~id text
 
 (* ═══════════════════════════════════════════════════════════════════
    REVERSE DIRECTION: Chain AST → Mermaid
@@ -1552,6 +1568,7 @@ let config_meta_to_json (chain : chain) : Yojson.Safe.t =
     ("timeout", `Int chain.config.timeout);
     ("trace", `Bool chain.config.trace);
     ("max_depth", `Int chain.config.max_depth);
+    ("max_concurrency", `Int chain.config.max_concurrency);
   ]
 
 let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
@@ -1563,6 +1580,8 @@ let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
   if lossless then begin
     let config_json = Yojson.Safe.to_string (config_meta_to_json chain) in
     Buffer.add_string buf (Printf.sprintf "    %%%% @chain %s\n" config_json);
+    let chain_json = Yojson.Safe.to_string (Chain_parser.chain_to_json chain) in
+    Buffer.add_string buf (Printf.sprintf "    %%%% @chain_json %s\n" chain_json);
     (* Emit node metadata *)
     List.iter (fun (node : node) ->
       match node_meta_to_json node with
