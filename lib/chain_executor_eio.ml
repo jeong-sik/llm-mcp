@@ -86,10 +86,11 @@ type exec_context = {
   mutable conversation: conversation_ctx option; (** Conversation context for conversational mode *)
   cache: (string, string * float) Hashtbl.t;  (** Node cache: key -> (result, timestamp) *)
   mutable total_tokens: Chain_category.token_usage; (** Accumulated token usage *)
+  langfuse_trace: Langfuse.trace option;     (** Langfuse trace for observability *)
 }
 
 (** Create a new execution context *)
-let make_context ~start_time ~trace_enabled ~timeout = {
+let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace () = {
   outputs = Hashtbl.create 16;
   traces = ref [];
   start_time;
@@ -99,6 +100,7 @@ let make_context ~start_time ~trace_enabled ~timeout = {
   conversation = None;
   cache = Hashtbl.create 32;
   total_tokens = Chain_category.Token_monoid.empty;
+  langfuse_trace;
 }
 
 (** {1 Trace Helpers} *)
@@ -476,6 +478,18 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
       let final_system = Option.map (fun s -> substitute_iteration_vars s ctx.iteration_ctx) resolved_system in
       record_start ctx node.id;
       let start = Unix.gettimeofday () in
+
+      (* Create Langfuse generation if tracing is enabled *)
+      let langfuse_gen = match ctx.langfuse_trace with
+        | Some trace ->
+            let input_str = match final_system with
+              | Some sys -> Printf.sprintf "[system] %s\n[user] %s" sys final_prompt
+              | None -> final_prompt
+            in
+            Some (Langfuse.create_generation ~trace ~name:node.id ~model ~input:input_str ())
+        | None -> None
+      in
+
       let result = exec_fn ~model ?system:final_system ~prompt:final_prompt ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
@@ -490,13 +504,24 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
             estimated_cost_usd = 0.0;
           } in
           ctx.total_tokens <- Chain_category.Token_monoid.concat ctx.total_tokens node_tokens;
+
+          (* End Langfuse generation with success *)
+          (match langfuse_gen with
+           | Some gen -> Langfuse.end_generation gen ~output ~prompt_tokens ~completion_tokens
+           | None -> ());
+
           record_complete ctx node.id ~duration_ms ~success:true;
           Hashtbl.add ctx.outputs node.id output;
           Ok output
-  | Error msg ->
-      record_complete ctx node.id ~duration_ms ~success:false;
-      record_error ctx node.id msg;
-      Error msg)
+      | Error msg ->
+          (* End Langfuse generation with error *)
+          (match langfuse_gen with
+           | Some gen -> Langfuse.error_generation gen ~message:msg
+           | None -> ());
+
+          record_complete ctx node.id ~duration_ms ~success:false;
+          record_error ctx node.id msg;
+          Error msg)
   | _ -> Error "execute_llm_node called with non-LLM node"
 
 (** Execute a tool node *)
@@ -1066,6 +1091,7 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       ~start_time:ctx.start_time
       ~trace_enabled:ctx.trace_enabled
       ~timeout:ctx.timeout
+      ()
     in
     (* Optionally inherit cache *)
     if inherit_cache then
@@ -2091,7 +2117,18 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 (** Execute a compiled execution plan *)
 let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_plan) : chain_result =
   let start_time = Unix.gettimeofday () in
-  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout in
+
+  (* Create Langfuse trace for observability if enabled *)
+  let langfuse_trace =
+    if Langfuse.is_enabled () then
+      Some (Langfuse.create_trace
+        ~name:plan.chain.Chain_types.id
+        ~metadata:[("type", "chain"); ("nodes", string_of_int (List.length plan.chain.Chain_types.nodes))]
+        ())
+    else None
+  in
+
+  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ?langfuse_trace ()  in
 
   (* Record chain start with mermaid visualization *)
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid plan.chain) in
@@ -2101,6 +2138,19 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec (plan : execution_pla
   let make_result ~success ~output =
     let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
     let trace = traces_to_entries (List.rev !(ctx.traces)) in
+
+    (* End Langfuse trace if enabled *)
+    (match langfuse_trace with
+     | Some t ->
+         (* Update trace metadata with final status *)
+         t.Langfuse.metadata <- [
+           ("success", string_of_bool success);
+           ("duration_ms", string_of_int duration_ms);
+           ("output_length", string_of_int (String.length output));
+         ];
+         Langfuse.end_trace t
+     | None -> ());
+
     {
       Chain_types.chain_id = plan.chain.Chain_types.id;
       output;

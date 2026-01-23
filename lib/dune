@@ -30,6 +30,8 @@
    chain_category
    chain_stats
    chain_telemetry
+   ; Observability
+   langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
    mcp_session
    ; SSE Notifications (Pure OCaml - moved from llm_mcp)
@@ -43,7 +45,9 @@
    msgpck
    compact-protocol
    grpc-direct-core
-   mcp_protocol)
+   mcp_protocol
+   base64
+   uri)
  (ocamlopt_flags (:standard -O3))
 (preprocess (pps ppx_deriving_yojson)))
 
