@@ -142,7 +142,7 @@ let read_lines_tail ~max_bytes ~max_lines path =
           let size = st.Unix.st_size in
           let start = if size > max_bytes then size - max_bytes else 0 in
           if start > 0 then begin
-            In_channel.seek ic start;
+            In_channel.seek ic (Int64.of_int start);
             (* Drop partial line to align to next full line. *)
             (try ignore (In_channel.input_line ic) with End_of_file -> ())
           end;
