@@ -2146,6 +2146,108 @@ let test_stream_merge_impossible_min_results () =
       (* Also acceptable: compile-time validation *)
       ()
 
+(** P2: True roundtrip - Mermaid → Chain → Mermaid → Chain *)
+let test_stream_merge_true_roundtrip () =
+  let original = {|graph LR
+    a["LLM:gemini 'Task A'"]
+    b["LLM:claude 'Task B'"]
+    merge[["StreamMerge:concat,1,30.0"]]
+    a --> merge
+    b --> merge|} in
+  match Chain_mermaid_parser.parse_chain original with
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse 1 error: %s" e)
+  | Ok chain1 ->
+      (* Serialize back to Mermaid *)
+      let serialized = Chain_mermaid_parser.chain_to_mermaid ~lossless:true chain1 in
+      (* Parse again *)
+      (match Chain_mermaid_parser.parse_chain serialized with
+       | Error e -> Alcotest.fail (Printf.sprintf "Parse 2 error: %s\nSerialized:\n%s" e serialized)
+       | Ok chain2 ->
+           (* Compare key properties *)
+           Alcotest.(check int) "node count preserved"
+             (List.length chain1.nodes) (List.length chain2.nodes);
+           (* Find merge nodes in both *)
+           let find_merge nodes =
+             List.find_opt (fun (n : node) ->
+               match n.node_type with StreamMerge _ -> true | _ -> false
+             ) nodes
+           in
+           match find_merge chain1.nodes, find_merge chain2.nodes with
+           | Some m1, Some m2 ->
+               (match m1.node_type, m2.node_type with
+                | StreamMerge s1, StreamMerge s2 ->
+                    Alcotest.(check (option int)) "min_results" s1.min_results s2.min_results;
+                    Alcotest.(check (option (float 0.01))) "timeout" s1.timeout s2.timeout
+                | _ -> Alcotest.fail "Type mismatch")
+           | _ -> Alcotest.fail "StreamMerge node not found in roundtrip")
+
+(** P2: Zero timeout edge case *)
+let test_stream_merge_zero_timeout () =
+  let json_str = {|
+{
+  "id": "zero_timeout",
+  "nodes": [
+    {
+      "id": "merger",
+      "type": "stream_merge",
+      "reducer": "first",
+      "timeout": 0.0,
+      "nodes": [
+        {"id": "a", "type": "llm", "model": "gemini", "prompt": "A"}
+      ]
+    }
+  ],
+  "output": "merger"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | StreamMerge { timeout; _ } ->
+           (* 0.0 should be preserved, not treated as None *)
+           Alcotest.(check (option (float 0.001))) "zero timeout" (Some 0.0) timeout
+       | _ -> Alcotest.fail "Expected StreamMerge")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
+(** P2: Nested StreamMerge depth calculation *)
+let test_stream_merge_nested_depth () =
+  let json_str = {|
+{
+  "id": "nested_test",
+  "nodes": [
+    {
+      "id": "outer",
+      "type": "stream_merge",
+      "reducer": "concat",
+      "nodes": [
+        {
+          "id": "inner",
+          "type": "stream_merge",
+          "reducer": "first",
+          "nodes": [
+            {"id": "a", "type": "llm", "model": "gemini", "prompt": "A"},
+            {"id": "b", "type": "llm", "model": "claude", "prompt": "B"}
+          ]
+        },
+        {"id": "c", "type": "llm", "model": "codex", "prompt": "C"}
+      ]
+    }
+  ],
+  "output": "outer"
+}
+|} in
+  let json = Yojson.Safe.from_string json_str in
+  match parse_chain json with
+  | Ok chain ->
+      (match compile chain with
+       | Ok plan ->
+           (* outer(1) + max(inner(1) + max(a,b), c) = 1 + max(2, 1) = 3 *)
+           Alcotest.(check int) "nested depth" 3 plan.depth
+       | Error e -> Alcotest.fail (Printf.sprintf "Compile error: %s" e))
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
+
 let stream_merge_tests = [
   "parse_stream_merge_basic", `Quick, test_parse_stream_merge_basic;
   "stream_merge_reducers", `Quick, test_stream_merge_reducers;
@@ -2155,6 +2257,10 @@ let stream_merge_tests = [
   "stream_merge_custom_reducer", `Quick, test_stream_merge_unknown_reducer_becomes_custom;
   "stream_merge_missing_nodes", `Quick, test_stream_merge_missing_nodes_field;
   "stream_merge_impossible_min", `Quick, test_stream_merge_impossible_min_results;
+  (* P2: Advanced tests *)
+  "stream_merge_true_roundtrip", `Quick, test_stream_merge_true_roundtrip;
+  "stream_merge_zero_timeout", `Quick, test_stream_merge_zero_timeout;
+  "stream_merge_nested_depth", `Quick, test_stream_merge_nested_depth;
 ]
 
 let () =

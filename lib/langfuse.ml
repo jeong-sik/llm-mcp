@@ -128,18 +128,17 @@ let trace_to_json (t : trace) =
 
 (** Encode generation to JSON *)
 let generation_to_json (gen : generation) =
-  (* Langfuse expects input/output as JSON objects, not plain strings *)
-  let input_obj = `Assoc [("prompt", `String gen.input)] in
+  (* Langfuse expects input/output as plain strings or standard formats *)
   let base = [
     ("id", `String gen.gen_id);
     ("traceId", `String gen.trace_id);
     ("name", `String gen.name);
     ("model", `String gen.model);
-    ("input", input_obj);
+    ("input", `String gen.input);
     ("startTime", `String (iso8601_of_float gen.started_at));
   ] in
   let with_output = match gen.output with
-    | Some o -> base @ [("output", `Assoc [("response", `String o)])]
+    | Some o -> base @ [("output", `String o)]
     | None -> base
   in
   let with_usage = match gen.usage with
