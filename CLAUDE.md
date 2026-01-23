@@ -9,6 +9,12 @@ chain.validate     - Validate chain syntax
 chain.to_mermaid   - Convert JSON chain to Mermaid
 chain.list         - List registered chains
 chain.orchestrate  - Run preset chain by ID
+chain.checkpoints  - List saved checkpoints
+chain.resume       - Resume chain from checkpoint
+
+prompt.register    - Register a prompt template
+prompt.list        - List all registered prompts
+prompt.get         - Get prompt by ID (with optional version)
 ```
 
 ### Presets (data/chains/)
@@ -58,6 +64,7 @@ graph LR
 | Cache | `[["Cache:60s"]]` | `[[double]]` |
 | GoalDriven | `{GoalDriven:evaluator}` | `{diamond}` |
 | Spawn | `[["Spawn:clean,node"]]` | `[[double]]` |
+| FeedbackLoop | `[[FeedbackLoop:eval_id,max_iter,min_score]]` | `[[double]]` |
 
 ### LLM Node Format
 ```
@@ -222,6 +229,284 @@ This chain:
 1. Generates test code
 2. Scores with anti_fake (heuristic + LLM)
 3. Fails if score < 0.7
+
+---
+
+## FeedbackLoop (Iterative Improvement)
+
+The FeedbackLoop node combines generation, evaluation, and improvement in an iterative cycle until quality threshold is met.
+
+### Concept (DSPy-Inspired)
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    FeedbackLoop                           │
+├──────────────────────────────────────────────────────────┤
+│  1. Generator → produces initial output                   │
+│  2. Evaluator → scores output (0.0-1.0)                   │
+│  3. If score < threshold:                                 │
+│     - Generate feedback explaining why                    │
+│     - Improver uses feedback to regenerate                │
+│     - Loop back to step 2                                 │
+│  4. Exit when score >= threshold or max_iterations hit    │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Mermaid Syntax
+
+```mermaid
+graph LR
+    gen["LLM:gemini 'Generate code for {{input}}'"]
+    loop[["FeedbackLoop:code_quality,3,0.8"]]
+    gen --> loop
+```
+
+Parameters: `FeedbackLoop:evaluator_id,max_iterations,min_score`
+
+### JSON Format
+
+```json
+{
+  "id": "quality_loop",
+  "type": "feedback_loop",
+  "generator": {
+    "id": "gen",
+    "type": "llm",
+    "model": "gemini",
+    "prompt": "Generate: {{input}}"
+  },
+  "evaluator_config": {
+    "scoring_func": "llm_judge",
+    "scoring_prompt": "Score code quality 0-1"
+  },
+  "improver_prompt": "Improve based on feedback: {{feedback}}",
+  "max_iterations": 3,
+  "min_score": 0.8
+}
+```
+
+### Example: Self-Improving Code Generation
+
+```mermaid
+graph LR
+    spec["LLM:gemini 'Parse requirements'"]
+    gen["LLM:claude 'Generate TypeScript code'"]
+    loop[["FeedbackLoop:type_safety,5,0.9"]]
+    spec --> gen --> loop
+```
+
+This chain:
+1. Parses requirements
+2. Generates TypeScript code
+3. Evaluator checks type safety
+4. If score < 0.9: improver refines code with feedback
+5. Repeats until score >= 0.9 or 5 iterations
+
+---
+
+## Checkpoint/Resume (State Persistence)
+
+Checkpoint allows long-running chains to save state and resume from failure points.
+
+### Concept (LangGraph-Inspired)
+
+```
+Chain execution:
+  Node A ✅ → Checkpoint 1 saved
+  Node B ✅ → Checkpoint 2 saved
+  Node C ❌ failure!
+
+Resume:
+  Load Checkpoint 2 → Skip A, B → Retry C
+```
+
+### Enabling Checkpoints
+
+```json
+{
+  "name": "chain.run",
+  "arguments": {
+    "mermaid": "graph LR\n  a --> b --> c",
+    "input": {...},
+    "checkpoint_enabled": true
+  }
+}
+```
+
+### Checkpoint Tools
+
+#### List Checkpoints
+```bash
+curl -X POST http://localhost:8932/mcp -d '{
+  "method": "tools/call",
+  "params": {
+    "name": "chain.checkpoints",
+    "arguments": {"chain_id": "my-chain"}
+  }
+}'
+```
+
+Response:
+```json
+{
+  "checkpoints": [
+    {
+      "run_id": "abc123",
+      "node_id": "step_2",
+      "timestamp": 1705123456.78,
+      "outputs": {"step_1": "result..."}
+    }
+  ]
+}
+```
+
+#### Resume from Checkpoint
+```bash
+curl -X POST http://localhost:8932/mcp -d '{
+  "method": "tools/call",
+  "params": {
+    "name": "chain.resume",
+    "arguments": {
+      "run_id": "abc123",
+      "input": {"additional": "data"}
+    }
+  }
+}'
+```
+
+### Storage Location
+
+Checkpoints are stored in: `~/.cache/llm-mcp/checkpoints/{run_id}.json`
+
+### Example: Resumable Pipeline
+
+```mermaid
+graph LR
+    fetch["Tool:fetch_data"]
+    process["LLM:gemini 'Process {{fetch}}'"]
+    analyze["LLM:claude 'Analyze {{process}}'"]
+    report["LLM:codex 'Generate report'"]
+    fetch --> process --> analyze --> report
+```
+
+Run with checkpoint:
+```json
+{
+  "mermaid": "...",
+  "checkpoint_enabled": true
+}
+```
+
+If `analyze` fails, resume from `process` checkpoint without re-fetching data.
+
+---
+
+## Prompt Registry (Template Management)
+
+The Prompt Registry provides versioned prompt templates with usage metrics.
+
+### Concept (DSPy-Inspired)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Prompt Registry                       │
+├─────────────────────────────────────────────────────────┤
+│  • Version control for prompts (semver)                  │
+│  • Track usage metrics (count, avg_score)                │
+│  • Reference prompts by ID in chains                     │
+│  • A/B testing with version selection                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Prompt Tools
+
+#### Register a Prompt
+```bash
+curl -X POST http://localhost:8932/mcp -d '{
+  "method": "tools/call",
+  "params": {
+    "name": "prompt.register",
+    "arguments": {
+      "id": "code-review-v2",
+      "template": "Review this {{language}} code:\n{{code}}\n\nFocus on: {{aspects}}",
+      "version": "2.0.0"
+    }
+  }
+}'
+```
+
+#### List Prompts
+```bash
+curl -X POST http://localhost:8932/mcp -d '{
+  "method": "tools/call",
+  "params": {
+    "name": "prompt.list",
+    "arguments": {}
+  }
+}'
+```
+
+Response:
+```json
+{
+  "prompts": [
+    {
+      "id": "code-review-v2",
+      "version": "2.0.0",
+      "variables": ["language", "code", "aspects"],
+      "metrics": {"usage_count": 156, "avg_score": 0.85}
+    }
+  ]
+}
+```
+
+#### Get Prompt (with version)
+```bash
+curl -X POST http://localhost:8932/mcp -d '{
+  "method": "tools/call",
+  "params": {
+    "name": "prompt.get",
+    "arguments": {
+      "id": "code-review-v2",
+      "version": "1.0.0"
+    }
+  }
+}'
+```
+
+### Using Prompts in Chains
+
+Reference registered prompts with `prompt_ref`:
+
+```json
+{
+  "id": "review",
+  "type": "llm",
+  "model": "claude",
+  "prompt_ref": "code-review-v2",
+  "prompt_vars": {
+    "language": "TypeScript",
+    "code": "{{input.code}}",
+    "aspects": "type safety, error handling"
+  }
+}
+```
+
+### Storage Location
+
+Prompts are stored in: `data/prompts/{id}.json`
+
+### Example: A/B Testing Prompts
+
+```json
+// Version 1.0.0 - Direct approach
+{"id": "summarize", "template": "Summarize: {{text}}", "version": "1.0.0"}
+
+// Version 2.0.0 - Chain-of-thought
+{"id": "summarize", "template": "Analyze key points, then summarize: {{text}}", "version": "2.0.0"}
+```
+
+Compare metrics to determine which version performs better.
 
 ---
 
