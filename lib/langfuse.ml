@@ -42,7 +42,10 @@ let load_config () =
 let config = lazy (load_config ())
 
 (** Check if Langfuse is enabled *)
-let is_enabled () = (Lazy.force config).enabled
+let is_enabled () =
+  let cfg = Lazy.force config in
+  Printf.eprintf "[Langfuse] is_enabled check: enabled=%b, host=%s\n%!" cfg.enabled cfg.host;
+  cfg.enabled
 
 (** {1 ID Generation} *)
 
@@ -125,16 +128,18 @@ let trace_to_json (t : trace) =
 
 (** Encode generation to JSON *)
 let generation_to_json (gen : generation) =
+  (* Langfuse expects input/output as JSON objects, not plain strings *)
+  let input_obj = `Assoc [("prompt", `String gen.input)] in
   let base = [
     ("id", `String gen.gen_id);
     ("traceId", `String gen.trace_id);
     ("name", `String gen.name);
     ("model", `String gen.model);
-    ("input", `String gen.input);
+    ("input", input_obj);
     ("startTime", `String (iso8601_of_float gen.started_at));
   ] in
   let with_output = match gen.output with
-    | Some o -> base @ [("output", `String o)]
+    | Some o -> base @ [("output", `Assoc [("response", `String o)])]
     | None -> base
   in
   let with_usage = match gen.usage with
@@ -198,6 +203,8 @@ let send_to_langfuse ~endpoint ~body () =
       let uri = Uri.of_string url in
       let host = Uri.host uri |> Option.value ~default:"localhost" in
       let port = Uri.port uri |> Option.value ~default:3100 in
+      Printf.eprintf "[Langfuse] Sending to %s:%d, endpoint=%s\n%!" host port endpoint;
+      Printf.eprintf "[Langfuse] Body: %s\n%!" (String.sub body_str 0 (min 500 (String.length body_str)));
       let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string
         (try (Unix.gethostbyname host).Unix.h_addr_list.(0)
               |> Unix.string_of_inet_addr
@@ -207,6 +214,7 @@ let send_to_langfuse ~endpoint ~body () =
       Unix.setsockopt_float sock Unix.SO_SNDTIMEO 2.0;  (* 2 second timeout *)
       Unix.setsockopt_float sock Unix.SO_RCVTIMEO 2.0;
       Unix.connect sock sockaddr;
+      Printf.eprintf "[Langfuse] Connected to socket\n%!";
 
       let path = Uri.path uri in
       let request = Printf.sprintf
@@ -219,11 +227,11 @@ let send_to_langfuse ~endpoint ~body () =
       let _ = Unix.write_substring sock request 0 (String.length request) in
       (* Read response to ensure request is processed *)
       let buf = Bytes.create 256 in
-      let _ = try Unix.read sock buf 0 256 with _ -> 0 in
+      let n = try Unix.read sock buf 0 256 with _ -> 0 in
+      Printf.eprintf "[Langfuse] Response (%d bytes): %s\n%!" n (Bytes.sub_string buf 0 (min n 100));
       Unix.close sock
-    with _ ->
-      (* Silently ignore errors - tracing should not break main flow *)
-      ()
+    with exn ->
+      Printf.eprintf "[Langfuse] Error: %s\n%!" (Printexc.to_string exn)
   end
 
 (** {1 API Functions} *)
