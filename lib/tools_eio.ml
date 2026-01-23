@@ -1138,7 +1138,7 @@ This chain will execute the goal using a stub model.|}
        | Ok cp ->
            (* Load the original chain from registry or reparse *)
            let chain_id = cp.Checkpoint_store.chain_id in
-           (match Chain_registry.get chain_id with
+           (match Chain_registry.lookup chain_id with
             | None ->
                 { model = "chain.resume";
                   returncode = -1;
@@ -1179,8 +1179,8 @@ This chain will execute the goal using a stub model.|}
                                    try
                                      Some {
                                        Types.name = item |> member "name" |> to_string;
-                                       description = item |> member "description" |> to_string_option;
-                                       parameters = Some (item |> member "parameters");
+                                      description = (match item |> member "description" |> to_string_option with Some s -> s | None -> "");
+                                      input_schema = item |> member "parameters";
                                      }
                                    with _ -> None
                                  ) items in
@@ -1217,16 +1217,16 @@ This chain will execute the goal using a stub model.|}
                            { model = sprintf "unknown:%s" model; returncode = 1;
                              response = sprintf "Unknown model: %s" model; extra = [] }
                        in
-                       if result.returncode = 0 then result.response
-                       else failwith (sprintf "LLM error: %s" result.response)
+                       if result.returncode = 0 then Ok result.response
+                       else Error (sprintf "LLM error: %s" result.response)
                      in
                      let tool_exec ~name ~args:tool_args =
                        match split_tool_name name with
                        | Some (server_name, tool_name) ->
                            let output = call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments:tool_args ~timeout:node_timeout in
-                           (try Yojson.Safe.from_string output with _ -> `String output)
+                           Ok output
                        | None ->
-                           `Assoc [("error", `String (sprintf "Unknown tool: %s" name))]
+                           Error (sprintf "Unknown tool: %s" name)
                      in
                      (* Create checkpoint config for resume *)
                      let checkpoint_config = Chain_executor_eio.make_checkpoint_config
