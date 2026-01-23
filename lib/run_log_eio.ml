@@ -67,7 +67,14 @@ let read_events () =
   let path = log_path () in
   if not (Sys.file_exists path) then []
   else
-    Common.read_lines path
+    let int_env name ~default =
+      match Sys.getenv_opt name with
+      | Some v -> (try int_of_string v with _ -> default)
+      | None -> default
+    in
+    let max_bytes = int_env "LLM_MCP_RUN_LOG_MAX_BYTES" ~default:(10 * 1024 * 1024) in
+    let max_lines = int_env "LLM_MCP_RUN_LOG_MAX_LINES" ~default:100_000 in
+    Common.read_lines_tail ~max_bytes ~max_lines path
     |> List.filter_map (fun line ->
       let line = String.trim line in
       if line = "" then None
