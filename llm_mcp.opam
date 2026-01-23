@@ -18,12 +18,15 @@ depends: [
   "compact-protocol" {>= "0.1.0"}
   "yojson" {>= "2.0"}
   "cmdliner" {>= "1.1"}
-  "lwt" {>= "5.6"}
-  "lwt_ppx" {>= "2.1"}
-  "cohttp-lwt-unix" {>= "5.0"}
   "ppx_deriving_yojson" {>= "3.6"}
+  "eio" {>= "1.0"}
+  "eio_main" {>= "1.0"}
+  "cohttp" {>= "6.0"}
+  "cohttp-eio" {>= "6.0"}
+  "httpun-eio" {>= "0.1"}
+  "gluten-eio" {>= "0.4"}
   "caqti" {>= "2.0"}
-  "caqti-lwt" {>= "2.0"}
+  "caqti-eio" {>= "2.0"}
   "caqti-driver-postgresql" {>= "2.0"}
   "re" {>= "1.10"}
   "base64" {>= "3.5"}
@@ -35,7 +38,6 @@ depends: [
   "zstd" {>= "0.4"}
   "domainslib" {>= "0.5"}
   "alcotest" {with-test & >= "1.6"}
-  "alcotest-lwt" {with-test & >= "1.6"}
   "odoc" {with-doc}
 ]
 build: [

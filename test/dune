@@ -110,7 +110,7 @@
 
 (executable
  (name test_resilience_mermaid)
- (libraries llm_mcp))
+ (libraries llm_mcp.eio))
 
 ; Lossless Roundtrip tests (JSON ↔ Mermaid with metadata)
 (test
