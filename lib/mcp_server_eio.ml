@@ -253,10 +253,10 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | _ -> failwith (sprintf "Unknown tool: %s" name)
   in
 
-  (* Execute via direct Eio call *)
+  (* Execute via direct Eio call with Langfuse tracing *)
   let result =
     try
-      Tools_eio.execute ~sw ~proc_mgr ~clock args
+      Tools_eio.execute_with_tracing ~sw ~proc_mgr ~clock args
     with exn ->
       { Types.model = "error";
         returncode = 1;
@@ -267,10 +267,23 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
 
   (* Format response - returncode 0 = success *)
   let is_error = result.Types.returncode <> 0 in
+
+  (* Build response text - include extra fields like tool_calls, thinking *)
+  let response_text =
+    let extra_json = match result.Types.extra with
+      | [] -> ""
+      | extras ->
+          let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
+          if result.response = "" then json_str
+          else "\n\n[Extra]\n" ^ json_str
+    in
+    result.response ^ extra_json
+  in
+
   let content =
     `Assoc [
       ("type", `String "text");
-      ("text", `String result.response);
+      ("text", `String response_text);
     ]
   in
   make_response ~id (`Assoc [

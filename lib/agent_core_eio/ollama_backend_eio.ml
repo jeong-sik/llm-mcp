@@ -47,6 +47,7 @@ let default_config = {
 
 type response = {
   content : string;
+  thinking : string option;  (** Thinking/reasoning from models like Nemotron *)
   tool_calls : tool_call list;
   done_ : bool;
   model : string option;
@@ -163,12 +164,13 @@ let parse_response json_str : (response, string) result =
     | None ->
       let message = json |> member "message" in
       let content = message |> member "content" |> to_string_option |> Option.value ~default:"" in
+      let thinking = message |> member "thinking" |> to_string_option in  (* Nemotron-style thinking *)
       let tool_calls = parse_tool_calls_json (message |> member "tool_calls") in
       let done_ = json |> member "done" |> to_bool_option |> Option.value ~default:true in
       let model = json |> member "model" |> to_string_option in
       let eval_count = json |> member "eval_count" |> to_int_option in
       let eval_duration = json |> member "eval_duration" |> to_int_option in
-      Result.Ok { content; tool_calls; done_; model; eval_count; eval_duration }
+      Result.Ok { content; thinking; tool_calls; done_; model; eval_count; eval_duration }
   with
   | Yojson.Json_error msg -> Result.Error (Printf.sprintf "JSON parse error: %s" msg)
   | e -> Result.Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))

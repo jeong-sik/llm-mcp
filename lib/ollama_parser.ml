@@ -39,7 +39,8 @@ type tool_call = {
 }
 
 (** Parse chat response from /api/chat endpoint.
-    Returns the assistant message content or error. *)
+    Returns the assistant message content, thinking, and tool_calls or error.
+    Supports Nemotron-style responses with thinking field. *)
 let parse_chat_response json_str =
   try
     let json = Yojson.Safe.from_string json_str in
@@ -49,8 +50,9 @@ let parse_chat_response json_str =
     | None ->
         let message = json |> member "message" in
         let content = message |> member "content" |> to_string_option |> Option.value ~default:"" in
+        let thinking = message |> member "thinking" |> to_string_option in
         let tool_calls = message |> member "tool_calls" in
-        Ok (content, tool_calls)
+        Ok (content, thinking, tool_calls)
   with
   | Yojson.Json_error msg -> Error (Printf.sprintf "JSON parse error: %s" msg)
   | _ -> Error (Printf.sprintf "Failed to parse chat response: %s" json_str)
@@ -77,23 +79,24 @@ let parse_tool_calls (tool_calls_json : Yojson.Safe.t) : tool_call list =
       ) calls
   | _ -> []
 
-(** Chat response result type *)
+(** Chat response result type - now includes optional thinking *)
 type chat_result =
-  | TextResponse of string
-  | ToolCalls of tool_call list
-  | TextWithTools of string * tool_call list
+  | TextResponse of string * string option  (* content, thinking *)
+  | ToolCalls of tool_call list * string option  (* calls, thinking *)
+  | TextWithTools of string * tool_call list * string option  (* content, calls, thinking *)
 
-(** Parse chat response and categorize the result *)
+(** Parse chat response and categorize the result.
+    Supports Nemotron-style thinking field. *)
 let parse_chat_result json_str : (chat_result, string) result =
   match parse_chat_response json_str with
   | Error e -> Error e
-  | Ok (content, tool_calls_json) ->
+  | Ok (content, thinking, tool_calls_json) ->
       let tool_calls = parse_tool_calls tool_calls_json in
-      match (content, tool_calls) with
-      | ("", []) -> Ok (TextResponse "")
-      | (text, []) -> Ok (TextResponse text)
-      | ("", calls) -> Ok (ToolCalls calls)
-      | (text, calls) -> Ok (TextWithTools (text, calls))
+      (match (content, tool_calls) with
+      | ("", []) -> Ok (TextResponse ("", thinking))
+      | (text, []) -> Ok (TextResponse (text, thinking))
+      | ("", calls) -> Ok (ToolCalls (calls, thinking))
+      | (text, calls) -> Ok (TextWithTools (text, calls, thinking)))
 
 (** Parse streaming chunk from /api/chat endpoint.
     Chat streaming returns: {"message": {"content": "token"}, "done": false}
