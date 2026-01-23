@@ -677,6 +677,10 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | StreamMerge { nodes = stream_nodes; reducer; initial; min_results; timeout } ->
       execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~nodes:stream_nodes ~reducer ~initial ~min_results ~timeout
+  (* FeedbackLoop: Iterative quality improvement with evaluator feedback *)
+  | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score } ->
+      execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec node
+        ~generator ~evaluator_config ~improver_prompt ~max_iterations ~min_score
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
@@ -1978,6 +1982,125 @@ Reply with ONLY a number between 0.0 and 1.0:|}
           Ok output
     end
   end
+
+(** Execute FeedbackLoop node - iterative quality improvement with evaluator feedback *)
+and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
+    ~generator ~(evaluator_config : Chain_types.evaluator_config)
+    ~improver_prompt ~max_iterations ~min_score : (string, string) result =
+  record_start ctx parent.id;
+  let start = Unix.gettimeofday () in
+
+  (* Helper: Score output using evaluator_config.scoring_func *)
+  let score_output output =
+    match evaluator_config.scoring_func with
+    | "llm_judge" ->
+        let prompt = match evaluator_config.scoring_prompt with
+          | Some p -> Printf.sprintf "%s\n\nOutput to evaluate:\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" p output
+          | None -> Printf.sprintf "Score this output from 0.0 to 1.0 for quality and correctness:\n\n%s\n\nRespond with ONLY a number between 0.0 and 1.0" output
+        in
+        (match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+         | Ok score_str ->
+             let cleaned = String.trim score_str in
+             (try min 1.0 (max 0.0 (float_of_string cleaned))
+              with Failure _ ->
+                let regex = Str.regexp "[0-9]+\\.[0-9]+" in
+                try
+                  let _ = Str.search_forward regex cleaned 0 in
+                  min 1.0 (max 0.0 (float_of_string (Str.matched_string cleaned)))
+                with Not_found | Failure _ -> 0.5)
+         | Error _ -> 0.5)
+    | "regex_match" ->
+        float_of_int (String.length output) /. 1000.0
+    | "json_schema" ->
+        (try
+          let json = Yojson.Safe.from_string output in
+          let depth = ref 0 in
+          let rec count_depth = function
+            | `Assoc fields -> incr depth; List.iter (fun (_, v) -> count_depth v) fields
+            | `List items -> incr depth; List.iter count_depth items
+            | _ -> ()
+          in
+          count_depth json;
+          min 1.0 (0.5 +. (float_of_int !depth *. 0.1))
+        with Yojson.Json_error _ -> 0.0)
+    | _ ->
+        (try
+          let json = Yojson.Safe.from_string output in
+          let open Yojson.Safe.Util in
+          json |> member "score" |> to_float
+        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> 0.5)
+  in
+
+  (* Helper: Generate feedback for improvement *)
+  let generate_feedback output score =
+    let prompt = Printf.sprintf
+      "The following output scored %.2f out of 1.0 for quality. Provide specific, actionable feedback on how to improve it:\n\n%s\n\nProvide 2-3 concrete suggestions for improvement:"
+      score output
+    in
+    match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
+    | Ok feedback -> feedback
+    | Error _ -> "Please improve the quality and accuracy of the output."
+  in
+
+  (* Helper: Substitute variables in improver_prompt *)
+  let substitute_prompt template ~feedback ~previous_output =
+    template
+    |> Str.global_replace (Str.regexp "{{feedback}}") feedback
+    |> Str.global_replace (Str.regexp "{{previous_output}}") previous_output
+  in
+
+  (* Create a mutable copy of the generator for prompt updates *)
+  let current_generator = ref generator in
+
+  let rec iterate iteration =
+    if iteration > max_iterations then begin
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx parent.id ~duration_ms ~success:false;
+      Error (Printf.sprintf "FeedbackLoop: Max iterations (%d) reached without meeting min_score %.2f"
+               max_iterations min_score)
+    end else begin
+      (* Execute current generator *)
+      match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec !current_generator with
+      | Error msg ->
+          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          record_complete ctx parent.id ~duration_ms ~success:false;
+          Error (Printf.sprintf "FeedbackLoop iteration %d failed: %s" iteration msg)
+      | Ok output ->
+          (* Score the output *)
+          let score = score_output output in
+
+          (* Store feedback in outputs for reference *)
+          Hashtbl.replace ctx.outputs (parent.id ^ ".feedback") "";
+
+          if score >= min_score then begin
+            (* Success: score meets threshold *)
+            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            record_complete ctx parent.id ~duration_ms ~success:true;
+            Hashtbl.add ctx.outputs parent.id output;
+            Ok output
+          end else begin
+            (* Generate feedback and prepare for next iteration *)
+            let feedback = generate_feedback output score in
+            Hashtbl.replace ctx.outputs (parent.id ^ ".feedback") feedback;
+
+            (* Update generator prompt with feedback *)
+            let new_prompt = substitute_prompt improver_prompt ~feedback ~previous_output:output in
+            let updated_generator = match (!current_generator).node_type with
+              | Llm llm_config ->
+                  { !current_generator with
+                    node_type = Llm { llm_config with prompt = new_prompt };
+                    id = Printf.sprintf "%s_iter%d" generator.id iteration }
+              | _ ->
+                  (* For non-LLM generators, we can't easily update prompt *)
+                  (* Just retry with same generator *)
+                  !current_generator
+            in
+            current_generator := updated_generator;
+            iterate (iteration + 1)
+          end
+    end
+  in
+  iterate 1
 
 (* ════════════════════════════════════════════════════════════════════════════
    Resilience Nodes Implementation

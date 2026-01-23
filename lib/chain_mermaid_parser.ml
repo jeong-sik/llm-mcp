@@ -552,8 +552,58 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine ]) (content : s
             })
         | _ ->
             Error (Printf.sprintf "StreamMerge format: reducer or reducer,min or reducer,min,timeout, got: %s" content))
+      else if String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:" then
+        (* [[FeedbackLoop:scoring_func,max_iter,min_score]] - iterative quality improvement *)
+        let parts = String.sub content 13 (String.length content - 13)
+          |> String.split_on_char ','
+          |> List.map trim
+        in
+        (* Generator placeholder - will be replaced during post-processing from incoming edges *)
+        let gen_placeholder = { id = "feedback_gen"; node_type = ChainRef "feedback_gen"; input_mapping = [] } in
+        (match parts with
+        | [scoring_func; max_iter_str; min_score_str] ->
+            let max_iterations = try int_of_string max_iter_str with _ -> 3 in
+            let min_score = try float_of_string min_score_str with _ -> 0.7 in
+            Ok (FeedbackLoop {
+              generator = gen_placeholder;
+              evaluator_config = {
+                scoring_func;
+                scoring_prompt = None;
+                select_strategy = Best;
+              };
+              improver_prompt = "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}";
+              max_iterations;
+              min_score;
+            })
+        | [scoring_func; max_iter_str] ->
+            let max_iterations = try int_of_string max_iter_str with _ -> 3 in
+            Ok (FeedbackLoop {
+              generator = gen_placeholder;
+              evaluator_config = {
+                scoring_func;
+                scoring_prompt = None;
+                select_strategy = Best;
+              };
+              improver_prompt = "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}";
+              max_iterations;
+              min_score = 0.7;
+            })
+        | [scoring_func] ->
+            Ok (FeedbackLoop {
+              generator = gen_placeholder;
+              evaluator_config = {
+                scoring_func;
+                scoring_prompt = None;
+                select_strategy = Best;
+              };
+              improver_prompt = "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}";
+              max_iterations = 3;
+              min_score = 0.7;
+            })
+        | _ ->
+            Error (Printf.sprintf "FeedbackLoop format: scoring_func or scoring_func,max_iter or scoring_func,max_iter,min_score, got: %s" content))
       else
-        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn/StreamMerge, got: %s" content)
+        Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn/StreamMerge/FeedbackLoop, got: %s" content)
 
   | `Diamond ->
       (* {Quorum:N} or {Gate:condition} *)
@@ -901,7 +951,8 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
             (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
             (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
             (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
-            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:")
+            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:") ||
+            (String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:")
           in
           if uses_old_syntax then
             parse_node_content mnode.shape content
@@ -1001,7 +1052,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
             (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
             (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
             (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
-            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:")
+            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:") ||
+            (String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:")
           in
           if uses_old_syntax then
             parse_node_content mnode.shape content
@@ -1211,6 +1263,8 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
       in
       let min_str = match min_results with Some n -> Printf.sprintf "_%d" n | None -> "" in
       Printf.sprintf "stream_merge_%s_%d%s" reducer_str (List.length nodes) min_str
+  | FeedbackLoop { evaluator_config; max_iterations; min_score; _ } ->
+      Printf.sprintf "feedback_%s_%d_%.2f" evaluator_config.scoring_func max_iterations min_score
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
@@ -1310,12 +1364,14 @@ let node_type_to_text (nt : node_type) : string =
        | Some m, None -> Printf.sprintf "StreamMerge:%s,%d" reducer_str m
        | Some m, Some t -> Printf.sprintf "StreamMerge:%s,%d,%.1f" reducer_str m t
        | None, Some t -> Printf.sprintf "StreamMerge:%s,1,%.1f" reducer_str t  (* default min=1 when only timeout *))
+  | FeedbackLoop { evaluator_config; max_iterations; min_score; _ } ->
+      Printf.sprintf "FeedbackLoop:%s,%d,%.2f" evaluator_config.scoring_func max_iterations min_score
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
   match nt with
   | Llm _ | Tool _ -> ("[", "]")
-  | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ -> ("{", "}")
+  | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ | FeedbackLoop _ -> ("{", "}")
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | Cache _ | Batch _ | Spawn _ -> ("[[", "]]")
   | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
@@ -1350,6 +1406,7 @@ let node_type_to_class (nt : node_type) : string =
   | Spawn _ -> "spawn"
   | Mcts _ -> "mcts"
   | StreamMerge _ -> "streammerge"
+  | FeedbackLoop _ -> "feedbackloop"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1374,6 +1431,7 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef batch fill:#7ed6df,stroke:#22a6b3,color:#000
     classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
     classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
@@ -1516,6 +1574,7 @@ let chain_to_ascii (chain : chain) : string =
       | Cache _ -> "💾" | Batch _ -> "📦" | Spawn _ -> "🌱"
       | Mcts _ -> "🌳"
       | StreamMerge _ -> "🌊"
+      | FeedbackLoop _ -> "🔄"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

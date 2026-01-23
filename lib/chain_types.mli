@@ -76,6 +76,27 @@ type select_strategy =
 val select_strategy_to_yojson : select_strategy -> Yojson.Safe.t
 val select_strategy_of_yojson : Yojson.Safe.t -> (select_strategy, string) result
 
+(** Configuration for evaluator in FeedbackLoop *)
+type evaluator_config = {
+  scoring_func : string;
+  scoring_prompt : string option;
+  select_strategy : select_strategy;
+}
+
+val evaluator_config_to_yojson : evaluator_config -> Yojson.Safe.t
+val evaluator_config_of_yojson : Yojson.Safe.t -> (evaluator_config, string) result
+
+(** Result of evaluation with optional feedback *)
+type evaluator_result = {
+  score : float;
+  feedback : string option;
+  selected_output : string;
+  selected_id : string;
+}
+
+val evaluator_result_to_yojson : evaluator_result -> Yojson.Safe.t
+val evaluator_result_of_yojson : Yojson.Safe.t -> (evaluator_result, string) result
+
 (** Backoff strategy for Retry node *)
 type backoff_strategy =
   | Constant of float         (** Fixed delay between retries *)
@@ -227,6 +248,13 @@ type node_type =
       min_results : int option;
       timeout : float option;
     }
+  | FeedbackLoop of {
+      generator : node;
+      evaluator_config : evaluator_config;
+      improver_prompt : string;
+      max_iterations : int;
+      min_score : float;
+    }
 
 (** A single execution node *)
 and node = {
@@ -318,6 +346,7 @@ val make_evaluator : id:string -> candidates:node list -> scoring_func:string ->
 val make_retry : id:string -> node:node -> max_attempts:int -> ?backoff:backoff_strategy -> ?retry_on:string list -> unit -> node
 val make_fallback : id:string -> primary:node -> fallbacks:node list -> node
 val make_race : id:string -> nodes:node list -> ?timeout:float -> unit -> node
+val make_feedback_loop : id:string -> generator:node -> evaluator_config:evaluator_config -> improver_prompt:string -> max_iterations:int -> min_score:float -> node
 
 (** {1 Batch Execution Types} *)
 

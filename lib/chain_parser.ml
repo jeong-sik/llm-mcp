@@ -639,6 +639,29 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let timeout = parse_float_opt json "timeout" in
       Ok (StreamMerge { nodes; reducer; initial; min_results; timeout })
 
+  | "feedback_loop" ->
+      (* FeedbackLoop - iterative quality improvement with evaluator feedback *)
+      let generator_json = json |> member "generator" in
+      let* generator = parse_node generator_json in
+      (* Parse evaluator_config *)
+      let evaluator_config_json = json |> member "evaluator_config" in
+      let scoring_func = parse_string_with_default evaluator_config_json "scoring_func" "llm_judge" in
+      let scoring_prompt = parse_string_opt evaluator_config_json "scoring_prompt" in
+      let select_strategy = match evaluator_config_json |> member "select_strategy" with
+        | `String "best" -> Best
+        | `String "worst" -> Worst
+        | `String "weighted_random" -> WeightedRandom
+        | `List [`String "above_threshold"; `Float t] -> AboveThreshold t
+        | `List [`String "above_threshold"; `Int t] -> AboveThreshold (float_of_int t)
+        | _ -> Best  (* default *)
+      in
+      let evaluator_config = { scoring_func; scoring_prompt; select_strategy } in
+      let improver_prompt = parse_string_with_default json "improver_prompt"
+        "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}" in
+      let max_iterations = parse_int_with_default json "max_iterations" 3 in
+      let min_score = Option.value (parse_float_opt json "min_score") ~default:0.7 in
+      Ok (FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -1072,6 +1095,26 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("initial", `String initial);
           ("min_results", match min_results with Some n -> `Int n | None -> `Null);
           ("timeout", match timeout with Some t -> `Float t | None -> `Null);
+        ]
+    | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score } ->
+        let select_strategy_json = match evaluator_config.select_strategy with
+          | Best -> `String "best"
+          | Worst -> `String "worst"
+          | WeightedRandom -> `String "weighted_random"
+          | AboveThreshold t -> `List [`String "above_threshold"; `Float t]
+        in
+        let evaluator_config_json = `Assoc [
+          ("scoring_func", `String evaluator_config.scoring_func);
+          ("scoring_prompt", match evaluator_config.scoring_prompt with Some p -> `String p | None -> `Null);
+          ("select_strategy", select_strategy_json);
+        ] in
+        [
+          ("type", `String "feedback_loop");
+          ("generator", node_to_json generator);
+          ("evaluator_config", evaluator_config_json);
+          ("improver_prompt", `String improver_prompt);
+          ("max_iterations", `Int max_iterations);
+          ("min_score", `Float min_score);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)
