@@ -594,11 +594,29 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
 
           (* SSE streaming endpoint for MCP Streamable HTTP *)
           | (`GET, "/sse") ->
-              let session_id = List.assoc_opt "mcp-session-id" headers
-                |> Option.value ~default:(generate_session_id ()) in
+              let session_id =
+                extract_session_id None headers
+                |> Option.value ~default:(generate_session_id ())
+              in
               let protocol_version = List.assoc_opt "mcp-protocol-version" headers
                 |> Option.value ~default:"2024-11-05" in
+              let last_event_id =
+                extract_last_event_id None headers |> Option.value ~default:0
+              in
               Http.Response.sse_stream ~session_id ~protocol_version reqd ~on_write:(fun body ->
+                let push_event ev =
+                  try
+                    Httpun.Body.Writer.write_string body ev;
+                    Httpun.Body.Writer.flush body ignore
+                  with _ -> ()
+                in
+                let notif_client_id =
+                  Notification_sse.register session_id ~push:push_event ~last_event_id
+                in
+                (* Replay missed events if client provides Last-Event-Id *)
+                if last_event_id > 0 then
+                  Notification_sse.get_events_after last_event_id
+                  |> List.iter push_event;
                 (* Register for shutdown notifications *)
                 let client_id = Http.register_sse_client body in
                 (* Send initial connection event *)
@@ -609,7 +627,7 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 let rec heartbeat_loop n =
                   Eio.Time.sleep clock 30.0;  (* 30s heartbeat interval *)
                   if Http.sse_client_count () > 0 then begin
-                    Http.send_sse_event_with_id body ~id:n ~event:"heartbeat"
+                    Http.send_sse_event body ~event:"heartbeat"
                       ~data:(sprintf {|{"timestamp":%f}|} (Unix.gettimeofday ()));
                     heartbeat_loop (n + 1)
                   end
@@ -622,6 +640,7 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 Eio.Fiber.fork ~sw (fun () ->
                   Eio.Time.sleep clock 3600.0;  (* 1h max connection time *)
                   Http.unregister_sse_client client_id;
+                  Notification_sse.unregister_if_current session_id notif_client_id;
                   try Httpun.Body.Writer.close body with _ -> ()
                 )
               )

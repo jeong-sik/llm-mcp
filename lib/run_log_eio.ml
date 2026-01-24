@@ -13,6 +13,11 @@ let enabled () =
   | Some "0" | Some "false" | Some "no" -> false
   | _ -> true
 
+let stream_enabled () =
+  match Sys.getenv_opt "LLM_MCP_RUN_LOG_STREAM" with
+  | Some "1" | Some "true" | Some "yes" | Some "on" -> true
+  | _ -> false
+
 let default_log_path () =
   Common.me_path ["logs"; "llm_mcp_runs.jsonl"]
 
@@ -127,7 +132,9 @@ let record_event
            ~extra ~extra_json ~event ~seq () in
          match fs with
          | Some f -> append_jsonl_unlocked ~fs:f json
-         | None -> append_jsonl_sys json)
+         | None -> append_jsonl_sys json;
+         if stream_enabled () then
+           (try Notification_sse.broadcast json with _ -> ()))
      with exn ->
        Printf.eprintf "[run_log_eio] Write failed: %s\n%!" (Printexc.to_string exn))
 
