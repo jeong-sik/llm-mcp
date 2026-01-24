@@ -1040,7 +1040,17 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
 
   let allowed_external =
     let schema_vars = collect_schema_vars c.Chain_types.input_schema in
-    List.sort_uniq String.compare ("input" :: "parent" :: schema_vars)
+    let metadata_vars =
+      match c.Chain_types.metadata with
+      | Some (`Assoc fields) ->
+          (match List.assoc_opt "external_inputs" fields with
+           | Some (`List items) ->
+               List.filter_map (function `String s -> Some s | _ -> None) items
+           | _ -> [])
+      | _ -> []
+    in
+    let defaults = ["input"; "parent"; "context"; "vars"; "env"; "secrets"] in
+    List.sort_uniq String.compare (defaults @ schema_vars @ metadata_vars)
   in
 
   let is_allowed_external id = List.mem id allowed_external in
@@ -1052,7 +1062,7 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         if List.mem root all_ids then ()
         else if is_allowed_external root then ()
         else
-          addf "Node '%s' input '%s' references unknown node '%s' (declare in input_schema or context_inject)"
+          addf "Node '%s' input '%s' references unknown node '%s' (declare in input_schema or metadata.external_inputs)"
             node_id key root
   in
 
@@ -1200,7 +1210,13 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
 
   if !errors = [] then Ok ()
   else
-    let msg = String.concat "; " (List.rev !errors) in
+    let items = List.rev !errors in
+    let msg =
+      match items with
+      | [] -> "Strict validation failed"
+      | _ ->
+          "Strict validation failed:\n- " ^ String.concat "\n- " items
+    in
     Error msg
 
 (* ============================================================================
