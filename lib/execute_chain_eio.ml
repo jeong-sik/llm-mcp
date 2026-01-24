@@ -236,7 +236,7 @@ let execute_chain_run
    ChainValidate
    ============================================================================ *)
 
-let execute_chain_validate ~chain ~mermaid =
+let execute_chain_validate ~chain ~mermaid ~strict =
   let parse_result = match (chain, mermaid) with
     | (Some c, _) -> Chain_parser.parse_chain c
     | (_, Some m) -> Chain_mermaid_parser.parse_chain m
@@ -249,7 +249,11 @@ let execute_chain_validate ~chain ~mermaid =
         response = sprintf "Parse error: %s" msg;
         extra = [("stage", "parse"); ("valid", "false")]; }
   | Ok parsed_chain ->
-      match Chain_parser.validate_chain parsed_chain with
+      let validation =
+        if strict then Chain_parser.validate_chain_strict parsed_chain
+        else Chain_parser.validate_chain parsed_chain
+      in
+      match validation with
       | Error msg ->
           { model = "chain.validate";
             returncode = -1;
@@ -272,6 +276,7 @@ let execute_chain_validate ~chain ~mermaid =
                   parsed_chain.Chain_types.id node_count depth parallel_groups;
                 extra = [
                   ("valid", "true");
+                  ("strict", if strict then "true" else "false");
                   ("chain_id", parsed_chain.Chain_types.id);
                   ("node_count", string_of_int node_count);
                   ("depth", string_of_int depth);

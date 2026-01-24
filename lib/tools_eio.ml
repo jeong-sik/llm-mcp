@@ -826,7 +826,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 ] @ (match run_id with Some id -> [("run_id", id)] | None -> []); })
 
 
-  | ChainValidate { chain; mermaid } ->
+  | ChainValidate { chain; mermaid; strict } ->
       (* Parse from either JSON or Mermaid, then validate *)
       let parse_result = match (chain, mermaid) with
         | (Some c, _) -> Chain_parser.parse_chain c
@@ -840,12 +840,17 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Parse error: %s" msg;
             extra = [("stage", "parse"); ("valid", "false")]; }
       | Ok parsed_chain ->
-          match Chain_parser.validate_chain parsed_chain with
+          let validation =
+            if strict then Chain_parser.validate_chain_strict parsed_chain
+            else Chain_parser.validate_chain parsed_chain
+          in
+          match validation with
           | Error msg ->
               { model = "chain.validate";
                 returncode = -1;
                 response = sprintf "Validation error: %s" msg;
-                extra = [("stage", "validate"); ("valid", "false")]; }
+                extra = [("stage", "validate"); ("valid", "false")];
+              }
           | Ok () ->
               (* Also try to compile to check DAG validity *)
               match Chain_compiler.compile parsed_chain with
@@ -853,7 +858,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   { model = "chain.validate";
                     returncode = -1;
                     response = sprintf "Compile error: %s" msg;
-                    extra = [("stage", "compile"); ("valid", "false")]; }
+                    extra = [("stage", "compile"); ("valid", "false")];
+                  }
               | Ok plan ->
                   let node_count = List.length parsed_chain.Chain_types.nodes in
                   let depth = plan.Chain_types.depth in
@@ -864,6 +870,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       parsed_chain.Chain_types.id node_count depth parallel_groups;
                     extra = [
                       ("valid", "true");
+                      ("strict", if strict then "true" else "false");
                       ("chain_id", parsed_chain.Chain_types.id);
                       ("node_count", string_of_int node_count);
                       ("depth", string_of_int depth);

@@ -923,7 +923,7 @@ dune runtest
 | Tool | Status | Description |
 |------|--------|-------------|
 | `chain.run` | ✅ Implemented | Execute a chain with LLM/tool calls |
-| `chain.validate` | ✅ Implemented | Validate chain syntax and show parallel groups |
+| `chain.validate` | ✅ Implemented | Validate chain syntax (strict completeness/format supported) |
 | `chain.to_mermaid` | ✅ Implemented | Convert chain JSON to Mermaid diagram |
 | `chain.convert` | ✅ Implemented | Convert between JSON and Mermaid formats |
 | `chain.visualize` | ✅ Implemented | Generate visual diagram of chain |
