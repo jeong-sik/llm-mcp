@@ -628,11 +628,12 @@ let run ~sw ~env ?(config = Http.default_config) () =
   (* Create session store for multi-tenancy *)
   let store = create_session_store () in
 
-  (* Periodic cleanup fiber for stale sessions *)
+  (* Periodic cleanup fiber for stale sessions - prevents memory leaks *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec cleanup_loop () =
-      Eio.Time.sleep clock 300.0; (* Clean up every 5 minutes *)
+      Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
       cleanup_stale_sessions store;
+      Mcp_session.cleanup_expired ();  (* Also clean global session store *)
       cleanup_loop ()
     in
     cleanup_loop ()
