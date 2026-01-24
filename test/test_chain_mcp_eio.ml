@@ -8,10 +8,25 @@ let run_eio f =
   Eio_main.run @@ fun env ->
   f env
 
+let find_substring ~sub s =
+  let sub_len = String.length sub in
+  let s_len = String.length s in
+  let rec loop i =
+    if i + sub_len > s_len then None
+    else if String.sub s i sub_len = sub then Some i
+    else loop (i + 1)
+  in
+  loop 0
+
+let strip_extra text =
+  match find_substring ~sub:"\n\n[Extra]" text with
+  | None -> text
+  | Some idx -> String.sub text 0 idx
+
 let get_result_text json =
   let open Yojson.Safe.Util in
   match json |> member "result" |> member "content" |> to_list with
-  | first :: _ -> first |> member "text" |> to_string
+  | first :: _ -> first |> member "text" |> to_string |> strip_extra
   | [] -> ""
 
 let starts_with ~prefix s =

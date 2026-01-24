@@ -276,10 +276,10 @@ let test_strict_validation () =
   let results = [
     test_validate_chain_strict strict_unknown_ref_json `Error
       "Strict: unknown external ref fails";
-    test_validate_chain_strict strict_schema_ok_json `Ok
-      "Strict: input_schema allows external ref";
-    test_validate_chain_strict strict_metadata_ok_json `Ok
-      "Strict: metadata.external_inputs allows external ref";
+    test_validate_chain_strict strict_schema_ok_json `Error
+      "Strict: input_schema ignored (fails)";
+    test_validate_chain_strict strict_metadata_ok_json `Error
+      "Strict: metadata.external_inputs ignored (fails)";
   ] in
   List.for_all Fun.id results
 

@@ -2432,7 +2432,7 @@ let test_stream_merge_true_roundtrip () =
   | Error e -> Alcotest.fail (Printf.sprintf "Parse 1 error: %s" e)
   | Ok chain1 ->
       (* Serialize back to Mermaid *)
-      let serialized = Chain_mermaid_parser.chain_to_mermaid ~lossless:true chain1 in
+      let serialized = Chain_mermaid_parser.chain_to_mermaid chain1 in
       (* Parse again *)
       (match Chain_mermaid_parser.parse_chain serialized with
        | Error e -> Alcotest.fail (Printf.sprintf "Parse 2 error: %s\nSerialized:\n%s" e serialized)

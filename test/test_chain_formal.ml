@@ -168,7 +168,7 @@ let all_enumerated_chains =
 
 (** Verify single chain *)
 let verify_chain chain =
-  let mermaid = CM.chain_to_mermaid ~lossless:true chain in
+  let mermaid = CM.chain_to_mermaid chain in
   match CM.parse_mermaid_to_chain mermaid with
   | Error e -> Error (Printf.sprintf "%s: %s" chain.CT.id e)
   | Ok chain' ->
@@ -243,11 +243,11 @@ let prop_idempotent =
   QCheck.Test.make ~count:200 ~name:"double_roundtrip"
     arbitrary_chain
     (fun chain ->
-      let m1 = CM.chain_to_mermaid ~lossless:true chain in
+      let m1 = CM.chain_to_mermaid chain in
       match CM.parse_mermaid_to_chain m1 with
       | Error _ -> false
       | Ok c1 ->
-          let m2 = CM.chain_to_mermaid ~lossless:true c1 in
+          let m2 = CM.chain_to_mermaid c1 in
           match CM.parse_mermaid_to_chain m2 with
           | Error _ -> false
           | Ok c2 -> chain_equiv c1 c2)

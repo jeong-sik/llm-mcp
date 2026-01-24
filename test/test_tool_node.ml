@@ -202,7 +202,7 @@ let test_roundtrip_tool_flat () =
   match Json_parser.parse_chain json1 with
   | Error e -> fail ("JSON parse failed: " ^ e)
   | Ok chain1 ->
-      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
       (match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
        | Error e -> fail ("Mermaid parse failed: " ^ e ^ "\nMermaid:\n" ^ mermaid)
        | Ok chain2 ->
@@ -227,7 +227,7 @@ let test_roundtrip_tool_nested () =
             | _ -> fail "Tool node not found after JSON parse")
        | None -> fail "Node a not found");
 
-      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
       Printf.printf "Generated Mermaid:\n%s\n" mermaid;
 
       (match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
@@ -257,7 +257,7 @@ let test_roundtrip_mixed_nodes () =
   match Json_parser.parse_chain json1 with
   | Error e -> fail ("JSON parse failed: " ^ e)
   | Ok chain1 ->
-      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
       (match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
        | Error e -> fail ("Mermaid parse failed: " ^ e)
        | Ok chain2 ->

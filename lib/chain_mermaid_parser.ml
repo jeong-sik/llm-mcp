@@ -90,6 +90,7 @@ type mermaid_meta = {
   chain_max_depth : int option;
   chain_max_concurrency : int option;
   chain_json : Yojson.Safe.t option;
+  chain_full_json : string option;
   node_input_mappings : (string, (string * string) list) Hashtbl.t;
   node_goaldriven_meta : (string, goaldriven_meta) Hashtbl.t;
 }
@@ -115,6 +116,7 @@ let empty_meta () : mermaid_meta = {
   chain_max_depth = None;
   chain_max_concurrency = None;
   chain_json = None;
+  chain_full_json = None;
   node_input_mappings = Hashtbl.create 16;
   node_goaldriven_meta = Hashtbl.create 16;
 }
@@ -150,6 +152,10 @@ let parse_chain_meta (json_str : string) (meta : mermaid_meta) : mermaid_meta =
         }
     | _ -> meta
   with Yojson.Json_error _ -> meta  (* Invalid JSON in @chain comment *)
+
+(** Parse @chain_full metadata: %% @chain_full { ...full chain JSON... } *)
+let parse_chain_full (json_str : string) (meta : mermaid_meta) : mermaid_meta =
+  { meta with chain_full_json = Some json_str }
 
 (** Parse @node:id metadata comment: %% @node:mynode {"input_mapping":[[k,v],...]} *)
 let parse_node_meta (node_id : string) (json_str : string) (meta : mermaid_meta) : mermaid_meta =
@@ -209,12 +215,16 @@ let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
   else
     let rest = trim (String.sub line 2 (String.length line - 2)) in
     (* Check for @chain or @node: *)
-    if String.length rest >= 12 && String.sub rest 0 12 = "@chain_json " then
-      let json_str = String.sub rest 12 (String.length rest - 12) in
+    if String.length rest >= 11 && String.sub rest 0 11 = "@chain_json" then
+      let json_str = trim (String.sub rest 11 (String.length rest - 11)) in
+      let meta = parse_chain_full json_str meta in
       (try
          let json = Yojson.Safe.from_string json_str in
          { meta with chain_json = Some json }
        with Yojson.Json_error _ -> meta)
+    else if String.length rest >= 11 && String.sub rest 0 11 = "@chain_full" then
+      let json_str = trim (String.sub rest 11 (String.length rest - 11)) in
+      parse_chain_full json_str meta
     else if String.length rest >= 7 && String.sub rest 0 7 = "@chain " then
       let json_str = String.sub rest 7 (String.length rest - 7) in
       parse_chain_meta json_str meta
@@ -1269,12 +1279,25 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
 
         Ok { id = final_id; nodes; output; config }
   in
-  match meta.chain_json with
-  | Some json ->
-      (match Chain_parser.parse_chain json with
-       | Ok chain -> Ok chain
-       | Error _ -> fallback ())
-  | None -> fallback ()
+  match meta.chain_full_json with
+  | Some json_str ->
+      (try
+         let json = Yojson.Safe.from_string json_str in
+         Chain_parser.parse_chain json
+       with Yojson.Json_error _ ->
+         (match meta.chain_json with
+          | Some json ->
+              (match Chain_parser.parse_chain json with
+               | Ok chain -> Ok chain
+               | Error _ -> fallback ())
+          | None -> fallback ()))
+  | None ->
+      (match meta.chain_json with
+       | Some json ->
+           (match Chain_parser.parse_chain json with
+            | Ok chain -> Ok chain
+            | Error _ -> fallback ())
+       | None -> fallback ())
 
 (** Parse Mermaid text into Chain with metadata (lossless roundtrip)
 
@@ -1284,15 +1307,51 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
     - %% @node:nodeid {"input_mapping":[["key1","val1"],["key2","val2"]]}
 
     Usage:
-      let mermaid = chain_to_mermaid ~lossless:true chain in
+      let mermaid = chain_to_mermaid chain in
       match parse_mermaid_to_chain ~id:"fallback_id" mermaid with
       | Ok chain2 -> (* chain2 is identical to chain *)
       | Error e -> ...
 *)
+let extract_chain_full (text : string) : string option =
+  let lines = String.split_on_char '\n' text in
+  let rec find = function
+    | [] -> None
+    | line :: rest ->
+        let line = trim line in
+        if String.length line >= 2 && String.sub line 0 2 = "%%" then
+          let rest_line = trim (String.sub line 2 (String.length line - 2)) in
+          if String.length rest_line >= 11 && String.sub rest_line 0 11 = "@chain_full" then
+            Some (trim (String.sub rest_line 11 (String.length rest_line - 11)))
+          else if String.length rest_line >= 11 && String.sub rest_line 0 11 = "@chain_json" then
+            Some (trim (String.sub rest_line 11 (String.length rest_line - 11)))
+          else
+            find rest
+        else
+          find rest
+  in
+  find lines
+
 let parse_mermaid_to_chain ?(id = "mermaid_chain") (text : string) : (chain, string) result =
-  match parse_mermaid_text_with_meta text with
-  | Error e -> Error e
-  | Ok (graph, meta) -> mermaid_to_chain_with_meta ~id graph meta
+  match extract_chain_full text with
+  | Some json_str ->
+      (try
+         let json = Yojson.Safe.from_string json_str in
+         Chain_parser.parse_chain json
+       with Yojson.Json_error msg ->
+         Error (Printf.sprintf "chain_full JSON parse error: %s" msg))
+  | None ->
+      (match parse_mermaid_text_with_meta text with
+      | Error e -> Error e
+      | Ok (graph, meta) ->
+          (match meta.chain_full_json with
+          | Some json_str ->
+              (try
+                 let json = Yojson.Safe.from_string json_str in
+                 Chain_parser.parse_chain json
+               with Yojson.Json_error msg ->
+                 Error (Printf.sprintf "chain_full JSON parse error: %s" msg))
+          | None ->
+              mermaid_to_chain_with_meta ~id graph meta))
 
 (** Main entry point: Parse Mermaid text into Chain *)
 let parse_chain (text : string) : (chain, string) result =
@@ -1571,26 +1630,25 @@ let config_meta_to_json (chain : chain) : Yojson.Safe.t =
     ("max_concurrency", `Int chain.config.max_concurrency);
   ]
 
-let chain_to_mermaid ?(styled=true) ?(lossless=false) (chain : chain) : string =
+let chain_to_mermaid ?(styled=true) (chain : chain) : string =
   let buf = Buffer.create 256 in
   let dir = direction_to_string chain.config.direction in
   Buffer.add_string buf (Printf.sprintf "graph %s\n" dir);
 
-  (* Lossless mode: emit metadata as comments *)
-  if lossless then begin
-    let config_json = Yojson.Safe.to_string (config_meta_to_json chain) in
-    Buffer.add_string buf (Printf.sprintf "    %%%% @chain %s\n" config_json);
-    let chain_json = Yojson.Safe.to_string (Chain_parser.chain_to_json chain) in
-    Buffer.add_string buf (Printf.sprintf "    %%%% @chain_json %s\n" chain_json);
-    (* Emit node metadata *)
-    List.iter (fun (node : node) ->
-      match node_meta_to_json node with
-      | None -> ()
-      | Some meta ->
-          let meta_json = Yojson.Safe.to_string meta in
-          Buffer.add_string buf (Printf.sprintf "    %%%% @node:%s %s\n" node.id meta_json)
-    ) chain.nodes
-  end;
+  (* Always emit lossless metadata as comments *)
+  let full_json = Chain_parser.chain_to_json_string ~pretty:false chain in
+  Buffer.add_string buf (Printf.sprintf "    %%%% @chain_full %s\n" full_json);
+  Buffer.add_string buf (Printf.sprintf "    %%%% @chain_json %s\n" full_json);
+  let config_json = Yojson.Safe.to_string (config_meta_to_json chain) in
+  Buffer.add_string buf (Printf.sprintf "    %%%% @chain %s\n" config_json);
+  (* Emit node metadata *)
+  List.iter (fun (node : node) ->
+    match node_meta_to_json node with
+    | None -> ()
+    | Some meta ->
+        let meta_json = Yojson.Safe.to_string meta in
+        Buffer.add_string buf (Printf.sprintf "    %%%% @node:%s %s\n" node.id meta_json)
+  ) chain.nodes;
 
   (* Add classDef styles if styled=true *)
   if styled then Buffer.add_string buf mermaid_class_defs;

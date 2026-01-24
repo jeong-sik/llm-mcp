@@ -960,6 +960,12 @@ dune runtest
 | `chain.list` | ✅ Implemented | List registered chains |
 | `chain.orchestrate` | ✅ Implemented | Advanced orchestration with goals |
 
+### Lossless Mermaid Roundtrip
+
+- Mermaid output always embeds full chain JSON:
+  - `%% @chain_full {...}`
+- Mermaid → JSON conversion prioritizes `@chain_full` for 1:1 restoration.
+
 ### Streaming Events (`/chain/events`)
 
 Real-time SSE endpoint for chain execution monitoring:

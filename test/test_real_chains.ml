@@ -9,6 +9,30 @@ module Json_parser = Chain_parser
 module Mermaid_parser = Chain_mermaid_parser
 open Chain_types
 
+(** Resolve repo root for test data *)
+let repo_root =
+  let rec find_root dir remaining =
+    if remaining = 0 then dir
+    else
+      let candidate = Filename.concat dir "data/chains" in
+      if Sys.file_exists candidate then dir
+      else
+        let parent = Filename.dirname dir in
+        if parent = dir then dir else find_root parent (remaining - 1)
+  in
+  find_root (Sys.getcwd ()) 6
+
+let repo_path rel = Filename.concat repo_root rel
+
+let list_chain_files () =
+  let dir = repo_path "data/chains" in
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.filter (fun name ->
+       Filename.check_suffix name ".json"
+       && (try not (Sys.is_directory (Filename.concat dir name)) with _ -> true))
+  |> List.sort String.compare
+
 (** Read file contents *)
 let read_file path =
   let ic = open_in path in
@@ -39,17 +63,18 @@ let find_node (chain : chain) (id : string) : node option =
 
 (** Common roundtrip assertion *)
 let assert_roundtrip path =
-  let json_str = read_file path in
+  let json_str = read_file (repo_path path) in
   let json = Yojson.Safe.from_string json_str in
   match Json_parser.parse_chain json with
   | Error e -> fail (Printf.sprintf "JSON parse failed for %s: %s" path e)
   | Ok chain1 ->
-      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
-      Printf.printf "=== Mermaid for %s ===\n%s\n\n" path mermaid;
+      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
       (match Mermaid_parser.parse_mermaid_to_chain ~id:"roundtrip" mermaid with
        | Error e -> fail (Printf.sprintf "Mermaid parse failed for %s: %s\nMermaid:\n%s" path e mermaid)
        | Ok chain2 ->
-           Printf.printf "Parsed %d nodes from Mermaid\n" (List.length chain2.nodes);
+           let json1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+           let json2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+           check string "json equality" json1 json2;
            (* Basic count checks *)
            check int "node count" (List.length chain1.nodes) (List.length chain2.nodes);
            check int "tool count" (count_tool_nodes chain1) (count_tool_nodes chain2);
@@ -61,7 +86,7 @@ let test_figma_to_web_component () =
   let path = "data/chains/figma-to-web-component.json" in
   assert_roundtrip path;
   (* Extra validation: verify Tool nodes have server prefix *)
-  let json_str = read_file path in
+  let json_str = read_file (repo_path path) in
   let json = Yojson.Safe.from_string json_str in
   let chain = Json_parser.parse_chain json |> Result.get_ok in
   (* Check parse-url node has figma: prefix *)
@@ -122,8 +147,22 @@ let test_pr_review_pipeline () =
 let test_simple_test () =
   assert_roundtrip "data/chains/simple-test.json"
 
+let test_all_chain_files_have_output () =
+  let files = list_chain_files () in
+  List.iter (fun name ->
+    let path = repo_path ("data/chains/" ^ name) in
+    let json = Yojson.Safe.from_string (read_file path) in
+    let open Yojson.Safe.Util in
+    match json |> member "output" with
+    | `String _ -> ()
+    | _ -> fail (Printf.sprintf "%s missing output field" name)
+  ) files
+
 let () =
   run "Real Chain Files" [
+    "Sanity", [
+      test_case "5.0 all chain files have output" `Quick test_all_chain_files_have_output;
+    ];
     "Layer 5: Roundtrip", [
       test_case "5.1 figma-to-web-component" `Quick test_figma_to_web_component;
       test_case "5.2 figma-to-prototype" `Quick test_figma_to_prototype;

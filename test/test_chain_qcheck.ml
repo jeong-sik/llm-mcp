@@ -170,7 +170,7 @@ let prop_node_count_preserved =
   QCheck.Test.make ~count:100 ~name:"node_count_preserved"
     arbitrary_chain
     (fun chain ->
-      let mermaid = CM.chain_to_mermaid ~lossless:true chain in
+      let mermaid = CM.chain_to_mermaid chain in
       match CM.parse_mermaid_to_chain mermaid with
       | Error _ -> false
       | Ok chain' -> count_real_nodes chain = count_real_nodes chain')
@@ -180,7 +180,7 @@ let prop_node_ids_preserved =
   QCheck.Test.make ~count:100 ~name:"node_ids_preserved"
     arbitrary_chain
     (fun chain ->
-      let mermaid = CM.chain_to_mermaid ~lossless:true chain in
+      let mermaid = CM.chain_to_mermaid chain in
       match CM.parse_mermaid_to_chain mermaid with
       | Error _ -> false
       | Ok chain' -> get_node_ids chain = get_node_ids chain')
@@ -190,7 +190,7 @@ let prop_edges_preserved =
   QCheck.Test.make ~count:100 ~name:"edges_preserved"
     arbitrary_chain
     (fun chain ->
-      let mermaid = CM.chain_to_mermaid ~lossless:true chain in
+      let mermaid = CM.chain_to_mermaid chain in
       match CM.parse_mermaid_to_chain mermaid with
       | Error _ -> false
       | Ok chain' -> get_edges chain = get_edges chain')
@@ -200,7 +200,7 @@ let prop_output_preserved =
   QCheck.Test.make ~count:100 ~name:"output_preserved"
     arbitrary_chain
     (fun chain ->
-      let mermaid = CM.chain_to_mermaid ~lossless:true chain in
+      let mermaid = CM.chain_to_mermaid chain in
       match CM.parse_mermaid_to_chain mermaid with
       | Error _ -> false
       | Ok chain' -> chain.CT.output = chain'.CT.output)
@@ -210,11 +210,11 @@ let prop_double_roundtrip_idempotent =
   QCheck.Test.make ~count:50 ~name:"double_roundtrip_idempotent"
     arbitrary_chain
     (fun chain ->
-      let mermaid1 = CM.chain_to_mermaid ~lossless:true chain in
+      let mermaid1 = CM.chain_to_mermaid chain in
       match CM.parse_mermaid_to_chain mermaid1 with
       | Error _ -> false
       | Ok chain' ->
-          let mermaid2 = CM.chain_to_mermaid ~lossless:true chain' in
+          let mermaid2 = CM.chain_to_mermaid chain' in
           match CM.parse_mermaid_to_chain mermaid2 with
           | Error _ -> false
           | Ok chain'' ->
