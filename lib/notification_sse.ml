@@ -7,7 +7,8 @@
 type client = {
   id : int;
   push : string -> unit;
-  mutable last_event_id : int;
+  mutable last_sent_id : int;
+  mutable last_acked_id : int;
 }
 
 (** Client registry: session_id -> client. *)
@@ -54,7 +55,7 @@ let prime_event ~retry_ms =
 
 let register session_id ~push ~last_event_id =
   incr client_id_counter;
-  let client = { id = !client_id_counter; push; last_event_id } in
+  let client = { id = !client_id_counter; push; last_sent_id = last_event_id; last_acked_id = last_event_id } in
   Hashtbl.replace clients session_id client;
   client.id
 
@@ -69,7 +70,7 @@ let client_count () = Hashtbl.length clients
 
 let update_last_event_id session_id event_id =
   match Hashtbl.find_opt clients session_id with
-  | Some client -> client.last_event_id <- event_id
+  | Some client -> client.last_acked_id <- event_id
   | None -> ()
 
 let broadcast json =
@@ -78,10 +79,10 @@ let broadcast json =
   let event = format_event ~id:current_event_id ~event_type:"notification" data in
   buffer_event current_event_id event;
   Hashtbl.iter
-    (fun session_id client ->
-      if current_event_id > client.last_event_id then (
+    (fun _session_id client ->
+      if current_event_id > client.last_acked_id then (
         try
           client.push event;
-          update_last_event_id session_id current_event_id
+          client.last_sent_id <- current_event_id
         with _ -> ()))
     clients
