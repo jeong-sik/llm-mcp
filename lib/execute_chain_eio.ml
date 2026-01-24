@@ -73,7 +73,17 @@ let execute_chain_run
             returncode = -1;
             response = sprintf "Compile error: %s" msg;
             extra = [("stage", "compile")]; }
-      | Ok plan ->
+  | Ok plan ->
+      if Run_log_eio.enabled () then
+        Run_log_eio.record_event
+          ~event:"chain_start"
+          ~chain_id:plan.chain.Chain_types.id
+          ~model:"chain.run"
+          ~tool:"chain.run"
+          ~prompt_chars:(String.length (Option.value mermaid ~default:""))
+          ()
+      else
+        ();
           (* Convert Yojson.Safe.t tools to tool_schema list option *)
           let parse_tools tools =
             match tools with
@@ -223,6 +233,18 @@ let execute_chain_run
           let result = Chain_executor_eio.execute
             ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec plan
           in
+          if Run_log_eio.enabled () then
+            Run_log_eio.record_event
+              ~event:"chain_complete"
+              ~chain_id:result.Chain_types.chain_id
+              ~model:"chain.run"
+              ~tool:"chain.run"
+              ~duration_ms:result.Chain_types.duration_ms
+              ~success:result.Chain_types.success
+              ?error_class:(if result.Chain_types.success then None else Some "chain_error")
+              ()
+          else
+            ();
           { model = "chain.run";
             returncode = if result.Chain_types.success then 0 else -1;
             response = result.Chain_types.output;

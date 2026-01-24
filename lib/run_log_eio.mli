@@ -11,6 +11,11 @@ open Types
 val log_path : unit -> string
 (** Get the log file path (from env or default) *)
 
+(** {1 Enable/Disable} *)
+
+val enabled : unit -> bool
+(** Whether run log is enabled (env: LLM_MCP_RUN_LOG) *)
+
 (** {1 Recording} *)
 
 val record :
@@ -23,6 +28,29 @@ val record :
   unit
 (** Record a tool execution to the run log.
     @param fs Eio filesystem capability *)
+
+val record_event :
+  ?fs:_ Eio.Path.t ->
+  ?run_id:string ->
+  ?chain_id:string ->
+  ?node_id:string ->
+  ?node_type:string ->
+  ?attempt:int ->
+  ?duration_ms:int ->
+  ?success:bool ->
+  ?model:string ->
+  ?tool:string ->
+  ?streamed:bool ->
+  ?prompt_chars:int ->
+  ?response_chars:int ->
+  ?error_class:string ->
+  ?error:string ->
+  ?extra:(string * string) list ->
+  ?extra_json:(string * Yojson.Safe.t) list ->
+  event:string ->
+  unit ->
+  unit
+(** Record a structured event to the run log. If [fs] is omitted, falls back to POSIX I/O. *)
 
 (** {1 Reading} *)
 

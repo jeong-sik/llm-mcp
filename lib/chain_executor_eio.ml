@@ -30,9 +30,9 @@ type adapter_transform = Chain_types.adapter_transform
 
 (** Trace event types for execution logging *)
 type trace_event =
-  | NodeStart
-  | NodeComplete of { duration_ms : int; success : bool }
-  | NodeError of string
+  | NodeStart of { node_type : string; attempt : int }
+  | NodeComplete of { duration_ms : int; success : bool; node_type : string; attempt : int }
+  | NodeError of { message : string; error_class : string option; node_type : string; attempt : int }
   | ChainStart of { chain_id : string; mermaid_dsl : string option }
   | ChainComplete of { chain_id : string; success : bool }
 
@@ -42,6 +42,13 @@ type internal_trace = {
   node_id : string;
   event : trace_event;
 }
+
+type exec_phase =
+  | Planned
+  | Running
+  | Completed
+  | Failed
+  | Skipped
 
 (** {1 Execution Context} *)
 
@@ -97,6 +104,9 @@ type exec_context = {
   mutable total_tokens: Chain_category.token_usage; (** Accumulated token usage *)
   langfuse_trace: Langfuse.trace option;     (** Langfuse trace for observability *)
   checkpoint: checkpoint_config;             (** Checkpoint/resume configuration *)
+  node_status: (string, exec_phase) Hashtbl.t; (** Node status for observability *)
+  node_attempts: (string, int) Hashtbl.t;       (** Node execution attempts *)
+  chain_id: string;                            (** Current chain id *)
 }
 
 (** Default checkpoint configuration - no checkpointing *)
@@ -109,7 +119,7 @@ let default_checkpoint_config = {
 }
 
 (** Create a new execution context *)
-let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace ?checkpoint () = {
+let make_context ~start_time ~trace_enabled ~timeout ~chain_id ?langfuse_trace ?checkpoint () = {
   outputs = Hashtbl.create 16;
   traces = ref [];
   start_time;
@@ -121,7 +131,19 @@ let make_context ~start_time ~trace_enabled ~timeout ?langfuse_trace ?checkpoint
   total_tokens = Chain_category.Token_monoid.empty;
   langfuse_trace;
   checkpoint = Option.value checkpoint ~default:default_checkpoint_config;
+  node_status = Hashtbl.create 64;
+  node_attempts = Hashtbl.create 64;
+  chain_id;
 }
+
+let set_node_status ctx node_id status =
+  Hashtbl.replace ctx.node_status node_id status
+
+let next_attempt ctx node_id =
+  let cur = match Hashtbl.find_opt ctx.node_attempts node_id with Some n -> n | None -> 0 in
+  let next = cur + 1 in
+  Hashtbl.replace ctx.node_attempts node_id next;
+  next
 
 (** Create checkpoint configuration for execution *)
 let make_checkpoint_config ?fs ?store ?(enabled = false) ?resume_from () =
@@ -218,9 +240,9 @@ let add_trace ctx node_id event =
          nodes_executed = 0;
          nodes_skipped = 0;
        })
-   | NodeStart ->
-       Chain_telemetry.emit (Chain_telemetry.node_start ~node_id ~node_type:"unknown" ())
-   | NodeComplete { duration_ms; success } ->
+   | NodeStart { node_type; _ } ->
+       Chain_telemetry.emit (Chain_telemetry.node_start ~node_id ~node_type ())
+    | NodeComplete { duration_ms; success; _ } ->
        Chain_telemetry.emit (Chain_telemetry.node_complete
          ~node_id
          ~duration_ms
@@ -228,30 +250,82 @@ let add_trace ctx node_id event =
          ~verdict:(if success then Chain_category.Pass "" else Chain_category.Fail "")
          ~confidence:1.0
          ())
-   | NodeError msg ->
+   | NodeError { message; _ } ->
        Chain_telemetry.emit (Chain_telemetry.Error {
          Chain_telemetry.error_node_id = node_id;
-         error_message = msg;
+         error_message = message;
          error_retries = 0;
          error_timestamp = Unix.gettimeofday ();
        }))
 
-let record_start ctx node_id =
-  add_trace ctx node_id NodeStart
+let record_start ?(node_type = "unknown") ctx node_id =
+  let attempt = next_attempt ctx node_id in
+  set_node_status ctx node_id Running;
+  if Run_log_eio.enabled () then
+    Run_log_eio.record_event
+      ~event:"node_start"
+      ~run_id:ctx.checkpoint.run_id
+      ~chain_id:ctx.chain_id
+      ~node_id
+      ~node_type
+      ~attempt
+      ()
+  else
+    ();
+  add_trace ctx node_id (NodeStart { node_type; attempt })
 
-let record_complete ctx node_id ~duration_ms ~success =
-  add_trace ctx node_id (NodeComplete { duration_ms; success })
+let record_complete ?(node_type = "unknown") ctx node_id ~duration_ms ~success =
+  let attempt = match Hashtbl.find_opt ctx.node_attempts node_id with Some n -> n | None -> 1 in
+  set_node_status ctx node_id (if success then Completed else Failed);
+  if Run_log_eio.enabled () then
+    Run_log_eio.record_event
+      ~event:"node_complete"
+      ~run_id:ctx.checkpoint.run_id
+      ~chain_id:ctx.chain_id
+      ~node_id
+      ~node_type
+      ~attempt
+      ~duration_ms
+      ~success
+      ()
+  else
+    ();
+  add_trace ctx node_id (NodeComplete { duration_ms; success; node_type; attempt })
 
-let record_error ctx node_id msg =
-  add_trace ctx node_id (NodeError msg)
+let record_error ?(node_type = "unknown") ctx node_id msg =
+  let attempt = match Hashtbl.find_opt ctx.node_attempts node_id with Some n -> n | None -> 1 in
+  if Run_log_eio.enabled () then
+    Run_log_eio.record_event
+      ~event:"node_error"
+      ~run_id:ctx.checkpoint.run_id
+      ~chain_id:ctx.chain_id
+      ~node_id
+      ~node_type
+      ~attempt
+      ~error_class:"node_error"
+      ~error:msg
+      ()
+  else
+    ();
+  add_trace ctx node_id (NodeError { message = msg; error_class = None; node_type; attempt })
 
 (** Convert internal_trace to Chain_types.trace_entry *)
 let trace_to_entry (t : internal_trace) (node_type_name : string) : Chain_types.trace_entry =
+  let node_type_from_event = match t.event with
+    | NodeStart { node_type; _ }
+    | NodeComplete { node_type; _ }
+    | NodeError { node_type; _ } -> Some node_type
+    | _ -> None
+  in
+  let node_type_name = match node_type_from_event with
+    | Some nt -> nt
+    | None -> node_type_name
+  in
   let status, error = match t.event with
-    | NodeStart -> (`Success, None)  (* Will be updated by NodeComplete *)
+    | NodeStart _ -> (`Success, None)  (* Will be updated by NodeComplete *)
     | NodeComplete { success; _ } ->
         if success then (`Success, None) else (`Failure, None)
-    | NodeError msg -> (`Failure, Some msg)
+    | NodeError { message; _ } -> (`Failure, Some message)
     | ChainStart _ | ChainComplete _ -> (`Success, None)
   in
   {
@@ -274,21 +348,31 @@ let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry l
   ) traces;
 
   Hashtbl.fold (fun node_id events acc ->
+    let node_type_name =
+      List.find_map (fun t ->
+        match t.event with
+        | NodeStart { node_type; _ }
+        | NodeComplete { node_type; _ }
+        | NodeError { node_type; _ } -> Some node_type
+        | _ -> None
+      ) events
+      |> Option.value ~default:"unknown"
+    in
     (* Find start and complete events *)
     let start_time = List.fold_left (fun acc t ->
-      match t.event with NodeStart -> min acc t.timestamp | _ -> acc
+      match t.event with NodeStart _ -> min acc t.timestamp | _ -> acc
     ) max_float events in
     let end_time, status, error = List.fold_left (fun (et, st, err) t ->
       match t.event with
-      | NodeComplete { duration_ms = _; success } ->
+      | NodeComplete { duration_ms = _; success; _ } ->
           (t.timestamp, (if success then `Success else `Failure), err)
-      | NodeError msg -> (et, `Failure, Some msg)
+      | NodeError { message; _ } -> (et, `Failure, Some message)
       | _ -> (et, st, err)
     ) (start_time, `Success, None) events in
 
     let entry : Chain_types.trace_entry = {
       node_id;
-      node_type_name = "unknown";  (* Would need node lookup to get this *)
+      node_type_name;
       start_time;
       end_time;
       status;
@@ -588,7 +672,35 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
             add_message conv ~role:"user" ~content:final_prompt ~iteration ~model:conv.current_model;
             (merged_prompt, Some conv, conv.current_model)
       in
-      record_start ctx node.id;
+      let tools_count =
+        match tools with
+        | Some (`List items) -> List.length items
+        | Some _ -> 1
+        | None -> 0
+      in
+      let lower_model = String.lowercase_ascii effective_model in
+      let tools_enabled =
+        tools_count > 0 &&
+        (lower_model = "ollama" || (String.length lower_model > 7 && String.sub lower_model 0 7 = "ollama:"))
+      in
+      if Run_log_eio.enabled () then
+        Run_log_eio.record_event
+          ~event:"tool_choice"
+          ~run_id:ctx.checkpoint.run_id
+          ~chain_id:ctx.chain_id
+          ~node_id:node.id
+          ~node_type:"llm"
+          ~model:effective_model
+          ~success:tools_enabled
+          ?error_class:(if tools_count > 0 && not tools_enabled then Some "tools_disabled" else None)
+          ~extra:[
+            ("tools_count", string_of_int tools_count);
+            ("tools_enabled", string_of_bool tools_enabled);
+          ]
+          ()
+      else
+        ();
+      record_start ctx node.id ~node_type:"llm";
       let start = Unix.gettimeofday () in
 
       (* Create Langfuse generation if tracing is enabled *)
@@ -645,7 +757,7 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
            | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
            | None -> ());
 
-          record_complete ctx node.id ~duration_ms ~success:true;
+          record_complete ctx node.id ~duration_ms ~success:true ~node_type:"llm";
           Hashtbl.add ctx.outputs node.id output;
           Ok output
       | Error msg ->
@@ -668,8 +780,8 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
                Prompt_registry.update_metrics ~id ~version ~score:0.0 ()
            | None -> ());
 
-          record_complete ctx node.id ~duration_ms ~success:false;
-          record_error ctx node.id msg;
+          record_complete ctx node.id ~duration_ms ~success:false ~node_type:"llm";
+          record_error ctx node.id ~node_type:"llm" msg;
           Error msg)
   | _ -> Error "execute_llm_node called with non-LLM node"
 
@@ -677,7 +789,7 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
 let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string, string) result =
   match tool with
   | Tool { name; args } ->
-      record_start ctx node.id;
+      record_start ctx node.id ~node_type:"tool";
       let start = Unix.gettimeofday () in
       let resolved_args = substitute_json ctx args in
       let result =
@@ -687,12 +799,12 @@ let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
-          record_complete ctx node.id ~duration_ms ~success:true;
+          record_complete ctx node.id ~duration_ms ~success:true ~node_type:"tool";
           Hashtbl.add ctx.outputs node.id output;
           Ok output
       | Error msg ->
-          record_complete ctx node.id ~duration_ms ~success:false;
-          record_error ctx node.id msg;
+          record_complete ctx node.id ~duration_ms ~success:false ~node_type:"tool";
+          record_error ctx node.id ~node_type:"tool" msg;
           Error msg)
   | _ -> Error "execute_tool_node called with non-Tool node"
 
@@ -702,13 +814,13 @@ let apply_adapter_transform = Chain_adapter_eio.apply_adapter_transform
 
 (** Execute an adapter node *)
 let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string, string) result =
-  record_start ctx node.id;
+  record_start ctx node.id ~node_type:"adapter";
   let start = Unix.gettimeofday () in
   (* Resolve input reference *)
   let input_value = resolve_single_input ctx input_ref in
   if input_value = "" then begin
     let msg = Printf.sprintf "Adapter: empty input from '%s'" input_ref in
-    record_error ctx node.id msg;
+    record_error ctx node.id ~node_type:"adapter" msg;
     match on_error with
     | `Fail -> Error msg
     | `Passthrough -> Ok ""
@@ -720,12 +832,12 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
     let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
     match result with
     | Ok output ->
-        record_complete ctx node.id ~duration_ms ~success:true;
+        record_complete ctx node.id ~duration_ms ~success:true ~node_type:"adapter";
         Hashtbl.add ctx.outputs node.id output;
         Ok output
     | Error msg ->
-        record_complete ctx node.id ~duration_ms ~success:false;
-        record_error ctx node.id msg;
+        record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
+        record_error ctx node.id ~node_type:"adapter" msg;
         (match on_error with
          | `Fail -> Error msg
          | `Passthrough -> Ok input_value  (* Return original on error *)
@@ -1249,6 +1361,7 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       ~start_time:ctx.start_time
       ~trace_enabled:ctx.trace_enabled
       ~timeout:ctx.timeout
+      ~chain_id:ctx.chain_id
       ()
     in
     (* Optionally inherit cache *)
@@ -2538,7 +2651,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
     else None
   in
 
-  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ?langfuse_trace ?checkpoint ()  in
+  let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ~chain_id:plan.chain.Chain_types.id ?langfuse_trace ?checkpoint ()  in
 
   (* Restore state from checkpoint if resuming *)
   (match ctx.checkpoint.resume_from with
@@ -2549,6 +2662,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
 
   (* Record chain start with mermaid visualization *)
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid plan.chain) in
+  List.iter (fun (n : node) -> set_node_status ctx n.id Planned) plan.chain.Chain_types.nodes;
   add_trace ctx plan.chain.Chain_types.id (ChainStart { chain_id = plan.chain.Chain_types.id; mermaid_dsl });
 
   (* Helper to build chain_result *)
@@ -2605,8 +2719,10 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
         let result = match step with
           | Sequential node ->
               (* Skip if node already completed in checkpoint *)
-              if node_completed_in_checkpoint ctx node.Chain_types.id then
+              if node_completed_in_checkpoint ctx node.Chain_types.id then begin
+                set_node_status ctx node.Chain_types.id Skipped;
                 Ok (Hashtbl.find ctx.outputs node.Chain_types.id)
+              end
               else begin
                 let r = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node in
                 (* Save checkpoint after successful node completion *)
@@ -2620,8 +2736,10 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
               let nodes_to_execute = List.filter (fun (n : node) ->
                 not (node_completed_in_checkpoint ctx n.id)
               ) nodes in
-              if List.length nodes_to_execute = 0 then
+              if List.length nodes_to_execute = 0 then begin
+                List.iter (fun (n : node) -> set_node_status ctx n.id Skipped) nodes;
                 Ok ""  (* All nodes already completed *)
+              end
               else begin
                 (* Execute remaining nodes in parallel *)
                 let results = ref [] in
