@@ -183,3 +183,9 @@
  (name test_chain_formal)
  (modules test_chain_formal)
  (libraries llm_mcp.common qcheck))
+
+; MCP Resilience tests (Circuit Breaker, Retry, Timeout)
+; Phase 4.2 of MCP Unify project
+(test
+ (name test_mcp_resilience)
+ (libraries llm_mcp.eio alcotest eio eio_main))
