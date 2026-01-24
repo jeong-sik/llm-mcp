@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <style>
+    body { background: #1a1a2e; padding: 20px; font-family: system-ui; }
+    h1, h2 { color: #fff; text-align: center; }
+    h2 { font-size: 1.2em; margin-top: 30px; color: #4ecdc4; }
+    .mermaid { background: white; padding: 20px; border-radius: 12px; margin: 10px 0; }
+    .code-block {
+      background: #2d3748;
+      color: #68d391;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Fira Code', monospace;
+      font-size: 13px;
+      white-space: pre;
+      overflow-x: auto;
+      margin: 10px 0;
+    }
+    .legend {
+      background: rgba(255,255,255,0.1);
+      padding: 15px;
+      border-radius: 8px;
+      margin: 20px 0;
+      color: #fff;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+    .legend-item { display: flex; align-items: center; }
+    .legend-color { width: 20px; height: 20px; border-radius: 4px; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h1>ChainRef - Multiple References in Mermaid</h1>
+
+  <!-- Pattern 1: Fan-out to multiple ChainRefs -->
+  <div class="section">
+    <h2>1. Fan-out to 3 ChainRefs (함수 병렬 호출)</h2>
+    <div class="mermaid">
+graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+
+    input["LLM:gemini 'Parse query'"]:::llm
+    hippo[["ChainRef:hippo-rag"]]:::ref
+    magi[["ChainRef:magi-code-review"]]:::ref
+    pr[["ChainRef:pr-review-pipeline"]]:::ref
+    combine{Merge:concat}:::merge
+    final["LLM:claude 'Synthesize'"]:::llm
+
+    input --> hippo
+    input --> magi
+    input --> pr
+    hippo --> combine
+    magi --> combine
+    pr --> combine
+    combine --> final
+    </div>
+    <div class="code-block">
+JSON:
+{
+  "id": "multi-rag-review",
+  "nodes": [
+    {"id": "input", "type": "llm", "llm": {...}},
+    {"id": "hippo", "type": "chain_ref", "chain_ref": {"chain_id": "hippo-rag"}},
+    {"id": "magi", "type": "chain_ref", "chain_ref": {"chain_id": "magi-code-review"}},
+    {"id": "pr", "type": "chain_ref", "chain_ref": {"chain_id": "pr-review-pipeline"}},
+    {"id": "combine", "type": "merge", ...},
+    {"id": "final", "type": "llm", ...}
+  ]
+}
+    </div>
+  </div>
+
+  <!-- Pattern 2: ChainRef in Pipeline -->
+  <div class="section">
+    <h2>2. ChainRef in Pipeline (순차 체인 호출)</h2>
+    <div class="mermaid">
+graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+
+    start["LLM:gemini 'Start'"]:::llm
+    pipe[["Pipeline"]]:::pipeline
+    
+    subgraph pipe_inner [Pipeline Inner]
+        rag[["ChainRef:hippo-rag"]]:::ref
+        review[["ChainRef:magi-code-review"]]:::ref
+    end
+    
+    finish["LLM:claude 'Finish'"]:::llm
+
+    start --> pipe
+    pipe --> finish
+    </div>
+  </div>
+
+  <!-- Pattern 3: Conditional ChainRef -->
+  <div class="section">
+    <h2>3. Gate로 조건부 ChainRef 선택</h2>
+    <div class="mermaid">
+graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+
+    analyze["LLM:gemini 'Classify task'"]:::llm
+    gate{Gate:is_code?}:::gate
+    code_review[["ChainRef:magi-code-review"]]:::ref
+    doc_review[["ChainRef:doc-review"]]:::ref
+    output["LLM:claude 'Report'"]:::llm
+
+    analyze --> gate
+    gate -->|yes| code_review
+    gate -->|no| doc_review
+    code_review --> output
+    doc_review --> output
+    </div>
+  </div>
+
+  <!-- Pattern 4: Recursive/Self ChainRef -->
+  <div class="section">
+    <h2>4. Recursive Pattern (재귀적 체인 참조)</h2>
+    <div class="mermaid">
+graph LR
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+
+    init["LLM:gemini 'Init'"]:::llm
+    loop{GoalDriven:coverage>=0.9}:::goal
+    self[["ChainRef:self"]]:::ref
+    done["LLM:claude 'Done'"]:::llm
+
+    init --> loop
+    loop -->|retry| self
+    self --> loop
+    loop -->|pass| done
+    </div>
+    <p style="color:#fff; margin-top:10px;">
+      ⚠️ <code>ChainRef:self</code>는 max_depth로 무한 재귀 방지 필요
+    </p>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-color" style="background:#4ecdc4"></div>LLM Node</div>
+    <div class="legend-item"><div class="legend-color" style="background:#b2bec3"></div>ChainRef (재사용 체인)</div>
+    <div class="legend-item"><div class="legend-color" style="background:#dda0dd"></div>Merge</div>
+    <div class="legend-item"><div class="legend-color" style="background:#6c5ce7"></div>Pipeline</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ffd93d"></div>Gate</div>
+    <div class="legend-item"><div class="legend-color" style="background:#00b894"></div>GoalDriven</div>
+  </div>
+
+  <script>mermaid.initialize({startOnLoad:true, theme:'default'});</script>
+</body>
+</html>

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <style>
+    body { background: #1a1a2e; padding: 20px; font-family: system-ui; }
+    h1, h2 { color: #fff; text-align: center; }
+    h2 { font-size: 1.2em; margin-top: 30px; color: #4ecdc4; }
+    .mermaid { background: white; padding: 20px; border-radius: 12px; margin: 10px 0; }
+    .section { margin: 20px 0; }
+    .code-block {
+      background: #2d3748;
+      color: #68d391;
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-family: 'Fira Code', monospace;
+      font-size: 13px;
+      margin: 5px 0;
+      overflow-x: auto;
+    }
+    .legend {
+      background: rgba(255,255,255,0.1);
+      padding: 15px;
+      border-radius: 8px;
+      margin: 20px 0;
+      color: #fff;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+    .legend-item { display: flex; align-items: center; }
+    .legend-color { width: 20px; height: 20px; border-radius: 4px; margin-right: 8px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0; color: #fff; }
+    th, td { padding: 8px 12px; text-align: left; border: 1px solid #4a5568; }
+    th { background: #2d3748; }
+    td { background: #1a202c; }
+    code { background: #2d3748; padding: 2px 6px; border-radius: 4px; color: #68d391; }
+  </style>
+</head>
+<body>
+  <h1>Chain Engine - All Node Types in Mermaid DSL</h1>
+
+  <!-- Score Operators -->
+  <div class="section">
+    <h2>1. FeedbackLoop Score Operators</h2>
+    <table>
+      <tr><th>Operator</th><th>JSON</th><th>Mermaid Symbol</th><th>Example</th></tr>
+      <tr><td>Greater Than</td><td><code>"gt"</code> or <code>">"</code></td><td><code>></code></td><td><code>{FeedbackLoop:llm_judge,3,>0.8}</code></td></tr>
+      <tr><td>Greater or Equal</td><td><code>"gte"</code> or <code>">="</code></td><td><code>>=</code></td><td><code>{FeedbackLoop:llm_judge,5,>=0.95}</code></td></tr>
+      <tr><td>Less Than</td><td><code>"lt"</code> or <code>"<"</code></td><td><code><</code></td><td><code>{FeedbackLoop:error_rate,3,<0.1}</code></td></tr>
+      <tr><td>Less or Equal</td><td><code>"lte"</code> or <code>"<="</code></td><td><code><=</code></td><td><code>{FeedbackLoop:latency,3,<=500}</code></td></tr>
+      <tr><td>Equal</td><td><code>"eq"</code> or <code>"="</code></td><td><code>=</code></td><td><code>{FeedbackLoop:exact_match,2,=1.0}</code></td></tr>
+      <tr><td>Not Equal</td><td><code>"neq"</code> or <code>"!="</code></td><td><code>!=</code></td><td><code>{FeedbackLoop:anomaly,3,!=0}</code></td></tr>
+    </table>
+  </div>
+
+  <!-- All Node Types -->
+  <div class="section">
+    <h2>2. All Node Types - Mermaid DSL Reference</h2>
+    <div class="mermaid">
+graph TB
+    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
+    classDef tool fill:#a8e6cf,stroke:#3d8b6e,color:#000
+    classDef quorum fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    classDef gate fill:#ffd93d,stroke:#e6b800,color:#000
+    classDef merge fill:#dda0dd,stroke:#9932cc,color:#000
+    classDef threshold fill:#ffb347,stroke:#ff8c00,color:#000
+    classDef evaluator fill:#87ceeb,stroke:#4682b4,color:#000
+    classDef pipeline fill:#6c5ce7,stroke:#341f97,color:#fff
+    classDef fanout fill:#fd79a8,stroke:#e84393,color:#000
+    classDef ref fill:#b2bec3,stroke:#636e72,color:#000
+    classDef goal fill:#00b894,stroke:#00695c,color:#fff
+    classDef retry fill:#fdcb6e,stroke:#f39c12,color:#000
+    classDef fallback fill:#e17055,stroke:#d63031,color:#fff
+    classDef race fill:#0984e3,stroke:#0652dd,color:#fff
+    classDef cache fill:#f8e71c,stroke:#d4af37,color:#000
+    classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
+    classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    classDef adapter fill:#74b9ff,stroke:#0984e3,color:#000
+
+    subgraph "Basic Nodes"
+        llm["LLM:gemini 'prompt'"]:::llm
+        tool["Tool:fetch_api {...}"]:::tool
+    end
+
+    subgraph "Decision Nodes"
+        quorum{"Quorum:2"}:::quorum
+        gate{"Gate:score>0.8"}:::gate
+        threshold{"Threshold:>=0.9"}:::threshold
+        merge{"Merge:concat"}:::merge
+    end
+
+    subgraph "Iteration Nodes"
+        feedback{"FeedbackLoop<br/>llm_judge,5,>=0.95"}:::feedbackloop
+        goal{"GoalDriven<br/>coverage,gte,0.9,10"}:::goal
+        mcts{"MCTS<br/>depth:3,ucb1"}:::mcts
+    end
+
+    subgraph "Flow Control"
+        pipeline[["Pipeline"]]:::pipeline
+        fanout[["Fanout"]]:::fanout
+        retry("Retry:3"):::retry
+        fallback("Fallback"):::fallback
+        race("Race"):::race
+    end
+
+    subgraph "Utility Nodes"
+        cache[["Cache:60s"]]:::cache
+        spawn[["Spawn:clean"]]:::spawn
+        ref[["ChainRef:other-chain"]]:::ref
+        adapter["Adapter:Extract .data"]:::adapter
+    end
+    </div>
+  </div>
+
+  <!-- Mermaid Syntax Table -->
+  <div class="section">
+    <h2>3. Mermaid Shape Reference</h2>
+    <table>
+      <tr><th>Node Type</th><th>Shape</th><th>Mermaid Syntax</th><th>Color</th></tr>
+      <tr><td>LLM</td><td>Rectangle</td><td><code>["LLM:model 'prompt'"]</code></td><td style="background:#4ecdc4;color:#000">Teal</td></tr>
+      <tr><td>Tool</td><td>Rectangle</td><td><code>["Tool:name {...}"]</code></td><td style="background:#a8e6cf;color:#000">Light Green</td></tr>
+      <tr><td>Quorum</td><td>Diamond</td><td><code>{Quorum:N}</code></td><td style="background:#ff6b6b;color:#fff">Red</td></tr>
+      <tr><td>Gate</td><td>Diamond</td><td><code>{Gate:condition}</code></td><td style="background:#ffd93d;color:#000">Yellow</td></tr>
+      <tr><td>Threshold</td><td>Diamond</td><td><code>{Threshold:>=0.9}</code></td><td style="background:#ffb347;color:#000">Orange</td></tr>
+      <tr><td>Merge</td><td>Diamond</td><td><code>{Merge:strategy}</code></td><td style="background:#dda0dd;color:#000">Plum</td></tr>
+      <tr><td>FeedbackLoop</td><td>Diamond</td><td><code>{FeedbackLoop:eval,iter,op+val}</code></td><td style="background:#ff7f50;color:#fff">Coral</td></tr>
+      <tr><td>GoalDriven</td><td>Diamond</td><td><code>{GoalDriven:metric:op:val:iter}</code></td><td style="background:#00b894;color:#fff">Emerald</td></tr>
+      <tr><td>MCTS</td><td>Diamond</td><td><code>{MCTS:depth:threshold:strategy}</code></td><td style="background:#e056fd;color:#fff">Purple</td></tr>
+      <tr><td>Pipeline</td><td>Double Rect</td><td><code>[["Pipeline"]]</code></td><td style="background:#6c5ce7;color:#fff">Indigo</td></tr>
+      <tr><td>Fanout</td><td>Double Rect</td><td><code>[["Fanout"]]</code></td><td style="background:#fd79a8;color:#000">Pink</td></tr>
+      <tr><td>ChainRef</td><td>Double Rect</td><td><code>[["ChainRef:id"]]</code></td><td style="background:#b2bec3;color:#000">Gray</td></tr>
+      <tr><td>Cache</td><td>Double Rect</td><td><code>[["Cache:60s"]]</code></td><td style="background:#f8e71c;color:#000">Yellow</td></tr>
+      <tr><td>Spawn</td><td>Double Rect</td><td><code>[["Spawn:mode"]]</code></td><td style="background:#b8e994;color:#000">Light Green</td></tr>
+      <tr><td>Retry</td><td>Rounded</td><td><code>("Retry:N")</code></td><td style="background:#fdcb6e;color:#000">Gold</td></tr>
+      <tr><td>Fallback</td><td>Rounded</td><td><code>("Fallback")</code></td><td style="background:#e17055;color:#fff">Terracotta</td></tr>
+      <tr><td>Race</td><td>Rounded</td><td><code>("Race")</code></td><td style="background:#0984e3;color:#fff">Blue</td></tr>
+      <tr><td>Adapter</td><td>Rectangle</td><td><code>["Adapter:transform"]</code></td><td style="background:#74b9ff;color:#000">Light Blue</td></tr>
+    </table>
+  </div>
+
+  <!-- FeedbackLoop Examples -->
+  <div class="section">
+    <h2>4. FeedbackLoop with Different Operators</h2>
+    <div class="mermaid">
+graph LR
+    classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+
+    a{"FeedbackLoop<br/>>=0.95 (gte)"}:::feedbackloop
+    b{">0.8 (gt)"}:::feedbackloop
+    c{"<=0.1 (lte)"}:::feedbackloop
+    d{"<0.05 (lt)"}:::feedbackloop
+    e{"=1.0 (eq)"}:::feedbackloop
+    f{"!=0 (neq)"}:::feedbackloop
+    </div>
+    <div class="code-block">
+Mermaid DSL Examples:
+{FeedbackLoop:llm_judge,5,>=0.95}   -- Quality Score >= 95%
+{FeedbackLoop:llm_judge,3,>0.8}     -- Quality Score > 80%
+{FeedbackLoop:error_rate,5,<=0.1}   -- Error Rate <= 10%
+{FeedbackLoop:error_rate,3,<0.05}   -- Error Rate < 5%
+{FeedbackLoop:exact_match,2,=1.0}   -- Exact Match = 100%
+{FeedbackLoop:anomaly,3,!=0}        -- Has Anomaly != 0
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-color" style="background:#4ecdc4"></div>LLM</div>
+    <div class="legend-item"><div class="legend-color" style="background:#a8e6cf"></div>Tool</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ff6b6b"></div>Quorum</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ffd93d"></div>Gate</div>
+    <div class="legend-item"><div class="legend-color" style="background:#ff7f50"></div>FeedbackLoop</div>
+    <div class="legend-item"><div class="legend-color" style="background:#00b894"></div>GoalDriven</div>
+    <div class="legend-item"><div class="legend-color" style="background:#e056fd"></div>MCTS</div>
+    <div class="legend-item"><div class="legend-color" style="background:#6c5ce7"></div>Pipeline</div>
+    <div class="legend-item"><div class="legend-color" style="background:#fdcb6e"></div>Retry</div>
+    <div class="legend-item"><div class="legend-color" style="background:#e17055"></div>Fallback</div>
+  </div>
+
+  <script>mermaid.initialize({startOnLoad:true, theme:'default'});</script>
+</body>
+</html>
