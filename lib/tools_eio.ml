@@ -826,7 +826,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 ] @ (match run_id with Some id -> [("run_id", id)] | None -> []); })
 
 
-  | ChainValidate { chain; mermaid } ->
+  | ChainValidate { chain; mermaid; strict } ->
       (* Parse from either JSON or Mermaid, then validate *)
       let parse_result = match (chain, mermaid) with
         | (Some c, _) -> Chain_parser.parse_chain c
@@ -840,12 +840,17 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Parse error: %s" msg;
             extra = [("stage", "parse"); ("valid", "false")]; }
       | Ok parsed_chain ->
-          match Chain_parser.validate_chain parsed_chain with
+          let validation =
+            if strict then Chain_parser.validate_chain_strict parsed_chain
+            else Chain_parser.validate_chain parsed_chain
+          in
+          match validation with
           | Error msg ->
               { model = "chain.validate";
                 returncode = -1;
                 response = sprintf "Validation error: %s" msg;
-                extra = [("stage", "validate"); ("valid", "false")]; }
+                extra = [("stage", "validate"); ("valid", "false")];
+              }
           | Ok () ->
               (* Also try to compile to check DAG validity *)
               match Chain_compiler.compile parsed_chain with
@@ -853,7 +858,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   { model = "chain.validate";
                     returncode = -1;
                     response = sprintf "Compile error: %s" msg;
-                    extra = [("stage", "compile"); ("valid", "false")]; }
+                    extra = [("stage", "compile"); ("valid", "false")];
+                  }
               | Ok plan ->
                   let node_count = List.length parsed_chain.Chain_types.nodes in
                   let depth = plan.Chain_types.depth in
@@ -864,6 +870,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       parsed_chain.Chain_types.id node_count depth parallel_groups;
                     extra = [
                       ("valid", "true");
+                      ("strict", if strict then "true" else "false");
                       ("chain_id", parsed_chain.Chain_types.id);
                       ("node_count", string_of_int node_count);
                       ("depth", string_of_int depth);
@@ -879,7 +886,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         extra = [("count", string_of_int (List.length ids))];
       }
 
-  | ChainToMermaid { chain } ->
+  | ChainToMermaid { chain; lossless } ->
       (* Parse JSON to Chain AST, then convert to Mermaid *)
       (match Chain_parser.parse_chain chain with
       | Error msg ->
@@ -888,7 +895,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Parse error: %s" msg;
             extra = [("stage", "parse")]; }
       | Ok parsed_chain ->
-          let mermaid_text = Chain_mermaid_parser.chain_to_mermaid parsed_chain in
+          let mermaid_text = Chain_mermaid_parser.chain_to_mermaid ~lossless parsed_chain in
           { model = "chain.to_mermaid";
             returncode = 0;
             response = mermaid_text;
@@ -916,7 +923,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               ("output", parsed_chain.Chain_types.output);
             ]; })
 
-  | ChainConvert { from_format; to_format; input; pretty } ->
+  | ChainConvert { from_format; to_format; input; pretty; lossless } ->
       (* Bidirectional conversion: JSON <-> Mermaid *)
       (match (from_format, to_format) with
        | ("json", "mermaid") ->
@@ -928,7 +935,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   response = sprintf "JSON parse error: %s" msg;
                   extra = [("from", "json"); ("to", "mermaid"); ("stage", "parse")]; }
             | Ok chain ->
-                let mermaid = Chain_mermaid_parser.chain_to_mermaid chain in
+                let mermaid = Chain_mermaid_parser.chain_to_mermaid ~lossless chain in
                 { model = "chain.convert";
                   returncode = 0;
                   response = mermaid;

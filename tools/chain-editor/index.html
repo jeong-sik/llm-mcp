@@ -333,6 +333,14 @@
           <div class="name">⚡ Simple Pipeline</div>
           <div class="nodes">3 nodes • A→B→C</div>
         </div>
+        <div class="preset-item" data-preset="figma-prototype">
+          <div class="name">🎨 Figma → Prototype</div>
+          <div class="nodes">6 nodes • figma-to-prototype</div>
+        </div>
+        <div class="preset-item" data-preset="figma-component">
+          <div class="name">🧩 Figma → Web Component</div>
+          <div class="nodes">6 nodes • figma-to-web-component</div>
+        </div>
       </div>
     </div>
 
@@ -497,6 +505,42 @@
           { id: 'C', type: 'llm', label: 'step3', x: 540, y: 150, config: 'LLM:ollama' },
         ],
         connections: [['A', 'B'], ['B', 'C']]
+      },
+      'figma-prototype': {
+        nodes: [
+          { id: 'P', type: 'tool', label: 'parse-url', x: 60, y: 120, config: 'Tool:figma:figma_parse_url' },
+          { id: 'F', type: 'tool', label: 'get-file', x: 260, y: 120, config: 'Tool:figma:figma_get_file' },
+          { id: 'T', type: 'tool', label: 'tokens', x: 460, y: 40, config: 'Tool:figma:figma_export_tokens' },
+          { id: 'S', type: 'llm', label: 'summarize', x: 460, y: 200, config: 'LLM:gemini' },
+          { id: 'M', type: 'merge', label: 'merge', x: 660, y: 120, config: 'Merge:concat' },
+          { id: 'C', type: 'llm', label: 'compose', x: 860, y: 120, config: 'LLM:claude' },
+        ],
+        connections: [
+          ['P', 'F'],
+          ['F', 'T'],
+          ['F', 'S'],
+          ['T', 'M'],
+          ['S', 'M'],
+          ['M', 'C']
+        ]
+      },
+      'figma-component': {
+        nodes: [
+          { id: 'P', type: 'tool', label: 'parse-url', x: 60, y: 120, config: 'Tool:figma:figma_parse_url' },
+          { id: 'N', type: 'tool', label: 'get-node', x: 260, y: 120, config: 'Tool:figma:figma_get_node' },
+          { id: 'B', type: 'tool', label: 'bundle', x: 460, y: 40, config: 'Tool:figma:figma_get_node_bundle' },
+          { id: 'D', type: 'llm', label: 'design', x: 460, y: 200, config: 'LLM:gemini' },
+          { id: 'V', type: 'merge', label: 'verify', x: 660, y: 120, config: 'Merge:concat' },
+          { id: 'H', type: 'llm', label: 'html', x: 860, y: 120, config: 'LLM:claude' },
+        ],
+        connections: [
+          ['P', 'N'],
+          ['N', 'B'],
+          ['N', 'D'],
+          ['B', 'V'],
+          ['D', 'V'],
+          ['V', 'H']
+        ]
       }
     };
 
@@ -883,7 +927,7 @@
       setStatus('Auto layout applied');
     }
 
-    function validateChain() {
+    function validateChainLocal() {
       const errors = [];
 
       // Check for cycles (simple check)
@@ -911,9 +955,53 @@
       });
 
       if (errors.length === 0) {
-        setStatus('✅ Validation passed');
+        state.lastOutput = 'Local validation passed';
+        setStatus('✅ Local validation passed');
       } else {
-        setStatus('❌ ' + errors.join('; '));
+        state.lastOutput = 'Local validation errors:\n- ' + errors.join('\n- ');
+        setStatus('❌ Local validation failed');
+      }
+      document.querySelector('[data-tab="output"]').click();
+    }
+
+    async function validateChain() {
+      const mermaid = generateMermaid();
+      setStatus('Validating (strict)...');
+      try {
+        const res = await fetch('http://localhost:8932/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: {
+              name: 'chain.validate',
+              arguments: {
+                mermaid: mermaid.replace(/\n/g, '\\n'),
+                strict: true
+              }
+            }
+          })
+        });
+
+        const text = await res.text();
+        const lines = text.split('\n').filter(l => l.startsWith('data:'));
+        if (lines.length === 0) throw new Error('No validation response');
+        const data = JSON.parse(lines[0].replace('data: ', ''));
+        if (data.result && !data.result.isError) {
+          const msg = data.result.content?.[0]?.text || 'Validation passed';
+          state.lastOutput = msg;
+          setStatus('✅ ' + msg);
+        } else {
+          const msg = data.result?.content?.[0]?.text || 'Validation failed';
+          state.lastOutput = msg;
+          setStatus('❌ Validation failed');
+        }
+        document.querySelector('[data-tab="output"]').click();
+      } catch (e) {
+        // Fallback to local validation if MCP server is unavailable
+        validateChainLocal();
       }
     }
 

@@ -236,7 +236,7 @@ let execute_chain_run
    ChainValidate
    ============================================================================ *)
 
-let execute_chain_validate ~chain ~mermaid =
+let execute_chain_validate ~chain ~mermaid ~strict =
   let parse_result = match (chain, mermaid) with
     | (Some c, _) -> Chain_parser.parse_chain c
     | (_, Some m) -> Chain_mermaid_parser.parse_mermaid_to_chain m
@@ -249,7 +249,11 @@ let execute_chain_validate ~chain ~mermaid =
         response = sprintf "Parse error: %s" msg;
         extra = [("stage", "parse"); ("valid", "false")]; }
   | Ok parsed_chain ->
-      match Chain_parser.validate_chain parsed_chain with
+      let validation =
+        if strict then Chain_parser.validate_chain_strict parsed_chain
+        else Chain_parser.validate_chain parsed_chain
+      in
+      match validation with
       | Error msg ->
           { model = "chain.validate";
             returncode = -1;
@@ -272,6 +276,7 @@ let execute_chain_validate ~chain ~mermaid =
                   parsed_chain.Chain_types.id node_count depth parallel_groups;
                 extra = [
                   ("valid", "true");
+                  ("strict", if strict then "true" else "false");
                   ("chain_id", parsed_chain.Chain_types.id);
                   ("node_count", string_of_int node_count);
                   ("depth", string_of_int depth);
@@ -295,7 +300,7 @@ let execute_chain_list () =
    ChainToMermaid
    ============================================================================ *)
 
-let execute_chain_to_mermaid ~chain =
+let execute_chain_to_mermaid ~chain ~lossless =
   match Chain_parser.parse_chain chain with
   | Error msg ->
       { model = "chain.to_mermaid";
@@ -303,7 +308,7 @@ let execute_chain_to_mermaid ~chain =
         response = sprintf "Parse error: %s" msg;
         extra = [("stage", "parse")]; }
   | Ok parsed_chain ->
-      let mermaid_text = Chain_mermaid_parser.chain_to_mermaid parsed_chain in
+      let mermaid_text = Chain_mermaid_parser.chain_to_mermaid ~lossless parsed_chain in
       { model = "chain.to_mermaid";
         returncode = 0;
         response = mermaid_text;
@@ -338,7 +343,7 @@ let execute_chain_visualize ~chain =
    ChainConvert
    ============================================================================ *)
 
-let execute_chain_convert ~from_format ~to_format ~input ~pretty =
+let execute_chain_convert ~from_format ~to_format ~input ~pretty ~lossless =
   match (from_format, to_format) with
   | ("json", "mermaid") ->
       (match Chain_parser.parse_chain input with
@@ -348,7 +353,7 @@ let execute_chain_convert ~from_format ~to_format ~input ~pretty =
              response = sprintf "JSON parse error: %s" msg;
              extra = [("from", "json"); ("to", "mermaid"); ("stage", "parse")]; }
        | Ok chain ->
-           let mermaid = Chain_mermaid_parser.chain_to_mermaid chain in
+           let mermaid = Chain_mermaid_parser.chain_to_mermaid ~lossless chain in
            { model = "chain.convert";
              returncode = 0;
              response = mermaid;

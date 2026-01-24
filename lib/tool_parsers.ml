@@ -134,13 +134,15 @@ let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args
     | c -> Some c
   in
   let mermaid = json |> member "mermaid" |> to_string_option in
-  ChainValidate { chain; mermaid }
+  let strict = try json |> member "strict" |> to_bool with _ -> true in
+  ChainValidate { chain; mermaid; strict }
 
 (** Parse JSON arguments for chain.to_mermaid tool *)
 let parse_chain_to_mermaid_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let chain = json |> member "chain" in
-  ChainToMermaid { chain }
+  let lossless = try json |> member "lossless" |> to_bool with _ -> false in
+  ChainToMermaid { chain; lossless }
 
 (** Parse JSON arguments for chain.visualize tool *)
 let parse_chain_visualize_args (json : Yojson.Safe.t) : tool_args =
@@ -155,7 +157,8 @@ let parse_chain_convert_args (json : Yojson.Safe.t) : tool_args =
   let to_format = json |> member "to" |> to_string in
   let input = json |> member "input" in
   let pretty = try json |> member "pretty" |> to_bool with _ -> true in
-  ChainConvert { from_format; to_format; input; pretty }
+  let lossless = try json |> member "lossless" |> to_bool with _ -> true in
+  ChainConvert { from_format; to_format; input; pretty; lossless }
 
 (** Parse JSON arguments for chain.orchestrate tool *)
 let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_args =
