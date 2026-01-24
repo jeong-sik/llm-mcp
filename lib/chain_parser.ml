@@ -764,8 +764,12 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let improver_prompt = parse_string_with_default json "improver_prompt"
         "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}" in
       let max_iterations = parse_int_with_default json "max_iterations" 3 in
-      let min_score = Option.value (parse_float_opt json "min_score") ~default:0.7 in
-      Ok (FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score })
+      (* score_threshold + score_operator (backward compatible: default gte) *)
+      let score_threshold = Option.value (parse_float_opt json "score_threshold")
+        ~default:(Option.value (parse_float_opt json "min_score") ~default:0.7) in
+      let score_operator_str = parse_string_with_default json "score_operator" "gte" in
+      let* score_operator = parse_threshold_op score_operator_str in
+      Ok (FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator })
 
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
@@ -1200,9 +1204,9 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
                path m (List.length nodes)
          | _ -> ());
         List.iter (fun n2 -> validate_node (path ^ "/stream_merge") n2) nodes
-    | Chain_types.FeedbackLoop { generator; max_iterations; min_score; _ } ->
+    | Chain_types.FeedbackLoop { generator; max_iterations; score_threshold; _ } ->
         if max_iterations <= 0 then addf "%s: feedback_loop.max_iterations must be > 0" path;
-        if min_score < 0.0 then addf "%s: feedback_loop.min_score must be >= 0" path;
+        if score_threshold < 0.0 then addf "%s: feedback_loop.score_threshold must be >= 0" path;
         validate_node (path ^ "/feedback_loop") generator
     )
   in
@@ -1334,7 +1338,19 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
         fields
 
     | Tool { name; args } ->
-        [("type", `String "tool"); ("name", `String name); ("args", args)]
+        (* Restore nested structure if server prefix exists: "figma:parse_url" -> tool.server + tool.name *)
+        if String.contains name ':' then
+          let idx = String.index name ':' in
+          let server = String.sub name 0 idx in
+          let tool_name = String.sub name (idx + 1) (String.length name - idx - 1) in
+          let tool_obj = `Assoc [
+            ("server", `String server);
+            ("name", `String tool_name);
+            ("args", args)
+          ] in
+          [("type", `String "tool"); ("tool", tool_obj)]
+        else
+          [("type", `String "tool"); ("name", `String name); ("args", args)]
 
     | Pipeline nodes ->
         [("type", `String "pipeline"); ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes))]
@@ -1384,7 +1400,7 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
           ("metric", `String metric);
           ("operator", `String (threshold_op_to_string operator));
           ("value", `Float value);
-          ("input", node_to_json_with include_empty_inputs input_node);
+          ("input_node", node_to_json_with include_empty_inputs input_node);
         ] in
         let fields = match on_pass with Some n -> fields @ [("on_pass", node_to_json_with include_empty_inputs n)] | None -> fields in
         let fields = match on_fail with Some n -> fields @ [("on_fail", node_to_json_with include_empty_inputs n)] | None -> fields in
@@ -1539,7 +1555,7 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
           ("min_results", match min_results with Some n -> `Int n | None -> `Null);
           ("timeout", match timeout with Some t -> `Float t | None -> `Null);
         ]
-    | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score } ->
+    | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator } ->
         let select_strategy_json = match evaluator_config.select_strategy with
           | Best -> `String "best"
           | Worst -> `String "worst"
@@ -1551,13 +1567,17 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
           ("scoring_prompt", match evaluator_config.scoring_prompt with Some p -> `String p | None -> `Null);
           ("select_strategy", select_strategy_json);
         ] in
+        let operator_str = match score_operator with
+          | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
+        in
         [
           ("type", `String "feedback_loop");
           ("generator", node_to_json_with include_empty_inputs generator);
           ("evaluator_config", evaluator_config_json);
           ("improver_prompt", `String improver_prompt);
           ("max_iterations", `Int max_iterations);
-          ("min_score", `Float min_score);
+          ("score_threshold", `Float score_threshold);
+          ("score_operator", `String operator_str);
         ]
   in
   `Assoc (base @ type_fields @ input_mapping)
