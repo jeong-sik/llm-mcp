@@ -11,6 +11,8 @@
    version
    ; Error types (centralized)
    error
+   ; Logging (structured, leveled)
+   log
    ; Pure OCaml - shared between Eio and Lwt
    common
    types
