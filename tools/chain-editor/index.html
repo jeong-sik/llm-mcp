@@ -102,6 +102,7 @@
     .canvas svg path { stroke: #4fc3f7; stroke-width: 2; fill: none; }
     .canvas svg path.preview { stroke-dasharray: 6 6; opacity: 0.7; }
     .canvas svg path.selected { stroke: #ffb74d; stroke-width: 3; }
+    .canvas svg text.edge-label { fill: #cbd5f5; font-size: 11px; font-family: monospace; paint-order: stroke; stroke: #0f172a; stroke-width: 3; }
     .canvas.pannable { cursor: grab; }
     .canvas.panning { cursor: grabbing; }
 
@@ -119,6 +120,8 @@
     .canvas-node:hover { border-color: #4fc3f7; }
     .canvas-node.selected { border-color: #4fc3f7; box-shadow: 0 0 20px rgba(79, 195, 247, 0.3); }
     .canvas-node.connecting { border-color: #81c784; box-shadow: 0 0 18px rgba(129, 199, 132, 0.35); }
+    .canvas-node.error { border-color: #ef5350; box-shadow: 0 0 18px rgba(239, 83, 80, 0.35); }
+    .canvas-node.warn { border-color: #ffb74d; box-shadow: 0 0 16px rgba(255, 183, 77, 0.3); }
     .canvas-node .node-type { font-size: 10px; color: #4fc3f7; text-transform: uppercase; letter-spacing: 1px; }
     .canvas-node .node-label { font-weight: 600; margin-top: 4px; }
     .canvas-node .node-config { font-size: 11px; color: #888; margin-top: 8px; font-family: monospace; }
@@ -455,9 +458,11 @@
     const state = {
       nodes: [],
       connections: [],
+      edgeLabels: {},
       selectedNode: null,
       selectedConnection: null,
       dragNode: null,
+      dragNodeEl: null,
       dragOffset: { x: 0, y: 0 },
       connecting: null,
       connectingPos: null,
@@ -466,6 +471,8 @@
       detailTab: 'summary',
       showMeta: false,
       lastValidation: null,
+      validationErrors: new Set(),
+      validationWarnings: new Set(),
       chainFull: null,
       gridSize: 20,
       gridEnabled: true,
@@ -871,9 +878,17 @@
 
     function loadPreset(preset) {
       state.nodes = preset.nodes.map(n => ({ ...n }));
-      state.connections = preset.connections.map(c => [...c]);
+      state.edgeLabels = {};
+      state.connections = (preset.connections || []).map(c => {
+        if (Array.isArray(c)) return [...c];
+        const from = c.from;
+        const to = c.to;
+        if (c.input) state.edgeLabels[connectionKey(from, to)] = c.input;
+        return [from, to];
+      });
       state.nodeCounter = state.nodes.length;
       state.lastValidation = null;
+      clearValidationMarks();
       state.chainFull = preset.chain ? JSON.parse(JSON.stringify(preset.chain)) : null;
       clearConnecting();
       closeDetail();
@@ -1147,7 +1162,9 @@
       const oy = pad - minY * scale;
 
       const ns = 'http://www.w3.org/2000/svg';
-      (preset.connections || []).forEach(([from, to]) => {
+      (preset.connections || []).forEach(c => {
+        const from = Array.isArray(c) ? c[0] : c.from;
+        const to = Array.isArray(c) ? c[1] : c.to;
         const a = nodes.find(n => n.id === from);
         const b = nodes.find(n => n.id === to);
         if (!a || !b) return;
@@ -1177,7 +1194,7 @@
       });
     }
 
-    function generateMermaidForGraph(nodes, connections, direction = 'LR') {
+    function generateMermaidForGraph(nodes, connections, direction = 'LR', edgeLabels = {}) {
       if (!nodes || nodes.length === 0) return `graph ${direction}\n    %% Empty graph`;
 
       let mermaid = `graph ${direction}\n`;
@@ -1185,8 +1202,16 @@
         const [open, close] = nodeShape(node);
         mermaid += `    ${node.id}${open}${node.config}${close}\n`;
       });
-      connections.forEach(([from, to]) => {
-        mermaid += `    ${from} --> ${to}\n`;
+      connections.forEach(c => {
+        const from = Array.isArray(c) ? c[0] : c.from;
+        const to = Array.isArray(c) ? c[1] : c.to;
+        const label = edgeLabels[connectionKey(from, to)] || (c && c.input ? c.input : '');
+        if (label) {
+          const safeLabel = String(label).replaceAll('|', '\\|');
+          mermaid += `    ${from} -->|${safeLabel}| ${to}\n`;
+        } else {
+          mermaid += `    ${from} --> ${to}\n`;
+        }
       });
       return mermaid;
     }
@@ -1227,7 +1252,7 @@
       } else {
         if (node.detail.graph) {
           const g = node.detail.graph;
-          contentEl.textContent = generateMermaidForGraph(g.nodes || [], g.connections || [], g.direction || 'LR');
+          contentEl.textContent = generateMermaidForGraph(g.nodes || [], g.connections || [], g.direction || 'LR', g.edgeLabels || {});
         } else {
           contentEl.textContent = node.detail.mermaid || JSON.stringify(node.detail, null, 2);
         }
@@ -1256,6 +1281,63 @@
       state.chainFull = null;
     }
 
+    function connectionKey(from, to) {
+      return `${from}::${to}`;
+    }
+
+    function getEdgeLabel(from, to) {
+      return state.edgeLabels[connectionKey(from, to)] || '';
+    }
+
+    function setEdgeLabel(from, to, label) {
+      const key = connectionKey(from, to);
+      const trimmed = (label || '').trim();
+      if (trimmed) {
+        state.edgeLabels[key] = trimmed;
+      } else {
+        delete state.edgeLabels[key];
+      }
+      invalidateChainFull();
+    }
+
+    function addConnection(from, to) {
+      const exists = state.connections.some(c => c[0] === from && c[1] === to);
+      if (exists) return false;
+      state.connections.push([from, to]);
+      invalidateChainFull();
+      updateOutput();
+      return true;
+    }
+
+    function clearValidationMarks() {
+      state.validationErrors = new Set();
+      state.validationWarnings = new Set();
+    }
+
+    function setValidationMarks(errors = [], warnings = []) {
+      state.validationErrors = new Set(errors);
+      state.validationWarnings = new Set(warnings);
+      render();
+    }
+
+    function extractNodeIds(message) {
+      const ids = new Set();
+      if (!message) return [];
+      const patterns = [
+        /Node '([^']+)'/gi,
+        /node '([^']+)'/gi,
+        /Merge ([A-Za-z0-9_-]+)/g,
+        /involving ([A-Za-z0-9_-]+)/g
+      ];
+      patterns.forEach(re => {
+        let match;
+        while ((match = re.exec(message)) !== null) {
+          ids.add(match[1]);
+        }
+      });
+      return Array.from(ids);
+    }
+
     function selectConnection(from, to) {
       state.selectedConnection = { from, to };
       state.selectedNode = null;
@@ -1270,6 +1352,7 @@
 
     function removeConnection(from, to) {
       state.connections = state.connections.filter(c => !(c[0] === from && c[1] === to));
+      delete state.edgeLabels[connectionKey(from, to)];
       state.selectedConnection = null;
       invalidateChainFull();
       updateOutput();
@@ -1278,7 +1361,11 @@
 
     function removeNode(nodeId) {
       state.nodes = state.nodes.filter(n => n.id !== nodeId);
-      state.connections = state.connections.filter(c => c[0] !== nodeId && c[1] !== nodeId);
+      state.connections = state.connections.filter(c => {
+        const keep = c[0] !== nodeId && c[1] !== nodeId;
+        if (!keep) delete state.edgeLabels[connectionKey(c[0], c[1])];
+        return keep;
+      });
       state.selectedNode = null;
       invalidateChainFull();
       updateOutput();
@@ -1302,7 +1389,13 @@
         const outClass = isConnecting ? 'port port-out active' : 'port port-out';
         const inClass = isCandidate ? 'port port-in candidate' : 'port port-in';
         const detailBadge = node.detail ? '<div class="detail-badge" data-action="detail">⋯</div>' : '';
-        el.className = 'canvas-node' + (state.selectedNode === node.id ? ' selected' : '') + (isConnecting ? ' connecting' : '');
+        const hasError = state.validationErrors.has(node.id);
+        const hasWarn = !hasError && state.validationWarnings.has(node.id);
+        el.className = 'canvas-node'
+          + (state.selectedNode === node.id ? ' selected' : '')
+          + (isConnecting ? ' connecting' : '')
+          + (hasError ? ' error' : '')
+          + (hasWarn ? ' warn' : '');
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
         el.innerHTML = `
@@ -1314,6 +1407,7 @@
           <div class="${outClass}" data-port="out"></div>
         `;
         el.dataset.id = node.id;
+        node._el = el;
 
         el.addEventListener('pointerdown', e => {
           if (e.target.classList.contains('port')) return;
@@ -1326,6 +1420,7 @@
           state.selectedConnection = null;
           const world = screenToWorld(e.clientX, e.clientY);
           state.dragNode = node;
+          state.dragNodeEl = el;
           state.dragOffset = { x: world.x - node.x, y: world.y - node.y };
           render();
         });
@@ -1350,6 +1445,10 @@
                 setConnecting(node.id);
               }
               renderConnections();
+            } else if (port.dataset.port === 'in' && state.connecting && state.connecting.from !== node.id) {
+              addConnection(state.connecting.from, node.id);
+              clearConnecting();
+              render();
             }
           });
         });
@@ -1399,8 +1498,11 @@
         const snapped = applySnap({ x: world.x - state.dragOffset.x, y: world.y - state.dragOffset.y }, true, size);
         state.dragNode.x = snapped.x;
         state.dragNode.y = snapped.y;
-        render();
-        updateOutput();
+        if (state.dragNodeEl) {
+          state.dragNodeEl.style.left = state.dragNode.x + 'px';
+          state.dragNodeEl.style.top = state.dragNode.y + 'px';
+        }
+        renderConnections();
         return;
       }
 
@@ -1428,16 +1530,13 @@
     document.addEventListener('pointerup', () => {
       if (state.dragNode) {
         state.dragNode = null;
-        renderMinimap();
+        state.dragNodeEl = null;
+        render();
+        updateOutput();
       }
       if (state.connecting) {
         if (state.hoverPort && state.hoverPort.port === 'in' && state.hoverPort.nodeId !== state.connecting.from) {
-          const exists = state.connections.some(c => c[0] === state.connecting.from && c[1] === state.hoverPort.nodeId);
-          if (!exists) {
-            state.connections.push([state.connecting.from, state.hoverPort.nodeId]);
-            invalidateChainFull();
-            updateOutput();
-          }
+          addConnection(state.connecting.from, state.hoverPort.nodeId);
         }
         clearConnecting();
         render();
@@ -1519,6 +1618,34 @@
     function renderConnections() {
       while (svg.firstChild) svg.removeChild(svg.firstChild);
       const ns = 'http://www.w3.org/2000/svg';
+      const defs = document.createElementNS(ns, 'defs');
+      const marker = document.createElementNS(ns, 'marker');
+      marker.setAttribute('id', 'arrowhead');
+      marker.setAttribute('markerWidth', '8');
+      marker.setAttribute('markerHeight', '6');
+      marker.setAttribute('refX', '8');
+      marker.setAttribute('refY', '3');
+      marker.setAttribute('orient', 'auto');
+      const arrowPath = document.createElementNS(ns, 'path');
+      arrowPath.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
+      arrowPath.setAttribute('fill', '#4fc3f7');
+      marker.appendChild(arrowPath);
+
+      const markerSel = document.createElementNS(ns, 'marker');
+      markerSel.setAttribute('id', 'arrowhead-selected');
+      markerSel.setAttribute('markerWidth', '8');
+      markerSel.setAttribute('markerHeight', '6');
+      markerSel.setAttribute('refX', '8');
+      markerSel.setAttribute('refY', '3');
+      markerSel.setAttribute('orient', 'auto');
+      const arrowSelPath = document.createElementNS(ns, 'path');
+      arrowSelPath.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
+      arrowSelPath.setAttribute('fill', '#ffb74d');
+      markerSel.appendChild(arrowSelPath);
+
+      defs.appendChild(marker);
+      defs.appendChild(markerSel);
+      svg.appendChild(defs);
 
       function orthoPath(ax, ay, bx, by) {
         const gap = 40;
@@ -1544,6 +1671,9 @@
         path.setAttribute('d', orthoPath(ax, ay, bx, by));
         if (state.selectedConnection && state.selectedConnection.from === fromId && state.selectedConnection.to === toId) {
           path.classList.add('selected');
+          path.setAttribute('marker-end', 'url(#arrowhead-selected)');
+        } else {
+          path.setAttribute('marker-end', 'url(#arrowhead)');
         }
         path.dataset.from = fromId;
         path.dataset.to = toId;
@@ -1551,7 +1681,30 @@
           e.stopPropagation();
           selectConnection(fromId, toId);
         });
+        path.addEventListener('dblclick', e => {
+          e.stopPropagation();
+          const current = getEdgeLabel(fromId, toId);
+          const next = prompt('Input key (optional):', current);
+          if (next === null) return;
+          setEdgeLabel(fromId, toId, next);
+          updateOutput();
+          renderConnections();
+        });
         svg.appendChild(path);
+
+        const label = getEdgeLabel(fromId, toId);
+        if (label) {
+          const text = document.createElementNS(ns, 'text');
+          text.setAttribute('class', 'edge-label');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('pointer-events', 'none');
+          const midX = (ax + bx) / 2;
+          const midY = (ay + by) / 2 - 6;
+          text.setAttribute('x', String(midX));
+          text.setAttribute('y', String(midY));
+          text.textContent = label;
+          svg.appendChild(text);
+        }
       });
 
       if (state.connecting && state.connectingPos) {
@@ -1570,7 +1723,7 @@
     }
 
     function generateMermaidRaw() {
-      const mermaid = generateMermaidForGraph(state.nodes, state.connections, 'LR');
+      const mermaid = generateMermaidForGraph(state.nodes, state.connections, 'LR', state.edgeLabels);
       if (!state.chainFull) return mermaid;
       const fullJson = JSON.stringify(state.chainFull);
       const lines = mermaid.split('\n');
@@ -1594,9 +1747,20 @@
         config: n.config
       })).sort((a, b) => a.id.localeCompare(b.id));
       const connections = [...state.connections]
-        .map(c => [c[0], c[1]])
-        .sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+        .map(c => ({
+          from: c[0],
+          to: c[1],
+          input: getEdgeLabel(c[0], c[1])
+        }))
+        .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
       return JSON.stringify({ nodes, connections });
+    }
+
+    function serializeConnections() {
+      return state.connections.map(([from, to]) => {
+        const input = getEdgeLabel(from, to);
+        return input ? { from, to, input } : { from, to };
+      });
     }
 
     function hashString(str) {
@@ -1720,7 +1884,7 @@
           content.textContent = generateMermaid();
           break;
         case 'json':
-          content.textContent = JSON.stringify({ nodes: state.nodes, connections: state.connections }, null, 2);
+          content.textContent = JSON.stringify({ nodes: state.nodes, connections: serializeConnections() }, null, 2);
           break;
         case 'integrity':
           content.textContent = renderIntegrity();
@@ -1766,8 +1930,10 @@
     function clearCanvas() {
       state.nodes = [];
       state.connections = [];
+      state.edgeLabels = {};
       state.nodeCounter = 0;
       state.lastValidation = null;
+      clearValidationMarks();
       state.chainFull = null;
       clearConnecting();
       closeDetail();
@@ -1789,6 +1955,7 @@
 
     function validateChainLocal() {
       const errors = [];
+      const errorNodes = new Set();
 
       // Check for cycles (simple check)
       const visited = new Set();
@@ -1805,22 +1972,30 @@
       }
 
       state.nodes.forEach(n => {
-        if (hasCycle(n.id)) errors.push(`Cycle detected involving ${n.id}`);
+        if (hasCycle(n.id)) {
+          errors.push(`Cycle detected involving ${n.id}`);
+          errorNodes.add(n.id);
+        }
       });
 
       // Check merge inputs
       state.nodes.filter(n => n.type === 'merge').forEach(n => {
         const inputs = state.connections.filter(c => c[1] === n.id).length;
-        if (inputs < 2) errors.push(`Merge ${n.id} needs at least 2 inputs (has ${inputs})`);
+        if (inputs < 2) {
+          errors.push(`Merge ${n.id} needs at least 2 inputs (has ${inputs})`);
+          errorNodes.add(n.id);
+        }
       });
 
       if (errors.length === 0) {
         state.lastOutput = 'Local validation passed';
         state.lastValidation = 'Local OK';
+        clearValidationMarks();
         setStatus('✅ Local validation passed');
       } else {
         state.lastOutput = 'Local validation errors:\n- ' + errors.join('\n- ');
         state.lastValidation = `Local FAIL (${errors.length} issues)`;
+        setValidationMarks(Array.from(errorNodes), []);
         setStatus('❌ Local validation failed');
       }
       document.querySelector('[data-tab="output"]').click();
@@ -1856,11 +2031,13 @@
           const msg = data.result.content?.[0]?.text || 'Validation passed';
           state.lastOutput = msg;
           state.lastValidation = 'Strict OK';
+          clearValidationMarks();
           setStatus('✅ ' + msg);
         } else {
           const msg = data.result?.content?.[0]?.text || 'Validation failed';
           state.lastOutput = msg;
           state.lastValidation = 'Strict FAIL';
+          setValidationMarks(extractNodeIds(msg), []);
           setStatus('❌ Validation failed');
         }
         document.querySelector('[data-tab="output"]').click();
