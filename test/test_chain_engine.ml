@@ -755,7 +755,7 @@ let test_estimate_tokens () =
 
 let test_add_message () =
   let ctx = make_conversation_ctx () in
-  add_message ctx ~role:"user" ~content:"hello" ~iteration:1;
+  add_message ctx ~role:"user" ~content:"hello" ~iteration:1 ~model:ctx.current_model;
   Alcotest.(check int) "history length" 1 (List.length ctx.history);
   Alcotest.(check int) "total_tokens" 2 ctx.total_tokens;  (* "hello" = 5 chars -> 2 tokens *)
   let msg = List.hd ctx.history in
@@ -764,7 +764,7 @@ let test_add_message () =
   Alcotest.(check string) "msg model" "gemini" msg.model;
   Alcotest.(check int) "msg iteration" 1 msg.iteration;
   (* Add another message *)
-  add_message ctx ~role:"assistant" ~content:"world" ~iteration:1;
+  add_message ctx ~role:"assistant" ~content:"world" ~iteration:1 ~model:ctx.current_model;
   Alcotest.(check int) "history length" 2 (List.length ctx.history);
   Alcotest.(check int) "total_tokens accumulated" 4 ctx.total_tokens
 
@@ -772,16 +772,16 @@ let test_needs_summarization () =
   let ctx = make_conversation_ctx ~token_threshold:10 ~window_size:2 () in
   Alcotest.(check bool) "initially no summarization" false (needs_summarization ctx);
   (* Add messages to exceed threshold and window *)
-  add_message ctx ~role:"user" ~content:"this is a long message" ~iteration:1;
-  add_message ctx ~role:"assistant" ~content:"another long message here" ~iteration:1;
-  add_message ctx ~role:"user" ~content:"third message" ~iteration:2;
+  add_message ctx ~role:"user" ~content:"this is a long message" ~iteration:1 ~model:ctx.current_model;
+  add_message ctx ~role:"assistant" ~content:"another long message here" ~iteration:1 ~model:ctx.current_model;
+  add_message ctx ~role:"user" ~content:"third message" ~iteration:2 ~model:ctx.current_model;
   (* Check conditions: total_tokens > 10 AND history > 2 *)
   Alcotest.(check bool) "needs summarization now" true (needs_summarization ctx)
 
 let test_build_context_prompt () =
   let ctx = make_conversation_ctx () in
-  add_message ctx ~role:"user" ~content:"hello" ~iteration:1;
-  add_message ctx ~role:"assistant" ~content:"hi" ~iteration:1;
+  add_message ctx ~role:"user" ~content:"hello" ~iteration:1 ~model:ctx.current_model;
+  add_message ctx ~role:"assistant" ~content:"hi" ~iteration:1 ~model:ctx.current_model;
   let prompt = build_context_prompt ctx in
   Alcotest.(check bool) "prompt not empty" true (String.length prompt > 0);
   Alcotest.(check bool) "contains user role" true

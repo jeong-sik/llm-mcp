@@ -160,6 +160,24 @@ let get_edges (chain : CT.chain) : (string * string) list =
   |> List.sort_uniq (fun (a1, a2) (b1, b2) ->
        let c = String.compare a1 b1 in if c <> 0 then c else String.compare a2 b2)
 
+let sort_nodes_by_id (nodes : CT.node list) : CT.node list =
+  List.sort (fun (a : CT.node) (b : CT.node) -> String.compare a.id b.id) nodes
+
+let normalize_node (node : CT.node) : CT.node =
+  let input_mapping =
+    List.sort (fun (a, _) (b, _) -> String.compare a b) node.CT.input_mapping
+  in
+  let node_type =
+    match node.CT.node_type with
+    | CT.Quorum { required; nodes } ->
+        CT.Quorum { required; nodes = sort_nodes_by_id nodes }
+    | other -> other
+  in
+  { node with CT.input_mapping; node_type }
+
+let normalize_chain (chain : CT.chain) : CT.chain =
+  { chain with CT.nodes = sort_nodes_by_id (List.map normalize_node chain.CT.nodes) }
+
 (* ══════════════════════════════════════════════════════════════════════════
    Properties
    ══════════════════════════════════════════════════════════════════════════ *)
@@ -242,6 +260,21 @@ let prop_json_roundtrip =
           count_real_nodes chain = count_real_nodes chain' &&
           chain.CT.output = chain'.CT.output)
 
+(** Property 8: chain_full metadata roundtrip is exact *)
+let prop_chain_full_roundtrip_exact =
+  QCheck.Test.make ~count:100 ~name:"chain_full_roundtrip_exact"
+    arbitrary_chain
+    (fun chain ->
+      let mermaid = CM.chain_to_mermaid chain in
+      if not (String.contains mermaid '@') then false
+      else
+        match CM.parse_mermaid_to_chain mermaid with
+        | Error _ -> false
+        | Ok chain' ->
+            let json1 = CP.chain_to_json_string ~pretty:false ~include_empty_inputs:true (normalize_chain chain) in
+            let json2 = CP.chain_to_json_string ~pretty:false ~include_empty_inputs:true (normalize_chain chain') in
+            String.equal json1 json2)
+
 (* ══════════════════════════════════════════════════════════════════════════
    Test Runner
    ══════════════════════════════════════════════════════════════════════════ *)
@@ -257,5 +290,6 @@ let () =
       QCheck_alcotest.to_alcotest prop_double_roundtrip_idempotent;
       QCheck_alcotest.to_alcotest prop_mermaid_parse_safe;
       QCheck_alcotest.to_alcotest prop_json_roundtrip;
+      QCheck_alcotest.to_alcotest prop_chain_full_roundtrip_exact;
     ];
   ]

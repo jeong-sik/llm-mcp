@@ -127,19 +127,21 @@ val parse_adapter_transform : Yojson.Safe.t -> (Chain_types.adapter_transform, s
 
 (** {1 JSON Serialization} *)
 
-(** [chain_to_json chain] serializes a chain to JSON.
+(** [chain_to_json ?include_empty_inputs chain] serializes a chain to JSON.
     This is the inverse of {!parse_chain}.
 
+    @param include_empty_inputs Emit empty "inputs": {} for nodes with no input_mapping (default: false)
     @param chain The chain to serialize
     @return The JSON representation *)
-val chain_to_json : Chain_types.chain -> Yojson.Safe.t
+val chain_to_json : ?include_empty_inputs:bool -> Chain_types.chain -> Yojson.Safe.t
 
-(** [chain_to_json_string ?pretty chain] serializes a chain to a JSON string.
+(** [chain_to_json_string ?pretty ?include_empty_inputs chain] serializes a chain to a JSON string.
 
     @param pretty Whether to pretty-print (default: true)
+    @param include_empty_inputs Emit empty "inputs": {} for nodes with no input_mapping (default: false)
     @param chain The chain to serialize
     @return The JSON string *)
-val chain_to_json_string : ?pretty:bool -> Chain_types.chain -> string
+val chain_to_json_string : ?pretty:bool -> ?include_empty_inputs:bool -> Chain_types.chain -> string
 
 (** [node_to_json node] serializes a node to JSON.
 

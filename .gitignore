@@ -25,6 +25,7 @@ Thumbs.db
 *.merlin
 .merlin
 _opam/
+.lake/
 
 # Downloaded release binaries
 llm-mcp-macos-arm64
