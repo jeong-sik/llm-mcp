@@ -48,6 +48,12 @@ let exponential_backoff ~base_delay attempt =
 let get_mcp_server_url = Tool_config.get_mcp_server_url
 let get_mcp_server_config = Tool_config.get_mcp_server_config
 
+let env_truthy value =
+  match String.lowercase_ascii value with
+  | "1" | "true" | "yes" | "on" -> true
+  | "0" | "false" | "no" | "off" -> false
+  | _ -> false
+
 (* Ollama helpers *)
 let thinking_prompt_prefix = Tool_parsers.thinking_prompt_prefix
 let tool_schema_to_ollama_tool = Tool_parsers.tool_schema_to_ollama_tool
@@ -177,6 +183,61 @@ let call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout =
           call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command:cmd ~args:config.args ~tool_name ~arguments ~timeout
       | None, None ->
           sprintf "Error: MCP server '%s' has no valid URL or command" server_name
+
+let masc_enabled () =
+  match Sys.getenv_opt "LLM_MCP_MASC_HOOK" with
+  | Some v -> env_truthy v
+  | None -> false
+
+let masc_agent_base () =
+  Sys.getenv_opt "LLM_MCP_MASC_AGENT" |> Option.value ~default:"llm-mcp"
+
+let masc_heartbeat_interval () =
+  match Sys.getenv_opt "LLM_MCP_MASC_HEARTBEAT_SEC" with
+  | Some v -> int_of_string_opt v |> Option.value ~default:30
+  | None -> 30
+
+let masc_available () =
+  match get_mcp_server_config "masc" with
+  | Some cfg -> cfg.url <> None || cfg.command <> None
+  | None -> false
+
+let call_masc_tool ~sw ~proc_mgr ~clock ~tool_name ~arguments =
+  call_mcp ~sw ~proc_mgr ~clock ~server_name:"masc" ~tool_name ~arguments ~timeout:5
+
+let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
+  if not (masc_enabled () && masc_available ()) then
+    f ()
+  else
+    let base = masc_agent_base () in
+    let ts = int_of_float (Unix.gettimeofday ()) in
+    let agent =
+      let safe_label = String.map (fun c -> if c = '.' then '-' else c) label in
+      Printf.sprintf "%s-%s-%d" base safe_label ts
+    in
+    let join_args = `Assoc [
+      ("agent_name", `String agent);
+      ("capabilities", `List [`String "chain"]);
+    ] in
+    let heartbeat_args = `Assoc [("agent_name", `String agent)] in
+    let leave_args = `Assoc [("agent_name", `String agent)] in
+    let _ = call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_join" ~arguments:join_args in
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args))
+      (fun () ->
+        Eio.Switch.run (fun hb_sw ->
+          let interval = float_of_int (masc_heartbeat_interval ()) in
+          let _ =
+            Eio.Fiber.fork ~sw:hb_sw (fun () ->
+              let rec loop () =
+                ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args);
+                Eio.Time.sleep clock interval;
+                loop ()
+              in
+              loop ())
+          in
+          f ()))
 
 (** {1 Streaming Execution} *)
 
@@ -812,8 +873,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               in
               (* Input is passed directly to executor for first node injection *)
               let _ = input in  (* Will be used by executor *)
-              let result = Chain_executor_eio.execute
-                ~sw ~clock ~timeout:node_timeout ~trace:trace_effective ~exec_fn ~tool_exec plan
+              let result =
+                with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.run" (fun () ->
+                  Chain_executor_eio.execute
+                    ~sw ~clock ~timeout:node_timeout ~trace:trace_effective ~exec_fn ~tool_exec plan)
               in
               let run_id = List.assoc_opt "run_id" result.Chain_types.metadata in
               { model = "chain.run";
@@ -1139,7 +1202,8 @@ This chain will execute the goal using a stub model.|}
       in
 
       (* Run orchestration *)
-      (match Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks with
+      (match with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.orchestrate" (fun () ->
+        Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks) with
       | Ok result ->
           let metrics_json = match result.final_metrics with
             | Some m -> Chain_evaluator.chain_metrics_to_yojson m |> Yojson.Safe.to_string
@@ -1322,9 +1386,11 @@ This chain will execute the goal using a stub model.|}
                      let checkpoint_config = Chain_executor_eio.make_checkpoint_config
                        ~store ~enabled:true ~resume_from:run_id ()
                      in
-                     let result = Chain_executor_eio.execute
-                       ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec
-                       ~checkpoint:checkpoint_config plan
+                     let result =
+                       with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.resume" (fun () ->
+                         Chain_executor_eio.execute
+                           ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec
+                           ~checkpoint:checkpoint_config plan)
                      in
                      { model = "chain.resume";
                        returncode = if result.Chain_types.success then 0 else -1;
@@ -1940,7 +2006,10 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 in
                 if result.returncode = 0 then Ok result.response else Error result.response
           in
-          let result = Chain_executor_eio.execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec plan in
+          let result =
+            with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.run.registry" (fun () ->
+              Chain_executor_eio.execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec plan)
+          in
           {
             model = sprintf "chain.run (%s)" chain.Chain_types.id;
             returncode = (if result.success then 0 else -1);
