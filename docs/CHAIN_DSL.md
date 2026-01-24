@@ -223,6 +223,36 @@ Explicit input mapping allows precise control over data flow:
 
 Without explicit mapping, references like `{{producer.output}}` are automatically extracted from the prompt.
 
+### External Inputs (Strict Validation)
+
+When using `chain.validate` in strict mode, input references must resolve to:
+- Existing node IDs
+- Built-in external roots: `input`, `parent`, `context`, `vars`, `env`, `secrets`
+- Variables declared in `input_schema`
+- Additional roots declared in `metadata.external_inputs`
+
+Example:
+
+```json
+{
+  "id": "chain_with_external",
+  "metadata": {
+    "external_inputs": ["user", "session"]
+  },
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "request": { "type": "string" }
+    },
+    "required": ["request"]
+  },
+  "nodes": [
+    { "id": "step1", "type": "llm", "model": "gemini", "prompt": "Hi {{user}}: {{request}}" }
+  ],
+  "output": "step1"
+}
+```
+
 ## Merge Strategies
 
 For combining results from parallel nodes:
@@ -923,7 +953,7 @@ dune runtest
 | Tool | Status | Description |
 |------|--------|-------------|
 | `chain.run` | ✅ Implemented | Execute a chain with LLM/tool calls |
-| `chain.validate` | ✅ Implemented | Validate chain syntax and show parallel groups |
+| `chain.validate` | ✅ Implemented | Validate chain syntax (strict completeness/format supported) |
 | `chain.to_mermaid` | ✅ Implemented | Convert chain JSON to Mermaid diagram |
 | `chain.convert` | ✅ Implemented | Convert between JSON and Mermaid formats |
 | `chain.visualize` | ✅ Implemented | Generate visual diagram of chain |
