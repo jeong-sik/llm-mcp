@@ -5,7 +5,7 @@ open Chain_mermaid_parser
 let make_llm id model prompt = {
   id;
   node_type = Llm { model; system = None; prompt; timeout = Some 30; tools = None; prompt_ref = None; prompt_vars = [] };
-  input_mapping = [];
+  input_mapping = []; output_key = None; depends_on = None;
 }
 
 let () =
@@ -18,7 +18,7 @@ let () =
       backoff = Exponential 2.0;
       retry_on = ["timeout"];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   
   let fallback_node = {
@@ -28,6 +28,7 @@ let () =
       fallbacks = [make_llm "f1" "gemini" "Backup1"; make_llm "f2" "ollama" "Backup2"];
     };
     input_mapping = [("in", "retry_api")];
+    output_key = None; depends_on = None
   } in
   
   let race_node = {
@@ -37,6 +38,7 @@ let () =
       timeout = Some 10.0;
     };
     input_mapping = [("in", "fallback_llm")];
+    output_key = None; depends_on = None
   } in
   
   let chain = {
@@ -44,6 +46,8 @@ let () =
     nodes = [retry_node; fallback_node; race_node];
     output = "race_search";
     config = { max_depth = 10; max_concurrency = 5; timeout = 300; trace = true; direction = LR };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   
   print_endline "=== Mermaid Output (chain_to_mermaid) ===";

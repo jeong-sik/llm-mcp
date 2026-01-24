@@ -27,25 +27,25 @@ let make_llm id prompt deps =
   let input_mapping = List.map (fun d -> ("_dep_" ^ d, d)) deps in
   { CT.id; node_type = CT.Llm { model = "gemini"; prompt; system = None;
     timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping }
+    input_mapping; output_key = None; depends_on = None }
 
 (** Create minimal Tool node *)
 let make_tool id name deps =
   let input_mapping = List.map (fun d -> ("_dep_" ^ d, d)) deps in
   { CT.id; node_type = CT.Tool { name; args = `Assoc [] };
-    input_mapping }
+    input_mapping; output_key = None; depends_on = None }
 
 (** Create ChainRef node *)
 let make_ref id =
   { CT.id; node_type = CT.ChainRef id;
-    input_mapping = [] }
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Create Quorum node *)
 let make_quorum id required dep_ids =
   let nodes = List.map make_ref dep_ids in
   let input_mapping = List.map (fun d -> (d, d)) dep_ids in
   { CT.id; node_type = CT.Quorum { required; nodes };
-    input_mapping }
+    input_mapping; output_key = None; depends_on = None }
 
 (* NOTE: make_pipeline, make_fanout, make_gate removed
    - These compound types get flattened in Mermaid roundtrip
@@ -55,9 +55,8 @@ let make_quorum id required dep_ids =
 (** Create chain from nodes *)
 let make_chain id nodes output =
   { CT.id; nodes; output; config = CT.default_config;
-    
-    
-     }
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None }
 
 (* ══════════════════════════════════════════════════════════════════════════
    Part 2: Semantic Equivalence

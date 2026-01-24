@@ -48,7 +48,7 @@ let gen_tool_node_type : CT.node_type QCheck.Gen.t =
 let gen_simple_node (id : string) : CT.node QCheck.Gen.t =
   QCheck.Gen.(
     let* node_type = oneof [gen_llm_node_type; gen_tool_node_type] in
-    return { CT.id; node_type; input_mapping = [] }
+    return { CT.id; node_type; input_mapping = []; output_key = None; depends_on = None }
   )
 
 (** Generate a simple linear chain (2-4 nodes) *)
@@ -81,8 +81,8 @@ let gen_simple_chain : CT.chain QCheck.Gen.t =
     let config = CT.default_config in
 
     return { CT.id = chain_id; nodes; output; config;
-             
-              }
+             name = None; description = None; version = None;
+             input_schema = None; output_schema = None; metadata = None }
   )
 
 (** Generate chain with Quorum (fan-in) *)
@@ -107,23 +107,22 @@ let gen_chain_with_quorum : CT.chain QCheck.Gen.t =
     (* Generate Quorum node *)
     let* required = int_range 1 num_inputs in
     let quorum_children = List.map (fun id ->
-      { CT.id; node_type = CT.ChainRef id; input_mapping = [] }
+      { CT.id; node_type = CT.ChainRef id; input_mapping = []; output_key = None; depends_on = None }
     ) input_ids in
     let quorum_node = {
       CT.id = "quorum";
       node_type = CT.Quorum { required; nodes = quorum_children };
       input_mapping = List.map (fun id -> (id, id)) input_ids;
-      
-      
-      
+      output_key = None;
+      depends_on = None;
     } in
 
     let all_nodes = input_nodes @ [quorum_node] in
     let config = CT.default_config in
 
     return { CT.id = chain_id; nodes = all_nodes; output = "quorum"; config;
-             
-              }
+             name = None; description = None; version = None;
+             input_schema = None; output_schema = None; metadata = None }
   )
 
 (** Combined arbitrary chain generator *)

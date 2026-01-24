@@ -29,7 +29,7 @@ let () =
       prompt_ref = None;
       prompt_vars = []
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal_node = {
@@ -45,14 +45,16 @@ let () =
       conversational = true;
       relay_models = ["qwen3:1.7b"];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let chain = {
     id = "code_improver";
     nodes = [action_node; goal_node];
     output = "quality_gate";
-    config = { default_config with timeout = 120; trace = true }
+    config = { default_config with timeout = 120; trace = true };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   (* Convert to Mermaid *)

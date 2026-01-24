@@ -114,7 +114,7 @@ let test_goaldriven_parse_float () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal_node = {
@@ -130,14 +130,16 @@ let test_goaldriven_parse_float () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "parse_float_test";
       nodes = [action_node; goal_node];
       output = "number_goal";
-      config = { default_config with timeout = 60; trace = true }
+      config = { default_config with timeout = 60; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     (* Execute *)
@@ -178,7 +180,7 @@ let test_goaldriven_exec_test () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal_node = {
@@ -194,14 +196,16 @@ let test_goaldriven_exec_test () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "exec_test_chain";
       nodes = [action_node; goal_node];
       output = "coverage_goal";
-      config = { default_config with timeout = 90; trace = true }
+      config = { default_config with timeout = 90; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     (* Execute *)
@@ -241,7 +245,7 @@ let test_goaldriven_llm_judge () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal_node = {
@@ -257,14 +261,16 @@ let test_goaldriven_llm_judge () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "llm_judge_chain";
       nodes = [action_node; goal_node];
       output = "code_quality_goal";
-      config = { default_config with timeout = 120; trace = true }
+      config = { default_config with timeout = 120; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     (* Execute *)
@@ -305,7 +311,7 @@ let test_goaldriven_strategy_hints () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal_node = {
@@ -325,14 +331,16 @@ let test_goaldriven_strategy_hints () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "strategy_hints_chain";
       nodes = [action_node; goal_node];
       output = "quality_goal";
-      config = { default_config with timeout = 90; trace = true }
+      config = { default_config with timeout = 90; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     (* Execute *)
@@ -373,7 +381,7 @@ let test_goaldriven_mermaid_roundtrip_execute () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal_node = {
@@ -389,14 +397,16 @@ let test_goaldriven_mermaid_roundtrip_execute () =
         conversational = false;
         relay_models = ["qwen3:1.7b"];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let original_chain = {
       id = "mermaid_test";
       nodes = [action_node; goal_node];
       output = "mermaid_goal";
-      config = { default_config with timeout = 60; trace = true }
+      config = { default_config with timeout = 60; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     (* 2. Convert to Mermaid *)

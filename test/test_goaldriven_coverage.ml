@@ -61,7 +61,7 @@ let test_operator_gt () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -77,10 +77,13 @@ let test_operator_gt () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* Response 0.5 should NOT pass (need > 0.5), response 0.6 should pass *)
   let responses = ["value: 0.5"; "value: 0.6"] in
@@ -105,7 +108,7 @@ let test_operator_lt () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -121,10 +124,13 @@ let test_operator_lt () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* 0.2 fails, 0.1 fails (not <), 0.05 passes *)
   let responses = ["error_rate: 0.2"; "error_rate: 0.1"; "error_rate: 0.05"] in
@@ -149,7 +155,7 @@ let test_operator_eq () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -165,10 +171,13 @@ let test_operator_eq () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* 0.9 fails, 1.1 fails, 1.0 passes *)
   let responses = ["status: 0.9"; "status: 1.1"; "status: 1.0"] in
@@ -193,7 +202,7 @@ let test_operator_neq () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -209,10 +218,13 @@ let test_operator_neq () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* 0.0 fails, 0.0 fails, 42.0 passes *)
   let responses = ["code: 0.0"; "code: 0"; "code: 42"] in
@@ -237,7 +249,7 @@ let test_operator_lte () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -253,10 +265,13 @@ let test_operator_lte () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* 200 fails, 100 passes (equal is ok) *)
   let responses = ["latency: 200"; "latency: 100"] in
@@ -285,7 +300,7 @@ let test_max_iterations_reached () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -301,10 +316,13 @@ let test_max_iterations_reached () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* All responses below target *)
   let responses = ["value: 0.1"; "value: 0.2"; "value: 0.3"] in
@@ -330,7 +348,7 @@ let test_single_iteration () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -346,10 +364,13 @@ let test_single_iteration () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   let responses = ["value: 0.9"] in  (* Pass on first try *)
 
@@ -377,7 +398,7 @@ let test_relay_models_rotation () =
   let action = {
     id = "action";
     node_type = Llm { model = "ollama:model_a"; system = None; prompt = "Return value"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -393,10 +414,13 @@ let test_relay_models_rotation () =
       conversational = false;
       relay_models = ["model_a"; "model_b"; "model_c"];  (* Should rotate *)
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   let responses = ["value: 0.1"; "value: 0.2"; "value: 0.3"; "value: 0.95"] in
 
@@ -432,7 +456,7 @@ let test_conversational_mode () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Improve: {{input}}"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -448,10 +472,13 @@ let test_conversational_mode () =
       conversational = true;  (* Enable context accumulation *)
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   let responses = ["First attempt. score: 0.3"; "Improved. score: 0.6"; "Final. score: 0.95"] in
 
@@ -483,7 +510,7 @@ let test_measure_func_parse_json () =
   let action = {
     id = "action";
     node_type = Llm { model = "mock"; system = None; prompt = "Return JSON"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -499,10 +526,13 @@ let test_measure_func_parse_json () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
-  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+  let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
   (* JSON responses with accuracy field *)
   let responses = [
@@ -545,7 +575,7 @@ let test_mermaid_operators_roundtrip () =
     let action = {
       id = "action";
       node_type = Llm { model = "test"; system = None; prompt = "Test"; timeout = Some 10; tools = None; prompt_ref = None; prompt_vars = [] };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal = {
@@ -561,10 +591,13 @@ let test_mermaid_operators_roundtrip () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
-    let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
+    let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config ;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
     let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false chain in
 

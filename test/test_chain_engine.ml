@@ -428,15 +428,17 @@ let test_node_type_name () =
   Alcotest.(check string) "quorum" "quorum"
     (node_type_name (Quorum { required = 2; nodes = [] }));
   Alcotest.(check string) "gate" "gate"
-    (node_type_name (Gate { condition = ""; then_node = { id = ""; node_type = Pipeline []; input_mapping = [] }; else_node = None }));
+    (node_type_name (Gate { condition = ""; then_node = { id = ""; node_type = Pipeline []; input_mapping = []; output_key = None; depends_on = None }; else_node = None }));
   Alcotest.(check string) "subgraph" "subgraph"
-    (node_type_name (Subgraph { id = ""; nodes = []; output = ""; config = default_config }));
+    (node_type_name (Subgraph { id = ""; nodes = []; output = ""; config = default_config;
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None }));
   Alcotest.(check string) "chain_ref" "chain_ref"
     (node_type_name (ChainRef "test"));
   Alcotest.(check string) "map" "map"
-    (node_type_name (Map { func = ""; inner = { id = ""; node_type = Pipeline []; input_mapping = [] } }));
+    (node_type_name (Map { func = ""; inner = { id = ""; node_type = Pipeline []; input_mapping = []; output_key = None; depends_on = None } }));
   Alcotest.(check string) "bind" "bind"
-    (node_type_name (Bind { func = ""; inner = { id = ""; node_type = Pipeline []; input_mapping = [] } }));
+    (node_type_name (Bind { func = ""; inner = { id = ""; node_type = Pipeline []; input_mapping = []; output_key = None; depends_on = None } }));
   Alcotest.(check string) "merge" "merge"
     (node_type_name (Merge { strategy = First; nodes = [] }))
 
@@ -494,6 +496,8 @@ let test_chain_json_roundtrip () =
     ];
     output = "n1";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let json = chain_to_yojson chain in
   match chain_of_yojson json with
@@ -1005,14 +1009,16 @@ let test_compile_pipeline_topological_order () =
     id = "topo_test";
     nodes = [
       { id = "c"; node_type = Llm { model = "gemini"; system = None; prompt = "c"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
-        input_mapping = [("input", "{{b.output}}")] };
+        input_mapping = [("input", "{{b.output}}")]; output_key = None; depends_on = None };
       { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "a"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
-        input_mapping = [] };
+        input_mapping = []; output_key = None; depends_on = None };
       { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "b"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
-        input_mapping = [("input", "{{a.output}}")] };
+        input_mapping = [("input", "{{a.output}}")]; output_key = None; depends_on = None };
     ];
     output = "c";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   match compile chain with
   | Ok plan ->
@@ -1054,6 +1060,8 @@ let test_registry_register_lookup () =
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
     output = "n1";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   Chain_registry.register chain;
   match Chain_registry.lookup "test_reg_chain" with
@@ -1068,6 +1076,8 @@ let test_registry_exists () =
     nodes = [];
     output = "";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   Alcotest.(check bool) "not exists before" false (Chain_registry.exists "exists_test");
   Chain_registry.register chain;
@@ -1080,6 +1090,8 @@ let test_registry_unregister () =
     nodes = [];
     output = "";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   Chain_registry.register chain;
   Alcotest.(check bool) "exists" true (Chain_registry.exists "unreg_test");
@@ -1089,8 +1101,12 @@ let test_registry_unregister () =
 
 let test_registry_list () =
   Chain_registry.clear ();
-  let chain1 = { id = "list_1"; nodes = []; output = ""; config = default_config } in
-  let chain2 = { id = "list_2"; nodes = []; output = ""; config = default_config } in
+  let chain1 = { id = "list_1"; nodes = []; output = ""; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  let chain2 = { id = "list_2"; nodes = []; output = ""; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
   Chain_registry.register chain1;
   Chain_registry.register chain2;
   let ids = Chain_registry.list_ids () in
@@ -1100,7 +1116,9 @@ let test_registry_list () =
 
 let test_registry_version () =
   Chain_registry.clear ();
-  let chain = { id = "version_test"; nodes = []; output = ""; config = default_config } in
+  let chain = { id = "version_test"; nodes = []; output = ""; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
   Chain_registry.register chain;
   Chain_registry.register chain;  (* Re-register same id *)
   match Chain_registry.lookup_entry "version_test" with
@@ -1113,7 +1131,9 @@ let test_registry_stats () =
     id = "stats_1";
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
     output = "n1";
-    config = default_config
+    config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let chain2 = {
     id = "stats_2";
@@ -1122,7 +1142,9 @@ let test_registry_stats () =
       make_llm_node ~id:"n2" ~model:"claude" ~prompt:"test" ();
     ];
     output = "n2";
-    config = default_config
+    config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   Chain_registry.register chain1;
   Chain_registry.register chain2;
@@ -1136,7 +1158,9 @@ let test_registry_json_export_import () =
     id = "export_test";
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
     output = "n1";
-    config = default_config
+    config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   Chain_registry.register ~description:"Test chain" chain;
   let json = Chain_registry.to_json () in
@@ -1317,6 +1341,8 @@ let test_chain_to_json_simple () =
     ];
     output = "analyze";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let json = chain_to_json chain in
   (* Parse it back *)
@@ -1338,13 +1364,15 @@ let test_chain_to_json_resilience () =
       backoff = Exponential 2.0;
       retry_on = ["timeout"; "rate_limit"];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let chain = {
     id = "resilience_test";
     nodes = [retry_node];
     output = "retry_api";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let json = chain_to_json chain in
   match parse_chain json with
@@ -1372,11 +1400,13 @@ let test_chain_to_json_pipeline () =
           make_llm_node ~id:"step1" ~model:"gemini" ~prompt:"step 1" ();
           make_llm_node ~id:"step2" ~model:"claude" ~prompt:"step 2" ();
         ];
-        input_mapping = [];
+        input_mapping = []; output_key = None; depends_on = None;
       }
     ];
     output = "pipeline";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let json = chain_to_json chain in
   match parse_chain json with
@@ -1415,6 +1445,8 @@ let test_chain_to_json_string () =
     nodes = [make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ()];
     output = "n1";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let pretty = chain_to_json_string ~pretty:true chain in
   let compact = chain_to_json_string ~pretty:false chain in
@@ -2661,6 +2693,8 @@ let test_feedback_loop_json_roundtrip () =
     nodes = [node];
     output = "fb";
     config = Chain_types.default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let json_str = Chain_parser.chain_to_json_string chain in
   match Chain_parser.parse_chain (Yojson.Safe.from_string json_str) with
@@ -2699,6 +2733,8 @@ let test_feedback_loop_compile_depth () =
     nodes = [node];
     output = "fb";
     config = Chain_types.default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   match Chain_compiler.compile chain with
   | Ok plan ->

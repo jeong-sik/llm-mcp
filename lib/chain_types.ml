@@ -285,6 +285,9 @@ and node = {
   id : string;                           (** Unique node identifier *)
   node_type : node_type;                 (** The node's type and config *)
   input_mapping : (string * string) list;  (** Map: param -> {{node.output}} *)
+  (* Preset node fields (optional, for data/chains/*.json) *)
+  output_key : string option; [@yojson.option]       (** Output variable name *)
+  depends_on : string list option; [@yojson.option]  (** Explicit dependencies *)
 }
 [@@deriving yojson]
 
@@ -294,8 +297,21 @@ and chain = {
   nodes : node list;     (** List of nodes in the chain *)
   output : string;       (** ID of the output node *)
   config : chain_config; (** Execution configuration *)
+  (* Preset metadata fields (optional, for data/chains/*.json) *)
+  name : string option; [@yojson.option]          (** Human-readable name *)
+  description : string option; [@yojson.option]   (** Chain description *)
+  version : string option; [@yojson.option]       (** Semantic version *)
+  input_schema : Yojson.Safe.t option; [@yojson.option]   (** JSON Schema for input *)
+  output_schema : Yojson.Safe.t option; [@yojson.option]  (** JSON Schema for output *)
+  metadata : Yojson.Safe.t option; [@yojson.option]       (** Arbitrary metadata *)
 }
 [@@deriving yojson]
+
+(** Create a chain with default optional fields *)
+let make_chain ~id ~nodes ~output ?(config = default_config)
+    ?name ?description ?version ?input_schema ?output_schema ?metadata () =
+  { id; nodes; output; config; name; description; version;
+    input_schema; output_schema; metadata }
 
 (** A single trace entry for debugging *)
 type trace_entry = {
@@ -376,31 +392,38 @@ let node_type_name = function
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) () =
-  { id; node_type = Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars }; input_mapping = [] }
+  { id; node_type = Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create an adapter node for inter-node data transformation *)
 let make_adapter ~id ~input_ref ~transform ?(on_error=`Fail) () =
-  { id; node_type = Adapter { input_ref; transform; on_error }; input_mapping = [] }
+  { id; node_type = Adapter { input_ref; transform; on_error };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a simple tool node *)
 let make_tool_node ~id ~name ~args =
-  { id; node_type = Tool { name; args }; input_mapping = [] }
+  { id; node_type = Tool { name; args };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a pipeline from nodes *)
 let make_pipeline ~id nodes =
-  { id; node_type = Pipeline nodes; input_mapping = [] }
+  { id; node_type = Pipeline nodes;
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a fanout from nodes *)
 let make_fanout ~id nodes =
-  { id; node_type = Fanout nodes; input_mapping = [] }
+  { id; node_type = Fanout nodes;
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a quorum node *)
 let make_quorum ~id ~required nodes =
-  { id; node_type = Quorum { required; nodes }; input_mapping = [] }
+  { id; node_type = Quorum { required; nodes };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a threshold node *)
 let make_threshold ~id ~metric ~operator ~value ~input_node ?on_pass ?on_fail () =
-  { id; node_type = Threshold { metric; operator; value; input_node; on_pass; on_fail }; input_mapping = [] }
+  { id; node_type = Threshold { metric; operator; value; input_node; on_pass; on_fail };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a goal-driven iterative node *)
 let make_goal_driven ~id ~goal_metric ~goal_operator ~goal_value
@@ -410,23 +433,27 @@ let make_goal_driven ~id ~goal_metric ~goal_operator ~goal_value
       goal_metric; goal_operator; goal_value;
       action_node; measure_func; max_iterations; strategy_hints;
       conversational; relay_models
-    }; input_mapping = [] }
+    }; input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create an evaluator node *)
 let make_evaluator ~id ~candidates ~scoring_func ?scoring_prompt ~select_strategy ?min_score () =
-  { id; node_type = Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score }; input_mapping = [] }
+  { id; node_type = Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a retry node with backoff *)
 let make_retry ~id ~node ~max_attempts ?(backoff = Exponential 1.0) ?(retry_on = []) () =
-  { id; node_type = Retry { node; max_attempts; backoff; retry_on }; input_mapping = [] }
+  { id; node_type = Retry { node; max_attempts; backoff; retry_on };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a fallback chain *)
 let make_fallback ~id ~primary ~fallbacks =
-  { id; node_type = Fallback { primary; fallbacks }; input_mapping = [] }
+  { id; node_type = Fallback { primary; fallbacks };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a race node (first result wins) *)
 let make_race ~id ~nodes ?timeout () =
-  { id; node_type = Race { nodes; timeout }; input_mapping = [] }
+  { id; node_type = Race { nodes; timeout };
+    input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a feedback loop node for iterative quality improvement *)
 let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
@@ -434,7 +461,7 @@ let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
   { id; node_type = FeedbackLoop {
       generator; evaluator_config; improver_prompt;
       max_iterations; score_threshold; score_operator
-    }; input_mapping = [] }
+    }; input_mapping = []; output_key = None; depends_on = None }
 
 (** {1 Batch Execution Types - Phase 5} *)
 

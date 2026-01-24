@@ -563,7 +563,28 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
-      let final_prompt = substitute_iteration_vars resolved_prompt ctx.iteration_ctx in
+      let iteration_prompt = substitute_iteration_vars resolved_prompt ctx.iteration_ctx in
+
+      (* Inject conversation context if in conversational mode *)
+      let (final_prompt, conv_model) = match ctx.conversation with
+        | Some conv ->
+            (* Get current iteration from iteration_ctx, default to 0 *)
+            let iter = match ctx.iteration_ctx with Some ic -> ic.iteration | None -> 0 in
+            (* Add user's prompt to conversation history *)
+            add_message conv ~role:"user" ~content:iteration_prompt ~iteration:iter;
+            (* Build context-aware prompt with history *)
+            let context_prompt = build_context_prompt conv in
+            let enriched_prompt = Printf.sprintf "%s\n\n## Current Task\n%s" context_prompt iteration_prompt in
+            (enriched_prompt, Some conv.current_model)
+        | None -> (iteration_prompt, None)
+      in
+
+      (* Use conversation's current model if in relay mode, otherwise use node's model *)
+      let effective_model = match conv_model with
+        | Some m -> m
+        | None -> model
+      in
+
       (* Also resolve system instruction if present *)
       let resolved_system = Option.map (fun s -> substitute_prompt s inputs) system in
       let final_system = Option.map (fun s -> substitute_iteration_vars s ctx.iteration_ctx) resolved_system in
@@ -577,11 +598,11 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
               | Some sys -> Printf.sprintf "[system] %s\n[user] %s" sys final_prompt
               | None -> final_prompt
             in
-            Some (Langfuse.create_generation ~trace ~name:node.id ~model ~input:input_str ())
+            Some (Langfuse.create_generation ~trace ~name:node.id ~model:effective_model ~input:input_str ())
         | None -> None
       in
 
-      let result = exec_fn ~model ?system:final_system ~prompt:final_prompt ?tools () in
+      let result = exec_fn ~model:effective_model ?system:final_system ~prompt:final_prompt ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
@@ -1754,12 +1775,11 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   let start = Unix.gettimeofday () in
 
   (* Initialize conversation context if conversational mode is enabled *)
-  let _conv_ctx =
-    if conversational then
+  let () =
+    if conversational then begin
       let models = if relay_models = [] then ["gemini"; "claude"; "codex"] else relay_models in
-      Some (make_conversation_ctx ~models ())
-    else
-      None
+      ctx.conversation <- Some (make_conversation_ctx ~models ())
+    end
   in
 
   (* Get strategy hint based on current progress *)
@@ -1854,6 +1874,13 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           record_complete ctx parent.id ~duration_ms ~success:false;
           Error (Printf.sprintf "Iteration %d failed: %s" iteration msg)
       | Ok output ->
+          (* Update conversation context with this iteration's output *)
+          (match ctx.conversation with
+           | Some conv ->
+               add_message conv ~role:"assistant" ~content:output ~iteration;
+               maybe_summarize_and_rotate ~exec_fn conv
+           | None -> ());
+
           (* Measure the metric *)
           (match measure output with
            | None ->
@@ -1871,6 +1898,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                in
                if goal_met then begin
                  ctx.iteration_ctx <- None;  (* Clear iteration context on completion *)
+                 ctx.conversation <- None;   (* Clear conversation context on completion *)
                  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
                  record_complete ctx parent.id ~duration_ms ~success:true;
                  Hashtbl.add ctx.outputs parent.id output;

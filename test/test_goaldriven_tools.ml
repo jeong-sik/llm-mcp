@@ -188,15 +188,17 @@ let test_simple_tool_chain () =
         name = "calculate";
         args = `Assoc [("expression", `String "25 * 4")]
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "simple_tool";
       nodes = [tool_node];
       output = "calc";
-      config = { default_config with timeout = 30; trace = true }
-    } in
+      config = { default_config with timeout = 30; trace = true };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
     Eio_main.run @@ fun env ->
       let clock = Eio.Stdenv.clock env in
@@ -236,7 +238,7 @@ let test_goaldriven_with_tool () =
         name = "calculate";
         args = `Assoc [("expression", `String "10 * 10")]
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal_node = {
@@ -252,15 +254,17 @@ let test_goaldriven_with_tool () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "goaldriven_tool";
       nodes = [calc_action; goal_node];
       output = "calc_goal";
-      config = { default_config with timeout = 30; trace = true }
-    } in
+      config = { default_config with timeout = 30; trace = true };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
     Eio_main.run @@ fun env ->
       let clock = Eio.Stdenv.clock env in
@@ -309,15 +313,17 @@ let test_llm_calling_tool () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "llm_tool_call";
       nodes = [llm_with_tools];
       output = "llm_calc";
-      config = { default_config with timeout = 120; trace = true }
-    } in
+      config = { default_config with timeout = 120; trace = true };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
     Eio_main.run @@ fun env ->
       let clock = Eio.Stdenv.clock env in
@@ -375,7 +381,7 @@ let test_goaldriven_llm_with_tool () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal = {
@@ -391,15 +397,17 @@ let test_goaldriven_llm_with_tool () =
         conversational = false;
         relay_models = [];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "goaldriven_llm_tool";
       nodes = [calc_llm_action; goal];
       output = "accuracy_goal";
-      config = { default_config with timeout = 180; trace = true }
-    } in
+      config = { default_config with timeout = 180; trace = true };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
+  } in
 
     Eio_main.run @@ fun env ->
       let clock = Eio.Stdenv.clock env in
