@@ -13,6 +13,8 @@
    error
    ; Logging (structured, leveled)
    log
+   ; Metrics (Prometheus compatible)
+   metrics
    ; Pure OCaml - shared between Eio and Lwt
    common
    types
