@@ -579,6 +579,8 @@ let test_complex_lossless_roundtrip () =
       max_iterations = 3;
       score_threshold = 0.9;
       score_operator = Gte;
+      conversational = false;
+      relay_models = [];
     };
     input_mapping = [];
   } in

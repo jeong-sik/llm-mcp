@@ -257,6 +257,8 @@ type node_type =
       max_iterations : int;
       score_threshold : float;
       score_operator : threshold_op;
+      conversational : bool;
+      relay_models : string list;
     }
 
 (** A single execution node *)
@@ -349,7 +351,7 @@ val make_evaluator : id:string -> candidates:node list -> scoring_func:string ->
 val make_retry : id:string -> node:node -> max_attempts:int -> ?backoff:backoff_strategy -> ?retry_on:string list -> unit -> node
 val make_fallback : id:string -> primary:node -> fallbacks:node list -> node
 val make_race : id:string -> nodes:node list -> ?timeout:float -> unit -> node
-val make_feedback_loop : id:string -> generator:node -> evaluator_config:evaluator_config -> improver_prompt:string -> max_iterations:int -> score_threshold:float -> ?score_operator:threshold_op -> unit -> node
+val make_feedback_loop : id:string -> generator:node -> evaluator_config:evaluator_config -> improver_prompt:string -> max_iterations:int -> score_threshold:float -> ?score_operator:threshold_op -> ?conversational:bool -> ?relay_models:string list -> unit -> node
 
 (** {1 Batch Execution Types} *)
 

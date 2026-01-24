@@ -769,7 +769,13 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         ~default:(Option.value (parse_float_opt json "min_score") ~default:0.7) in
       let score_operator_str = parse_string_with_default json "score_operator" "gte" in
       let* score_operator = parse_threshold_op score_operator_str in
-      Ok (FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator })
+      let conversational = parse_bool_with_default json "conversational" false in
+      let relay_models = parse_string_list_opt json "relay_models" in
+      Ok (FeedbackLoop {
+        generator; evaluator_config; improver_prompt;
+        max_iterations; score_threshold; score_operator;
+        conversational; relay_models
+      })
 
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
@@ -1553,7 +1559,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("min_results", match min_results with Some n -> `Int n | None -> `Null);
           ("timeout", match timeout with Some t -> `Float t | None -> `Null);
         ]
-    | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator } ->
+    | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator; conversational; relay_models } ->
         let select_strategy_json = match evaluator_config.select_strategy with
           | Best -> `String "best"
           | Worst -> `String "worst"
@@ -1568,7 +1574,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         let operator_str = match score_operator with
           | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
         in
-        [
+        let fields = [
           ("type", `String "feedback_loop");
           ("generator", node_to_json generator);
           ("evaluator_config", evaluator_config_json);
@@ -1576,7 +1582,12 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("max_iterations", `Int max_iterations);
           ("score_threshold", `Float score_threshold);
           ("score_operator", `String operator_str);
-        ]
+          ("conversational", `Bool conversational);
+        ] in
+        let fields = if relay_models = [] then fields
+          else fields @ [("relay_models", `List (List.map (fun s -> `String s) relay_models))]
+        in
+        fields
   in
   `Assoc (base @ type_fields @ input_mapping)
 

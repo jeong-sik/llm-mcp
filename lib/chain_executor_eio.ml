@@ -479,8 +479,8 @@ let make_conversation_ctx ?(models=["gemini"; "claude"; "codex"])
 }
 
 (** Add a message to conversation history *)
-let add_message (conv : conversation_ctx) ~role ~content ~iteration : unit =
-  let msg = { role; content; model = conv.current_model; iteration } in
+let add_message (conv : conversation_ctx) ~role ~content ~iteration ~model : unit =
+  let msg = { role; content; model; iteration } in
   conv.history <- msg :: conv.history;
   conv.total_tokens <- conv.total_tokens + estimate_tokens content
 
@@ -503,13 +503,16 @@ let build_context_prompt (conv : conversation_ctx) : string =
     | sums -> "## Previous Context Summary\n" ^ String.concat "\n---\n" sums ^ "\n\n"
   in
   let history_section =
-    let recent = List.rev conv.history in
-    String.concat "\n" (List.map (fun msg ->
-      Printf.sprintf "[%s (%s, iter %d)]: %s"
-        msg.role msg.model msg.iteration msg.content
-    ) recent)
+    match List.rev conv.history with
+    | [] -> ""
+    | recent ->
+        "## Recent History\n" ^
+        String.concat "\n" (List.map (fun msg ->
+          Printf.sprintf "[%s (%s, iter %d)]: %s"
+            msg.role msg.model msg.iteration msg.content
+        ) recent)
   in
-  summary_section ^ "## Recent History\n" ^ history_section
+  String.trim (summary_section ^ history_section)
 
 (** Summarize history using LLM and compress context *)
 let summarize_history ~exec_fn (conv : conversation_ctx) : string =
@@ -567,6 +570,23 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
       (* Also resolve system instruction if present *)
       let resolved_system = Option.map (fun s -> substitute_prompt s inputs) system in
       let final_system = Option.map (fun s -> substitute_iteration_vars s ctx.iteration_ctx) resolved_system in
+      let iteration = match ctx.iteration_ctx with
+        | Some it -> it.iteration
+        | None -> 0
+      in
+      let (prompt_with_context, conv_opt) =
+        match ctx.conversation with
+        | None -> (final_prompt, None)
+        | Some conv ->
+            maybe_summarize_and_rotate ~exec_fn conv;
+            let context_prompt = build_context_prompt conv in
+            let merged_prompt =
+              if context_prompt = "" then final_prompt
+              else context_prompt ^ "\n\n" ^ final_prompt
+            in
+            add_message conv ~role:"user" ~content:final_prompt ~iteration ~model:conv.current_model;
+            (merged_prompt, Some conv)
+      in
       record_start ctx node.id;
       let start = Unix.gettimeofday () in
 
@@ -574,19 +594,19 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
       let langfuse_gen = match ctx.langfuse_trace with
         | Some trace ->
             let input_str = match final_system with
-              | Some sys -> Printf.sprintf "[system] %s\n[user] %s" sys final_prompt
-              | None -> final_prompt
+              | Some sys -> Printf.sprintf "[system] %s\n[user] %s" sys prompt_with_context
+              | None -> prompt_with_context
             in
             Some (Langfuse.create_generation ~trace ~name:node.id ~model ~input:input_str ())
         | None -> None
       in
 
-      let result = exec_fn ~model ?system:final_system ~prompt:final_prompt ?tools () in
+      let result = exec_fn ~model ?system:final_system ~prompt:prompt_with_context ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
           (* Estimate tokens: ~4 chars per token (rough approximation) *)
-          let prompt_tokens = (String.length final_prompt + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
+          let prompt_tokens = (String.length prompt_with_context + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
           let completion_tokens = String.length output / 4 in
           let node_tokens = {
             Chain_category.prompt_tokens;
@@ -618,6 +638,10 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
                (* In real usage, this could be replaced with a proper evaluation *)
                let score = min 1.0 (float_of_int (String.length output) /. 500.0) in
                Prompt_registry.update_metrics ~id ~version ~score ()
+           | None -> ());
+
+          (match conv_opt with
+           | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
            | None -> ());
 
           record_complete ctx node.id ~duration_ms ~success:true;
@@ -802,9 +826,10 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
       execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~nodes:stream_nodes ~reducer ~initial ~min_results ~timeout
   (* FeedbackLoop: Iterative quality improvement with evaluator feedback *)
-  | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator } ->
+  | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator; conversational; relay_models } ->
       execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~generator ~evaluator_config ~improver_prompt ~max_iterations ~score_threshold ~score_operator
+        ~conversational ~relay_models
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
@@ -1754,13 +1779,10 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   let start = Unix.gettimeofday () in
 
   (* Initialize conversation context if conversational mode is enabled *)
-  let _conv_ctx =
-    if conversational then
-      let models = if relay_models = [] then ["gemini"; "claude"; "codex"] else relay_models in
-      Some (make_conversation_ctx ~models ())
-    else
-      None
-  in
+  let prev_conversation = ctx.conversation in
+  (if conversational then
+     let models = if relay_models = [] then ["gemini"; "claude"; "codex"] else relay_models in
+     ctx.conversation <- Some (make_conversation_ctx ~models ()));
 
   (* Get strategy hint based on current progress *)
   let get_strategy_hint current_value =
@@ -1879,7 +1901,9 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                  iterate (iteration + 1) v)
     end
   in
-  iterate 1 0.0
+  let result = iterate 1 0.0 in
+  ctx.conversation <- prev_conversation;
+  result
 
 (** Execute evaluator node - score candidates and select based on strategy *)
 and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
@@ -2110,9 +2134,14 @@ Reply with ONLY a number between 0.0 and 1.0:|}
 (** Execute FeedbackLoop node - iterative quality improvement with evaluator feedback *)
 and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~generator ~(evaluator_config : Chain_types.evaluator_config)
-    ~improver_prompt ~max_iterations ~score_threshold ~score_operator : (string, string) result =
+    ~improver_prompt ~max_iterations ~score_threshold ~score_operator
+    ~conversational ~relay_models : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
+  let prev_conversation = ctx.conversation in
+  (if conversational then
+     let models = if relay_models = [] then ["gemini"; "claude"; "codex"] else relay_models in
+     ctx.conversation <- Some (make_conversation_ctx ~models ()));
 
   (* Helper: Check if score passes threshold using operator *)
   let passes_threshold score =
@@ -2241,7 +2270,9 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           end
     end
   in
-  iterate 1
+  let result = iterate 1 in
+  ctx.conversation <- prev_conversation;
+  result
 
 (* ════════════════════════════════════════════════════════════════════════════
    Resilience Nodes Implementation
