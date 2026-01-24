@@ -1,6 +1,7 @@
 #!/bin/bash
 # LLM-MCP (OCaml) - Start Script (HTTP default)
 # Usage: ./start-llm-mcp.sh [--stdio] [--port PORT]
+#        ./start-llm-mcp.sh --masc-hook [--masc-agent NAME] [--masc-heartbeat-sec N]
 
 set -e
 
@@ -15,6 +16,58 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+
+# Parse MASC hook flags and strip them from args passed to binary
+clean_args=()
+masc_hook=""
+masc_agent=""
+masc_heartbeat=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --masc-hook|--masc-hook=true|--masc-hook=1)
+            masc_hook="true"
+            shift
+            ;;
+        --masc-hook=false|--masc-hook=0)
+            masc_hook="false"
+            shift
+            ;;
+        --masc-agent)
+            shift
+            masc_agent="${1:-}"
+            shift || true
+            ;;
+        --masc-agent=*)
+            masc_agent="${1#*=}"
+            shift
+            ;;
+        --masc-heartbeat-sec)
+            shift
+            masc_heartbeat="${1:-}"
+            shift || true
+            ;;
+        --masc-heartbeat-sec=*)
+            masc_heartbeat="${1#*=}"
+            shift
+            ;;
+        *)
+            clean_args+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [ -n "$masc_hook" ]; then
+    export LLM_MCP_MASC_HOOK="$masc_hook"
+fi
+if [ -n "$masc_agent" ]; then
+    export LLM_MCP_MASC_AGENT="$masc_agent"
+fi
+if [ -n "$masc_heartbeat" ]; then
+    export LLM_MCP_MASC_HEARTBEAT_SEC="$masc_heartbeat"
+fi
+
+set -- "${clean_args[@]}"
 
 # Resolve target port/stdout mode from args for safe cleanup
 resolve_port() {
