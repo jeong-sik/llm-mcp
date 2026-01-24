@@ -577,7 +577,8 @@ let test_complex_lossless_roundtrip () =
       evaluator_config = { scoring_func = "llm_judge"; scoring_prompt = Some "Score 0-1"; select_strategy = Best };
       improver_prompt = "Fix: {{feedback}}";
       max_iterations = 3;
-      min_score = 0.9;
+      score_threshold = 0.9;
+      score_operator = Gte;
     };
     input_mapping = [];
   } in
@@ -691,6 +692,1048 @@ let test_complex_lossless_roundtrip () =
         json1 = json2
   )
 
+(* Tool node nested structure roundtrip test *)
+let test_tool_nested_roundtrip () =
+  let json = {|{
+    "id": "tool_nested_test",
+    "nodes": [
+      {
+        "id": "parse",
+        "type": "tool",
+        "tool": {
+          "server": "figma",
+          "name": "figma_parse_url",
+          "args": {"url": "{{input.figma_url}}", "depth": 4}
+        }
+      },
+      {
+        "id": "export",
+        "type": "tool",
+        "tool": {
+          "server": "figma",
+          "name": "figma_export_image",
+          "args": {"scale": 2, "format": "png"}
+        },
+        "input_mapping": [["file_key", "parse"]]
+      }
+    ],
+    "output": "export",
+    "config": {"timeout": 60, "trace": false, "max_depth": 3}
+  }|} in
+  Alcotest.(check bool) "tool nested structure roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let json1_str = Json_parser.chain_to_json_string ~pretty:true chain1 in
+            let json2_str = Json_parser.chain_to_json_string ~pretty:true chain2 in
+            if json1_str <> json2_str then begin
+              Printf.printf "FAIL: tool nested mismatch\n";
+              Printf.printf "---- json1 ----\n%s\n" json1_str;
+              Printf.printf "---- json2 ----\n%s\n" json2_str;
+            end;
+            json1_str = json2_str
+  )
+
+(* Tool node flat format roundtrip test *)
+let test_tool_flat_roundtrip () =
+  let json = {|{
+    "id": "tool_flat_test",
+    "nodes": [
+      {"id": "lint", "type": "tool", "name": "eslint", "args": {"pattern": "*.ts"}}
+    ],
+    "output": "lint",
+    "config": {"timeout": 30, "trace": false, "max_depth": 2}
+  }|} in
+  Alcotest.(check bool) "tool flat format roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            (* For flat format, just check that args are preserved *)
+            let find_lint nodes = List.find_opt (fun (n:node) -> n.id = "lint") nodes in
+            match find_lint chain1.nodes, find_lint chain2.nodes with
+            | Some n1, Some n2 ->
+                (match n1.node_type, n2.node_type with
+                 | Tool { args = a1; _ }, Tool { args = a2; _ } ->
+                     let eq = Yojson.Safe.equal a1 a2 in
+                     if not eq then Printf.printf "FAIL: tool args mismatch\n";
+                     eq
+                 | _ -> false)
+            | _ -> false
+  )
+
+(* ============================================================
+   Production Chain Tests - Test all 14 chains from data/chains/
+   ============================================================ *)
+
+(* Helper: find project root (contains dune-project) *)
+let find_project_root () =
+  let rec find dir =
+    let dune_project = Filename.concat dir "dune-project" in
+    if Sys.file_exists dune_project then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if parent = dir then None
+      else find parent
+  in
+  (* Try from current directory and walk up *)
+  match find (Sys.getcwd ()) with
+  | Some root -> root
+  | None ->
+      (* Fallback: try common locations *)
+      let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
+      Filename.concat home "me/workspace/yousleepwhen/llm-mcp"
+
+(* Helper: read file contents *)
+let read_chain_file filename =
+  let root = find_project_root () in
+  let path = Printf.sprintf "%s/data/chains/%s" root filename in
+  let ic = open_in path in
+  let n = in_channel_length ic in
+  let s = really_input_string ic n in
+  close_in ic;
+  s
+
+(* Helper: test a production chain file for lossless roundtrip *)
+let test_production_chain filename () =
+  let json_str = read_chain_file filename in
+  let json1 = Yojson.Safe.from_string json_str in
+  match Json_parser.parse_chain json1 with
+  | Error e ->
+      Alcotest.fail (Printf.sprintf "%s: JSON parse failed: %s" filename e)
+  | Ok chain1 ->
+      let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+      match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+      | Error e ->
+          Alcotest.fail (Printf.sprintf "%s: Mermaid parse failed: %s" filename e)
+      | Ok chain2 ->
+          (* Compare: node count, output, id *)
+          let n1 = List.length chain1.nodes in
+          let n2 = List.length chain2.nodes in
+          if n1 <> n2 then
+            Alcotest.fail (Printf.sprintf "%s: node count mismatch: %d vs %d" filename n1 n2);
+          if chain1.id <> chain2.id then
+            Alcotest.fail (Printf.sprintf "%s: id mismatch: %s vs %s" filename chain1.id chain2.id);
+          if chain1.output <> chain2.output then
+            Alcotest.fail (Printf.sprintf "%s: output mismatch: %s vs %s" filename chain1.output chain2.output);
+          (* Compare full JSON for strictest check *)
+          let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+          let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+          if j1 <> j2 then begin
+            Printf.printf "FAIL: %s roundtrip mismatch\n" filename;
+            Printf.printf "---- Original nodes: %d, Roundtrip nodes: %d ----\n" n1 n2;
+            Alcotest.fail (Printf.sprintf "%s: full JSON mismatch after roundtrip" filename)
+          end
+
+(* Individual production chain tests *)
+let test_chain_code_migration = test_production_chain "code-migration.json"
+let test_chain_deep_research = test_production_chain "deep-research.json"
+let test_chain_design_to_tasks = test_production_chain "design_to_tasks.json"
+let test_chain_figma_to_prototype = test_production_chain "figma-to-prototype.json"
+let test_chain_figma_to_web_v2 = test_production_chain "figma-to-web-component-v2.json"
+let test_chain_figma_to_web = test_production_chain "figma-to-web-component.json"
+let test_chain_incident_response = test_production_chain "incident-response.json"
+let test_chain_magi_code_review = test_production_chain "magi-code-review.json"
+let test_chain_mcts_explore = test_production_chain "mcts-mantra-explore.json"
+let test_chain_mcts_hybrid = test_production_chain "mcts-mantra-hybrid.json"
+let test_chain_mcts_review = test_production_chain "mcts-mantra-review.json"
+let test_chain_mermaid_to_chain = test_production_chain "mermaid-to-chain.json"
+let test_chain_pr_review = test_production_chain "pr-review-pipeline.json"
+let test_chain_simple_test = test_production_chain "simple-test.json"
+
+(* ============================================================
+   Advanced Node Types Roundtrip Tests (Map, Bind, Spawn, Mcts)
+   ============================================================ *)
+
+(* Map node roundtrip test *)
+let test_map_roundtrip () =
+  let json = {|{
+    "id": "map_test",
+    "nodes": [
+      {"id": "source", "type": "llm", "model": "gemini", "prompt": "Generate data"},
+      {
+        "id": "transform",
+        "type": "map",
+        "func": "extract_json",
+        "inner": {"id": "inner_llm", "type": "llm", "model": "claude", "prompt": "Parse: {{source}}"}
+      }
+    ],
+    "output": "transform",
+    "config": {"timeout": 60, "trace": false, "max_depth": 3}
+  }|} in
+  Alcotest.(check bool) "map roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            if j1 <> j2 then Printf.printf "FAIL: map mismatch\n";
+            j1 = j2
+  )
+
+(* Bind node roundtrip test *)
+let test_bind_roundtrip () =
+  let json = {|{
+    "id": "bind_test",
+    "nodes": [
+      {"id": "router", "type": "llm", "model": "gemini", "prompt": "Decide route"},
+      {
+        "id": "dynamic",
+        "type": "bind",
+        "func": "select_model",
+        "inner": {"id": "inner_exec", "type": "llm", "model": "claude", "prompt": "Execute: {{router}}"}
+      }
+    ],
+    "output": "dynamic",
+    "config": {"timeout": 90, "trace": true, "max_depth": 4}
+  }|} in
+  Alcotest.(check bool) "bind roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            if j1 <> j2 then Printf.printf "FAIL: bind mismatch\n";
+            j1 = j2
+  )
+
+(* Spawn node roundtrip test *)
+let test_spawn_roundtrip () =
+  let json = {|{
+    "id": "spawn_test",
+    "nodes": [
+      {"id": "setup", "type": "llm", "model": "gemini", "prompt": "Setup context"},
+      {
+        "id": "isolated",
+        "type": "spawn",
+        "clean": true,
+        "pass_vars": ["input", "config"],
+        "inherit_cache": false,
+        "inner": {"id": "worker", "type": "llm", "model": "claude", "prompt": "Work in isolation"}
+      }
+    ],
+    "output": "isolated",
+    "config": {"timeout": 120, "trace": false, "max_depth": 5}
+  }|} in
+  Alcotest.(check bool) "spawn roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            if j1 <> j2 then Printf.printf "FAIL: spawn mismatch\n";
+            j1 = j2
+  )
+
+(* ============================================================
+   Combination Tests - Node type interactions
+   ============================================================ *)
+
+(* ChainRef inside Pipeline *)
+let test_chainref_in_pipeline () =
+  let json = {|{
+    "id": "chainref_pipeline",
+    "nodes": [
+      {
+        "id": "p",
+        "type": "pipeline",
+        "nodes": [
+          {"id": "pre", "type": "llm", "model": "gemini", "prompt": "Prepare"},
+          {"id": "ref", "type": "chain_ref", "ref": "magi-code-review"},
+          {"id": "post", "type": "llm", "model": "claude", "prompt": "Finalize: {{ref}}"}
+        ]
+      }
+    ],
+    "output": "p",
+    "config": {"timeout": 180, "trace": true, "max_depth": 5}
+  }|} in
+  Alcotest.(check bool) "chainref in pipeline" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Fanout with mixed node types *)
+let test_fanout_mixed_types () =
+  let json = {|{
+    "id": "fanout_mixed",
+    "nodes": [
+      {
+        "id": "parallel",
+        "type": "fanout",
+        "nodes": [
+          {"id": "llm_branch", "type": "llm", "model": "gemini", "prompt": "Analyze"},
+          {"id": "tool_branch", "type": "tool", "name": "eslint", "args": {"pattern": "*.ts"}},
+          {"id": "ref_branch", "type": "chain_ref", "ref": "simple-test"}
+        ]
+      },
+      {
+        "id": "merge_all",
+        "type": "merge",
+        "strategy": "concat",
+        "nodes": [
+          {"id": "m1", "type": "llm", "model": "claude", "prompt": "Summarize: {{parallel}}"}
+        ]
+      }
+    ],
+    "output": "merge_all",
+    "config": {"timeout": 120, "trace": false, "max_depth": 4}
+  }|} in
+  Alcotest.(check bool) "fanout mixed types" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Subgraph with complex inner chain *)
+let test_subgraph_complex () =
+  let json = {|{
+    "id": "subgraph_complex",
+    "nodes": [
+      {"id": "input_proc", "type": "llm", "model": "gemini", "prompt": "Process input"},
+      {
+        "id": "inner_chain",
+        "type": "subgraph",
+        "graph": {
+          "id": "inner",
+          "nodes": [
+            {"id": "a", "type": "llm", "model": "claude", "prompt": "Step A"},
+            {
+              "id": "gate",
+              "type": "gate",
+              "condition": "{{a.score}} > 0.8",
+              "then": {"id": "high", "type": "llm", "model": "codex", "prompt": "High path"},
+              "else": {"id": "low", "type": "llm", "model": "gemini", "prompt": "Low path"}
+            }
+          ],
+          "output": "gate",
+          "config": {"timeout": 60, "trace": false, "max_depth": 2}
+        }
+      }
+    ],
+    "output": "inner_chain",
+    "config": {"timeout": 180, "trace": true, "max_depth": 6}
+  }|} in
+  Alcotest.(check bool) "subgraph complex" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Nested resilience: Retry > Fallback > Race *)
+let test_nested_resilience () =
+  let json = {|{
+    "id": "nested_resilience",
+    "nodes": [
+      {
+        "id": "robust",
+        "type": "retry",
+        "max_attempts": 3,
+        "backoff": {"Exponential": {"base": 1.0, "max": 10.0}},
+        "retry_on": ["timeout", "rate_limit"],
+        "node": {
+          "id": "fallback_layer",
+          "type": "fallback",
+          "primary": {
+            "id": "race_layer",
+            "type": "race",
+            "timeout": 30.0,
+            "nodes": [
+              {"id": "fast", "type": "llm", "model": "gemini", "prompt": "Quick"},
+              {"id": "slow", "type": "llm", "model": "claude", "prompt": "Thorough"}
+            ]
+          },
+          "fallbacks": [
+            {"id": "backup", "type": "llm", "model": "codex", "prompt": "Backup plan"}
+          ]
+        }
+      }
+    ],
+    "output": "robust",
+    "config": {"timeout": 300, "trace": true, "max_depth": 8}
+  }|} in
+  Alcotest.(check bool) "nested resilience" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* GoalDriven with Evaluator inside *)
+let test_goaldriven_with_evaluator () =
+  let json = {|{
+    "id": "goaldriven_eval",
+    "nodes": [
+      {
+        "id": "iterative",
+        "type": "goal_driven",
+        "goal_metric": "coverage",
+        "goal_operator": "gte",
+        "goal_value": 0.9,
+        "max_iterations": 5,
+        "measure_func": "exec_test",
+        "conversational": true,
+        "relay_models": ["gemini", "claude"],
+        "strategy_hints": {"below_50": "aggressive", "above_50": "conservative"},
+        "action_node": {
+          "id": "action",
+          "type": "evaluator",
+          "scoring_func": "anti_fake",
+          "select_strategy": "best",
+          "min_score": 0.7,
+          "candidates": [
+            {"id": "c1", "type": "llm", "model": "gemini", "prompt": "Generate v1"},
+            {"id": "c2", "type": "llm", "model": "claude", "prompt": "Generate v2"}
+          ]
+        }
+      }
+    ],
+    "output": "iterative",
+    "config": {"timeout": 600, "trace": true, "max_depth": 10}
+  }|} in
+  Alcotest.(check bool) "goaldriven with evaluator" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Mcts node roundtrip test *)
+let test_mcts_roundtrip () =
+  let json = {|{
+    "id": "mcts_test",
+    "nodes": [
+      {
+        "id": "search",
+        "type": "mcts",
+        "strategies": [
+          {"id": "s1", "type": "llm", "model": "gemini", "prompt": "Strategy A"},
+          {"id": "s2", "type": "llm", "model": "claude", "prompt": "Strategy B"}
+        ],
+        "simulation": {"id": "sim", "type": "llm", "model": "codex", "prompt": "Simulate"},
+        "evaluator": "llm_judge",
+        "evaluator_prompt": "Score 0-1",
+        "policy": {"UCB1": 1.414},
+        "max_iterations": 10,
+        "max_depth": 3,
+        "expansion_threshold": 2,
+        "early_stop": 0.95,
+        "parallel_sims": 2
+      }
+    ],
+    "output": "search",
+    "config": {"timeout": 300, "trace": true, "max_depth": 8}
+  }|} in
+  Alcotest.(check bool) "mcts roundtrip" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            if j1 <> j2 then begin
+              Printf.printf "FAIL: mcts mismatch\n";
+              Printf.printf "---- j1 ----\n%s\n" (Json_parser.chain_to_json_string ~pretty:true chain1);
+              Printf.printf "---- j2 ----\n%s\n" (Json_parser.chain_to_json_string ~pretty:true chain2);
+            end;
+            j1 = j2
+  )
+
+(* ============================================================
+   STRESS TESTS - Extreme combinations 🔥
+   ============================================================ *)
+
+(* 5-level deep nesting: Subgraph > Pipeline > Retry > Fanout > Gate *)
+let test_stress_5level_nesting () =
+  let json = {|{
+    "id": "stress_5level",
+    "nodes": [
+      {
+        "id": "level1_subgraph",
+        "type": "subgraph",
+        "graph": {
+          "id": "inner1",
+          "nodes": [
+            {
+              "id": "level2_pipeline",
+              "type": "pipeline",
+              "nodes": [
+                {"id": "prep", "type": "llm", "model": "gemini", "prompt": "Prepare"},
+                {
+                  "id": "level3_retry",
+                  "type": "retry",
+                  "max_attempts": 3,
+                  "backoff": {"Exponential": {"base": 1.0, "max": 10.0}},
+                  "retry_on": ["timeout"],
+                  "node": {
+                    "id": "level4_fanout",
+                    "type": "fanout",
+                    "nodes": [
+                      {
+                        "id": "level5_gate_a",
+                        "type": "gate",
+                        "condition": "{{prep.score}} > 0.5",
+                        "then": {"id": "high_a", "type": "llm", "model": "claude", "prompt": "High A"},
+                        "else": {"id": "low_a", "type": "llm", "model": "codex", "prompt": "Low A"}
+                      },
+                      {
+                        "id": "level5_gate_b",
+                        "type": "gate",
+                        "condition": "{{prep.score}} > 0.8",
+                        "then": {"id": "high_b", "type": "llm", "model": "gemini", "prompt": "High B"}
+                      }
+                    ]
+                  }
+                },
+                {"id": "post", "type": "llm", "model": "claude", "prompt": "Finalize"}
+              ]
+            }
+          ],
+          "output": "level2_pipeline",
+          "config": {"timeout": 120, "trace": true, "max_depth": 6}
+        }
+      }
+    ],
+    "output": "level1_subgraph",
+    "config": {"timeout": 300, "trace": true, "max_depth": 10}
+  }|} in
+  Alcotest.(check bool) "5-level nesting" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Kitchen sink: Maximum node type diversity in one chain *)
+let test_stress_kitchen_sink () =
+  let json = {|{
+    "id": "kitchen_sink",
+    "nodes": [
+      {"id": "n1_llm", "type": "llm", "model": "gemini", "prompt": "Start"},
+      {"id": "n2_tool", "type": "tool", "name": "eslint", "args": {"pattern": "*.ts"}},
+      {"id": "n3_chainref", "type": "chain_ref", "ref": "magi-code-review"},
+      {
+        "id": "n4_pipeline",
+        "type": "pipeline",
+        "nodes": [
+          {"id": "p1", "type": "llm", "model": "claude", "prompt": "Pipeline step 1"},
+          {"id": "p2", "type": "llm", "model": "codex", "prompt": "Pipeline step 2"}
+        ]
+      },
+      {
+        "id": "n5_fanout",
+        "type": "fanout",
+        "nodes": [
+          {"id": "f1", "type": "llm", "model": "gemini", "prompt": "Branch 1"},
+          {"id": "f2", "type": "llm", "model": "claude", "prompt": "Branch 2"}
+        ]
+      },
+      {
+        "id": "n6_quorum",
+        "type": "quorum",
+        "required": 2,
+        "nodes": [
+          {"id": "q1", "type": "llm", "model": "gemini", "prompt": "Vote 1"},
+          {"id": "q2", "type": "llm", "model": "claude", "prompt": "Vote 2"},
+          {"id": "q3", "type": "llm", "model": "codex", "prompt": "Vote 3"}
+        ]
+      },
+      {
+        "id": "n7_gate",
+        "type": "gate",
+        "condition": "{{n1_llm.score}} > 0.7",
+        "then": {"id": "then_node", "type": "llm", "model": "claude", "prompt": "Then path"},
+        "else": {"id": "else_node", "type": "llm", "model": "gemini", "prompt": "Else path"}
+      },
+      {
+        "id": "n8_retry",
+        "type": "retry",
+        "max_attempts": 2,
+        "backoff": {"Fixed": 1.0},
+        "retry_on": ["error"],
+        "node": {"id": "retry_inner", "type": "llm", "model": "codex", "prompt": "Retry this"}
+      },
+      {
+        "id": "n9_fallback",
+        "type": "fallback",
+        "primary": {"id": "primary", "type": "llm", "model": "claude", "prompt": "Primary"},
+        "fallbacks": [
+          {"id": "fb1", "type": "llm", "model": "gemini", "prompt": "Fallback 1"},
+          {"id": "fb2", "type": "llm", "model": "codex", "prompt": "Fallback 2"}
+        ]
+      },
+      {
+        "id": "n10_race",
+        "type": "race",
+        "timeout": 30.0,
+        "nodes": [
+          {"id": "r1", "type": "llm", "model": "gemini", "prompt": "Race 1"},
+          {"id": "r2", "type": "llm", "model": "claude", "prompt": "Race 2"}
+        ]
+      },
+      {
+        "id": "n11_merge",
+        "type": "merge",
+        "strategy": "concat",
+        "nodes": [
+          {"id": "m1", "type": "llm", "model": "claude", "prompt": "Merge input 1"},
+          {"id": "m2", "type": "llm", "model": "gemini", "prompt": "Merge input 2"}
+        ]
+      },
+      {
+        "id": "n12_threshold",
+        "type": "threshold",
+        "metric": "confidence",
+        "operator": "gte",
+        "value": 0.8,
+        "input_node": {"id": "thresh_in", "type": "llm", "model": "claude", "prompt": "Check"},
+        "on_pass": {"id": "pass", "type": "llm", "model": "gemini", "prompt": "Passed"},
+        "on_fail": {"id": "fail", "type": "llm", "model": "codex", "prompt": "Failed"}
+      },
+      {
+        "id": "n13_evaluator",
+        "type": "evaluator",
+        "scoring_func": "llm_judge",
+        "select_strategy": "best",
+        "min_score": 0.6,
+        "candidates": [
+          {"id": "e1", "type": "llm", "model": "gemini", "prompt": "Candidate 1"},
+          {"id": "e2", "type": "llm", "model": "claude", "prompt": "Candidate 2"}
+        ]
+      }
+    ],
+    "output": "n13_evaluator",
+    "config": {"timeout": 600, "trace": true, "max_depth": 15}
+  }|} in
+  Alcotest.(check bool) "kitchen sink" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Triple subgraph nesting: Subgraph > Subgraph > Subgraph *)
+let test_stress_triple_subgraph () =
+  let json = {|{
+    "id": "triple_sub",
+    "nodes": [
+      {
+        "id": "outer",
+        "type": "subgraph",
+        "graph": {
+          "id": "mid_chain",
+          "nodes": [
+            {"id": "mid_pre", "type": "llm", "model": "gemini", "prompt": "Mid prep"},
+            {
+              "id": "middle",
+              "type": "subgraph",
+              "graph": {
+                "id": "inner_chain",
+                "nodes": [
+                  {"id": "inner_pre", "type": "llm", "model": "claude", "prompt": "Inner prep"},
+                  {
+                    "id": "innermost",
+                    "type": "subgraph",
+                    "graph": {
+                      "id": "core_chain",
+                      "nodes": [
+                        {"id": "core1", "type": "llm", "model": "codex", "prompt": "Core 1"},
+                        {"id": "core2", "type": "llm", "model": "gemini", "prompt": "Core 2"}
+                      ],
+                      "output": "core2",
+                      "config": {"timeout": 30, "trace": true, "max_depth": 2}
+                    }
+                  }
+                ],
+                "output": "innermost",
+                "config": {"timeout": 60, "trace": true, "max_depth": 3}
+              }
+            }
+          ],
+          "output": "middle",
+          "config": {"timeout": 120, "trace": true, "max_depth": 4}
+        }
+      }
+    ],
+    "output": "outer",
+    "config": {"timeout": 300, "trace": true, "max_depth": 8}
+  }|} in
+  Alcotest.(check bool) "triple subgraph" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* MCTS with Pipeline strategies *)
+let test_stress_mcts_pipeline_strategies () =
+  let json = {|{
+    "id": "mcts_complex",
+    "nodes": [
+      {
+        "id": "search",
+        "type": "mcts",
+        "strategies": [
+          {
+            "id": "strategy_pipeline",
+            "type": "pipeline",
+            "nodes": [
+              {"id": "sp1", "type": "llm", "model": "gemini", "prompt": "Analyze"},
+              {"id": "sp2", "type": "llm", "model": "claude", "prompt": "Synthesize"}
+            ]
+          },
+          {
+            "id": "strategy_fanout",
+            "type": "fanout",
+            "nodes": [
+              {"id": "sf1", "type": "llm", "model": "codex", "prompt": "Path A"},
+              {"id": "sf2", "type": "llm", "model": "gemini", "prompt": "Path B"}
+            ]
+          }
+        ],
+        "simulation": {
+          "id": "sim_retry",
+          "type": "retry",
+          "max_attempts": 2,
+          "backoff": {"Fixed": 0.5},
+          "retry_on": ["timeout"],
+          "node": {"id": "sim_inner", "type": "llm", "model": "claude", "prompt": "Simulate"}
+        },
+        "evaluator": "llm_judge",
+        "evaluator_prompt": "Score 0-1 based on quality",
+        "policy": {"UCB1": 1.414},
+        "max_iterations": 5,
+        "max_depth": 3,
+        "expansion_threshold": 2,
+        "early_stop": 0.9,
+        "parallel_sims": 1
+      }
+    ],
+    "output": "search",
+    "config": {"timeout": 600, "trace": true, "max_depth": 10}
+  }|} in
+  Alcotest.(check bool) "mcts pipeline strategies" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* Evaluator with complex candidates (Pipeline + Fanout) *)
+let test_stress_evaluator_complex_candidates () =
+  let json = {|{
+    "id": "eval_complex",
+    "nodes": [
+      {
+        "id": "eval",
+        "type": "evaluator",
+        "scoring_func": "anti_fake",
+        "scoring_prompt": "Check for quality and completeness",
+        "select_strategy": "best",
+        "min_score": 0.7,
+        "candidates": [
+          {
+            "id": "cand_pipeline",
+            "type": "pipeline",
+            "nodes": [
+              {"id": "cp1", "type": "llm", "model": "gemini", "prompt": "Step 1"},
+              {"id": "cp2", "type": "llm", "model": "claude", "prompt": "Step 2"},
+              {"id": "cp3", "type": "llm", "model": "codex", "prompt": "Step 3"}
+            ]
+          },
+          {
+            "id": "cand_fanout",
+            "type": "fanout",
+            "nodes": [
+              {"id": "cf1", "type": "llm", "model": "gemini", "prompt": "Parallel A"},
+              {"id": "cf2", "type": "llm", "model": "claude", "prompt": "Parallel B"}
+            ]
+          },
+          {
+            "id": "cand_retry",
+            "type": "retry",
+            "max_attempts": 3,
+            "backoff": {"Exponential": {"base": 0.5, "max": 5.0}},
+            "retry_on": ["error", "timeout"],
+            "node": {"id": "cr_inner", "type": "llm", "model": "codex", "prompt": "Robust generation"}
+          }
+        ]
+      }
+    ],
+    "output": "eval",
+    "config": {"timeout": 300, "trace": true, "max_depth": 8}
+  }|} in
+  Alcotest.(check bool) "evaluator complex candidates" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* GoalDriven with MCTS action_node *)
+let test_stress_goaldriven_mcts () =
+  let json = {|{
+    "id": "goal_mcts",
+    "nodes": [
+      {
+        "id": "optimizer",
+        "type": "goal_driven",
+        "goal_metric": "test_coverage",
+        "goal_operator": "gte",
+        "goal_value": 0.95,
+        "max_iterations": 10,
+        "measure_func": "run_tests",
+        "conversational": false,
+        "strategy_hints": {"below_30": "expand", "below_70": "refine", "above_70": "polish"},
+        "action_node": {
+          "id": "mcts_action",
+          "type": "mcts",
+          "strategies": [
+            {"id": "s1", "type": "llm", "model": "gemini", "prompt": "Strategy 1"},
+            {"id": "s2", "type": "llm", "model": "claude", "prompt": "Strategy 2"}
+          ],
+          "simulation": {"id": "sim", "type": "llm", "model": "codex", "prompt": "Simulate"},
+          "evaluator": "llm_judge",
+          "policy": {"UCB1": 1.414},
+          "max_iterations": 3,
+          "max_depth": 2,
+          "expansion_threshold": 1,
+          "parallel_sims": 1
+        }
+      }
+    ],
+    "output": "optimizer",
+    "config": {"timeout": 1200, "trace": true, "max_depth": 15}
+  }|} in
+  Alcotest.(check bool) "goaldriven mcts" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* FeedbackLoop with GoalDriven generator *)
+let test_stress_feedbackloop_goaldriven () =
+  let json = {|{
+    "id": "feedback_goal",
+    "nodes": [
+      {
+        "id": "loop",
+        "type": "feedback_loop",
+        "generator": {
+          "id": "gen_goal",
+          "type": "goal_driven",
+          "goal_metric": "quality",
+          "goal_operator": "gte",
+          "goal_value": 0.8,
+          "max_iterations": 5,
+          "measure_func": "quality_check",
+          "conversational": true,
+          "action_node": {"id": "gen_action", "type": "llm", "model": "claude", "prompt": "Generate"}
+        },
+        "evaluator_config": {
+          "scoring_func": "anti_fake",
+          "scoring_prompt": "Score the output quality"
+        },
+        "improver_prompt": "Improve based on: {{feedback}}",
+        "max_iterations": 3,
+        "score_threshold": 0.9,
+        "score_operator": "gte"
+      }
+    ],
+    "output": "loop",
+    "config": {"timeout": 900, "trace": true, "max_depth": 12}
+  }|} in
+  Alcotest.(check bool) "feedbackloop goaldriven" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
+(* All resilience patterns combined: Retry > Fallback > Race > Gate *)
+let test_stress_resilience_pyramid () =
+  let json = {|{
+    "id": "resilience_pyramid",
+    "nodes": [
+      {
+        "id": "layer1_retry",
+        "type": "retry",
+        "max_attempts": 3,
+        "backoff": {"Exponential": {"base": 1.0, "max": 30.0}},
+        "retry_on": ["timeout", "rate_limit", "error"],
+        "node": {
+          "id": "layer2_fallback",
+          "type": "fallback",
+          "primary": {
+            "id": "layer3_race",
+            "type": "race",
+            "timeout": 60.0,
+            "nodes": [
+              {
+                "id": "race_gate1",
+                "type": "gate",
+                "condition": "{{input.priority}} == 'high'",
+                "then": {"id": "fast_path", "type": "llm", "model": "gemini", "prompt": "Fast high priority"},
+                "else": {"id": "normal_path", "type": "llm", "model": "claude", "prompt": "Normal priority"}
+              },
+              {
+                "id": "race_gate2",
+                "type": "gate",
+                "condition": "{{input.type}} == 'code'",
+                "then": {"id": "code_path", "type": "llm", "model": "codex", "prompt": "Code specialized"},
+                "else": {"id": "text_path", "type": "llm", "model": "gemini", "prompt": "Text specialized"}
+              }
+            ]
+          },
+          "fallbacks": [
+            {
+              "id": "fb_quorum",
+              "type": "quorum",
+              "required": 2,
+              "nodes": [
+                {"id": "fb_q1", "type": "llm", "model": "gemini", "prompt": "Fallback vote 1"},
+                {"id": "fb_q2", "type": "llm", "model": "claude", "prompt": "Fallback vote 2"},
+                {"id": "fb_q3", "type": "llm", "model": "codex", "prompt": "Fallback vote 3"}
+              ]
+            },
+            {"id": "last_resort", "type": "llm", "model": "gemini", "prompt": "Last resort"}
+          ]
+        }
+      }
+    ],
+    "output": "layer1_retry",
+    "config": {"timeout": 600, "trace": true, "max_depth": 12}
+  }|} in
+  Alcotest.(check bool) "resilience pyramid" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
+  )
+
 let () =
   Alcotest.run "Lossless Roundtrip" [
     "roundtrip", [
@@ -714,5 +1757,48 @@ let () =
       Alcotest.test_case "GoalDriven explicit syntax" `Quick test_goaldriven_mermaid_parsing;
       Alcotest.test_case "GoalDriven ID-based inference" `Quick test_goaldriven_id_inference;
       Alcotest.test_case "GoalDriven strict roundtrip" `Quick test_goaldriven_strict_roundtrip;
+    ];
+    "tool_nodes", [
+      Alcotest.test_case "Tool nested structure (server:name)" `Quick test_tool_nested_roundtrip;
+      Alcotest.test_case "Tool flat format" `Quick test_tool_flat_roundtrip;
+    ];
+    "advanced_nodes", [
+      Alcotest.test_case "Map node (functor)" `Quick test_map_roundtrip;
+      Alcotest.test_case "Bind node (monad)" `Quick test_bind_roundtrip;
+      Alcotest.test_case "Spawn node (clean context)" `Quick test_spawn_roundtrip;
+      Alcotest.test_case "Mcts node (tree search)" `Quick test_mcts_roundtrip;
+    ];
+    "combinations", [
+      Alcotest.test_case "ChainRef inside Pipeline" `Quick test_chainref_in_pipeline;
+      Alcotest.test_case "Fanout with mixed node types" `Quick test_fanout_mixed_types;
+      Alcotest.test_case "Subgraph with complex inner" `Quick test_subgraph_complex;
+      Alcotest.test_case "Nested resilience (Retry>Fallback>Race)" `Quick test_nested_resilience;
+      Alcotest.test_case "GoalDriven with Evaluator" `Quick test_goaldriven_with_evaluator;
+    ];
+    "stress", [
+      Alcotest.test_case "5-level deep nesting" `Quick test_stress_5level_nesting;
+      Alcotest.test_case "Kitchen sink (13 node types)" `Quick test_stress_kitchen_sink;
+      Alcotest.test_case "Triple subgraph nesting" `Quick test_stress_triple_subgraph;
+      Alcotest.test_case "MCTS with Pipeline strategies" `Quick test_stress_mcts_pipeline_strategies;
+      Alcotest.test_case "Evaluator complex candidates" `Quick test_stress_evaluator_complex_candidates;
+      Alcotest.test_case "GoalDriven with MCTS" `Quick test_stress_goaldriven_mcts;
+      Alcotest.test_case "FeedbackLoop with GoalDriven" `Quick test_stress_feedbackloop_goaldriven;
+      Alcotest.test_case "Resilience pyramid (4-layer)" `Quick test_stress_resilience_pyramid;
+    ];
+    "production_chains", [
+      Alcotest.test_case "code-migration.json" `Quick test_chain_code_migration;
+      Alcotest.test_case "deep-research.json" `Quick test_chain_deep_research;
+      Alcotest.test_case "design_to_tasks.json" `Quick test_chain_design_to_tasks;
+      Alcotest.test_case "figma-to-prototype.json" `Quick test_chain_figma_to_prototype;
+      Alcotest.test_case "figma-to-web-component-v2.json" `Quick test_chain_figma_to_web_v2;
+      Alcotest.test_case "figma-to-web-component.json" `Quick test_chain_figma_to_web;
+      Alcotest.test_case "incident-response.json" `Quick test_chain_incident_response;
+      Alcotest.test_case "magi-code-review.json" `Quick test_chain_magi_code_review;
+      Alcotest.test_case "mcts-mantra-explore.json" `Quick test_chain_mcts_explore;
+      Alcotest.test_case "mcts-mantra-hybrid.json" `Quick test_chain_mcts_hybrid;
+      Alcotest.test_case "mcts-mantra-review.json" `Quick test_chain_mcts_review;
+      Alcotest.test_case "mermaid-to-chain.json" `Quick test_chain_mermaid_to_chain;
+      Alcotest.test_case "pr-review-pipeline.json" `Quick test_chain_pr_review;
+      Alcotest.test_case "simple-test.json" `Quick test_chain_simple_test;
     ];
   ]
