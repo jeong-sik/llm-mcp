@@ -4,6 +4,8 @@ OCaml로 만든 Multi-LLM MCP 서버.
 
 Claude Code 안에서 다른 LLM 호출할 때 쓰려고 만든 CLI 래퍼.
 
+Note: This is a personal project.
+
 ## 도구
 
 - `gemini` - Gemini CLI
