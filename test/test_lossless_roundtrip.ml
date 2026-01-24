@@ -334,7 +334,7 @@ let test_goaldriven_strict_roundtrip () =
   let action_node = {
     id = "action";
     node_type = Llm { model = "gemini"; system = None; prompt = "Improve code"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
   let goal_node = {
     id = "goal";
@@ -349,13 +349,16 @@ let test_goaldriven_strict_roundtrip () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = [("input", "action")]
+    input_mapping = [("input", "action")];
+    output_key = None; depends_on = None
   } in
   let chain1 = {
     id = "strict_test";
     nodes = [action_node; goal_node];
     output = "goal";
-    config = { default_config with timeout = 120; trace = true }
+    config = { default_config with timeout = 120; trace = true };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   Alcotest.(check bool) "GoalDriven strict roundtrip" true (
@@ -527,7 +530,7 @@ let test_complex_lossless_roundtrip () =
         prompt_ref = None;
         prompt_vars = [];
       };
-      input_mapping = [];
+      input_mapping = []; output_key = None; depends_on = None;
     }
   in
   let tool_node = {
@@ -536,7 +539,7 @@ let test_complex_lossless_roundtrip () =
       name = "figma:figma_parse_url";
       args = `Assoc [("url", `String "https://figma.com/file/abc/xyz")];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let retry_node = {
     id = "retry_api";
@@ -546,7 +549,7 @@ let test_complex_lossless_roundtrip () =
       backoff = Exponential 1.5;
       retry_on = ["timeout"; "5xx"];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let fallback_node = {
     id = "fallback_llm";
@@ -555,6 +558,7 @@ let test_complex_lossless_roundtrip () =
       fallbacks = [make_llm "fb1" "gemini" "Backup1"; make_llm "fb2" "ollama" "Backup2"];
     };
     input_mapping = [("input", "retry_api")];
+    output_key = None; depends_on = None
   } in
   let sub_chain = {
     id = "sub_chain";
@@ -564,11 +568,14 @@ let test_complex_lossless_roundtrip () =
     ];
     output = "sub_b";
     config = { Chain_types.default_config with timeout = 77; trace = true; max_concurrency = 2; direction = TB };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   let subgraph_node = {
     id = "subgraph";
     node_type = Subgraph sub_chain;
     input_mapping = [("input", "fallback_llm")];
+    output_key = None; depends_on = None
   } in
   let feedback_node = {
     id = "feedback";
@@ -582,7 +589,7 @@ let test_complex_lossless_roundtrip () =
       conversational = false;
       relay_models = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let mcts_node = {
     id = "mcts";
@@ -598,7 +605,7 @@ let test_complex_lossless_roundtrip () =
       early_stop = Some 0.95;
       parallel_sims = 2;
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let stream_node = {
     id = "stream";
@@ -610,6 +617,7 @@ let test_complex_lossless_roundtrip () =
       timeout = Some 1.5;
     };
     input_mapping = [("from", "subgraph")];
+    output_key = None; depends_on = None
   } in
   let adapter_node = {
     id = "adapt";
@@ -618,7 +626,7 @@ let test_complex_lossless_roundtrip () =
       transform = Template "Result: {{value}}";
       on_error = `Default "N/A";
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let chain_exec_node = {
     id = "exec";
@@ -630,7 +638,7 @@ let test_complex_lossless_roundtrip () =
       context_inject = [("input", "subgraph")];
       pass_outputs = false;
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let cache_node = {
     id = "cache";
@@ -639,7 +647,7 @@ let test_complex_lossless_roundtrip () =
       ttl_seconds = 30;
       inner = make_llm "cache_inner" "gemini" "Cache";
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let batch_node = {
     id = "batch";
@@ -649,7 +657,7 @@ let test_complex_lossless_roundtrip () =
       inner = make_llm "batch_inner" "gemini" "Batch";
       collect_strategy = `Concat;
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let spawn_node = {
     id = "spawn";
@@ -659,7 +667,7 @@ let test_complex_lossless_roundtrip () =
       pass_vars = ["input"; "config"];
       inherit_cache = false;
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
   let chain1 = {
     id = "complex_lossless";
@@ -678,6 +686,8 @@ let test_complex_lossless_roundtrip () =
     ];
     output = "stream";
     config = { Chain_types.default_config with timeout = 123; trace = true; max_concurrency = 4; direction = LR };
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
   Alcotest.(check bool) "complex lossless roundtrip" true (
     let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in

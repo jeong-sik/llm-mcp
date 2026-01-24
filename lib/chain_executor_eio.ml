@@ -567,6 +567,7 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
       let final_prompt = substitute_iteration_vars resolved_prompt ctx.iteration_ctx in
+
       (* Also resolve system instruction if present *)
       let resolved_system = Option.map (fun s -> substitute_prompt s inputs) system in
       let final_system = Option.map (fun s -> substitute_iteration_vars s ctx.iteration_ctx) resolved_system in
@@ -574,9 +575,9 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
         | Some it -> it.iteration
         | None -> 0
       in
-      let (prompt_with_context, conv_opt) =
+      let (prompt_with_context, conv_opt, effective_model) =
         match ctx.conversation with
-        | None -> (final_prompt, None)
+        | None -> (final_prompt, None, model)
         | Some conv ->
             maybe_summarize_and_rotate ~exec_fn conv;
             let context_prompt = build_context_prompt conv in
@@ -585,7 +586,7 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
               else context_prompt ^ "\n\n" ^ final_prompt
             in
             add_message conv ~role:"user" ~content:final_prompt ~iteration ~model:conv.current_model;
-            (merged_prompt, Some conv)
+            (merged_prompt, Some conv, conv.current_model)
       in
       record_start ctx node.id;
       let start = Unix.gettimeofday () in
@@ -597,11 +598,11 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
               | Some sys -> Printf.sprintf "[system] %s\n[user] %s" sys prompt_with_context
               | None -> prompt_with_context
             in
-            Some (Langfuse.create_generation ~trace ~name:node.id ~model ~input:input_str ())
+            Some (Langfuse.create_generation ~trace ~name:node.id ~model:effective_model ~input:input_str ())
         | None -> None
       in
 
-      let result = exec_fn ~model ?system:final_system ~prompt:prompt_with_context ?tools () in
+      let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_with_context ?tools () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
@@ -1876,6 +1877,18 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           record_complete ctx parent.id ~duration_ms ~success:false;
           Error (Printf.sprintf "Iteration %d failed: %s" iteration msg)
       | Ok output ->
+          (* Update conversation context with this iteration's output when not a direct LLM node *)
+          let should_record =
+            match action_node.node_type with
+            | Llm _ -> false
+            | _ -> true
+          in
+          (match ctx.conversation, should_record with
+           | Some conv, true ->
+               add_message conv ~role:"assistant" ~content:output ~iteration ~model:conv.current_model;
+               maybe_summarize_and_rotate ~exec_fn conv
+           | _ -> ());
+
           (* Measure the metric *)
           (match measure output with
            | None ->
@@ -1893,6 +1906,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                in
                if goal_met then begin
                  ctx.iteration_ctx <- None;  (* Clear iteration context on completion *)
+                 ctx.conversation <- None;   (* Clear conversation context on completion *)
                  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
                  record_complete ctx parent.id ~duration_ms ~success:true;
                  Hashtbl.add ctx.outputs parent.id output;

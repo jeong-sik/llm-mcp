@@ -12,7 +12,7 @@ let () =
       prompt_ref = None;
       prompt_vars = []
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let goal = {
@@ -28,14 +28,16 @@ let () =
       conversational = true;
       relay_models = ["qwen3:1.7b"];
     };
-    input_mapping = []
+    input_mapping = []; output_key = None; depends_on = None
   } in
 
   let chain = {
     id = "test_chain";
     nodes = [action; goal];
     output = "translation_quality";
-    config = default_config
+    config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   Printf.printf "=== Original Chain ===\n";

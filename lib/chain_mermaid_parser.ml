@@ -300,7 +300,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         let n = int_of_string (Str.matched_group 1 id_lower) in
         Ok (Quorum { required = n; nodes = [] })
       else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "gate_" then
-        Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] }; else_node = None })
+        Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
       else if String.length id_lower >= 6 && String.sub id_lower 0 6 = "merge_" then
         Ok (Merge { strategy = Concat; nodes = [] })
       else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "goal_" then
@@ -319,7 +319,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
             goal_metric = metric;
             goal_operator = operator;
             goal_value = value;
-            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] };
+            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None };
             measure_func = "default";
             max_iterations = max_iter;
             strategy_hints = [];
@@ -332,7 +332,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
             goal_metric = metric;
             goal_operator = Gte;
             goal_value = 0.9;
-            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] };
+            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None };
             measure_func = "default";
             max_iterations = 10;
             strategy_hints = [];
@@ -345,7 +345,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
           let n = Scanf.sscanf text "Quorum:%d" (fun n -> n) in
           Ok (Quorum { required = n; nodes = [] })
         with Scanf.Scan_failure _ | Failure _ | End_of_file ->
-          Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] }; else_node = None }))
+          Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None }))
 
   | `Subroutine ->
       (* Subroutine nodes: Ref, Pipeline, Fanout, Map, Bind *)
@@ -357,7 +357,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       else if String.length id_lower >= 4 && String.sub id_lower 0 4 = "par_" then
         Ok (Fanout [])
       else if String.length id_lower >= 4 && String.sub id_lower 0 4 = "map_" then
-        Ok (Map { func = text; inner = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] } })
+        Ok (Map { func = text; inner = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None } })
       else
         (* Default subroutine: ChainRef using the content as chain ID *)
         let ref_id = if text = "" then id else text in
@@ -462,7 +462,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
           |> List.filter (fun s -> s <> "")
         in
         let placeholder_nodes = List.map (fun id ->
-          { id; node_type = ChainRef id; input_mapping = [] }
+          { id; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
         ) node_ids in
         Ok (Pipeline placeholder_nodes)
       else if String.length content > 7 && String.sub content 0 7 = "Fanout:" then
@@ -473,7 +473,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
           |> List.filter (fun s -> s <> "")
         in
         let placeholder_nodes = List.map (fun id ->
-          { id; node_type = ChainRef id; input_mapping = [] }
+          { id; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
         ) node_ids in
         Ok (Fanout placeholder_nodes)
       else if String.length content > 4 && String.sub content 0 4 = "Map:" then
@@ -484,7 +484,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         in
         (match parts with
         | [func; node_id] ->
-            Ok (Map { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+            Ok (Map { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | _ ->
             Error (Printf.sprintf "Map requires func,node format, got: %s" content))
       else if String.length content > 5 && String.sub content 0 5 = "Bind:" then
@@ -495,7 +495,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         in
         (match parts with
         | [func; node_id] ->
-            Ok (Bind { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+            Ok (Bind { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | _ ->
             Error (Printf.sprintf "Bind requires func,node format, got: %s" content))
       else if String.length content > 6 && String.sub content 0 6 = "Cache:" then
@@ -507,10 +507,10 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         (match parts with
         | [key_expr; ttl_str; node_id] ->
             let ttl_seconds = try int_of_string ttl_str with _ -> 0 in
-            Ok (Cache { key_expr; ttl_seconds; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+            Ok (Cache { key_expr; ttl_seconds; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | [key_expr; node_id] ->
             (* Default TTL = 0 (infinite) *)
-            Ok (Cache { key_expr; ttl_seconds = 0; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] } })
+            Ok (Cache { key_expr; ttl_seconds = 0; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | _ ->
             Error (Printf.sprintf "Cache requires key,ttl,node or key,node format, got: %s" content))
       else if String.length content > 6 && String.sub content 0 6 = "Batch:" then
@@ -523,10 +523,10 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         | [size_str; parallel_str; node_id] ->
             let batch_size = try int_of_string size_str with _ -> 10 in
             let parallel = parallel_str = "true" || parallel_str = "parallel" in
-            Ok (Batch { batch_size; parallel; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; collect_strategy = `List })
+            Ok (Batch { batch_size; parallel; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
         | [size_str; node_id] ->
             let batch_size = try int_of_string size_str with _ -> 10 in
-            Ok (Batch { batch_size; parallel = true; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; collect_strategy = `List })
+            Ok (Batch { batch_size; parallel = true; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
         | _ ->
             Error (Printf.sprintf "Batch requires size,parallel,node or size,node format, got: %s" content))
       else if String.length content > 6 && String.sub content 0 6 = "Spawn:" then
@@ -538,11 +538,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         (match parts with
         | [clean_str; node_id] ->
             let clean = clean_str = "true" || clean_str = "clean" in
-            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; pass_vars = []; inherit_cache = true })
+            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; pass_vars = []; inherit_cache = true })
         | [clean_str; pass_vars_str; node_id] ->
             let clean = clean_str = "true" || clean_str = "clean" in
             let pass_vars = String.split_on_char '|' pass_vars_str |> List.map trim in
-            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = [] }; pass_vars; inherit_cache = true })
+            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; pass_vars; inherit_cache = true })
         | _ ->
             Error (Printf.sprintf "Spawn requires clean,node or clean,pass_vars,node format, got: %s" content))
       else if String.length content > 12 && String.sub content 0 12 = "StreamMerge:" then
@@ -593,7 +593,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
           |> List.map trim
         in
         (* Generator placeholder - will be replaced during post-processing from incoming edges *)
-        let gen_placeholder = { id = "feedback_gen"; node_type = ChainRef "feedback_gen"; input_mapping = [] } in
+        let gen_placeholder = { id = "feedback_gen"; node_type = ChainRef "feedback_gen"; input_mapping = []; output_key = None; depends_on = None } in
         (* Parse threshold with operator: ">=0.95", "<0.3", "0.7" (default >=) *)
         let parse_threshold_value str =
           let s = trim str in
@@ -679,7 +679,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
       else if String.length content > 5 && String.sub content 0 5 = "Gate:" then
         let condition = trim (String.sub content 5 (String.length content - 5)) in
         (* Gate needs then/else filled in from edges *)
-        Ok (Gate { condition; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] }; else_node = None })
+        Ok (Gate { condition; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
       else if String.length content > 6 && String.sub content 0 6 = "Merge:" then
         (* {Merge:strategy} - e.g., {Merge:weighted_average} *)
         let strategy_str = trim (String.sub content 6 (String.length content - 6)) in
@@ -711,7 +711,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
             goal_metric = metric;
             goal_operator = operator;
             goal_value = value;
-            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = [] };
+            action_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None };
             measure_func = "default";
             max_iterations = max_iter;
             strategy_hints = [];
@@ -728,7 +728,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         | [policy_type; iter_str] when policy_type = "greedy" ->
             let max_iterations = try int_of_string iter_str with _ -> 10 in
             (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = [] } in
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
@@ -750,7 +750,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               | _ -> UCB1 1.41  (* default *)
             in
             (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = [] } in
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
@@ -791,8 +791,20 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
           Error (Printf.sprintf "Invalid LLM format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
         let rest = String.sub content_clean 5 (String.length content_clean - 5) in
+        (* Try Base64 encoded args first: "name %{base64}" *)
+        let base64_re = Str.regexp {|^\([^ ]+\) *%{\([^}]+\)}$|} in
+        if Str.string_match base64_re rest 0 then
+          let name = trim (Str.matched_group 1 rest) in
+          let encoded = Str.matched_group 2 rest in
+          (try
+             let decoded = Base64.decode_exn encoded in
+             let args = Yojson.Safe.from_string decoded in
+             Ok (Tool { name; args })
+           with _ ->
+             (* Fallback: if Base64 decode fails, store as-is *)
+             Ok (Tool { name; args = `Assoc [("input", `String encoded)] }))
         (* Parse: name "args" or name 'args' or name {...json...} or just name *)
-        if Str.string_match quote_re rest 0 then
+        else if Str.string_match quote_re rest 0 then
           let name = trim (Str.matched_group 1 rest) in
           let args_str = trim (Str.matched_group 2 rest) in
           (* Create args with "input" key holding the args string *)
@@ -1088,7 +1100,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                   in
                   (* Create placeholder nodes for inputs *)
                   let input_nodes = List.map (fun input_id ->
-                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                    { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                   ) input_ids in
                   Quorum { required; nodes = input_nodes }
               | Merge { strategy; nodes = _ } ->
@@ -1098,7 +1110,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                     | None -> []
                   in
                   let input_nodes = List.map (fun input_id ->
-                    { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                    { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                   ) input_ids in
                   Merge { strategy; nodes = input_nodes }
               | other -> other
@@ -1111,7 +1123,8 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                   List.map (fun inp -> (inp, inp)) inputs
               | None -> []
             in
-            let node = { id = mnode.id; node_type; input_mapping } in
+            let node = { id = mnode.id; node_type; input_mapping;
+                         output_key = None; depends_on = None } in
             Hashtbl.replace node_map mnode.id node
   ) graph.nodes;
 
@@ -1138,6 +1151,8 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
         nodes;
         output;
         config = { default_config with direction = direction_of_string graph.direction };
+        name = None; description = None; version = None;
+        input_schema = None; output_schema = None; metadata = None;
       }
 
 (** Convert Mermaid graph to Chain AST with metadata (for lossless roundtrip) *)
@@ -1188,7 +1203,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                       | None -> []
                     in
                     let input_nodes = List.map (fun input_id ->
-                      { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                      { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                     ) input_ids in
                     Quorum { required; nodes = input_nodes }
                 | Merge { strategy; nodes = _ } ->
@@ -1198,7 +1213,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                       | None -> []
                     in
                     let input_nodes = List.map (fun input_id ->
-                      { id = input_id; node_type = ChainRef input_id; input_mapping = [] }
+                      { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                     ) input_ids in
                     Merge { strategy; nodes = input_nodes }
                 | GoalDriven gd ->
@@ -1214,7 +1229,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                               | Some (id :: _) -> id
                               | _ -> "_placeholder"
                         in
-                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
+                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = []; output_key = None; depends_on = None } in
                         GoalDriven {
                           gd with
                           action_node;
@@ -1229,7 +1244,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                           | Some (id :: _) -> id
                           | _ -> "_placeholder"
                         in
-                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = [] } in
+                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = []; output_key = None; depends_on = None } in
                         GoalDriven { gd with action_node })
                 | other -> other
               in
@@ -1243,7 +1258,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                     | Some inputs -> List.map (fun inp -> (inp, inp)) inputs
                     | None -> []
               in
-              let node = { id = mnode.id; node_type; input_mapping } in
+              let node = { id = mnode.id; node_type; input_mapping;
+                         output_key = None; depends_on = None } in
               Hashtbl.replace node_map mnode.id node
     ) graph.nodes;
 
@@ -1304,7 +1320,9 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
           direction = direction_of_string graph.direction;
         } in
 
-        Ok { id = final_id; nodes; output; config }
+        Ok { id = final_id; nodes; output; config;
+             name = None; description = None; version = None;
+             input_schema = None; output_schema = None; metadata = None }
   in
   match meta.chain_full_json with
   | Some json_str ->
@@ -1472,10 +1490,10 @@ let node_type_to_text (nt : node_type) : string =
       (match args with
        | `Null | `Assoc [] -> Printf.sprintf "Tool:%s" name
        | json ->
-           (* Escape JSON for Mermaid: double quotes -> single quotes, truncate *)
+           (* Base64 encode args for lossless roundtrip *)
            let json_str = Yojson.Safe.to_string json in
-           let json_escaped = escape_for_mermaid ~max_len:80 json_str in
-           Printf.sprintf "Tool:%s %s" name json_escaped)
+           let encoded = Base64.encode_string json_str in
+           Printf.sprintf "Tool:%s %%{%s}" name encoded)
   | Quorum { required; _ } -> Printf.sprintf "Quorum:%d" required
   | Gate { condition; _ } -> Printf.sprintf "Gate:%s" condition
   | Merge { strategy; _ } ->

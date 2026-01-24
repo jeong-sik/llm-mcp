@@ -367,22 +367,31 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
       | _ -> []
     in
 
-    (* Also parse "depends_on" field as edges (common in real chain files) *)
-    let depends_on_mapping =
+    (* Parse "output_key" field (optional) *)
+    let output_key = match json |> member "output_key" with
+      | `String s -> Some s
+      | _ -> None
+    in
+
+    (* Parse "depends_on" field as both string list and edges (common in real chain files) *)
+    let depends_on_list, depends_on_mapping =
       match json |> member "depends_on" with
       | `List deps ->
-          List.filter_map (fun d ->
+          let parsed = List.filter_map (fun d ->
             match d with
-            | `String dep_id -> Some ("_dep_" ^ dep_id, dep_id)
+            | `String dep_id -> Some dep_id
             | _ -> None
-          ) deps
-      | _ -> []
+          ) deps in
+          let mapping = List.map (fun dep_id -> ("_dep_" ^ dep_id, dep_id)) parsed in
+          (Some parsed, mapping)
+      | _ -> (None, [])
     in
 
     (* Combine input_mapping with depends_on *)
     let final_input_mapping = input_mapping @ depends_on_mapping in
 
-    Ok { id; node_type; input_mapping = final_input_mapping }
+    Ok { id; node_type; input_mapping = final_input_mapping;
+         output_key; depends_on = depends_on_list }
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error (Printf.sprintf "JSON type error: %s" msg)
@@ -508,7 +517,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | `Null ->
             (* Try then_node as string ID *)
             (match json |> member "then_node" with
-             | `String id -> Ok { id = "_ref_" ^ id; node_type = ChainRef id; input_mapping = [] }
+             | `String id -> Ok { id = "_ref_" ^ id; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
              | _ -> Error "Gate requires 'then' (node object) or 'then_node' (string ID)")
         | then_json -> parse_node then_json
       in
@@ -517,7 +526,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | `Null ->
             (* Try else_node as string ID *)
             (match json |> member "else_node" with
-             | `String id -> Some { id = "_ref_" ^ id; node_type = ChainRef id; input_mapping = [] }
+             | `String id -> Some { id = "_ref_" ^ id; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
              | _ -> None)
         | else_json ->
             (match parse_node else_json with
@@ -807,7 +816,21 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
       | `Null -> default_config
       | cfg -> parse_config cfg
     in
-    Ok { id; nodes; output; config }
+    (* Extract optional preset metadata fields *)
+    let name = match json |> member "name" with
+      | `String s -> Some s | _ -> None in
+    let description = match json |> member "description" with
+      | `String s -> Some s | _ -> None in
+    let version = match json |> member "version" with
+      | `String s -> Some s | _ -> None in
+    let input_schema = match json |> member "input_schema" with
+      | `Null -> None | v -> Some v in
+    let output_schema = match json |> member "output_schema" with
+      | `Null -> None | v -> Some v in
+    let metadata = match json |> member "metadata" with
+      | `Null -> None | v -> Some v in
+    Ok { id; nodes; output; config; name; description; version;
+         input_schema; output_schema; metadata }
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
       Error (Printf.sprintf "Chain JSON type error: %s" msg)

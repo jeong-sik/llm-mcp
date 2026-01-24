@@ -94,7 +94,7 @@ No explanation, no markdown, just the raw JSON object.|};
       prompt_ref = None;
       prompt_vars = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let goal = {
@@ -110,7 +110,7 @@ No explanation, no markdown, just the raw JSON object.|};
       conversational = false;
       relay_models = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let chain = {
@@ -118,6 +118,8 @@ No explanation, no markdown, just the raw JSON object.|};
     nodes = [goal];
     output = "quality_goal";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   Eio_main.run @@ fun env ->
@@ -153,7 +155,7 @@ No explanation, no markdown, just the raw JSON object.|};
       prompt_ref = None;
       prompt_vars = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let goal = {
@@ -169,7 +171,7 @@ No explanation, no markdown, just the raw JSON object.|};
       conversational = false;
       relay_models = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let chain = {
@@ -177,6 +179,8 @@ No explanation, no markdown, just the raw JSON object.|};
     nodes = [goal];
     output = "json_goal";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   Eio_main.run @@ fun env ->
@@ -213,7 +217,7 @@ No explanation, no markdown, just the raw JSON object.|};
       prompt_ref = None;
       prompt_vars = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let goal = {
@@ -232,7 +236,7 @@ No explanation, no markdown, just the raw JSON object.|};
       conversational = false;
       relay_models = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let chain = {
@@ -240,6 +244,8 @@ No explanation, no markdown, just the raw JSON object.|};
     nodes = [goal];
     output = "optimize_goal";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   Eio_main.run @@ fun env ->
@@ -277,7 +283,7 @@ No explanation, no markdown, just the raw JSON object.|};
       prompt_ref = None;
       prompt_vars = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let goal = {
@@ -293,7 +299,7 @@ No explanation, no markdown, just the raw JSON object.|};
       conversational = true;  (* Enable context accumulation *)
       relay_models = [];
     };
-    input_mapping = [];
+    input_mapping = []; output_key = None; depends_on = None;
   } in
 
   let chain = {
@@ -301,6 +307,8 @@ No explanation, no markdown, just the raw JSON object.|};
     nodes = [goal];
     output = "count_goal";
     config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None
   } in
 
   Eio_main.run @@ fun env ->

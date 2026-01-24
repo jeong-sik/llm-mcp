@@ -266,6 +266,8 @@ and node = {
   id : string;
   node_type : node_type;
   input_mapping : (string * string) list;
+  output_key : string option;
+  depends_on : string list option;
 }
 
 (** A complete chain definition *)
@@ -274,7 +276,27 @@ and chain = {
   nodes : node list;
   output : string;
   config : chain_config;
+  name : string option;
+  description : string option;
+  version : string option;
+  input_schema : Yojson.Safe.t option;
+  output_schema : Yojson.Safe.t option;
+  metadata : Yojson.Safe.t option;
 }
+
+(** Create a chain with default optional fields *)
+val make_chain :
+  id:string ->
+  nodes:node list ->
+  output:string ->
+  ?config:chain_config ->
+  ?name:string ->
+  ?description:string ->
+  ?version:string ->
+  ?input_schema:Yojson.Safe.t ->
+  ?output_schema:Yojson.Safe.t ->
+  ?metadata:Yojson.Safe.t ->
+  unit -> chain
 
 val node_type_to_yojson : node_type -> Yojson.Safe.t
 val node_type_of_yojson : Yojson.Safe.t -> (node_type, string) result

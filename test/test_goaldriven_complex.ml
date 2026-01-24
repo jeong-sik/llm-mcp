@@ -115,7 +115,7 @@ let test_multi_stage_pipeline () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     (* Stage 2: GoalDriven improvement loop *)
@@ -130,7 +130,8 @@ let test_multi_stage_pipeline () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = [("input", "initial_gen")]
+      input_mapping = [("input", "initial_gen")];
+      output_key = None; depends_on = None
     } in
 
     let quality_gate = {
@@ -149,7 +150,8 @@ let test_multi_stage_pipeline () =
         conversational = false;
         relay_models = ["qwen3:1.7b"];
       };
-      input_mapping = [("input", "initial_gen")]
+      input_mapping = [("input", "initial_gen")];
+      output_key = None; depends_on = None
     } in
 
     (* Stage 3: Final formatting *)
@@ -164,14 +166,17 @@ let test_multi_stage_pipeline () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = [("input", "quality_gate")]
+      input_mapping = [("input", "quality_gate")];
+      output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "multi_stage_pipeline";
       nodes = [stage1_gen; improve_action; quality_gate; format_output];
       output = "format_output";
-      config = { default_config with timeout = 180; trace = true }
+      config = { default_config with timeout = 180; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     Eio_main.run @@ fun env ->
@@ -227,7 +232,7 @@ Strategy: {{strategy}}|};
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let code_quality_gate = {
@@ -247,14 +252,16 @@ Strategy: {{strategy}}|};
         conversational = true;  (* Accumulate context *)
         relay_models = ["qwen3:1.7b"];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let chain = {
       id = "code_improvement";
       nodes = [code_gen_action; code_quality_gate];
       output = "code_quality";
-      config = { default_config with timeout = 180; trace = true }
+      config = { default_config with timeout = 180; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     Eio_main.run @@ fun env ->
@@ -305,7 +312,7 @@ let test_mermaid_complex_execution () =
         prompt_ref = None;
         prompt_vars = []
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let goal = {
@@ -324,14 +331,16 @@ let test_mermaid_complex_execution () =
         conversational = true;
         relay_models = ["qwen3:1.7b"; "llama3.2"];
       };
-      input_mapping = []
+      input_mapping = []; output_key = None; depends_on = None
     } in
 
     let original_chain = {
       id = "translation_chain";
       nodes = [action; goal];
       output = "translation_quality";
-      config = { default_config with timeout = 120; trace = true }
+      config = { default_config with timeout = 120; trace = true };
+      name = None; description = None; version = None;
+      input_schema = None; output_schema = None; metadata = None
     } in
 
     (* Convert to Mermaid *)
