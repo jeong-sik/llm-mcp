@@ -113,7 +113,6 @@ type tool_args =
   | ChainList
   | ChainToMermaid of {
       chain : Yojson.Safe.t;         (* Chain definition to convert - required *)
-      lossless : bool;               (* Preserve full chain JSON in Mermaid comments *)
     }
   | ChainVisualize of {
       chain : Yojson.Safe.t;         (* Chain definition to visualize - required *)
@@ -123,7 +122,6 @@ type tool_args =
       to_format : string;            (* Target format: "json" or "mermaid" *)
       input : Yojson.Safe.t;         (* Input content (JSON object or string) *)
       pretty : bool;                 (* Pretty-print JSON output *)
-      lossless : bool;               (* Preserve full chain JSON when converting to Mermaid *)
     }
   | ChainOrchestrate of {
       goal : string;                       (* Goal description for the orchestration *)
@@ -648,7 +646,6 @@ let chain_to_mermaid_schema : tool_schema = {
 
 Parameters:
 - chain: Chain DSL JSON to convert (required)
-- lossless: Include full chain JSON in Mermaid comments for exact roundtrip (default: false)
 
 Returns: Mermaid flowchart text that can be rendered or edited visually.|};
   input_schema = `Assoc [
@@ -657,11 +654,6 @@ Returns: Mermaid flowchart text that can be rendered or edited visually.|};
       ("chain", `Assoc [
         ("type", `String "object");
         ("description", `String "Chain DSL definition to convert to Mermaid");
-      ]);
-      ("lossless", `Assoc [
-        ("type", `String "boolean");
-        ("description", `String "Include full chain JSON in Mermaid comments for exact roundtrip");
-        ("default", `Bool false);
       ]);
     ]);
     ("required", `List [`String "chain"]);
@@ -704,7 +696,6 @@ Parameters:
 - to: Target format ("json" or "mermaid")
 - input: The input content (JSON object or Mermaid string)
 - pretty: For JSON output, pretty-print (default: true)
-- lossless: Include full chain JSON in Mermaid comments (json -> mermaid, default: true)
 
 Example Mermaid → JSON:
   {"from": "mermaid", "to": "json", "input": "graph LR\n    A[LLM:gemini \"Hello\"]"}
@@ -730,11 +721,6 @@ Example JSON → Mermaid:
       ("pretty", `Assoc [
         ("type", `String "boolean");
         ("description", `String "Pretty-print JSON output");
-        ("default", `Bool true);
-      ]);
-      ("lossless", `Assoc [
-        ("type", `String "boolean");
-        ("description", `String "Include full chain JSON in Mermaid comments for exact roundtrip");
         ("default", `Bool true);
       ]);
     ]);

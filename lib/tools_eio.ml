@@ -886,7 +886,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         extra = [("count", string_of_int (List.length ids))];
       }
 
-  | ChainToMermaid { chain; lossless } ->
+  | ChainToMermaid { chain } ->
       (* Parse JSON to Chain AST, then convert to Mermaid *)
       (match Chain_parser.parse_chain chain with
       | Error msg ->
@@ -895,7 +895,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Parse error: %s" msg;
             extra = [("stage", "parse")]; }
       | Ok parsed_chain ->
-          let mermaid_text = Chain_mermaid_parser.chain_to_mermaid ~lossless parsed_chain in
+          let mermaid_text = Chain_mermaid_parser.chain_to_mermaid parsed_chain in
           { model = "chain.to_mermaid";
             returncode = 0;
             response = mermaid_text;
@@ -923,7 +923,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               ("output", parsed_chain.Chain_types.output);
             ]; })
 
-  | ChainConvert { from_format; to_format; input; pretty; lossless } ->
+  | ChainConvert { from_format; to_format; input; pretty } ->
       (* Bidirectional conversion: JSON <-> Mermaid *)
       (match (from_format, to_format) with
        | ("json", "mermaid") ->
@@ -935,7 +935,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   response = sprintf "JSON parse error: %s" msg;
                   extra = [("from", "json"); ("to", "mermaid"); ("stage", "parse")]; }
             | Ok chain ->
-                let mermaid = Chain_mermaid_parser.chain_to_mermaid ~lossless chain in
+                let mermaid = Chain_mermaid_parser.chain_to_mermaid chain in
                 { model = "chain.convert";
                   returncode = 0;
                   response = mermaid;

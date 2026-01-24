@@ -677,7 +677,7 @@ let test_complex_lossless_roundtrip () =
     config = { Chain_types.default_config with timeout = 123; trace = true; max_concurrency = 4; direction = LR };
   } in
   Alcotest.(check bool) "complex lossless roundtrip" true (
-    let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+    let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
     match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
     | Error e -> failwith ("Mermaid parse failed: " ^ e)
     | Ok chain2 ->
