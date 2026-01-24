@@ -1877,12 +1877,17 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           record_complete ctx parent.id ~duration_ms ~success:false;
           Error (Printf.sprintf "Iteration %d failed: %s" iteration msg)
       | Ok output ->
-          (* Update conversation context with this iteration's output *)
-          (match ctx.conversation with
-           | Some conv ->
+          (* Update conversation context with this iteration's output when not a direct LLM node *)
+          let should_record =
+            match action_node.node_type with
+            | Llm _ -> false
+            | _ -> true
+          in
+          (match ctx.conversation, should_record with
+           | Some conv, true ->
                add_message conv ~role:"assistant" ~content:output ~iteration ~model:conv.current_model;
                maybe_summarize_and_rotate ~exec_fn conv
-           | None -> ());
+           | _ -> ());
 
           (* Measure the metric *)
           (match measure output with
