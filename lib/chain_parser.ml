@@ -791,16 +791,7 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
     in
     let nodes_json = json |> member "nodes" |> to_list in
     let* nodes = parse_nodes nodes_json in
-    (* output field is optional; default to last node ID if not specified *)
-    let output = match json |> member "output" with
-      | `String s -> s
-      | `Null ->
-          (* Find last node in the list as default output *)
-          (match List.rev nodes with
-           | last :: _ -> last.id
-           | [] -> "output")
-      | _ -> "output"
-    in
+    let* output = require_string json "output" in
     let config =
       match json |> member "config" with
       | `Null -> default_config
@@ -932,6 +923,26 @@ let extract_ref_root ~known_ids (s : string) : string option =
     else
       None
 
+let extract_template_vars (s : string) : string list =
+  let re = Str.regexp "{{\\([^}]+\\)}}" in
+  let rec loop pos acc =
+    try
+      let _ = Str.search_forward re s pos in
+      let var = Str.matched_group 1 s |> String.trim in
+      let next = Str.match_end () in
+      loop next (var :: acc)
+    with Not_found -> List.rev acc
+  in
+  loop 0 []
+
+let rec collect_template_vars_json acc (json : Yojson.Safe.t) =
+  match json with
+  | `String s -> extract_template_vars s @ acc
+  | `List items -> List.fold_left collect_template_vars_json acc items
+  | `Assoc fields ->
+      List.fold_left (fun acc (_, v) -> collect_template_vars_json acc v) acc fields
+  | _ -> acc
+
 let rec collect_all_nodes (acc : Chain_types.node list) (n : Chain_types.node) : Chain_types.node list =
   let acc = n :: acc in
   match n.node_type with
@@ -1041,6 +1052,26 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
   let rec validate_node (path : string) (n : Chain_types.node) : unit =
     if is_blank n.id then
       addf "%s: node id is empty" path;
+
+    (* Template refs inside prompts/args should resolve to known nodes or allowed externals *)
+    (match n.node_type with
+     | Chain_types.Llm { prompt; system; _ } ->
+         let vars = extract_template_vars prompt in
+         let vars = match system with
+           | Some s -> vars @ extract_template_vars s
+           | None -> vars
+         in
+         List.iter (fun v ->
+           let ref_str = Printf.sprintf "{{%s}}" v in
+           validate_ref ~node_id:n.id ~key:"prompt" ~ref_str
+         ) vars
+     | Chain_types.Tool { args; _ } ->
+         let vars = collect_template_vars_json [] args in
+         List.iter (fun v ->
+           let ref_str = Printf.sprintf "{{%s}}" v in
+           validate_ref ~node_id:n.id ~key:"args" ~ref_str
+         ) vars
+     | _ -> ());
 
     (* input_mapping key uniqueness *)
     let keys = List.map fst n.input_mapping in

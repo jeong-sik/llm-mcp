@@ -41,7 +41,7 @@ let () =
   Printf.printf "=== Original Chain ===\n";
   Printf.printf "Nodes: [%s]\n" (String.concat ", " (List.map (fun (n:node) -> n.id) chain.nodes));
 
-  let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain in
+  let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false chain in
   Printf.printf "\n=== Generated Mermaid ===\n%s\n" mermaid;
 
   match Chain_mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with

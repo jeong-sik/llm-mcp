@@ -117,6 +117,11 @@
  (name test_lossless_roundtrip)
  (libraries llm_mcp.common alcotest))
 
+; Generated chain roundtrip tests (random small graphs)
+(test
+ (name test_generated_roundtrip)
+ (libraries llm_mcp.common alcotest))
+
 ; Tool Node tests (Layer 1-4: JSON parsing, Mermaid gen/parse, roundtrip)
 (test
  (name test_tool_node)

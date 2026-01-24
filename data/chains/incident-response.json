@@ -123,6 +123,7 @@
       "output_key": "incident_response"
     }
   ],
+  "output": "assemble-response",
   "input_schema": {
     "type": "object",
     "properties": {

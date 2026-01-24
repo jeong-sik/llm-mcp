@@ -56,7 +56,7 @@ let () =
   } in
 
   (* Convert to Mermaid *)
-  let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain in
+  let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false chain in
 
   Printf.printf "┌─────────────────────────────────────────────────────────────┐\n";
   Printf.printf "│ Generated Mermaid (with metadata)                           │\n";

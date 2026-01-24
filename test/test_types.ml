@@ -57,7 +57,7 @@ let test_tool_result_to_yojson () =
 
 (** Test all_schemas contains expected tools *)
 let test_all_schemas () =
-  check int "should have 14 schemas" 14 (List.length all_schemas);  (* gemini, claude, codex, ollama, ollama_list, chain_{run,validate,convert,list,to_mermaid,visualize,orchestrate}, gh_pr_diff, slack_post *)
+  check int "should have 19 schemas" 19 (List.length all_schemas);  (* gemini, claude, codex, ollama, ollama_list, chain_{run,validate,convert,list,checkpoints,resume,to_mermaid,visualize,orchestrate}, prompt_{register,list,get}, gh_pr_diff, slack_post *)
   let names = List.map (fun (s : tool_schema) -> s.name) all_schemas in
   check bool "gemini exists" true (List.mem "gemini" names);
   check bool "claude-cli exists" true (List.mem "claude-cli" names);
