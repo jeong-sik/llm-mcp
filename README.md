@@ -164,6 +164,19 @@ curl -X POST http://localhost:8932/mcp -d '{
 
 상세: [CLAUDE.md](CLAUDE.md), [docs/PRESETS.md](docs/PRESETS.md)
 
+## MASC Hook (optional)
+
+`chain.run`/`chain.orchestrate` 실행 시 MASC join/heartbeat/leave를 자동으로 수행합니다.
+
+```bash
+LLM_MCP_MASC_HOOK=true
+LLM_MCP_MASC_AGENT=llm-mcp
+LLM_MCP_MASC_HEARTBEAT_SEC=30
+```
+
+요구사항:
+- `~/.mcp.json`에 `masc` 서버 등록 필요
+
 ## 개발
 
 ```bash
