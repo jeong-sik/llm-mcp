@@ -328,16 +328,16 @@
           { id: 'F', type: 'tool', label: 'get-file', x: 260, y: 120, config: 'Tool:figma:figma_get_file' },
           { id: 'T', type: 'tool', label: 'tokens', x: 460, y: 40, config: 'Tool:figma:figma_export_tokens' },
           { id: 'S', type: 'llm', label: 'summarize', x: 460, y: 200, config: 'LLM:gemini' },
-          { id: 'C', type: 'llm', label: 'compose', x: 660, y: 120, config: 'LLM:claude' },
-          { id: 'M', type: 'merge', label: 'merge', x: 860, y: 120, config: 'Merge:concat' },
+          { id: 'M', type: 'merge', label: 'merge', x: 660, y: 120, config: 'Merge:concat' },
+          { id: 'C', type: 'llm', label: 'compose', x: 860, y: 120, config: 'LLM:claude' },
         ],
         connections: [
           ['P', 'F'],
           ['F', 'T'],
           ['F', 'S'],
-          ['T', 'C'],
-          ['S', 'C'],
-          ['C', 'M']
+          ['T', 'M'],
+          ['S', 'M'],
+          ['M', 'C']
         ]
       },
       'figma-component': {
@@ -346,16 +346,16 @@
           { id: 'N', type: 'tool', label: 'get-node', x: 260, y: 120, config: 'Tool:figma:figma_get_node' },
           { id: 'B', type: 'tool', label: 'bundle', x: 460, y: 40, config: 'Tool:figma:figma_get_node_bundle' },
           { id: 'D', type: 'llm', label: 'design', x: 460, y: 200, config: 'LLM:gemini' },
-          { id: 'H', type: 'llm', label: 'html', x: 660, y: 120, config: 'LLM:claude' },
-          { id: 'V', type: 'merge', label: 'verify', x: 860, y: 120, config: 'Merge:concat' },
+          { id: 'V', type: 'merge', label: 'verify', x: 660, y: 120, config: 'Merge:concat' },
+          { id: 'H', type: 'llm', label: 'html', x: 860, y: 120, config: 'LLM:claude' },
         ],
         connections: [
           ['P', 'N'],
           ['N', 'B'],
           ['N', 'D'],
-          ['B', 'H'],
-          ['D', 'H'],
-          ['H', 'V']
+          ['B', 'V'],
+          ['D', 'V'],
+          ['V', 'H']
         ]
       }
     };
