@@ -593,7 +593,23 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
           send_unauthorized reqd msg
 
       | Ok () ->
-          (* Authentication passed - route to endpoint *)
+          (* Rate limiting - use client IP or session ID as key *)
+          let rate_key =
+            extract_session_id None headers
+            |> Option.value ~default:"anonymous"
+          in
+          if not (Rate_limit.check_global ~key:rate_key) then begin
+            Metrics.record_error ~error_type:"rate_limit" ();
+            let headers = Httpun.Headers.of_list [
+              ("content-type", "application/json");
+              ("retry-after", "1");
+            ] in
+            let response = Httpun.Response.create ~headers `Too_many_requests in
+            Httpun.Reqd.respond_with_string reqd response
+              (Rate_limit.too_many_requests_body ())
+          end
+          else
+          (* Authentication and rate limit passed - route to endpoint *)
           match (meth, path) with
           (* Session stats endpoint *)
           | (`GET, "/sessions") ->
