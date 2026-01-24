@@ -241,8 +241,27 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
 
 (** {1 Streaming Execution} *)
 
+let stream_delta_enabled () =
+  match Sys.getenv_opt "LLM_MCP_STREAM_DELTA" with
+  | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
+  | _ -> false
+
+let stream_delta_max_events () =
+  match Sys.getenv_opt "LLM_MCP_STREAM_DELTA_MAX_EVENTS" with
+  | Some v -> (try int_of_string v with _ -> 2000)
+  | None -> 2000
+
+let stream_delta_max_chars () =
+  match Sys.getenv_opt "LLM_MCP_STREAM_DELTA_MAX_CHARS" with
+  | Some v -> (try int_of_string v with _ -> 200)
+  | None -> 200
+
+let generate_stream_id model_name =
+  let ts = int_of_float (Unix.gettimeofday () *. 1000.) in
+  Printf.sprintf "%s:%d:%d" model_name ts (Random.int 1000000)
+
 (** Execute Ollama with token streaming callback *)
-let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
+let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token ?stream_id args =
   let (cmd_result, model_name, extra_base, has_tools, err_msg) = match args with
     | Ollama { model; temperature; tools; timeout = _; _ } ->
         let has_tools = match tools with Some l when List.length l > 0 -> true | _ -> false in
@@ -257,30 +276,126 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
     | Ollama { timeout; _ } -> timeout
     | _ -> 300
   in
+  let stream_id =
+    match stream_id with
+    | Some sid -> sid
+    | None -> generate_stream_id model_name
+  in
+  let delta_enabled = stream_delta_enabled () in
+  let delta_max_events = stream_delta_max_events () in
+  let delta_max_chars = stream_delta_max_chars () in
+  let delta_count = ref 0 in
+  let delta_truncated = ref false in
+  let total_chars = ref 0 in
+  let broadcast_delta json =
+    if delta_enabled then
+      try Notification_sse.broadcast json with _ -> ()
+    else
+      ()
+  in
+  let emit_start () =
+    broadcast_delta (`Assoc [
+      ("type", `String "llm_stream_start");
+      ("stream_id", `String stream_id);
+      ("model", `String model_name);
+      ("has_tools", `Bool has_tools);
+    ])
+  in
+  let emit_end ~success ?error () =
+    let base = [
+      ("type", `String "llm_stream_end");
+      ("stream_id", `String stream_id);
+      ("model", `String model_name);
+      ("success", `Bool success);
+      ("chunks", `Int !delta_count);
+      ("total_chars", `Int !total_chars);
+      ("truncated", `Bool !delta_truncated);
+    ] in
+    let fields = match error with
+      | Some msg -> base @ [("error", `String msg)]
+      | None -> base
+    in
+    broadcast_delta (`Assoc fields)
+  in
+  emit_start ();
   match cmd_result with
   | Error err ->
       let response = Option.value err_msg ~default:err in
+      emit_end ~success:false ~error:response ();
       { model = model_name; returncode = -1; response; extra = extra_base }
   | Ok cmd_list ->
       if cmd_list = [] then
-        { model = model_name; returncode = -1; response = "Invalid args"; extra = extra_base }
+        let response = "Invalid args" in
+        emit_end ~success:false ~error:response ();
+        { model = model_name; returncode = -1; response; extra = extra_base }
       else begin
         let cmd = List.hd cmd_list in
         let cmd_args = List.tl cmd_list in
         let full_response = Buffer.create 1024 in
         let accumulated_tool_calls = ref [] in
+        let truncated_notice_sent = ref false in
         let on_line line =
           if has_tools then
             match Ollama_parser.parse_chat_chunk line with
             | Ok (token, tool_calls, _done) ->
                 Buffer.add_string full_response token;
                 if tool_calls <> [] then accumulated_tool_calls := tool_calls;
+                total_chars := !total_chars + String.length token;
+                incr delta_count;
+                if !delta_count <= delta_max_events then begin
+                  let truncated = String.length token > delta_max_chars in
+                  let delta =
+                    if truncated then String.sub token 0 delta_max_chars else token
+                  in
+                  if truncated then delta_truncated := true;
+                  broadcast_delta (`Assoc [
+                    ("type", `String "llm_delta");
+                    ("stream_id", `String stream_id);
+                    ("index", `Int !delta_count);
+                    ("delta", `String delta);
+                    ("truncated", `Bool truncated);
+                    ("orig_len", `Int (String.length token));
+                  ])
+                end else if not !truncated_notice_sent then begin
+                  truncated_notice_sent := true;
+                  delta_truncated := true;
+                  broadcast_delta (`Assoc [
+                    ("type", `String "llm_delta_truncated");
+                    ("stream_id", `String stream_id);
+                    ("max_events", `Int delta_max_events);
+                  ])
+                end;
                 on_token token
             | Error _ -> ()
           else
             match Tool_parsers.parse_ollama_chunk line with
             | Ok (token, _done) ->
                 Buffer.add_string full_response token;
+                total_chars := !total_chars + String.length token;
+                incr delta_count;
+                if !delta_count <= delta_max_events then begin
+                  let truncated = String.length token > delta_max_chars in
+                  let delta =
+                    if truncated then String.sub token 0 delta_max_chars else token
+                  in
+                  if truncated then delta_truncated := true;
+                  broadcast_delta (`Assoc [
+                    ("type", `String "llm_delta");
+                    ("stream_id", `String stream_id);
+                    ("index", `Int !delta_count);
+                    ("delta", `String delta);
+                    ("truncated", `Bool truncated);
+                    ("orig_len", `Int (String.length token));
+                  ])
+                end else if not !truncated_notice_sent then begin
+                  truncated_notice_sent := true;
+                  delta_truncated := true;
+                  broadcast_delta (`Assoc [
+                    ("type", `String "llm_delta_truncated");
+                    ("stream_id", `String stream_id);
+                    ("max_events", `Int delta_max_events);
+                  ])
+                end;
                 on_token token
             | Error _ -> ()
         in
@@ -291,19 +406,25 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token args =
             let extra = if !accumulated_tool_calls <> [] then
               extra @ [("tool_calls", Tool_parsers.tool_calls_to_json !accumulated_tool_calls)]
             else extra in
+            let extra = extra @ [("stream_id", stream_id)] in
+            emit_end ~success:true ();
             { model = model_name;
               returncode = 0;
               response = Buffer.contents full_response;
               extra; }
         | Error (Timeout t) ->
+            let response = Printf.sprintf "Timeout after %ds" t in
+            emit_end ~success:false ~error:response ();
             { model = model_name;
               returncode = -1;
-              response = sprintf "Timeout after %ds" t;
+              response;
               extra = extra_base; }
         | Error (ProcessError msg) ->
+            let response = sprintf "Error: %s" msg in
+            emit_end ~success:false ~error:response ();
             { model = model_name;
               returncode = -1;
-              response = sprintf "Error: %s" msg;
+              response;
               extra = extra_base; }
       end
 
@@ -522,6 +643,16 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
     | _ -> false
   in
   let model_for_log = get_model_name_for_tracing args in
+  let stream_id_opt =
+    match args with
+    | Ollama { stream = true; _ } -> Some (generate_stream_id model_for_log)
+    | _ -> None
+  in
+  let log_extra =
+    match stream_id_opt with
+    | Some sid -> [("stream_id", sid)]
+    | None -> []
+  in
   let tool_for_log = match args with
     | ChainRun _ -> "chain.run"
     | ChainValidate _ -> "chain.validate"
@@ -549,6 +680,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       ~model:model_for_log
       ~prompt_chars:(String.length prompt_for_log)
       ~streamed:stream_flag
+      ~extra:log_extra
       ()
   else
     ();
@@ -565,6 +697,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
+          ~extra:log_extra
           ?error_class:(classify_error_class result)
           ()
       else
@@ -609,6 +742,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
+          ~extra:log_extra
           ?error_class:(classify_error_class result)
           ()
       else
@@ -653,6 +787,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
+          ~extra:log_extra
           ?error_class:(classify_error_class result)
           ()
       else
@@ -731,7 +866,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       in
       let result =
         if stream then
-          let streaming = execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token:(fun _ -> ()) args in
+          let streaming =
+            execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token:(fun _ -> ())
+              ?stream_id:stream_id_opt args
+          in
           if streaming.returncode = 0 then streaming
           else begin
             if log_enabled then
@@ -742,14 +880,26 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 ~success:false
                 ~error_class:"stream_fallback"
                 ~error:streaming.response
-                ~extra:[("fallback", "non_stream")]
+                ~extra:([("fallback", "non_stream")] @ log_extra)
                 ()
             else
               ();
-            execute_nonstream ()
+            let fallback = execute_nonstream () in
+            (match stream_id_opt with
+             | Some sid ->
+                 { fallback with extra = fallback.extra @ [("stream_id", sid); ("stream_fallback", "true")] }
+             | None -> fallback)
           end
         else
           execute_nonstream ()
+      in
+      let result =
+        match stream_id_opt with
+        | Some sid ->
+            if List.assoc_opt "stream_id" result.extra = None then
+              { result with extra = result.extra @ [("stream_id", sid)] }
+            else result
+        | None -> result
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -761,6 +911,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
+          ~extra:log_extra
           ?error_class:(classify_error_class result)
           ()
       else
