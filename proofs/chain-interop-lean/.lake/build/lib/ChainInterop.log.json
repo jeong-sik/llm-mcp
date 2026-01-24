@@ -1,5 +1,0 @@
-{"log":
- [{"message":
-   ".> LEAN_PATH=././.lake/build/lib DYLD_LIBRARY_PATH=././.lake/build/lib /Users/dancer/.elan/toolchains/leanprover--lean4---v4.8.0/bin/lean ././././ChainInterop.lean -R ./././. -o ././.lake/build/lib/ChainInterop.olean -i ././.lake/build/lib/ChainInterop.ilean -c ././.lake/build/ir/ChainInterop.c --json",
-   "level": "trace"}],
- "depHash": "14490479216494993959"}

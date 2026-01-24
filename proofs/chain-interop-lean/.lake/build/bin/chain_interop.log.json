@@ -1,5 +1,0 @@
-{"log":
- [{"message":
-   ".> /Users/dancer/.elan/toolchains/leanprover--lean4---v4.8.0/bin/leanc -o ././.lake/build/bin/chain_interop ././.lake/build/ir/ChainInterop.c.o.export",
-   "level": "trace"}],
- "depHash": "11355136150298754836"}
