@@ -51,4 +51,7 @@
   (integers (>= 0.7))
   (zstd (>= 0.4))
   (domainslib (>= 0.5))
-  (alcotest (and :with-test (>= 1.6)))))
+  (alcotest (and :with-test (>= 1.6)))
+  ; TODO: Coverage - bisect_ppx pending ppxlib 0.37+ support
+  ; (bisect_ppx (and :with-test (>= 2.8)))
+  (odoc :with-doc)))

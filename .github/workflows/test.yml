@@ -1,0 +1,86 @@
+# CI workflow for llm-mcp
+# Runs on every push and PR to ensure code quality
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2.x"
+          dune-cache: true
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only --with-test -y
+
+      - name: Build
+        run: |
+          opam exec -- dune build
+
+      - name: Run tests
+        run: |
+          opam exec -- dune test
+
+  # NOTE: Coverage job disabled - bisect_ppx pending ppxlib 0.37+ support
+  # TODO: Re-enable when bisect_ppx is updated for OCaml 5.2+ AST
+  # coverage:
+  #   runs-on: ubuntu-latest
+  #   needs: build-and-test
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #     - name: Setup OCaml
+  #       uses: ocaml/setup-ocaml@v3
+  #       with:
+  #         ocaml-compiler: "5.2.x"
+  #     - name: Install dependencies
+  #       run: |
+  #         opam install . --deps-only --with-test -y
+  #         opam install bisect_ppx -y
+  #     - name: Run tests with coverage
+  #       run: |
+  #         mkdir -p _coverage
+  #         opam exec -- dune test --instrument-with bisect_ppx --force
+  #       env:
+  #         BISECT_FILE: _coverage/bisect
+  #     - name: Upload coverage to Codecov
+  #       uses: codecov/codecov-action@v4
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.2.x"
+          dune-cache: true
+
+      - name: Install dependencies
+        run: |
+          opam install . --deps-only -y
+          opam install ocamlformat -y || true
+
+      - name: Check formatting
+        run: |
+          opam exec -- dune fmt --check || echo "::warning::Code formatting issues found"
+        continue-on-error: true
