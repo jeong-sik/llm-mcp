@@ -587,17 +587,35 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         | _ ->
             Error (Printf.sprintf "StreamMerge format: reducer or reducer,min or reducer,min,timeout, got: %s" content))
       else if String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:" then
-        (* [[FeedbackLoop:scoring_func,max_iter,min_score]] - iterative quality improvement *)
+        (* [[FeedbackLoop:scoring_func,max_iter,>=0.95]] - iterative quality improvement with explicit operator *)
         let parts = String.sub content 13 (String.length content - 13)
           |> String.split_on_char ','
           |> List.map trim
         in
         (* Generator placeholder - will be replaced during post-processing from incoming edges *)
         let gen_placeholder = { id = "feedback_gen"; node_type = ChainRef "feedback_gen"; input_mapping = [] } in
+        (* Parse threshold with operator: ">=0.95", "<0.3", "0.7" (default >=) *)
+        let parse_threshold_value str =
+          let s = trim str in
+          if String.length s >= 2 && s.[0] = '>' && s.[1] = '=' then
+            (Gte, try float_of_string (String.sub s 2 (String.length s - 2)) with _ -> 0.7)
+          else if String.length s >= 2 && s.[0] = '<' && s.[1] = '=' then
+            (Lte, try float_of_string (String.sub s 2 (String.length s - 2)) with _ -> 0.7)
+          else if String.length s >= 2 && s.[0] = '!' && s.[1] = '=' then
+            (Neq, try float_of_string (String.sub s 2 (String.length s - 2)) with _ -> 0.7)
+          else if String.length s >= 1 && s.[0] = '>' then
+            (Gt, try float_of_string (String.sub s 1 (String.length s - 1)) with _ -> 0.7)
+          else if String.length s >= 1 && s.[0] = '<' then
+            (Lt, try float_of_string (String.sub s 1 (String.length s - 1)) with _ -> 0.7)
+          else if String.length s >= 1 && s.[0] = '=' then
+            (Eq, try float_of_string (String.sub s 1 (String.length s - 1)) with _ -> 0.7)
+          else
+            (Gte, try float_of_string s with _ -> 0.7)  (* default: >=value *)
+        in
         (match parts with
-        | [scoring_func; max_iter_str; min_score_str] ->
+        | [scoring_func; max_iter_str; threshold_str] ->
             let max_iterations = try int_of_string max_iter_str with _ -> 3 in
-            let min_score = try float_of_string min_score_str with _ -> 0.7 in
+            let (score_operator, score_threshold) = parse_threshold_value threshold_str in
             Ok (FeedbackLoop {
               generator = gen_placeholder;
               evaluator_config = {
@@ -607,7 +625,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               };
               improver_prompt = "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}";
               max_iterations;
-              min_score;
+              score_threshold;
+              score_operator;
             })
         | [scoring_func; max_iter_str] ->
             let max_iterations = try int_of_string max_iter_str with _ -> 3 in
@@ -620,7 +639,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               };
               improver_prompt = "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}";
               max_iterations;
-              min_score = 0.7;
+              score_threshold = 0.7;
+              score_operator = Gte;
             })
         | [scoring_func] ->
             Ok (FeedbackLoop {
@@ -632,10 +652,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               };
               improver_prompt = "Improve the output based on this feedback: {{feedback}}\n\nPrevious output: {{previous_output}}";
               max_iterations = 3;
-              min_score = 0.7;
+              score_threshold = 0.7;
+              score_operator = Gte;
             })
         | _ ->
-            Error (Printf.sprintf "FeedbackLoop format: scoring_func or scoring_func,max_iter or scoring_func,max_iter,min_score, got: %s" content))
+            Error (Printf.sprintf "FeedbackLoop format: func or func,max or func,max,>=0.95, got: %s" content))
       else
         Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn/StreamMerge/FeedbackLoop, got: %s" content)
 
@@ -1406,14 +1427,30 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
       in
       let min_str = match min_results with Some n -> Printf.sprintf "_%d" n | None -> "" in
       Printf.sprintf "stream_merge_%s_%d%s" reducer_str (List.length nodes) min_str
-  | FeedbackLoop { evaluator_config; max_iterations; min_score; _ } ->
-      Printf.sprintf "feedback_%s_%d_%.2f" evaluator_config.scoring_func max_iterations min_score
+  | FeedbackLoop { evaluator_config; max_iterations; score_threshold; score_operator; _ } ->
+      let op_str = match score_operator with
+        | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
+      in
+      Printf.sprintf "feedback_%s_%d_%s%.2f" evaluator_config.scoring_func max_iterations op_str score_threshold
+
+(** Escape text for Mermaid node labels:
+    - Newlines → space (Mermaid doesn't support \n in labels)
+    - Double quotes → single quotes
+    - Truncate very long text for readability *)
+let escape_for_mermaid ?(max_len=100) (text : string) : string =
+  (* Replace newlines with spaces, double quotes with single quotes *)
+  let s1 = Str.global_replace (Str.regexp "\n") " " text in
+  let s2 = Str.global_replace (Str.regexp {|"|}) {|'|} s1 in
+  if String.length s2 > max_len then
+    String.sub s2 0 (max_len - 3) ^ "..."
+  else
+    s2
 
 (** Convert a node_type to Mermaid node text (lossless DSL syntax) *)
 let node_type_to_text (nt : node_type) : string =
   match nt with
   | Llm { model; prompt; tools; _ } ->
-      let prompt_escaped = Str.global_replace (Str.regexp {|"|}) {|'|} prompt in
+      let prompt_escaped = escape_for_mermaid prompt in
       let base = Printf.sprintf "LLM:%s \"%s\"" model prompt_escaped in
       (match tools with
        | Some (`List ts) when ts <> [] ->
@@ -1429,9 +1466,9 @@ let node_type_to_text (nt : node_type) : string =
       (match args with
        | `Null | `Assoc [] -> Printf.sprintf "Tool:%s" name
        | json ->
-           (* Escape double quotes for Mermaid: " -> backslash-" *)
+           (* Escape JSON for Mermaid: double quotes -> single quotes, truncate *)
            let json_str = Yojson.Safe.to_string json in
-           let json_escaped = Str.global_replace (Str.regexp {|"|}) {|\\"|} json_str in
+           let json_escaped = escape_for_mermaid ~max_len:80 json_str in
            Printf.sprintf "Tool:%s %s" name json_escaped)
   | Quorum { required; _ } -> Printf.sprintf "Quorum:%d" required
   | Gate { condition; _ } -> Printf.sprintf "Gate:%s" condition
@@ -1511,8 +1548,11 @@ let node_type_to_text (nt : node_type) : string =
        | Some m, None -> Printf.sprintf "StreamMerge:%s,%d" reducer_str m
        | Some m, Some t -> Printf.sprintf "StreamMerge:%s,%d,%.1f" reducer_str m t
        | None, Some t -> Printf.sprintf "StreamMerge:%s,1,%.1f" reducer_str t  (* default min=1 when only timeout *))
-  | FeedbackLoop { evaluator_config; max_iterations; min_score; _ } ->
-      Printf.sprintf "FeedbackLoop:%s,%d,%.2f" evaluator_config.scoring_func max_iterations min_score
+  | FeedbackLoop { evaluator_config; max_iterations; score_threshold; score_operator; _ } ->
+      let op_sym = match score_operator with
+        | Gt -> ">" | Gte -> ">=" | Lt -> "<" | Lte -> "<=" | Eq -> "=" | Neq -> "!="
+      in
+      Printf.sprintf "FeedbackLoop:%s,%d,%s%.2f" evaluator_config.scoring_func max_iterations op_sym score_threshold
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =

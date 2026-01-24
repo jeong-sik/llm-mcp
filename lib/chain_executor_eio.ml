@@ -802,9 +802,9 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
       execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~nodes:stream_nodes ~reducer ~initial ~min_results ~timeout
   (* FeedbackLoop: Iterative quality improvement with evaluator feedback *)
-  | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; min_score } ->
+  | FeedbackLoop { generator; evaluator_config; improver_prompt; max_iterations; score_threshold; score_operator } ->
       execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec node
-        ~generator ~evaluator_config ~improver_prompt ~max_iterations ~min_score
+        ~generator ~evaluator_config ~improver_prompt ~max_iterations ~score_threshold ~score_operator
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
@@ -2110,9 +2110,26 @@ Reply with ONLY a number between 0.0 and 1.0:|}
 (** Execute FeedbackLoop node - iterative quality improvement with evaluator feedback *)
 and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~generator ~(evaluator_config : Chain_types.evaluator_config)
-    ~improver_prompt ~max_iterations ~min_score : (string, string) result =
+    ~improver_prompt ~max_iterations ~score_threshold ~score_operator : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
+
+  (* Helper: Check if score passes threshold using operator *)
+  let passes_threshold score =
+    match score_operator with
+    | Chain_types.Gt -> score > score_threshold
+    | Chain_types.Gte -> score >= score_threshold
+    | Chain_types.Lt -> score < score_threshold
+    | Chain_types.Lte -> score <= score_threshold
+    | Chain_types.Eq -> abs_float (score -. score_threshold) < 0.001
+    | Chain_types.Neq -> abs_float (score -. score_threshold) >= 0.001
+  in
+
+  (* Helper: Format operator for error messages *)
+  let op_str = match score_operator with
+    | Chain_types.Gt -> ">" | Chain_types.Gte -> ">=" | Chain_types.Lt -> "<"
+    | Chain_types.Lte -> "<=" | Chain_types.Eq -> "=" | Chain_types.Neq -> "!="
+  in
 
   (* Helper: Score output using evaluator_config.scoring_func *)
   let score_output output =
@@ -2180,8 +2197,8 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     if iteration > max_iterations then begin
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       record_complete ctx parent.id ~duration_ms ~success:false;
-      Error (Printf.sprintf "FeedbackLoop: Max iterations (%d) reached without meeting min_score %.2f"
-               max_iterations min_score)
+      Error (Printf.sprintf "FeedbackLoop: Max iterations (%d) reached without meeting threshold %s%.2f"
+               max_iterations op_str score_threshold)
     end else begin
       (* Execute current generator *)
       match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec !current_generator with
@@ -2196,7 +2213,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           (* Store feedback in outputs for reference *)
           Hashtbl.replace ctx.outputs (parent.id ^ ".feedback") "";
 
-          if score >= min_score then begin
+          if passes_threshold score then begin
             (* Success: score meets threshold *)
             let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
             record_complete ctx parent.id ~duration_ms ~success:true;

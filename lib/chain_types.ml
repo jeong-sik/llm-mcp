@@ -275,7 +275,8 @@ type node_type =
       evaluator_config : evaluator_config;  (** Evaluator configuration *)
       improver_prompt : string;      (** Prompt template with {{feedback}} and {{previous_output}} *)
       max_iterations : int;          (** Maximum iteration count *)
-      min_score : float;             (** Minimum acceptable score (0.0-1.0) *)
+      score_threshold : float;       (** Score threshold (0.0-1.0) *)
+      score_operator : threshold_op; (** Comparison operator: Gte, Lte, Gt, Lt, Eq *)
     }
 [@@deriving yojson]
 
@@ -429,10 +430,10 @@ let make_race ~id ~nodes ?timeout () =
 
 (** Helper: Create a feedback loop node for iterative quality improvement *)
 let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
-    ~max_iterations ~min_score =
+    ~max_iterations ~score_threshold ?(score_operator=Gte) () =
   { id; node_type = FeedbackLoop {
       generator; evaluator_config; improver_prompt;
-      max_iterations; min_score
+      max_iterations; score_threshold; score_operator
     }; input_mapping = [] }
 
 (** {1 Batch Execution Types - Phase 5} *)
