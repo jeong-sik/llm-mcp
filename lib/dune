@@ -9,6 +9,8 @@
  (modules
    ; Version (auto-generated from dune-project)
    version
+   ; Error types (centralized)
+   error
    ; Pure OCaml - shared between Eio and Lwt
    common
    types
