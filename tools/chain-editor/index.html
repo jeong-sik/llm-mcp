@@ -46,6 +46,7 @@
       gap: 12px;
       align-items: center;
       border-bottom: 1px solid #0f3460;
+      flex-wrap: wrap;
     }
     .toolbar button {
       background: #0f3460;
@@ -61,20 +62,49 @@
     .toolbar button.primary { background: #4fc3f7; color: #1a1a2e; }
     .toolbar .spacer { flex: 1; }
     .toolbar .status { font-size: 12px; color: #888; }
+    .toolbar .chip {
+      background: #0c1a33;
+      border: 1px solid #1f3a66;
+      color: #9db7ff;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .toolbar .chip.active { background: #4fc3f7; color: #0f172a; border-color: #4fc3f7; }
+    .toolbar .zoom-group { display: flex; gap: 6px; align-items: center; }
+    .toolbar .zoom-label { font-size: 12px; color: #9aa7bd; min-width: 52px; text-align: center; }
 
     .canvas {
       flex: 1;
       position: relative;
       overflow: hidden;
+      touch-action: none;
       background:
-        linear-gradient(rgba(79, 195, 247, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(79, 195, 247, 0.03) 1px, transparent 1px);
-      background-size: 20px 20px;
+        linear-gradient(rgba(79, 195, 247, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(79, 195, 247, 0.05) 1px, transparent 1px);
+      background-size: var(--grid-size, 20px) var(--grid-size, 20px);
+      background-position: var(--grid-x, 0px) var(--grid-y, 0px);
     }
 
-    .canvas svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .canvas-inner {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    .canvas svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: auto; overflow: visible; }
     .canvas svg path { stroke: #4fc3f7; stroke-width: 2; fill: none; }
     .canvas svg path.preview { stroke-dasharray: 6 6; opacity: 0.7; }
+    .canvas svg path.selected { stroke: #ffb74d; stroke-width: 3; }
+    .canvas svg text.edge-label { fill: #cbd5f5; font-size: 11px; font-family: monospace; paint-order: stroke; stroke: #0f172a; stroke-width: 3; }
+    .canvas.pannable { cursor: grab; }
+    .canvas.panning { cursor: grabbing; }
 
     .canvas-node {
       position: absolute;
@@ -90,6 +120,8 @@
     .canvas-node:hover { border-color: #4fc3f7; }
     .canvas-node.selected { border-color: #4fc3f7; box-shadow: 0 0 20px rgba(79, 195, 247, 0.3); }
     .canvas-node.connecting { border-color: #81c784; box-shadow: 0 0 18px rgba(129, 199, 132, 0.35); }
+    .canvas-node.error { border-color: #ef5350; box-shadow: 0 0 18px rgba(239, 83, 80, 0.35); }
+    .canvas-node.warn { border-color: #ffb74d; box-shadow: 0 0 16px rgba(255, 183, 77, 0.3); }
     .canvas-node .node-type { font-size: 10px; color: #4fc3f7; text-transform: uppercase; letter-spacing: 1px; }
     .canvas-node .node-label { font-weight: 600; margin-top: 4px; }
     .canvas-node .node-config { font-size: 11px; color: #888; margin-top: 8px; font-family: monospace; }
@@ -107,6 +139,7 @@
     .canvas-node .port-out { top: 50%; right: -6px; transform: translateY(-50%); }
     .canvas-node .port:hover { background: #4fc3f7; }
     .canvas-node .port.active { background: #81c784; border-color: #81c784; }
+    .canvas-node .port.candidate { background: #ffb74d; border-color: #ffb74d; }
     .canvas-node .detail-badge {
       position: absolute;
       top: -8px;
@@ -179,6 +212,43 @@
     .preset-item:hover { border-color: #81c784; }
     .preset-item .name { font-weight: 600; font-size: 13px; }
     .preset-item .nodes { font-size: 11px; color: #81c784; margin-top: 4px; }
+    .preset-item .mini {
+      margin-top: 8px;
+      background: #0f172a;
+      border-radius: 6px;
+      border: 1px solid #243b67;
+      height: 70px;
+      position: relative;
+      overflow: hidden;
+    }
+    .preset-search {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #2a2f3a;
+      background: #0f172a;
+      color: #cbd5f5;
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+
+    /* Minimap */
+    .minimap {
+      position: absolute;
+      right: 16px;
+      bottom: 16px;
+      width: 200px;
+      height: 140px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid #2a3b60;
+      border-radius: 10px;
+      padding: 8px;
+      display: none;
+      z-index: 10;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+    .minimap.active { display: block; }
+    .minimap canvas { width: 100%; height: 100%; display: block; }
 
     /* Detail Modal */
     .detail-modal {
@@ -313,34 +383,8 @@
 
       <div class="presets">
         <h2>Presets</h2>
-        <div class="preset-item" data-preset="figma_component">
-          <div class="name">🎨 Figma → Component (Router)</div>
-          <div class="nodes">10 nodes • optional verify</div>
-        </div>
-        <div class="preset-item" data-preset="coverage_boost">
-          <div class="name">🧪 Coverage Boost (Optional Source)</div>
-          <div class="nodes">8 nodes • numeric coverage</div>
-        </div>
-        <div class="preset-item" data-preset="magi">
-          <div class="name">🔮 MAGI Code Review</div>
-          <div class="nodes">5 nodes • 3-LLM consensus</div>
-        </div>
-        <div class="preset-item" data-preset="research">
-          <div class="name">🔍 Deep Research</div>
-          <div class="nodes">8 nodes • Multi-source</div>
-        </div>
-        <div class="preset-item" data-preset="simple">
-          <div class="name">⚡ Simple Pipeline</div>
-          <div class="nodes">3 nodes • A→B→C</div>
-        </div>
-        <div class="preset-item" data-preset="figma-prototype">
-          <div class="name">🎨 Figma → Prototype</div>
-          <div class="nodes">6 nodes • figma-to-prototype</div>
-        </div>
-        <div class="preset-item" data-preset="figma-component">
-          <div class="name">🧩 Figma → Web Component</div>
-          <div class="nodes">6 nodes • figma-to-web-component</div>
-        </div>
+        <input class="preset-search" id="preset-search" placeholder="Search presets..." />
+        <div id="preset-list"></div>
       </div>
     </div>
 
@@ -350,12 +394,27 @@
         <button onclick="clearCanvas()">Clear</button>
         <button onclick="autoLayout()">Auto Layout</button>
         <button onclick="validateChain()">Validate</button>
+        <button onclick="fitToView()">Fit</button>
+        <div class="zoom-group">
+          <button onclick="zoomOut()">−</button>
+          <span class="zoom-label" id="zoom-label">100%</span>
+          <button onclick="zoomIn()">＋</button>
+          <button onclick="resetZoom()">Reset</button>
+        </div>
+        <button class="chip active" id="toggle-grid">Grid</button>
+        <button class="chip active" id="toggle-snap">Snap</button>
+        <button class="chip" id="toggle-minimap">Minimap</button>
         <span class="spacer"></span>
         <span class="status" id="status">Ready</span>
         <button class="primary" onclick="runChain()">▶ Run</button>
       </div>
       <div class="canvas" id="canvas">
-        <svg id="connections"></svg>
+        <div class="canvas-inner" id="canvas-inner">
+          <svg id="connections"></svg>
+        </div>
+        <div class="minimap" id="minimap">
+          <canvas id="minimap-canvas" width="200" height="140"></canvas>
+        </div>
       </div>
     </div>
 
@@ -364,6 +423,7 @@
       <div class="tabs">
         <div class="tab active" data-tab="mermaid">Mermaid</div>
         <div class="tab" data-tab="json">JSON</div>
+        <div class="tab" data-tab="integrity">Integrity</div>
         <div class="tab" data-tab="output">Output</div>
       </div>
       <div class="meta-toggle">
@@ -398,18 +458,41 @@
     const state = {
       nodes: [],
       connections: [],
+      edgeLabels: {},
       selectedNode: null,
+      selectedConnection: null,
       dragNode: null,
+      dragNodeEl: null,
+      dragOffset: { x: 0, y: 0 },
       connecting: null,
       connectingPos: null,
+      hoverPort: null,
       detailNode: null,
       detailTab: 'summary',
       showMeta: false,
+      lastValidation: null,
+      validationErrors: new Set(),
+      validationWarnings: new Set(),
+      chainFull: null,
+      gridSize: 20,
+      gridEnabled: true,
+      snapEnabled: true,
+      minimapEnabled: false,
+      minimapDragging: false,
+      minimapTransform: null,
+      viewport: { x: 40, y: 40, scale: 1 },
+      isPanning: false,
+      panStart: { x: 0, y: 0 },
+      spacePressed: false,
       nodeCounter: 0
     };
 
     const canvas = document.getElementById('canvas');
+    const canvasInner = document.getElementById('canvas-inner');
     const svg = document.getElementById('connections');
+    const minimap = document.getElementById('minimap');
+    const minimapCanvas = document.getElementById('minimap-canvas');
+    const minimapCtx = minimapCanvas.getContext('2d');
 
     // Presets
     const presets = {
@@ -424,7 +507,7 @@
           { id: 'M', type: 'merge', label: 'pick', x: 800, y: 170, config: 'Merge:pick_one' },
           { id: 'G', type: 'gate', label: 'verify?', x: 980, y: 170, config: 'Gate:verify' },
           { id: 'X', type: 'tool', label: 'verify', x: 1160, y: 80, config: 'Tool:figma_verify_visual' },
-          { id: 'O', type: 'map', label: 'emit', x: 1160, y: 250, config: 'Map:emit_component' },
+          { id: 'O', type: 'map', label: 'emit', x: 1160, y: 250, config: 'Map:emit_component,H' },
         ],
         connections: [
           ['P', 'B'],
@@ -434,7 +517,38 @@
           ['M', 'G'],
           ['G', 'X'], ['G', 'O'],
           ['X', 'O']
-        ]
+        ],
+        chain: {
+          id: 'figma_component_router',
+          nodes: [
+            {
+              id: 'router_flow',
+              type: 'pipeline',
+              nodes: [
+                { id: 'router_parse', type: 'tool', name: 'figma:figma_parse_url', args: {} },
+                { id: 'router_bundle', type: 'tool', name: 'figma:figma_get_node_bundle', args: { node: '{{router_parse.output}}' } },
+                {
+                  id: 'router_merge',
+                  type: 'merge',
+                  strategy: 'first',
+                  nodes: [
+                    { id: 'router_react', type: 'llm', model: 'codex', prompt: 'React component: {{router_bundle.output}}' },
+                    { id: 'router_html', type: 'llm', model: 'claude', prompt: 'HTML component: {{router_bundle.output}}' },
+                    { id: 'router_vue', type: 'llm', model: 'gemini', prompt: 'Vue component: {{router_bundle.output}}' }
+                  ]
+                },
+                {
+                  id: 'router_gate',
+                  type: 'gate',
+                  condition: 'verify',
+                  then: { id: 'router_verify', type: 'tool', name: 'figma:figma_verify_visual', args: { component: '{{router_merge.output}}' } },
+                  else: { id: 'router_emit', type: 'llm', model: 'claude', prompt: 'Emit component: {{router_merge.output}}' }
+                }
+              ]
+            }
+          ],
+          output: 'router_flow'
+        }
       },
       coverage_boost: {
         nodes: [
@@ -451,7 +565,7 @@
                 nodes: [
                   { id: 'G', type: 'llm', label: 'generate', config: 'LLM:generate_tests' },
                   { id: 'T', type: 'tool', label: 'run-tests', config: 'Tool:run_tests' },
-                  { id: 'E', type: 'map', label: 'extract', config: 'Map:extract_coverage_pct' },
+                  { id: 'E', type: 'map', label: 'extract', config: 'Map:extract_coverage_pct,T' },
                   { id: 'C', type: 'gate', label: 'check', config: 'Gate:coverage>=target' }
                 ],
                 connections: [
@@ -466,7 +580,48 @@
           ['A', 'F'], ['B', 'F'],
           ['F', 'L'],
           ['L', 'R']
-        ]
+        ],
+        chain: {
+          id: 'coverage_boost',
+          nodes: [
+            {
+              id: 'coverage_flow',
+              type: 'pipeline',
+              nodes: [
+                {
+                  id: 'coverage_source',
+                  type: 'fallback',
+                  primary: { id: 'coverage_source_a', type: 'tool', name: 'coverage_source', args: {} },
+                  fallbacks: [
+                    { id: 'coverage_source_b', type: 'tool', name: 'coverage_source_alt', args: {} }
+                  ]
+                },
+                {
+                  id: 'coverage_loop',
+                  type: 'goal_driven',
+                  goal_metric: 'coverage',
+                  goal_operator: 'gte',
+                  goal_value: 0.85,
+                  action_node: {
+                    id: 'coverage_action',
+                    type: 'pipeline',
+                    nodes: [
+                      { id: 'coverage_gen', type: 'llm', model: 'gemini', prompt: 'Generate tests: {{coverage_source.output}}' },
+                      { id: 'coverage_run', type: 'tool', name: 'run_tests', args: { suite: '{{coverage_gen.output}}' } }
+                    ]
+                  },
+                  measure_func: 'extract_coverage_pct',
+                  max_iterations: 6,
+                  strategy_hints: [],
+                  conversational: false,
+                  relay_models: []
+                },
+                { id: 'coverage_report', type: 'tool', name: 'report_coverage', args: { from: '{{coverage_loop.output}}' } }
+              ]
+            }
+          ],
+          output: 'coverage_flow'
+        }
       },
       magi: {
         nodes: [
@@ -479,7 +634,30 @@
         connections: [
           ['A', 'B'], ['A', 'C'], ['A', 'D'],
           ['B', 'M'], ['C', 'M'], ['D', 'M']
-        ]
+        ],
+        chain: {
+          id: 'magi_review',
+          nodes: [
+            {
+              id: 'magi_flow',
+              type: 'pipeline',
+              nodes: [
+                { id: 'magi_read', type: 'tool', name: 'echo', args: { text: '{{input}}' } },
+                {
+                  id: 'magi_consensus',
+                  type: 'quorum',
+                  required: 2,
+                  nodes: [
+                    { id: 'magi_melchior', type: 'llm', model: 'codex', prompt: 'MELCHIOR review: {{magi_read.output}}' },
+                    { id: 'magi_balthasar', type: 'llm', model: 'claude', prompt: 'BALTHASAR review: {{magi_read.output}}' },
+                    { id: 'magi_casper', type: 'llm', model: 'gemini', prompt: 'CASPER review: {{magi_read.output}}' }
+                  ]
+                }
+              ]
+            }
+          ],
+          output: 'magi_flow'
+        }
       },
       research: {
         nodes: [
@@ -496,7 +674,46 @@
           ['S1', 'F'], ['S2', 'F'],
           ['F', 'V'], ['F', 'C'],
           ['V', 'R'], ['C', 'R']
-        ]
+        ],
+        chain: {
+          id: 'deep_research',
+          nodes: [
+            {
+              id: 'research_flow',
+              type: 'pipeline',
+              nodes: [
+                { id: 'research_expand', type: 'llm', model: 'gemini', prompt: 'Expand query: {{input}}' },
+                {
+                  id: 'research_sources',
+                  type: 'fanout',
+                  nodes: [
+                    { id: 'research_source1', type: 'llm', model: 'ollama', prompt: 'Source A: {{research_expand.output}}' },
+                    { id: 'research_source2', type: 'llm', model: 'ollama', prompt: 'Source B: {{research_expand.output}}' }
+                  ]
+                },
+                { id: 'research_summarize', type: 'llm', model: 'claude', prompt: 'Summarize: {{research_sources.output}}' },
+                {
+                  id: 'research_validate',
+                  type: 'fanout',
+                  nodes: [
+                    { id: 'research_verify', type: 'llm', model: 'codex', prompt: 'Verify: {{research_summarize.output}}' },
+                    { id: 'research_cite', type: 'llm', model: 'gemini', prompt: 'Cite: {{research_summarize.output}}' }
+                  ]
+                },
+                {
+                  id: 'research_merge',
+                  type: 'merge',
+                  strategy: 'concat',
+                  nodes: [
+                    { id: 'research_verdict', type: 'llm', model: 'codex', prompt: 'Verdict: {{research_verify.output}}' },
+                    { id: 'research_final', type: 'llm', model: 'gemini', prompt: 'Finalize: {{research_cite.output}}' }
+                  ]
+                }
+              ]
+            }
+          ],
+          output: 'research_flow'
+        }
       },
       simple: {
         nodes: [
@@ -504,7 +721,22 @@
           { id: 'B', type: 'llm', label: 'step2', x: 320, y: 150, config: 'LLM:ollama' },
           { id: 'C', type: 'llm', label: 'step3', x: 540, y: 150, config: 'LLM:ollama' },
         ],
-        connections: [['A', 'B'], ['B', 'C']]
+        connections: [['A', 'B'], ['B', 'C']],
+        chain: {
+          id: 'simple_pipeline',
+          nodes: [
+            {
+              id: 'simple_flow',
+              type: 'pipeline',
+              nodes: [
+                { id: 'simple_a', type: 'llm', model: 'stub', prompt: 'Step1: {{input}}' },
+                { id: 'simple_b', type: 'llm', model: 'ollama', prompt: 'Step2: {{simple_a.output}}' },
+                { id: 'simple_c', type: 'llm', model: 'ollama', prompt: 'Step3: {{simple_b.output}}' }
+              ]
+            }
+          ],
+          output: 'simple_flow'
+        }
       },
       'figma-prototype': {
         nodes: [
@@ -522,7 +754,30 @@
           ['T', 'M'],
           ['S', 'M'],
           ['M', 'C']
-        ]
+        ],
+        chain: {
+          id: 'figma_prototype',
+          nodes: [
+            {
+              id: 'figma_proto_flow',
+              type: 'pipeline',
+              nodes: [
+                { id: 'figma_parse', type: 'tool', name: 'figma:figma_parse_url', args: {} },
+                { id: 'figma_file', type: 'tool', name: 'figma:figma_get_file', args: { file: '{{figma_parse.output}}' } },
+                {
+                  id: 'figma_assets',
+                  type: 'fanout',
+                  nodes: [
+                    { id: 'figma_tokens', type: 'tool', name: 'figma:figma_export_tokens', args: { file: '{{figma_file.output}}' } },
+                    { id: 'figma_summary', type: 'llm', model: 'gemini', prompt: 'Summarize design: {{figma_file.output}}' }
+                  ]
+                },
+                { id: 'figma_compose', type: 'llm', model: 'claude', prompt: 'Compose prototype using {{figma_assets.output}}' }
+              ]
+            }
+          ],
+          output: 'figma_proto_flow'
+        }
       },
       'figma-component': {
         nodes: [
@@ -540,25 +795,105 @@
           ['B', 'V'],
           ['D', 'V'],
           ['V', 'H']
-        ]
+        ],
+        chain: {
+          id: 'figma_web_component',
+          nodes: [
+            {
+              id: 'figma_component_flow',
+              type: 'pipeline',
+              nodes: [
+                { id: 'web_parse', type: 'tool', name: 'figma:figma_parse_url', args: {} },
+                { id: 'web_node', type: 'tool', name: 'figma:figma_get_node', args: { node: '{{web_parse.output}}' } },
+                {
+                  id: 'web_merge',
+                  type: 'merge',
+                  strategy: 'concat',
+                  nodes: [
+                    { id: 'web_bundle', type: 'tool', name: 'figma:figma_get_node_bundle', args: { node: '{{web_node.output}}' } },
+                    { id: 'web_design', type: 'llm', model: 'gemini', prompt: 'Design notes: {{web_node.output}}' }
+                  ]
+                },
+                { id: 'web_html', type: 'llm', model: 'claude', prompt: 'Web component HTML: {{web_merge.output}}' }
+              ]
+            }
+          ],
+          output: 'figma_component_flow'
+        }
       }
     };
 
-    // Load preset
-    document.querySelectorAll('.preset-item').forEach(el => {
-      el.addEventListener('click', () => {
-        const preset = presets[el.dataset.preset];
-        if (preset) loadPreset(preset);
+    const presetMeta = {
+      figma_component: { title: '🎨 Figma → Component (Router)', summary: '10 nodes · optional verify', tags: ['figma', 'component'] },
+      coverage_boost: { title: '🧪 Coverage Boost', summary: '8 nodes · numeric coverage', tags: ['coverage', 'loop'] },
+      magi: { title: '🔮 MAGI Code Review', summary: '5 nodes · 3-LLM consensus', tags: ['review', 'magi'] },
+      research: { title: '🔍 Deep Research', summary: '8 nodes · multi-source', tags: ['research'] },
+      simple: { title: '⚡ Simple Pipeline', summary: '3 nodes · A→B→C', tags: ['simple'] },
+      'figma-prototype': { title: '🎨 Figma → Prototype', summary: '6 nodes · figma-to-prototype', tags: ['figma', 'prototype'] },
+      'figma-component': { title: '🧩 Figma → Web Component', summary: '6 nodes · figma-to-web-component', tags: ['figma', 'web'] }
+    };
+
+    function renderPresetList(filter = '') {
+      const listEl = document.getElementById('preset-list');
+      listEl.innerHTML = '';
+      const term = filter.trim().toLowerCase();
+      Object.entries(presets).forEach(([key, preset]) => {
+        const meta = presetMeta[key] || { title: key, summary: `${preset.nodes.length} nodes`, tags: [] };
+        const hay = (meta.title + ' ' + meta.summary + ' ' + meta.tags.join(' ')).toLowerCase();
+        if (term && !hay.includes(term)) return;
+        const item = document.createElement('div');
+        item.className = 'preset-item';
+        item.dataset.preset = key;
+        item.innerHTML = `
+          <div class="name">${meta.title}</div>
+          <div class="nodes">${meta.summary}</div>
+          <div class="mini"><svg width="160" height="70"></svg></div>
+        `;
+        item.addEventListener('click', () => loadPreset(preset));
+        listEl.appendChild(item);
+        renderPresetMini(item.querySelector('svg'), preset);
       });
+    }
+
+    document.getElementById('preset-search').addEventListener('input', e => {
+      renderPresetList(e.target.value);
+    });
+
+    document.getElementById('toggle-grid').addEventListener('click', e => {
+      state.gridEnabled = !state.gridEnabled;
+      e.currentTarget.classList.toggle('active', state.gridEnabled);
+      updateViewportTransform();
+    });
+
+    document.getElementById('toggle-snap').addEventListener('click', e => {
+      state.snapEnabled = !state.snapEnabled;
+      e.currentTarget.classList.toggle('active', state.snapEnabled);
+    });
+
+    document.getElementById('toggle-minimap').addEventListener('click', e => {
+      state.minimapEnabled = !state.minimapEnabled;
+      e.currentTarget.classList.toggle('active', state.minimapEnabled);
+      updateViewportTransform();
     });
 
     function loadPreset(preset) {
       state.nodes = preset.nodes.map(n => ({ ...n }));
-      state.connections = preset.connections.map(c => [...c]);
+      state.edgeLabels = {};
+      state.connections = (preset.connections || []).map(c => {
+        if (Array.isArray(c)) return [...c];
+        const from = c.from;
+        const to = c.to;
+        if (c.input) state.edgeLabels[connectionKey(from, to)] = c.input;
+        return [from, to];
+      });
       state.nodeCounter = state.nodes.length;
+      state.lastValidation = null;
+      clearValidationMarks();
+      state.chainFull = preset.chain ? JSON.parse(JSON.stringify(preset.chain)) : null;
       clearConnecting();
       closeDetail();
       render();
+      fitToView();
       updateOutput();
       setStatus(`Loaded preset with ${state.nodes.length} nodes`);
     }
@@ -575,17 +910,19 @@
       e.preventDefault();
       const type = e.dataTransfer.getData('type');
       if (type) {
-        const rect = canvas.getBoundingClientRect();
+        const world = screenToWorld(e.clientX, e.clientY);
         const id = String.fromCharCode(65 + state.nodeCounter++);
+        const position = applySnap({ x: world.x - 90, y: world.y - 40 }, true);
         state.nodes.push({
           id,
           type,
           label: type,
-          x: e.clientX - rect.left - 90,
-          y: e.clientY - rect.top - 40,
+          x: position.x,
+          y: position.y,
           config: getDefaultConfig(type),
           detail: type === 'loop' ? defaultLoopDetail() : null
         });
+        invalidateChainFull();
         render();
         updateOutput();
       }
@@ -598,7 +935,7 @@
         merge: 'Merge:concat',
         quorum: 'Quorum:2',
         gate: 'Gate:condition',
-        map: 'Map:uppercase',
+        map: 'Map:uppercase,input',
         bind: 'Bind:router',
         fallback: 'Fallback',
         retry: 'Retry:3,1000',
@@ -625,6 +962,67 @@
       };
     }
 
+    function updateViewportTransform() {
+      const { x, y, scale } = state.viewport;
+      canvasInner.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+      const gridSize = state.gridEnabled ? state.gridSize * scale : 100000;
+      canvas.style.setProperty('--grid-size', `${gridSize}px`);
+      canvas.style.setProperty('--grid-x', `${x}px`);
+      canvas.style.setProperty('--grid-y', `${y}px`);
+      document.getElementById('zoom-label').textContent = `${Math.round(scale * 100)}%`;
+      minimap.classList.toggle('active', state.minimapEnabled);
+      renderMinimap();
+    }
+
+    function screenToWorld(clientX, clientY) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (clientX - rect.left - state.viewport.x) / state.viewport.scale,
+        y: (clientY - rect.top - state.viewport.y) / state.viewport.scale
+      };
+    }
+
+    function worldToMinimap(pt, origin, scale) {
+      return {
+        x: (pt.x - origin.x) * scale,
+        y: (pt.y - origin.y) * scale
+      };
+    }
+
+    function zoomAt(clientX, clientY, deltaScale) {
+      const oldScale = state.viewport.scale;
+      const newScale = Math.min(2.5, Math.max(0.3, oldScale * deltaScale));
+      const world = screenToWorld(clientX, clientY);
+      state.viewport.scale = newScale;
+      state.viewport.x = clientX - canvas.getBoundingClientRect().left - world.x * newScale;
+      state.viewport.y = clientY - canvas.getBoundingClientRect().top - world.y * newScale;
+      updateViewportTransform();
+      renderConnections();
+    }
+
+    function zoomIn() { zoomAt(canvas.getBoundingClientRect().left + 200, canvas.getBoundingClientRect().top + 200, 1.1); }
+    function zoomOut() { zoomAt(canvas.getBoundingClientRect().left + 200, canvas.getBoundingClientRect().top + 200, 0.9); }
+    function resetZoom() {
+      state.viewport = { x: 40, y: 40, scale: 1 };
+      updateViewportTransform();
+      renderConnections();
+    }
+
+    function fitToView() {
+      if (state.nodes.length === 0) return;
+      const bounds = getNodeBounds();
+      const rect = canvas.getBoundingClientRect();
+      const padding = 80;
+      const width = Math.max(1, bounds.maxX - bounds.minX + padding * 2);
+      const height = Math.max(1, bounds.maxY - bounds.minY + padding * 2);
+      const scale = Math.min(rect.width / width, rect.height / height);
+      state.viewport.scale = Math.min(2.0, Math.max(0.3, scale));
+      state.viewport.x = rect.width / 2 - (bounds.minX + (bounds.maxX - bounds.minX) / 2) * state.viewport.scale;
+      state.viewport.y = rect.height / 2 - (bounds.minY + (bounds.maxY - bounds.minY) / 2) * state.viewport.scale;
+      updateViewportTransform();
+      renderConnections();
+    }
+
     function nodeShape(node) {
       const diamondTypes = ['merge', 'quorum', 'gate', 'fallback', 'loop'];
       const subTypes = ['map', 'bind', 'retry'];
@@ -633,7 +1031,170 @@
       return ['[', ']'];
     }
 
-    function generateMermaidForGraph(nodes, connections, direction = 'LR') {
+    function applySnap(pos, useGrid = true, size = { w: 180, h: 80 }) {
+      let { x, y } = pos;
+      if (!state.snapEnabled) return { x, y };
+      if (useGrid && state.gridEnabled) {
+        x = Math.round(x / state.gridSize) * state.gridSize;
+        y = Math.round(y / state.gridSize) * state.gridSize;
+      }
+      const threshold = 8;
+      state.nodes.forEach(n => {
+        if (state.dragNode && n.id === state.dragNode.id) return;
+        const w = n._w || 180;
+        const h = n._h || 80;
+        if (Math.abs(x - n.x) < threshold) x = n.x;
+        if (Math.abs(y - n.y) < threshold) y = n.y;
+        if (Math.abs((x + size.w) - (n.x + w)) < threshold) x = n.x + w - size.w;
+        if (Math.abs((y + size.h) - (n.y + h)) < threshold) y = n.y + h - size.h;
+        const cx = x + size.w / 2;
+        const cy = y + size.h / 2;
+        const ncx = n.x + w / 2;
+        const ncy = n.y + h / 2;
+        if (Math.abs(cx - ncx) < threshold) x = ncx - size.w / 2;
+        if (Math.abs(cy - ncy) < threshold) y = ncy - size.h / 2;
+      });
+      return { x, y };
+    }
+
+    function getNodeBounds() {
+      if (state.nodes.length === 0) return { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      state.nodes.forEach(n => {
+        const w = n._w || 180;
+        const h = n._h || 80;
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + w);
+        maxY = Math.max(maxY, n.y + h);
+      });
+      return { minX, minY, maxX, maxY };
+    }
+
+    function renderMinimap() {
+      if (!state.minimapEnabled) return;
+      const rect = minimapCanvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      minimapCanvas.width = w * devicePixelRatio;
+      minimapCanvas.height = h * devicePixelRatio;
+      minimapCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      minimapCtx.clearRect(0, 0, w, h);
+
+      const bounds = getNodeBounds();
+      const pad = 40;
+      const bw = Math.max(1, bounds.maxX - bounds.minX + pad * 2);
+      const bh = Math.max(1, bounds.maxY - bounds.minY + pad * 2);
+      const scale = Math.min(w / bw, h / bh);
+      const origin = { x: bounds.minX - pad, y: bounds.minY - pad };
+      state.minimapTransform = { origin, scale, width: w, height: h };
+
+      // edges
+      minimapCtx.strokeStyle = '#3b82f6';
+      minimapCtx.lineWidth = 1;
+      state.connections.forEach(([from, to]) => {
+        const a = state.nodes.find(n => n.id === from);
+        const b = state.nodes.find(n => n.id === to);
+        if (!a || !b) return;
+        const pa = worldToMinimap({ x: a.x + (a._w || 180), y: a.y + (a._h || 80) / 2 }, origin, scale);
+        const pb = worldToMinimap({ x: b.x, y: b.y + (b._h || 80) / 2 }, origin, scale);
+        minimapCtx.beginPath();
+        minimapCtx.moveTo(pa.x, pa.y);
+        minimapCtx.lineTo(pb.x, pb.y);
+        minimapCtx.stroke();
+      });
+
+      // nodes
+      minimapCtx.fillStyle = '#94a3b8';
+      state.nodes.forEach(n => {
+        const p = worldToMinimap({ x: n.x, y: n.y }, origin, scale);
+        const ww = (n._w || 180) * scale;
+        const hh = (n._h || 80) * scale;
+        minimapCtx.fillRect(p.x, p.y, ww, hh);
+      });
+
+      // viewport
+      const viewW = canvas.clientWidth / state.viewport.scale;
+      const viewH = canvas.clientHeight / state.viewport.scale;
+      const viewX = (-state.viewport.x) / state.viewport.scale;
+      const viewY = (-state.viewport.y) / state.viewport.scale;
+      const vp = worldToMinimap({ x: viewX, y: viewY }, origin, scale);
+      minimapCtx.strokeStyle = '#fbbf24';
+      minimapCtx.lineWidth = 2;
+      minimapCtx.strokeRect(vp.x, vp.y, viewW * scale, viewH * scale);
+    }
+
+    function moveViewportToMinimap(e) {
+      if (!state.minimapEnabled || !state.minimapTransform) return;
+      const rect = minimapCanvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const { origin, scale } = state.minimapTransform;
+      const worldX = x / scale + origin.x;
+      const worldY = y / scale + origin.y;
+      const canvasRect = canvas.getBoundingClientRect();
+      state.viewport.x = canvasRect.width / 2 - worldX * state.viewport.scale;
+      state.viewport.y = canvasRect.height / 2 - worldY * state.viewport.scale;
+      updateViewportTransform();
+      renderConnections();
+    }
+
+    function renderPresetMini(svgEl, preset) {
+      if (!svgEl) return;
+      while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild);
+      const width = 160;
+      const height = 70;
+      svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      const nodes = preset.nodes || [];
+      if (nodes.length === 0) return;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      nodes.forEach(n => {
+        minX = Math.min(minX, n.x);
+        minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + 120);
+        maxY = Math.max(maxY, n.y + 60);
+      });
+      const pad = 10;
+      const spanX = Math.max(1, maxX - minX);
+      const spanY = Math.max(1, maxY - minY);
+      const scale = Math.min((width - pad * 2) / spanX, (height - pad * 2) / spanY);
+      const ox = pad - minX * scale;
+      const oy = pad - minY * scale;
+
+      const ns = 'http://www.w3.org/2000/svg';
+      (preset.connections || []).forEach(c => {
+        const from = Array.isArray(c) ? c[0] : c.from;
+        const to = Array.isArray(c) ? c[1] : c.to;
+        const a = nodes.find(n => n.id === from);
+        const b = nodes.find(n => n.id === to);
+        if (!a || !b) return;
+        const x1 = (a.x + 120) * scale + ox;
+        const y1 = (a.y + 30) * scale + oy;
+        const x2 = b.x * scale + ox;
+        const y2 = (b.y + 30) * scale + oy;
+        const path = document.createElementNS(ns, 'path');
+        const midX = (x1 + x2) / 2;
+        path.setAttribute('d', `M${x1},${y1} L${midX},${y1} L${midX},${y2} L${x2},${y2}`);
+        path.setAttribute('stroke', '#4fc3f7');
+        path.setAttribute('stroke-width', '1');
+        path.setAttribute('fill', 'none');
+        svgEl.appendChild(path);
+      });
+
+      nodes.forEach(n => {
+        const rect = document.createElementNS(ns, 'rect');
+        rect.setAttribute('x', n.x * scale + ox);
+        rect.setAttribute('y', n.y * scale + oy);
+        rect.setAttribute('width', 120 * scale);
+        rect.setAttribute('height', 50 * scale);
+        rect.setAttribute('rx', 6 * scale);
+        rect.setAttribute('fill', '#1f2937');
+        rect.setAttribute('stroke', '#334155');
+        svgEl.appendChild(rect);
+      });
+    }
+
+    function generateMermaidForGraph(nodes, connections, direction = 'LR', edgeLabels = {}) {
       if (!nodes || nodes.length === 0) return `graph ${direction}\n    %% Empty graph`;
 
       let mermaid = `graph ${direction}\n`;
@@ -641,8 +1202,16 @@
         const [open, close] = nodeShape(node);
         mermaid += `    ${node.id}${open}${node.config}${close}\n`;
       });
-      connections.forEach(([from, to]) => {
-        mermaid += `    ${from} --> ${to}\n`;
+      connections.forEach(c => {
+        const from = Array.isArray(c) ? c[0] : c.from;
+        const to = Array.isArray(c) ? c[1] : c.to;
+        const label = edgeLabels[connectionKey(from, to)] || (c && c.input ? c.input : '');
+        if (label) {
+          const safeLabel = String(label).replaceAll('|', '\\|');
+          mermaid += `    ${from} -->|${safeLabel}| ${to}\n`;
+        } else {
+          mermaid += `    ${from} --> ${to}\n`;
+        }
       });
       return mermaid;
     }
@@ -683,7 +1252,7 @@
       } else {
         if (node.detail.graph) {
           const g = node.detail.graph;
-          contentEl.textContent = generateMermaidForGraph(g.nodes || [], g.connections || [], g.direction || 'LR');
+          contentEl.textContent = generateMermaidForGraph(g.nodes || [], g.connections || [], g.direction || 'LR', g.edgeLabels || {});
         } else {
           contentEl.textContent = node.detail.mermaid || JSON.stringify(node.detail, null, 2);
         }
@@ -694,7 +1263,9 @@
       const fromNode = state.nodes.find(n => n.id === nodeId);
       state.connecting = { from: nodeId };
       if (fromNode) {
-        state.connectingPos = { x: fromNode.x + 180, y: fromNode.y + 40 };
+        const w = fromNode._w || 180;
+        const h = fromNode._h || 80;
+        state.connectingPos = { x: fromNode.x + w, y: fromNode.y + h / 2 };
       } else {
         state.connectingPos = null;
       }
@@ -703,24 +1274,132 @@
     function clearConnecting() {
       state.connecting = null;
       state.connectingPos = null;
+      state.hoverPort = null;
     }
 
-    // Render nodes
-    function render() {
-      // Clear existing nodes
-      canvas.querySelectorAll('.canvas-node').forEach(el => el.remove());
+    function invalidateChainFull() {
+      state.chainFull = null;
+    }
 
-      // Render nodes
+    function connectionKey(from, to) {
+      return `${from}::${to}`;
+    }
+
+    function getEdgeLabel(from, to) {
+      return state.edgeLabels[connectionKey(from, to)] || '';
+    }
+
+    function setEdgeLabel(from, to, label) {
+      const key = connectionKey(from, to);
+      const trimmed = (label || '').trim();
+      if (trimmed) {
+        state.edgeLabels[key] = trimmed;
+      } else {
+        delete state.edgeLabels[key];
+      }
+      invalidateChainFull();
+    }
+
+    function addConnection(from, to) {
+      const exists = state.connections.some(c => c[0] === from && c[1] === to);
+      if (exists) return false;
+      state.connections.push([from, to]);
+      invalidateChainFull();
+      updateOutput();
+      return true;
+    }
+
+    function clearValidationMarks() {
+      state.validationErrors = new Set();
+      state.validationWarnings = new Set();
+    }
+
+    function setValidationMarks(errors = [], warnings = []) {
+      state.validationErrors = new Set(errors);
+      state.validationWarnings = new Set(warnings);
+      render();
+    }
+
+    function extractNodeIds(message) {
+      const ids = new Set();
+      if (!message) return [];
+      const patterns = [
+        /Node '([^']+)'/gi,
+        /node '([^']+)'/gi,
+        /Merge ([A-Za-z0-9_-]+)/g,
+        /involving ([A-Za-z0-9_-]+)/g
+      ];
+      patterns.forEach(re => {
+        let match;
+        while ((match = re.exec(message)) !== null) {
+          ids.add(match[1]);
+        }
+      });
+      return Array.from(ids);
+    }
+
+    function selectConnection(from, to) {
+      state.selectedConnection = { from, to };
+      state.selectedNode = null;
+      renderConnections();
+    }
+
+    function clearSelection() {
+      state.selectedNode = null;
+      state.selectedConnection = null;
+      renderConnections();
+    }
+
+    function removeConnection(from, to) {
+      state.connections = state.connections.filter(c => !(c[0] === from && c[1] === to));
+      delete state.edgeLabels[connectionKey(from, to)];
+      state.selectedConnection = null;
+      invalidateChainFull();
+      updateOutput();
+      render();
+    }
+
+    function removeNode(nodeId) {
+      state.nodes = state.nodes.filter(n => n.id !== nodeId);
+      state.connections = state.connections.filter(c => {
+        const keep = c[0] !== nodeId && c[1] !== nodeId;
+        if (!keep) delete state.edgeLabels[connectionKey(c[0], c[1])];
+        return keep;
+      });
+      state.selectedNode = null;
+      invalidateChainFull();
+      updateOutput();
+      render();
+    }
+
+    function measureNode(el, node) {
+      const rect = el.getBoundingClientRect();
+      node._w = rect.width / state.viewport.scale;
+      node._h = rect.height / state.viewport.scale;
+    }
+
+    function render() {
+      canvasInner.querySelectorAll('.canvas-node').forEach(el => el.remove());
+      const measurements = [];
+
       state.nodes.forEach(node => {
         const el = document.createElement('div');
         const isConnecting = state.connecting && state.connecting.from === node.id;
+        const isCandidate = state.connecting && state.hoverPort && state.hoverPort.nodeId === node.id && state.hoverPort.port === 'in';
         const outClass = isConnecting ? 'port port-out active' : 'port port-out';
+        const inClass = isCandidate ? 'port port-in candidate' : 'port port-in';
         const detailBadge = node.detail ? '<div class="detail-badge" data-action="detail">⋯</div>' : '';
-        el.className = 'canvas-node' + (state.selectedNode === node.id ? ' selected' : '') + (isConnecting ? ' connecting' : '');
+        const hasError = state.validationErrors.has(node.id);
+        const hasWarn = !hasError && state.validationWarnings.has(node.id);
+        el.className = 'canvas-node'
+          + (state.selectedNode === node.id ? ' selected' : '')
+          + (isConnecting ? ' connecting' : '')
+          + (hasError ? ' error' : '')
+          + (hasWarn ? ' warn' : '');
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
         el.innerHTML = `
-          <div class="port port-in" data-port="in"></div>
+          <div class="${inClass}" data-port="in"></div>
           <div class="node-type">${node.type}</div>
           <div class="node-label">${node.label}</div>
           <div class="node-config">${node.config}</div>
@@ -728,19 +1407,36 @@
           <div class="${outClass}" data-port="out"></div>
         `;
         el.dataset.id = node.id;
+        node._el = el;
 
-        // Drag to move
-        el.addEventListener('mousedown', e => {
+        el.addEventListener('pointerdown', e => {
           if (e.target.classList.contains('port')) return;
+          if (state.spacePressed || e.button === 1) {
+            beginPan(e);
+            return;
+          }
           clearConnecting();
-          state.dragNode = node;
           state.selectedNode = node.id;
+          state.selectedConnection = null;
+          const world = screenToWorld(e.clientX, e.clientY);
+          state.dragNode = node;
+          state.dragNodeEl = el;
+          state.dragOffset = { x: world.x - node.x, y: world.y - node.y };
           render();
         });
 
-        // Port click for connections
         el.querySelectorAll('.port').forEach(port => {
-          port.addEventListener('click', e => {
+          port.addEventListener('pointerenter', () => {
+            state.hoverPort = { nodeId: node.id, port: port.dataset.port };
+            render();
+          });
+          port.addEventListener('pointerleave', () => {
+            if (state.hoverPort && state.hoverPort.nodeId === node.id && state.hoverPort.port === port.dataset.port) {
+              state.hoverPort = null;
+              render();
+            }
+          });
+          port.addEventListener('pointerdown', e => {
             e.stopPropagation();
             if (port.dataset.port === 'out') {
               if (state.connecting && state.connecting.from === node.id) {
@@ -748,23 +1444,15 @@
               } else {
                 setConnecting(node.id);
               }
+              renderConnections();
+            } else if (port.dataset.port === 'in' && state.connecting && state.connecting.from !== node.id) {
+              addConnection(state.connecting.from, node.id);
+              clearConnecting();
               render();
-              return;
             }
-
-            if (state.connecting && port.dataset.port === 'in' && state.connecting.from !== node.id) {
-              const exists = state.connections.some(c => c[0] === state.connecting.from && c[1] === node.id);
-              if (!exists) {
-                state.connections.push([state.connecting.from, node.id]);
-                updateOutput();
-              }
-            }
-            clearConnecting();
-            render();
           });
         });
 
-        // Detail view
         const badge = el.querySelector('.detail-badge');
         if (badge) {
           badge.addEventListener('click', e => {
@@ -778,42 +1466,107 @@
           }
         });
 
-        canvas.appendChild(el);
+        canvasInner.appendChild(el);
+        measurements.push({ el, node });
       });
 
+      measurements.forEach(({ el, node }) => measureNode(el, node));
       renderConnections();
+      renderMinimap();
     }
 
-    // Mouse move for dragging
-    document.addEventListener('mousemove', e => {
+    function updateConnectingPos(clientX, clientY) {
+      const world = screenToWorld(clientX, clientY);
+      state.connectingPos = { x: world.x, y: world.y };
+    }
+
+    function beginPan(e) {
+      state.isPanning = true;
+      state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.x, oy: state.viewport.y };
+      canvas.classList.add('panning');
+    }
+
+    function endPan() {
+      state.isPanning = false;
+      canvas.classList.remove('panning');
+    }
+
+    document.addEventListener('pointermove', e => {
       if (state.dragNode) {
-        const rect = canvas.getBoundingClientRect();
-        state.dragNode.x = e.clientX - rect.left - 90;
-        state.dragNode.y = e.clientY - rect.top - 40;
-        render();
-        updateOutput();
+        const world = screenToWorld(e.clientX, e.clientY);
+        const size = { w: state.dragNode._w || 180, h: state.dragNode._h || 80 };
+        const snapped = applySnap({ x: world.x - state.dragOffset.x, y: world.y - state.dragOffset.y }, true, size);
+        state.dragNode.x = snapped.x;
+        state.dragNode.y = snapped.y;
+        if (state.dragNodeEl) {
+          state.dragNodeEl.style.left = state.dragNode.x + 'px';
+          state.dragNodeEl.style.top = state.dragNode.y + 'px';
+        }
+        renderConnections();
+        return;
+      }
+
+      if (state.isPanning) {
+        const dx = e.clientX - state.panStart.x;
+        const dy = e.clientY - state.panStart.y;
+        state.viewport.x = state.panStart.ox + dx;
+        state.viewport.y = state.panStart.oy + dy;
+        updateViewportTransform();
+        renderConnections();
+        return;
+      }
+
+      if (state.minimapDragging) {
+        moveViewportToMinimap(e);
         return;
       }
 
       if (state.connecting) {
-        const rect = canvas.getBoundingClientRect();
-        state.connectingPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        updateConnectingPos(e.clientX, e.clientY);
         renderConnections();
       }
     });
 
-    document.addEventListener('mouseup', () => {
-      state.dragNode = null;
+    document.addEventListener('pointerup', () => {
+      if (state.dragNode) {
+        state.dragNode = null;
+        state.dragNodeEl = null;
+        render();
+        updateOutput();
+      }
+      if (state.connecting) {
+        if (state.hoverPort && state.hoverPort.port === 'in' && state.hoverPort.nodeId !== state.connecting.from) {
+          addConnection(state.connecting.from, state.hoverPort.nodeId);
+        }
+        clearConnecting();
+        render();
+      }
+      if (state.isPanning) endPan();
+      if (state.minimapDragging) state.minimapDragging = false;
+    });
+
+    canvas.addEventListener('pointerdown', e => {
+      if (e.target.closest('.canvas-node')) return;
+      clearSelection();
+      if (state.spacePressed || e.button === 1) {
+        beginPan(e);
+      }
     });
 
     canvas.addEventListener('click', e => {
-      if (state.connecting && e.target === canvas) {
+      if (state.connecting && !e.target.closest('.canvas-node')) {
         clearConnecting();
         render();
       }
     });
 
     document.addEventListener('keydown', e => {
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+      if (e.code === 'Space') {
+        state.spacePressed = true;
+        canvas.classList.add('pannable');
+        e.preventDefault();
+      }
       if (e.key === 'Escape' && state.connecting) {
         clearConnecting();
         render();
@@ -821,46 +1574,330 @@
       if (e.key === 'Escape' && document.getElementById('detail-modal').classList.contains('active')) {
         closeDetail();
       }
+      if (e.key === 'Escape') {
+        clearSelection();
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedConnection) {
+        removeConnection(state.selectedConnection.from, state.selectedConnection.to);
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedNode) {
+        removeNode(state.selectedNode);
+      }
+    });
+
+    document.addEventListener('keyup', e => {
+      if (e.code === 'Space') {
+        state.spacePressed = false;
+        canvas.classList.remove('pannable');
+      }
+    });
+
+    canvas.addEventListener('wheel', e => {
+      if (state.spacePressed || e.ctrlKey || e.metaKey) {
+        const delta = e.deltaY < 0 ? 1.08 : 0.92;
+        zoomAt(e.clientX, e.clientY, delta);
+        e.preventDefault();
+        return;
+      }
+      if (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) > 0) {
+        state.viewport.x -= e.deltaX;
+        state.viewport.y -= e.deltaY;
+        updateViewportTransform();
+        renderConnections();
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    minimapCanvas.addEventListener('pointerdown', e => {
+      if (!state.minimapEnabled) return;
+      state.minimapDragging = true;
+      moveViewportToMinimap(e);
+      e.preventDefault();
     });
 
     // Render connections
     function renderConnections() {
-      let paths = '';
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      const ns = 'http://www.w3.org/2000/svg';
+      const defs = document.createElementNS(ns, 'defs');
+      const marker = document.createElementNS(ns, 'marker');
+      marker.setAttribute('id', 'arrowhead');
+      marker.setAttribute('markerWidth', '8');
+      marker.setAttribute('markerHeight', '6');
+      marker.setAttribute('refX', '8');
+      marker.setAttribute('refY', '3');
+      marker.setAttribute('orient', 'auto');
+      const arrowPath = document.createElementNS(ns, 'path');
+      arrowPath.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
+      arrowPath.setAttribute('fill', '#4fc3f7');
+      marker.appendChild(arrowPath);
+
+      const markerSel = document.createElementNS(ns, 'marker');
+      markerSel.setAttribute('id', 'arrowhead-selected');
+      markerSel.setAttribute('markerWidth', '8');
+      markerSel.setAttribute('markerHeight', '6');
+      markerSel.setAttribute('refX', '8');
+      markerSel.setAttribute('refY', '3');
+      markerSel.setAttribute('orient', 'auto');
+      const arrowSelPath = document.createElementNS(ns, 'path');
+      arrowSelPath.setAttribute('d', 'M0,0 L8,3 L0,6 Z');
+      arrowSelPath.setAttribute('fill', '#ffb74d');
+      markerSel.appendChild(arrowSelPath);
+
+      defs.appendChild(marker);
+      defs.appendChild(markerSel);
+      svg.appendChild(defs);
+
+      function orthoPath(ax, ay, bx, by) {
+        const gap = 40;
+        if (bx >= ax + gap) {
+          const midX = (ax + bx) / 2;
+          return `M${ax},${ay} L${midX},${ay} L${midX},${by} L${bx},${by}`;
+        }
+        const bendX = ax + gap;
+        const midY = ay + (by - ay) / 2;
+        const backX = bx - gap;
+        return `M${ax},${ay} L${bendX},${ay} L${bendX},${midY} L${backX},${midY} L${backX},${by} L${bx},${by}`;
+      }
+
       state.connections.forEach(([fromId, toId]) => {
         const fromNode = state.nodes.find(n => n.id === fromId);
         const toNode = state.nodes.find(n => n.id === toId);
-        if (fromNode && toNode) {
-          const x1 = fromNode.x + 180;
-          const y1 = fromNode.y + 40;
-          const x2 = toNode.x;
-          const y2 = toNode.y + 40;
-          const cx = (x1 + x2) / 2;
-          paths += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}"/>`;
+        if (!fromNode || !toNode) return;
+        const ax = fromNode.x + (fromNode._w || 180);
+        const ay = fromNode.y + (fromNode._h || 80) / 2;
+        const bx = toNode.x;
+        const by = toNode.y + (toNode._h || 80) / 2;
+        const path = document.createElementNS(ns, 'path');
+        path.setAttribute('d', orthoPath(ax, ay, bx, by));
+        if (state.selectedConnection && state.selectedConnection.from === fromId && state.selectedConnection.to === toId) {
+          path.classList.add('selected');
+          path.setAttribute('marker-end', 'url(#arrowhead-selected)');
+        } else {
+          path.setAttribute('marker-end', 'url(#arrowhead)');
+        }
+        path.dataset.from = fromId;
+        path.dataset.to = toId;
+        path.addEventListener('click', e => {
+          e.stopPropagation();
+          selectConnection(fromId, toId);
+        });
+        path.addEventListener('dblclick', e => {
+          e.stopPropagation();
+          const current = getEdgeLabel(fromId, toId);
+          const next = prompt('Input key (optional):', current);
+          if (next === null) return;
+          setEdgeLabel(fromId, toId, next);
+          updateOutput();
+          renderConnections();
+        });
+        svg.appendChild(path);
+
+        const label = getEdgeLabel(fromId, toId);
+        if (label) {
+          const text = document.createElementNS(ns, 'text');
+          text.setAttribute('class', 'edge-label');
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('pointer-events', 'none');
+          const midX = (ax + bx) / 2;
+          const midY = (ay + by) / 2 - 6;
+          text.setAttribute('x', String(midX));
+          text.setAttribute('y', String(midY));
+          text.textContent = label;
+          svg.appendChild(text);
         }
       });
+
       if (state.connecting && state.connectingPos) {
         const fromNode = state.nodes.find(n => n.id === state.connecting.from);
         if (fromNode) {
-          const x1 = fromNode.x + 180;
-          const y1 = fromNode.y + 40;
-          const x2 = state.connectingPos.x;
-          const y2 = state.connectingPos.y;
-          const cx = (x1 + x2) / 2;
-          paths += `<path class="preview" d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}"/>`;
+          const ax = fromNode.x + (fromNode._w || 180);
+          const ay = fromNode.y + (fromNode._h || 80) / 2;
+          const bx = state.connectingPos.x;
+          const by = state.connectingPos.y;
+          const preview = document.createElementNS(ns, 'path');
+          preview.setAttribute('d', orthoPath(ax, ay, bx, by));
+          preview.classList.add('preview');
+          svg.appendChild(preview);
         }
       }
-      svg.innerHTML = paths;
     }
 
-    // Generate Mermaid
+    function generateMermaidRaw() {
+      const mermaid = generateMermaidForGraph(state.nodes, state.connections, 'LR', state.edgeLabels);
+      if (!state.chainFull) return mermaid;
+      const fullJson = JSON.stringify(state.chainFull);
+      const lines = mermaid.split('\n');
+      if (lines.length > 0) {
+        lines.splice(1, 0, `    %% @chain_full ${fullJson}`, `    %% @chain_json ${fullJson}`);
+      }
+      return lines.join('\n');
+    }
+
+    // Generate Mermaid (display)
     function generateMermaid() {
-      const mermaid = generateMermaidForGraph(state.nodes, state.connections, 'LR');
+      const mermaid = generateMermaidRaw();
       return state.showMeta ? mermaid : stripMeta(mermaid);
+    }
+
+    function normalizeChain() {
+      const nodes = [...state.nodes].map(n => ({
+        id: n.id,
+        type: n.type,
+        label: n.label,
+        config: n.config
+      })).sort((a, b) => a.id.localeCompare(b.id));
+      const connections = [...state.connections]
+        .map(c => ({
+          from: c[0],
+          to: c[1],
+          input: getEdgeLabel(c[0], c[1])
+        }))
+        .sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+      return JSON.stringify({ nodes, connections });
+    }
+
+    function serializeConnections() {
+      return state.connections.map(([from, to]) => {
+        const input = getEdgeLabel(from, to);
+        return input ? { from, to, input } : { from, to };
+      });
+    }
+
+    function hashString(str) {
+      let hash = 2166136261;
+      for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = (hash * 16777619) >>> 0;
+      }
+      return hash.toString(16).padStart(8, '0');
+    }
+
+    function computeIntegrity() {
+      const issues = [];
+      const warnings = [];
+      const nodeIds = state.nodes.map(n => n.id);
+      const idSet = new Set(nodeIds);
+      const dupIds = nodeIds.filter((id, idx) => nodeIds.indexOf(id) !== idx);
+      if (dupIds.length) issues.push(`Duplicate node ids: ${[...new Set(dupIds)].join(', ')}`);
+
+      const dangling = [];
+      state.connections.forEach(([from, to]) => {
+        if (!idSet.has(from) || !idSet.has(to)) dangling.push(`${from} -> ${to}`);
+      });
+      if (dangling.length) issues.push(`Dangling edges: ${dangling.join(', ')}`);
+
+      const incoming = {};
+      const outgoing = {};
+      state.nodes.forEach(n => {
+        incoming[n.id] = 0;
+        outgoing[n.id] = 0;
+      });
+      state.connections.forEach(([from, to]) => {
+        if (incoming[to] !== undefined) incoming[to] += 1;
+        if (outgoing[from] !== undefined) outgoing[from] += 1;
+      });
+
+      const outputs = state.nodes.filter(n => outgoing[n.id] === 0);
+      const inputs = state.nodes.filter(n => incoming[n.id] === 0);
+      const isolated = state.nodes.filter(n => incoming[n.id] === 0 && outgoing[n.id] === 0);
+
+      if (state.nodes.length > 0 && outputs.length === 0) {
+        issues.push('No output node (every node has an outgoing edge).');
+      }
+      if (state.nodes.length > 0 && inputs.length === 0) {
+        warnings.push('No input node (every node has an incoming edge).');
+      }
+      if (isolated.length) warnings.push(`Isolated nodes: ${isolated.map(n => n.id).join(', ')}`);
+
+      // Merge input requirement
+      state.nodes.filter(n => n.type === 'merge').forEach(n => {
+        const inputsCount = state.connections.filter(c => c[1] === n.id).length;
+        if (inputsCount < 2) issues.push(`Merge ${n.id} needs at least 2 inputs (has ${inputsCount})`);
+      });
+
+      // Cycle check (informational)
+      const visited = new Set();
+      const cycleNodes = new Set();
+      function hasCycle(nodeId, path = new Set()) {
+        if (path.has(nodeId)) return true;
+        if (visited.has(nodeId)) return false;
+        visited.add(nodeId);
+        path.add(nodeId);
+        const outgoingEdges = state.connections.filter(c => c[0] === nodeId);
+        for (const [, to] of outgoingEdges) {
+          if (hasCycle(to, new Set(path))) return true;
+        }
+        return false;
+      }
+      state.nodes.forEach(n => {
+        if (hasCycle(n.id)) cycleNodes.add(n.id);
+      });
+      if (cycleNodes.size > 0) warnings.push(`Cycle detected (verify loop semantics): ${[...cycleNodes].join(', ')}`);
+
+      const normalized = normalizeChain();
+      const hash = hashString(normalized);
+      return {
+        status: issues.length === 0 ? 'PASS' : 'FAIL',
+        nodeCount: state.nodes.length,
+        edgeCount: state.connections.length,
+        inputs: inputs.length,
+        outputs: outputs.length,
+        isolated: isolated.length,
+        issues,
+        warnings,
+        hash
+      };
+    }
+
+    function renderIntegrity() {
+      const report = computeIntegrity();
+      const lines = [];
+      lines.push(`Integrity: ${report.status}`);
+      lines.push(`Nodes: ${report.nodeCount}  Edges: ${report.edgeCount}`);
+      lines.push(`Inputs: ${report.inputs}  Outputs: ${report.outputs}  Isolated: ${report.isolated}`);
+      lines.push(`Normalized Hash: ${report.hash}`);
+      lines.push(`Chain Full: ${state.chainFull ? 'Yes' : 'No'}`);
+      if (state.lastValidation) {
+        lines.push(`Strict Validation: ${state.lastValidation}`);
+      } else {
+        lines.push('Strict Validation: (run Validate to check MCP strict mode)');
+      }
+      if (report.issues.length) {
+        lines.push('');
+        lines.push('Issues:');
+        report.issues.forEach(i => lines.push(`- ${i}`));
+      }
+      if (report.warnings.length) {
+        lines.push('');
+        lines.push('Warnings:');
+        report.warnings.forEach(w => lines.push(`- ${w}`));
+      }
+      return lines.join('\n');
+    }
+
+    function refreshActiveTab() {
+      const content = document.getElementById('output-content');
+      const active = document.querySelector('.tab.active');
+      if (!active) return;
+      switch (active.dataset.tab) {
+        case 'mermaid':
+          content.textContent = generateMermaid();
+          break;
+        case 'json':
+          content.textContent = JSON.stringify({ nodes: state.nodes, connections: serializeConnections() }, null, 2);
+          break;
+        case 'integrity':
+          content.textContent = renderIntegrity();
+          break;
+        case 'output':
+          content.textContent = state.lastOutput || '(No output yet - click Run)';
+          break;
+      }
     }
 
     // Update output
     function updateOutput() {
-      document.getElementById('output-content').textContent = generateMermaid();
+      refreshActiveTab();
     }
 
     // Tab switching
@@ -868,28 +1905,13 @@
       tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-
-        const content = document.getElementById('output-content');
-        switch (tab.dataset.tab) {
-          case 'mermaid':
-            content.textContent = generateMermaid();
-            break;
-          case 'json':
-            content.textContent = JSON.stringify({ nodes: state.nodes, connections: state.connections }, null, 2);
-            break;
-          case 'output':
-            content.textContent = state.lastOutput || '(No output yet - click Run)';
-            break;
-        }
+        refreshActiveTab();
       });
     });
 
     document.getElementById('show-meta').addEventListener('change', e => {
       state.showMeta = e.target.checked;
-      const active = document.querySelector('.tab.active');
-      if (active && active.dataset.tab === 'mermaid') {
-        document.getElementById('output-content').textContent = generateMermaid();
-      }
+      refreshActiveTab();
     });
 
     // Detail modal interactions
@@ -908,7 +1930,11 @@
     function clearCanvas() {
       state.nodes = [];
       state.connections = [];
+      state.edgeLabels = {};
       state.nodeCounter = 0;
+      state.lastValidation = null;
+      clearValidationMarks();
+      state.chainFull = null;
       clearConnecting();
       closeDetail();
       render();
@@ -929,6 +1955,7 @@
 
     function validateChainLocal() {
       const errors = [];
+      const errorNodes = new Set();
 
       // Check for cycles (simple check)
       const visited = new Set();
@@ -945,27 +1972,38 @@
       }
 
       state.nodes.forEach(n => {
-        if (hasCycle(n.id)) errors.push(`Cycle detected involving ${n.id}`);
+        if (hasCycle(n.id)) {
+          errors.push(`Cycle detected involving ${n.id}`);
+          errorNodes.add(n.id);
+        }
       });
 
       // Check merge inputs
       state.nodes.filter(n => n.type === 'merge').forEach(n => {
         const inputs = state.connections.filter(c => c[1] === n.id).length;
-        if (inputs < 2) errors.push(`Merge ${n.id} needs at least 2 inputs (has ${inputs})`);
+        if (inputs < 2) {
+          errors.push(`Merge ${n.id} needs at least 2 inputs (has ${inputs})`);
+          errorNodes.add(n.id);
+        }
       });
 
       if (errors.length === 0) {
         state.lastOutput = 'Local validation passed';
+        state.lastValidation = 'Local OK';
+        clearValidationMarks();
         setStatus('✅ Local validation passed');
       } else {
         state.lastOutput = 'Local validation errors:\n- ' + errors.join('\n- ');
+        state.lastValidation = `Local FAIL (${errors.length} issues)`;
+        setValidationMarks(Array.from(errorNodes), []);
         setStatus('❌ Local validation failed');
       }
       document.querySelector('[data-tab="output"]').click();
     }
 
     async function validateChain() {
-      const mermaid = generateMermaid();
+      const mermaid = generateMermaidRaw();
+      const hasChain = !!state.chainFull;
       setStatus('Validating (strict)...');
       try {
         const res = await fetch('http://localhost:8932/mcp', {
@@ -977,25 +2015,29 @@
             method: 'tools/call',
             params: {
               name: 'chain.validate',
-              arguments: {
-                mermaid: mermaid.replace(/\n/g, '\\n'),
-                strict: true
-              }
+              arguments: hasChain
+                ? { chain: state.chainFull, strict: true }
+                : { mermaid, strict: true }
             }
           })
         });
 
         const text = await res.text();
         const lines = text.split('\n').filter(l => l.startsWith('data:'));
-        if (lines.length === 0) throw new Error('No validation response');
-        const data = JSON.parse(lines[0].replace('data: ', ''));
+        const data = lines.length > 0
+          ? JSON.parse(lines[0].replace('data: ', ''))
+          : JSON.parse(text);
         if (data.result && !data.result.isError) {
           const msg = data.result.content?.[0]?.text || 'Validation passed';
           state.lastOutput = msg;
+          state.lastValidation = 'Strict OK';
+          clearValidationMarks();
           setStatus('✅ ' + msg);
         } else {
           const msg = data.result?.content?.[0]?.text || 'Validation failed';
           state.lastOutput = msg;
+          state.lastValidation = 'Strict FAIL';
+          setValidationMarks(extractNodeIds(msg), []);
           setStatus('❌ Validation failed');
         }
         document.querySelector('[data-tab="output"]').click();
@@ -1006,7 +2048,8 @@
     }
 
     async function runChain() {
-      const mermaid = generateMermaid();
+      const mermaid = generateMermaidRaw();
+      const hasChain = !!state.chainFull;
       setStatus('Running...');
 
       try {
@@ -1019,22 +2062,24 @@
             method: 'tools/call',
             params: {
               name: 'chain.run',
-              arguments: { mermaid: mermaid.replace(/\n/g, '\\n'), timeout: 120 }
+              arguments: hasChain
+                ? { chain: state.chainFull, timeout: 120 }
+                : { mermaid, timeout: 120 }
             }
           })
         });
 
         const text = await res.text();
         const lines = text.split('\n').filter(l => l.startsWith('data:'));
-        if (lines.length > 0) {
-          const data = JSON.parse(lines[0].replace('data: ', ''));
-          if (data.result && !data.result.isError) {
-            state.lastOutput = data.result.content?.[0]?.text || 'Success (no output)';
-            setStatus('✅ Chain completed');
-          } else {
-            state.lastOutput = 'Error: ' + (data.result?.content?.[0]?.text || 'Unknown error');
-            setStatus('❌ Chain failed');
-          }
+        const data = lines.length > 0
+          ? JSON.parse(lines[0].replace('data: ', ''))
+          : JSON.parse(text);
+        if (data.result && !data.result.isError) {
+          state.lastOutput = data.result.content?.[0]?.text || 'Success (no output)';
+          setStatus('✅ Chain completed');
+        } else {
+          state.lastOutput = 'Error: ' + (data.result?.content?.[0]?.text || 'Unknown error');
+          setStatus('❌ Chain failed');
         }
       } catch (e) {
         state.lastOutput = 'Error: ' + e.message;
@@ -1050,7 +2095,10 @@
     }
 
     // Initial render
+    renderPresetList();
+    updateViewportTransform();
     render();
+    updateOutput();
   </script>
 </body>
 </html>

@@ -1306,11 +1306,13 @@ let config_to_json (cfg : chain_config) : Yojson.Safe.t =
   ]
 
 (** Serialize node to JSON *)
-let rec node_to_json (n : node) : Yojson.Safe.t =
+let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe.t =
   let base = [("id", `String n.id)] in
   let input_mapping =
-    if n.input_mapping = [] then []
-    else [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
+    if n.input_mapping = [] then
+      if include_empty_inputs then [("inputs", `Assoc [])] else []
+    else
+      [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
   in
   let type_fields = match n.node_type with
     | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars } ->
@@ -1357,45 +1359,45 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           [("type", `String "tool"); ("name", `String name); ("args", args)]
 
     | Pipeline nodes ->
-        [("type", `String "pipeline"); ("nodes", `List (List.map node_to_json nodes))]
+        [("type", `String "pipeline"); ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes))]
 
     | Fanout nodes ->
-        [("type", `String "fanout"); ("nodes", `List (List.map node_to_json nodes))]
+        [("type", `String "fanout"); ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes))]
 
     | Quorum { required; nodes } ->
         [
           ("type", `String "quorum");
           ("required", `Int required);
-          ("nodes", `List (List.map node_to_json nodes));
+          ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes));
         ]
 
     | Gate { condition; then_node; else_node } ->
         let fields = [
           ("type", `String "gate");
           ("condition", `String condition);
-          ("then", node_to_json then_node);
+          ("then", node_to_json_with include_empty_inputs then_node);
         ] in
         (match else_node with
-         | Some en -> fields @ [("else", node_to_json en)]
+         | Some en -> fields @ [("else", node_to_json_with include_empty_inputs en)]
          | None -> fields)
 
     | Subgraph c ->
-        [("type", `String "subgraph"); ("graph", chain_to_json_inner c)]
+        [("type", `String "subgraph"); ("graph", chain_to_json_inner_with include_empty_inputs c)]
 
     | ChainRef ref_id ->
         [("type", `String "chain_ref"); ("ref", `String ref_id)]
 
     | Map { func; inner } ->
-        [("type", `String "map"); ("func", `String func); ("inner", node_to_json inner)]
+        [("type", `String "map"); ("func", `String func); ("inner", node_to_json_with include_empty_inputs inner)]
 
     | Bind { func; inner } ->
-        [("type", `String "bind"); ("func", `String func); ("inner", node_to_json inner)]
+        [("type", `String "bind"); ("func", `String func); ("inner", node_to_json_with include_empty_inputs inner)]
 
     | Merge { strategy; nodes } ->
         [
           ("type", `String "merge");
           ("strategy", `String (merge_strategy_to_string strategy));
-          ("nodes", `List (List.map node_to_json nodes));
+          ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes));
         ]
 
     | Threshold { metric; operator; value; input_node; on_pass; on_fail } ->
@@ -1404,10 +1406,10 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("metric", `String metric);
           ("operator", `String (threshold_op_to_string operator));
           ("value", `Float value);
-          ("input_node", node_to_json input_node);
+          ("input_node", node_to_json_with include_empty_inputs input_node);
         ] in
-        let fields = match on_pass with Some n -> fields @ [("on_pass", node_to_json n)] | None -> fields in
-        let fields = match on_fail with Some n -> fields @ [("on_fail", node_to_json n)] | None -> fields in
+        let fields = match on_pass with Some n -> fields @ [("on_pass", node_to_json_with include_empty_inputs n)] | None -> fields in
+        let fields = match on_fail with Some n -> fields @ [("on_fail", node_to_json_with include_empty_inputs n)] | None -> fields in
         fields
 
     | GoalDriven { goal_metric; goal_operator; goal_value; action_node;
@@ -1417,7 +1419,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("goal_metric", `String goal_metric);
           ("goal_operator", `String (threshold_op_to_string goal_operator));
           ("goal_value", `Float goal_value);
-          ("action_node", node_to_json action_node);
+          ("action_node", node_to_json_with include_empty_inputs action_node);
           ("measure_func", `String measure_func);
           ("max_iterations", `Int max_iterations);
           ("conversational", `Bool conversational);
@@ -1433,7 +1435,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
     | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
         let fields = [
           ("type", `String "evaluator");
-          ("candidates", `List (List.map node_to_json candidates));
+          ("candidates", `List (List.map (node_to_json_with include_empty_inputs) candidates));
           ("scoring_func", `String scoring_func);
           ("select_strategy", select_strategy_to_json select_strategy);
         ] in
@@ -1450,7 +1452,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
     | Retry { node = inner; max_attempts; backoff; retry_on } ->
         [
           ("type", `String "retry");
-          ("node", node_to_json inner);
+          ("node", node_to_json_with include_empty_inputs inner);
           ("max_attempts", `Int max_attempts);
           ("backoff", backoff_to_json backoff);
           ("retry_on", `List (List.map (fun s -> `String s) retry_on));
@@ -1459,14 +1461,14 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
     | Fallback { primary; fallbacks } ->
         [
           ("type", `String "fallback");
-          ("primary", node_to_json primary);
-          ("fallbacks", `List (List.map node_to_json fallbacks));
+          ("primary", node_to_json_with include_empty_inputs primary);
+          ("fallbacks", `List (List.map (node_to_json_with include_empty_inputs) fallbacks));
         ]
 
     | Race { nodes; timeout } ->
         let fields = [
           ("type", `String "race");
-          ("nodes", `List (List.map node_to_json nodes));
+          ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes));
         ] in
         (match timeout with
          | Some t -> fields @ [("timeout", `Float t)]
@@ -1500,7 +1502,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("type", `String "cache");
           ("key_expr", `String key_expr);
           ("ttl_seconds", `Int ttl_seconds);
-          ("inner", node_to_json inner);
+          ("inner", node_to_json_with include_empty_inputs inner);
         ]
 
     | Batch { batch_size; parallel; inner; collect_strategy } ->
@@ -1511,14 +1513,14 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
           ("type", `String "batch");
           ("batch_size", `Int batch_size);
           ("parallel", `Bool parallel);
-          ("inner", node_to_json inner);
+          ("inner", node_to_json_with include_empty_inputs inner);
           ("collect_strategy", `String strategy_str);
         ]
     | Spawn { clean; inner; pass_vars; inherit_cache } ->
         [
           ("type", `String "spawn");
           ("clean", `Bool clean);
-          ("inner", node_to_json inner);
+          ("inner", node_to_json_with include_empty_inputs inner);
           ("pass_vars", `List (List.map (fun v -> `String v) pass_vars));
           ("inherit_cache", `Bool inherit_cache);
         ]
@@ -1532,8 +1534,8 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         in
         [
           ("type", `String "mcts");
-          ("strategies", `List (List.map node_to_json strategies));
-          ("simulation", node_to_json simulation);
+          ("strategies", `List (List.map (node_to_json_with include_empty_inputs) strategies));
+          ("simulation", node_to_json_with include_empty_inputs simulation);
           ("evaluator", `String evaluator);
           ("evaluator_prompt", match evaluator_prompt with Some p -> `String p | None -> `Null);
           ("policy", policy_json);
@@ -1553,7 +1555,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         in
         [
           ("type", `String "stream_merge");
-          ("nodes", `List (List.map node_to_json nodes));
+          ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes));
           ("reducer", reducer_json);
           ("initial", `String initial);
           ("min_results", match min_results with Some n -> `Int n | None -> `Null);
@@ -1576,7 +1578,7 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
         in
         let fields = [
           ("type", `String "feedback_loop");
-          ("generator", node_to_json generator);
+          ("generator", node_to_json_with include_empty_inputs generator);
           ("evaluator_config", evaluator_config_json);
           ("improver_prompt", `String improver_prompt);
           ("max_iterations", `Int max_iterations);
@@ -1592,19 +1594,23 @@ let rec node_to_json (n : node) : Yojson.Safe.t =
   `Assoc (base @ type_fields @ input_mapping)
 
 (** Serialize chain to JSON (inner) *)
-and chain_to_json_inner (c : chain) : Yojson.Safe.t =
+and chain_to_json_inner_with (include_empty_inputs : bool) (c : chain) : Yojson.Safe.t =
   `Assoc [
     ("id", `String c.id);
-    ("nodes", `List (List.map node_to_json c.nodes));
+    ("nodes", `List (List.map (node_to_json_with include_empty_inputs) c.nodes));
     ("output", `String c.output);
     ("config", config_to_json c.config);
   ]
 
+let node_to_json (n : node) : Yojson.Safe.t =
+  node_to_json_with false n
+
 (** Main entry point: Serialize chain to JSON *)
-let chain_to_json (c : chain) : Yojson.Safe.t = chain_to_json_inner c
+let chain_to_json ?(include_empty_inputs = false) (c : chain) : Yojson.Safe.t =
+  chain_to_json_inner_with include_empty_inputs c
 
 (** Serialize chain to JSON string (pretty-printed) *)
-let chain_to_json_string ?(pretty=true) (c : chain) : string =
-  let json = chain_to_json c in
+let chain_to_json_string ?(pretty=true) ?(include_empty_inputs = false) (c : chain) : string =
+  let json = chain_to_json ~include_empty_inputs c in
   if pretty then Yojson.Safe.pretty_to_string json
   else Yojson.Safe.to_string json
