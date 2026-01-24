@@ -143,9 +143,14 @@ let test_oauth_status_runs () =
   if not (binary_exists "oauth-status") then
     skip ()
   else begin
-    let _, _, status = run_command "oauth-status --quiet" None in
-    (* Should exit successfully (may output nothing if all is well) *)
-    check bool "exit success" true (status = Unix.WEXITED 0)
+    let stdout, _, status = run_command "oauth-status --json" None in
+    (* Exit code is 0 when all OK, 1 when auth issues are detected. *)
+    check bool "exit success or auth issues" true
+      (status = Unix.WEXITED 0 || status = Unix.WEXITED 1);
+    check bool "outputs json" true (starts_with ~prefix:"{" (String.trim stdout));
+    check bool "has accounts" true (contains ~substring:"\"accounts\"" stdout);
+    check bool "has issues" true (contains ~substring:"\"issues\"" stdout);
+    check bool "has all_ok" true (contains ~substring:"\"all_ok\"" stdout)
   end
 
 (* ============================================================================
