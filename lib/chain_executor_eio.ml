@@ -672,17 +672,26 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
             add_message conv ~role:"user" ~content:final_prompt ~iteration ~model:conv.current_model;
             (merged_prompt, Some conv, conv.current_model)
       in
-      let tools_count =
+      let (tools_count, tools_shape, tools_invalid) =
         match tools with
-        | Some (`List items) -> List.length items
-        | Some _ -> 1
-        | None -> 0
+        | None -> (0, "none", false)
+        | Some (`List items) -> (List.length items, "list", false)
+        | Some _ -> (0, "invalid", true)
       in
       let lower_model = String.lowercase_ascii effective_model in
-      let tools_enabled =
-        tools_count > 0 &&
-        (lower_model = "ollama" || (String.length lower_model > 7 && String.sub lower_model 0 7 = "ollama:"))
+      let supports_tools =
+        (lower_model = "ollama" ||
+         (String.length lower_model > 7 && String.sub lower_model 0 7 = "ollama:"))
       in
+      let tools_enabled = tools_count > 0 && (not tools_invalid) && supports_tools in
+      let tool_choice_reason =
+        if tools = None then "no_tools"
+        else if tools_invalid then "invalid_schema"
+        else if tools_count = 0 then "empty_tools"
+        else if not supports_tools then "model_unsupported"
+        else "enabled"
+      in
+      let tools_arg = if tools_enabled then tools else None in
       if Run_log_eio.enabled () then
         Run_log_eio.record_event
           ~event:"tool_choice"
@@ -696,6 +705,10 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
           ~extra:[
             ("tools_count", string_of_int tools_count);
             ("tools_enabled", string_of_bool tools_enabled);
+            ("tools_shape", tools_shape);
+            ("tools_invalid", string_of_bool tools_invalid);
+            ("supports_tools", string_of_bool supports_tools);
+            ("decision_reason", tool_choice_reason);
           ]
           ()
       else
@@ -714,7 +727,7 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
         | None -> None
       in
 
-      let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_with_context ?tools () in
+      let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_with_context ?tools:tools_arg () in
       let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
