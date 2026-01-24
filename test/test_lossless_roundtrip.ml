@@ -24,7 +24,7 @@ let test_lossless_roundtrip () =
     | Error e -> failwith ("JSON parse failed: " ^ e)
     | Ok chain1 ->
         (* Convert to Mermaid with lossless mode *)
-        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
 
         (* Parse back with metadata *)
         match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
@@ -98,7 +98,7 @@ let test_special_chars_roundtrip () =
     match Json_parser.parse_chain json1 with
     | Error e -> failwith ("JSON parse failed: " ^ e)
     | Ok chain1 ->
-        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
         match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
         | Error e -> failwith ("Mermaid parse failed: " ^ e)
         | Ok chain2 ->
@@ -121,17 +121,21 @@ let test_empty_mapping () =
     match Json_parser.parse_chain json1 with
     | Error e -> failwith ("JSON parse failed: " ^ e)
     | Ok chain1 ->
-        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
-        (* Should only have @chain comment, no @node comments *)
-        let has_chain_meta = String.sub mermaid 0 100 |> fun s ->
-          try let _ = Str.search_forward (Str.regexp "@chain") s 0 in true
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        (* Should have @chain_full + @chain comments, no @node comments *)
+        let has_chain_full =
+          try let _ = Str.search_forward (Str.regexp "@chain_full") mermaid 0 in true
+          with Not_found -> false
+        in
+        let has_chain_meta =
+          try let _ = Str.search_forward (Str.regexp "@chain ") mermaid 0 in true
           with Not_found -> false
         in
         let has_node_meta =
           try let _ = Str.search_forward (Str.regexp "@node:") mermaid 0 in true
           with Not_found -> false
         in
-        has_chain_meta && not has_node_meta
+        has_chain_full && has_chain_meta && not has_node_meta
   )
 
 (* Edge case: complex multi-node chain with various mappings *)
@@ -152,7 +156,7 @@ let test_complex_chain () =
     match Json_parser.parse_chain json1 with
     | Error e -> failwith ("JSON parse failed: " ^ e)
     | Ok chain1 ->
-        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
         match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
         | Error e -> failwith ("Mermaid parse failed: " ^ e)
         | Ok chain2 ->
@@ -178,8 +182,8 @@ let test_complex_chain () =
             config_ok && mapping_ok
   )
 
-(* Edge case: without lossless flag, metadata should be lost *)
-let test_lossy_mode () =
+(* Always lossless: metadata should always be present *)
+let test_always_lossless () =
   let json = {|{
     "id": "lossy_test",
     "nodes": [
@@ -189,18 +193,21 @@ let test_lossy_mode () =
     "output": "b",
     "config": {"timeout": 999, "trace": true, "max_depth": 9}
   }|} in
-  Alcotest.(check bool) "lossy mode loses metadata" true (
+  Alcotest.(check bool) "always lossless includes metadata" true (
     let json1 = Yojson.Safe.from_string json in
     match Json_parser.parse_chain json1 with
     | Error e -> failwith ("JSON parse failed: " ^ e)
     | Ok chain1 ->
-        (* Without lossless=true, no metadata comments *)
-        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:false chain1 in
-        let has_meta =
-          try let _ = Str.search_forward (Str.regexp "@chain") mermaid 0 in true
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        let has_chain_full =
+          try let _ = Str.search_forward (Str.regexp "@chain_full") mermaid 0 in true
           with Not_found -> false
         in
-        not has_meta  (* Should NOT have metadata *)
+        let has_chain =
+          try let _ = Str.search_forward (Str.regexp "@chain ") mermaid 0 in true
+          with Not_found -> false
+        in
+        has_chain_full && has_chain
   )
 
 (* Edge case: fallback id is used when no metadata *)
@@ -216,6 +223,67 @@ let test_fallback_id () =
     | Ok chain ->
         (* Should use fallback id since no @chain metadata *)
         chain.id = "my_fallback_id"
+  )
+
+(* chain_full metadata should override mismatched graph *)
+let test_chain_full_override () =
+  let json = {|{
+    "id": "override_chain",
+    "nodes": [
+      {"id": "a", "type": "llm", "model": "gemini", "prompt": "Hello"},
+      {"id": "b", "type": "llm", "model": "claude", "prompt": "World", "input_mapping": [["input","a"]]}
+    ],
+    "output": "b",
+    "config": {"timeout": 10, "trace": false, "max_depth": 2}
+  }|} in
+  Alcotest.(check bool) "chain_full override" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let full_json = Json_parser.chain_to_json_string ~pretty:false chain1 in
+        (* Intentionally wrong graph, should still parse from chain_full *)
+        let mermaid =
+          "graph LR\n    %% @chain_full " ^ full_json ^ "\n    x[LLM:stub \"x\"]\n"
+        in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let ids1 = List.map (fun (n:node) -> n.id) chain1.nodes |> List.sort compare in
+            let ids2 = List.map (fun (n:node) -> n.id) chain2.nodes |> List.sort compare in
+            chain1.id = chain2.id && ids1 = ids2 && chain1.output = chain2.output
+  )
+
+(* FeedbackLoop should survive lossless roundtrip via chain_full *)
+let test_feedback_loop_roundtrip () =
+  let json = {|{
+    "id": "fb_loop",
+    "nodes": [
+      {
+        "id": "loop",
+        "type": "feedback_loop",
+        "generator": {"id": "gen", "type": "llm", "model": "claude", "prompt": "Draft"},
+        "evaluator_config": {"scoring_func": "llm_judge", "select_strategy": "best"},
+        "improver_prompt": "Improve: {{feedback}}",
+        "max_iterations": 2,
+        "min_score": 0.6
+      }
+    ],
+    "output": "loop",
+    "config": {"timeout": 60, "trace": false, "max_depth": 3}
+  }|} in
+  Alcotest.(check bool) "feedback_loop lossless" true (
+    let json1 = Yojson.Safe.from_string json in
+    match Json_parser.parse_chain json1 with
+    | Error e -> failwith ("JSON parse failed: " ^ e)
+    | Ok chain1 ->
+        let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
+        match Mermaid_parser.parse_mermaid_to_chain ~id:"fallback" mermaid with
+        | Error e -> failwith ("Mermaid parse failed: " ^ e)
+        | Ok chain2 ->
+            let j1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+            let j2 = Json_parser.chain_to_json_string ~pretty:false chain2 in
+            j1 = j2
   )
 
 (* Edge case: partial metadata (only some fields) *)
@@ -292,7 +360,7 @@ let test_goaldriven_strict_roundtrip () =
 
   Alcotest.(check bool) "GoalDriven strict roundtrip" true (
     (* Chain → Mermaid (lossless) *)
-    let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain1 in
+    let mermaid = Mermaid_parser.chain_to_mermaid ~styled:false chain1 in
 
     Printf.printf "\n╔══════════════════════════════════════════════════════════╗\n";
     Printf.printf "║  🎯 GoalDriven ↔ Mermaid 양방향 변환 증명                 ║\n";
@@ -459,8 +527,10 @@ let () =
       Alcotest.test_case "Special characters in prompts" `Quick test_special_chars_roundtrip;
       Alcotest.test_case "Empty input_mapping" `Quick test_empty_mapping;
       Alcotest.test_case "Complex multi-node chain" `Quick test_complex_chain;
-      Alcotest.test_case "Lossy mode (no metadata)" `Quick test_lossy_mode;
+      Alcotest.test_case "Always lossless (metadata present)" `Quick test_always_lossless;
       Alcotest.test_case "Fallback ID when no metadata" `Quick test_fallback_id;
+      Alcotest.test_case "chain_full override" `Quick test_chain_full_override;
+      Alcotest.test_case "FeedbackLoop lossless" `Quick test_feedback_loop_roundtrip;
       Alcotest.test_case "Partial metadata" `Quick test_partial_metadata;
       Alcotest.test_case "inputs assoc format (chain_to_json compat)" `Quick test_inputs_assoc_format;
       Alcotest.test_case "inputs full roundtrip" `Quick test_inputs_full_roundtrip;

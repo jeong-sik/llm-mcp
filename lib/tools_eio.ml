@@ -624,7 +624,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       (* Parse from either JSON or Mermaid (WYSIWYE) *)
       let parse_result = match (chain, mermaid) with
         | (Some c, _) -> Chain_parser.parse_chain c
-        | (_, Some m) -> Chain_mermaid_parser.parse_chain m
+        | (_, Some m) -> Chain_mermaid_parser.parse_mermaid_to_chain m
         | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
       in
       (match parse_result with
@@ -830,7 +830,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       (* Parse from either JSON or Mermaid, then validate *)
       let parse_result = match (chain, mermaid) with
         | (Some c, _) -> Chain_parser.parse_chain c
-        | (_, Some m) -> Chain_mermaid_parser.parse_chain m
+        | (_, Some m) -> Chain_mermaid_parser.parse_mermaid_to_chain m
         | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
       in
       (match parse_result with
@@ -944,7 +944,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
              | `String s -> s
              | _ -> Yojson.Safe.to_string input
            in
-           (match Chain_mermaid_parser.parse_chain mermaid_text with
+           (match Chain_mermaid_parser.parse_mermaid_to_chain mermaid_text with
             | Error msg ->
                 { model = "chain.convert";
                   returncode = -1;

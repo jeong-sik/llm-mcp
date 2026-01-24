@@ -130,6 +130,7 @@
       "output_key": "final_report"
     }
   ],
+  "output": "final-output",
   "input_schema": {
     "type": "object",
     "properties": {

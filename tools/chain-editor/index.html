@@ -74,6 +74,7 @@
 
     .canvas svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
     .canvas svg path { stroke: #4fc3f7; stroke-width: 2; fill: none; }
+    .canvas svg path.preview { stroke-dasharray: 6 6; opacity: 0.7; }
 
     .canvas-node {
       position: absolute;
@@ -88,6 +89,7 @@
     }
     .canvas-node:hover { border-color: #4fc3f7; }
     .canvas-node.selected { border-color: #4fc3f7; box-shadow: 0 0 20px rgba(79, 195, 247, 0.3); }
+    .canvas-node.connecting { border-color: #81c784; box-shadow: 0 0 18px rgba(129, 199, 132, 0.35); }
     .canvas-node .node-type { font-size: 10px; color: #4fc3f7; text-transform: uppercase; letter-spacing: 1px; }
     .canvas-node .node-label { font-weight: 600; margin-top: 4px; }
     .canvas-node .node-config { font-size: 11px; color: #888; margin-top: 8px; font-family: monospace; }
@@ -104,6 +106,24 @@
     .canvas-node .port-in { top: 50%; left: -6px; transform: translateY(-50%); }
     .canvas-node .port-out { top: 50%; right: -6px; transform: translateY(-50%); }
     .canvas-node .port:hover { background: #4fc3f7; }
+    .canvas-node .port.active { background: #81c784; border-color: #81c784; }
+    .canvas-node .detail-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #81c784;
+      color: #0f3460;
+      font-weight: 700;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
 
     /* Output Panel */
     .output-panel {
@@ -117,6 +137,16 @@
       display: flex;
       border-bottom: 1px solid #0f3460;
     }
+    .output-panel .meta-toggle {
+      padding: 8px 16px;
+      border-bottom: 1px solid #0f3460;
+      font-size: 12px;
+      color: #9aa7bd;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .output-panel .meta-toggle input { accent-color: #4fc3f7; }
     .output-panel .tab {
       padding: 12px 20px;
       cursor: pointer;
@@ -149,6 +179,68 @@
     .preset-item:hover { border-color: #81c784; }
     .preset-item .name { font-weight: 600; font-size: 13px; }
     .preset-item .nodes { font-size: 11px; color: #81c784; margin-top: 4px; }
+
+    /* Detail Modal */
+    .detail-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 16, 32, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+    }
+    .detail-modal.active { display: flex; }
+    .detail-card {
+      width: 720px;
+      max-width: 90vw;
+      background: #0f172a;
+      border: 1px solid #243b67;
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+      display: flex;
+      flex-direction: column;
+    }
+    .detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #1e2a46;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .detail-header button {
+      background: transparent;
+      border: none;
+      color: #9aa7bd;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    .detail-tabs {
+      display: flex;
+      gap: 8px;
+      padding: 10px 16px;
+      border-bottom: 1px solid #1e2a46;
+    }
+    .detail-tab {
+      background: #14203a;
+      border: 1px solid #243b67;
+      color: #9db7ff;
+      border-radius: 999px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .detail-tab.active { background: #4fc3f7; color: #0f172a; border-color: #4fc3f7; }
+    .detail-content {
+      padding: 16px;
+      max-height: 60vh;
+      overflow: auto;
+    }
   </style>
 </head>
 <body>
@@ -212,10 +304,23 @@
           <div class="desc">Retry on failure</div>
           <div class="sig">Single&lt;A&gt; → Single&lt;A&gt;</div>
         </div>
+        <div class="node-item" draggable="true" data-type="loop">
+          <div class="name">Loop</div>
+          <div class="desc">Goal-driven iteration</div>
+          <div class="sig">Single&lt;A&gt; → Single&lt;A&gt;</div>
+        </div>
       </div>
 
       <div class="presets">
         <h2>Presets</h2>
+        <div class="preset-item" data-preset="figma_component">
+          <div class="name">🎨 Figma → Component (Router)</div>
+          <div class="nodes">10 nodes • optional verify</div>
+        </div>
+        <div class="preset-item" data-preset="coverage_boost">
+          <div class="name">🧪 Coverage Boost (Optional Source)</div>
+          <div class="nodes">8 nodes • numeric coverage</div>
+        </div>
         <div class="preset-item" data-preset="magi">
           <div class="name">🔮 MAGI Code Review</div>
           <div class="nodes">5 nodes • 3-LLM consensus</div>
@@ -253,9 +358,29 @@
         <div class="tab" data-tab="json">JSON</div>
         <div class="tab" data-tab="output">Output</div>
       </div>
+      <div class="meta-toggle">
+        <input type="checkbox" id="show-meta" />
+        <label for="show-meta">Show metadata</label>
+      </div>
       <div class="content">
         <pre id="output-content">graph LR
     %% Drag nodes to canvas to build your chain</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-modal" id="detail-modal">
+    <div class="detail-card">
+      <div class="detail-header">
+        <div id="detail-title">Loop Detail</div>
+        <button id="detail-close" aria-label="Close">✕</button>
+      </div>
+      <div class="detail-tabs">
+        <button class="detail-tab active" data-detail-tab="summary">Summary</button>
+        <button class="detail-tab" data-detail-tab="depth">Depth Dive</button>
+      </div>
+      <div class="detail-content">
+        <pre id="detail-content"></pre>
       </div>
     </div>
   </div>
@@ -268,6 +393,10 @@
       selectedNode: null,
       dragNode: null,
       connecting: null,
+      connectingPos: null,
+      detailNode: null,
+      detailTab: 'summary',
+      showMeta: false,
       nodeCounter: 0
     };
 
@@ -276,6 +405,61 @@
 
     // Presets
     const presets = {
+      figma_component: {
+        nodes: [
+          { id: 'P', type: 'tool', label: 'parse-url', x: 40, y: 170, config: 'Tool:figma_parse_url' },
+          { id: 'B', type: 'tool', label: 'bundle', x: 230, y: 170, config: 'Tool:figma_get_node_bundle' },
+          { id: 'T', type: 'gate', label: 'target', x: 420, y: 170, config: 'Gate:target(react|html|vue)' },
+          { id: 'R', type: 'llm', label: 'react', x: 610, y: 60, config: 'LLM:react-component' },
+          { id: 'H', type: 'llm', label: 'html', x: 610, y: 170, config: 'LLM:html-component' },
+          { id: 'V', type: 'llm', label: 'vue', x: 610, y: 280, config: 'LLM:vue-component' },
+          { id: 'M', type: 'merge', label: 'pick', x: 800, y: 170, config: 'Merge:pick_one' },
+          { id: 'G', type: 'gate', label: 'verify?', x: 980, y: 170, config: 'Gate:verify' },
+          { id: 'X', type: 'tool', label: 'verify', x: 1160, y: 80, config: 'Tool:figma_verify_visual' },
+          { id: 'O', type: 'map', label: 'emit', x: 1160, y: 250, config: 'Map:emit_component' },
+        ],
+        connections: [
+          ['P', 'B'],
+          ['B', 'T'],
+          ['T', 'R'], ['T', 'H'], ['T', 'V'],
+          ['R', 'M'], ['H', 'M'], ['V', 'M'],
+          ['M', 'G'],
+          ['G', 'X'], ['G', 'O'],
+          ['X', 'O']
+        ]
+      },
+      coverage_boost: {
+        nodes: [
+          { id: 'A', type: 'tool', label: 'source-a', x: 40, y: 80, config: 'Tool:coverage_source (optional)' },
+          { id: 'B', type: 'tool', label: 'source-b', x: 40, y: 240, config: 'Tool:coverage_source_alt (optional)' },
+          { id: 'F', type: 'fallback', label: 'source', x: 230, y: 160, config: 'Fallback' },
+          {
+            id: 'L', type: 'loop', label: 'goal', x: 430, y: 160,
+            config: 'GoalDriven:coverage:gte:0.85:6',
+            detail: {
+              summary: 'Iterate until coverage ≥ target or max iterations.',
+              graph: {
+                direction: 'LR',
+                nodes: [
+                  { id: 'G', type: 'llm', label: 'generate', config: 'LLM:generate_tests' },
+                  { id: 'T', type: 'tool', label: 'run-tests', config: 'Tool:run_tests' },
+                  { id: 'E', type: 'map', label: 'extract', config: 'Map:extract_coverage_pct' },
+                  { id: 'C', type: 'gate', label: 'check', config: 'Gate:coverage>=target' }
+                ],
+                connections: [
+                  ['G', 'T'], ['T', 'E'], ['E', 'C'], ['C', 'G']
+                ]
+              }
+            }
+          },
+          { id: 'R', type: 'tool', label: 'report', x: 660, y: 160, config: 'Tool:report_coverage' },
+        ],
+        connections: [
+          ['A', 'F'], ['B', 'F'],
+          ['F', 'L'],
+          ['L', 'R']
+        ]
+      },
       magi: {
         nodes: [
           { id: 'A', type: 'tool', label: 'read-file', x: 50, y: 150, config: 'Tool:echo' },
@@ -328,6 +512,8 @@
       state.nodes = preset.nodes.map(n => ({ ...n }));
       state.connections = preset.connections.map(c => [...c]);
       state.nodeCounter = state.nodes.length;
+      clearConnecting();
+      closeDetail();
       render();
       updateOutput();
       setStatus(`Loaded preset with ${state.nodes.length} nodes`);
@@ -353,7 +539,8 @@
           label: type,
           x: e.clientX - rect.left - 90,
           y: e.clientY - rect.top - 40,
-          config: getDefaultConfig(type)
+          config: getDefaultConfig(type),
+          detail: type === 'loop' ? defaultLoopDetail() : null
         });
         render();
         updateOutput();
@@ -370,9 +557,108 @@
         map: 'Map:uppercase',
         bind: 'Bind:router',
         fallback: 'Fallback',
-        retry: 'Retry:3,1000'
+        retry: 'Retry:3,1000',
+        loop: 'GoalDriven:coverage:gte:0.85:6'
       };
       return configs[type] || type;
+    }
+
+    function defaultLoopDetail() {
+      return {
+        summary: 'Goal-driven loop: generate tests → run → extract coverage → check threshold → iterate.',
+        graph: {
+          direction: 'LR',
+          nodes: [
+            { id: 'G', type: 'llm', label: 'generate', config: 'LLM:generate_tests' },
+            { id: 'T', type: 'tool', label: 'run-tests', config: 'Tool:run_tests' },
+            { id: 'E', type: 'map', label: 'extract', config: 'Map:extract_coverage_pct' },
+            { id: 'C', type: 'gate', label: 'check', config: 'Gate:coverage>=target' }
+          ],
+          connections: [
+            ['G', 'T'], ['T', 'E'], ['E', 'C'], ['C', 'G']
+          ]
+        }
+      };
+    }
+
+    function nodeShape(node) {
+      const diamondTypes = ['merge', 'quorum', 'gate', 'fallback', 'loop'];
+      const subTypes = ['map', 'bind', 'retry'];
+      if (diamondTypes.includes(node.type)) return ['{', '}'];
+      if (subTypes.includes(node.type)) return ['[[', ']]'];
+      return ['[', ']'];
+    }
+
+    function generateMermaidForGraph(nodes, connections, direction = 'LR') {
+      if (!nodes || nodes.length === 0) return `graph ${direction}\n    %% Empty graph`;
+
+      let mermaid = `graph ${direction}\n`;
+      nodes.forEach(node => {
+        const [open, close] = nodeShape(node);
+        mermaid += `    ${node.id}${open}${node.config}${close}\n`;
+      });
+      connections.forEach(([from, to]) => {
+        mermaid += `    ${from} --> ${to}\n`;
+      });
+      return mermaid;
+    }
+
+    function stripMeta(mermaid) {
+      return mermaid
+        .split('\n')
+        .filter(line => {
+          const t = line.trim();
+          return !(t.startsWith('%% @chain_full') || t.startsWith('%% @chain_json') ||
+                   t.startsWith('%% @chain ') || t.startsWith('%% @node:'));
+        })
+        .join('\n');
+    }
+
+    function openDetail(node) {
+      state.detailNode = node;
+      state.detailTab = 'summary';
+      renderDetail();
+      document.getElementById('detail-modal').classList.add('active');
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-modal').classList.remove('active');
+      state.detailNode = null;
+    }
+
+    function renderDetail() {
+      const node = state.detailNode;
+      if (!node || !node.detail) return;
+      document.getElementById('detail-title').textContent = `${node.label} (${node.type})`;
+      document.querySelectorAll('.detail-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.detailTab === state.detailTab);
+      });
+      const contentEl = document.getElementById('detail-content');
+      if (state.detailTab === 'summary') {
+        contentEl.textContent = node.detail.summary || JSON.stringify(node.detail, null, 2);
+      } else {
+        if (node.detail.graph) {
+          const g = node.detail.graph;
+          contentEl.textContent = generateMermaidForGraph(g.nodes || [], g.connections || [], g.direction || 'LR');
+        } else {
+          contentEl.textContent = node.detail.mermaid || JSON.stringify(node.detail, null, 2);
+        }
+      }
+    }
+
+    function setConnecting(nodeId) {
+      const fromNode = state.nodes.find(n => n.id === nodeId);
+      state.connecting = { from: nodeId };
+      if (fromNode) {
+        state.connectingPos = { x: fromNode.x + 180, y: fromNode.y + 40 };
+      } else {
+        state.connectingPos = null;
+      }
+    }
+
+    function clearConnecting() {
+      state.connecting = null;
+      state.connectingPos = null;
     }
 
     // Render nodes
@@ -383,7 +669,10 @@
       // Render nodes
       state.nodes.forEach(node => {
         const el = document.createElement('div');
-        el.className = 'canvas-node' + (state.selectedNode === node.id ? ' selected' : '');
+        const isConnecting = state.connecting && state.connecting.from === node.id;
+        const outClass = isConnecting ? 'port port-out active' : 'port port-out';
+        const detailBadge = node.detail ? '<div class="detail-badge" data-action="detail">⋯</div>' : '';
+        el.className = 'canvas-node' + (state.selectedNode === node.id ? ' selected' : '') + (isConnecting ? ' connecting' : '');
         el.style.left = node.x + 'px';
         el.style.top = node.y + 'px';
         el.innerHTML = `
@@ -391,13 +680,15 @@
           <div class="node-type">${node.type}</div>
           <div class="node-label">${node.label}</div>
           <div class="node-config">${node.config}</div>
-          <div class="port port-out" data-port="out"></div>
+          ${detailBadge}
+          <div class="${outClass}" data-port="out"></div>
         `;
         el.dataset.id = node.id;
 
         // Drag to move
         el.addEventListener('mousedown', e => {
           if (e.target.classList.contains('port')) return;
+          clearConnecting();
           state.dragNode = node;
           state.selectedNode = node.id;
           render();
@@ -405,25 +696,42 @@
 
         // Port click for connections
         el.querySelectorAll('.port').forEach(port => {
-          port.addEventListener('mousedown', e => {
+          port.addEventListener('click', e => {
             e.stopPropagation();
             if (port.dataset.port === 'out') {
-              state.connecting = { from: node.id };
+              if (state.connecting && state.connecting.from === node.id) {
+                clearConnecting();
+              } else {
+                setConnecting(node.id);
+              }
+              render();
+              return;
             }
-          });
-          port.addEventListener('mouseup', e => {
-            e.stopPropagation();
+
             if (state.connecting && port.dataset.port === 'in' && state.connecting.from !== node.id) {
-              // Add connection if not duplicate
               const exists = state.connections.some(c => c[0] === state.connecting.from && c[1] === node.id);
               if (!exists) {
                 state.connections.push([state.connecting.from, node.id]);
                 updateOutput();
               }
             }
-            state.connecting = null;
-            renderConnections();
+            clearConnecting();
+            render();
           });
+        });
+
+        // Detail view
+        const badge = el.querySelector('.detail-badge');
+        if (badge) {
+          badge.addEventListener('click', e => {
+            e.stopPropagation();
+            openDetail(node);
+          });
+        }
+        el.addEventListener('dblclick', e => {
+          if (node.detail && !e.target.classList.contains('port')) {
+            openDetail(node);
+          }
         });
 
         canvas.appendChild(el);
@@ -440,12 +748,35 @@
         state.dragNode.y = e.clientY - rect.top - 40;
         render();
         updateOutput();
+        return;
+      }
+
+      if (state.connecting) {
+        const rect = canvas.getBoundingClientRect();
+        state.connectingPos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        renderConnections();
       }
     });
 
     document.addEventListener('mouseup', () => {
       state.dragNode = null;
-      state.connecting = null;
+    });
+
+    canvas.addEventListener('click', e => {
+      if (state.connecting && e.target === canvas) {
+        clearConnecting();
+        render();
+      }
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && state.connecting) {
+        clearConnecting();
+        render();
+      }
+      if (e.key === 'Escape' && document.getElementById('detail-modal').classList.contains('active')) {
+        closeDetail();
+      }
     });
 
     // Render connections
@@ -463,31 +794,24 @@
           paths += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}"/>`;
         }
       });
+      if (state.connecting && state.connectingPos) {
+        const fromNode = state.nodes.find(n => n.id === state.connecting.from);
+        if (fromNode) {
+          const x1 = fromNode.x + 180;
+          const y1 = fromNode.y + 40;
+          const x2 = state.connectingPos.x;
+          const y2 = state.connectingPos.y;
+          const cx = (x1 + x2) / 2;
+          paths += `<path class="preview" d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}"/>`;
+        }
+      }
       svg.innerHTML = paths;
     }
 
     // Generate Mermaid
     function generateMermaid() {
-      if (state.nodes.length === 0) return 'graph LR\n    %% Drag nodes to canvas';
-
-      let mermaid = 'graph LR\n';
-
-      // Nodes
-      state.nodes.forEach(node => {
-        const shape = ['merge', 'quorum', 'gate', 'fallback'].includes(node.type)
-          ? `{${node.config}}`
-          : ['map', 'bind', 'retry'].includes(node.type)
-            ? `[[${node.config}]]`
-            : `[${node.config}]`;
-        mermaid += `    ${node.id}${shape}\n`;
-      });
-
-      // Connections
-      state.connections.forEach(([from, to]) => {
-        mermaid += `    ${from} --> ${to}\n`;
-      });
-
-      return mermaid;
+      const mermaid = generateMermaidForGraph(state.nodes, state.connections, 'LR');
+      return state.showMeta ? mermaid : stripMeta(mermaid);
     }
 
     // Update output
@@ -516,11 +840,33 @@
       });
     });
 
+    document.getElementById('show-meta').addEventListener('change', e => {
+      state.showMeta = e.target.checked;
+      const active = document.querySelector('.tab.active');
+      if (active && active.dataset.tab === 'mermaid') {
+        document.getElementById('output-content').textContent = generateMermaid();
+      }
+    });
+
+    // Detail modal interactions
+    document.getElementById('detail-close').addEventListener('click', closeDetail);
+    document.getElementById('detail-modal').addEventListener('click', e => {
+      if (e.target.id === 'detail-modal') closeDetail();
+    });
+    document.querySelectorAll('.detail-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        state.detailTab = tab.dataset.detailTab;
+        renderDetail();
+      });
+    });
+
     // Actions
     function clearCanvas() {
       state.nodes = [];
       state.connections = [];
       state.nodeCounter = 0;
+      clearConnecting();
+      closeDetail();
       render();
       updateOutput();
       setStatus('Canvas cleared');

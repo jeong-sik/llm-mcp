@@ -335,7 +335,7 @@ let test_mermaid_complex_execution () =
     } in
 
     (* Convert to Mermaid *)
-    let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true original_chain in
+    let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false original_chain in
     Printf.printf "Generated Mermaid:\n%s\n\n" mermaid;
 
     (* Parse back *)

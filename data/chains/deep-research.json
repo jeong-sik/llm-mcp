@@ -82,6 +82,7 @@
       "output_key": "final_document"
     }
   ],
+  "output": "final-assembly",
   "input_schema": {
     "type": "object",
     "properties": {

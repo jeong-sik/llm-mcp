@@ -790,16 +790,7 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
     in
     let nodes_json = json |> member "nodes" |> to_list in
     let* nodes = parse_nodes nodes_json in
-    (* output field is optional; default to last node ID if not specified *)
-    let output = match json |> member "output" with
-      | `String s -> s
-      | `Null ->
-          (* Find last node in the list as default output *)
-          (match List.rev nodes with
-           | last :: _ -> last.id
-           | [] -> "output")
-      | _ -> "output"
-    in
+    let* output = require_string json "output" in
     let config =
       match json |> member "config" with
       | `Null -> default_config

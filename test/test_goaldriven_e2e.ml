@@ -400,7 +400,7 @@ let test_goaldriven_mermaid_roundtrip_execute () =
     } in
 
     (* 2. Convert to Mermaid *)
-    let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true original_chain in
+    let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false original_chain in
     Printf.printf "Generated Mermaid:\n%s\n\n" mermaid;
 
     (* 3. Parse back from Mermaid *)

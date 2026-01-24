@@ -74,6 +74,7 @@
       "output_key": "migration_report"
     }
   ],
+  "output": "final-report",
   "input_schema": {
     "type": "object",
     "properties": {
