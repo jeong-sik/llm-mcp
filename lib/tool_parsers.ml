@@ -134,7 +134,8 @@ let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args
     | c -> Some c
   in
   let mermaid = json |> member "mermaid" |> to_string_option in
-  ChainValidate { chain; mermaid }
+  let strict = try json |> member "strict" |> to_bool with _ -> true in
+  ChainValidate { chain; mermaid; strict }
 
 (** Parse JSON arguments for chain.to_mermaid tool *)
 let parse_chain_to_mermaid_args (json : Yojson.Safe.t) : tool_args =

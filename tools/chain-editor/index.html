@@ -581,7 +581,7 @@
       setStatus('Auto layout applied');
     }
 
-    function validateChain() {
+    function validateChainLocal() {
       const errors = [];
 
       // Check for cycles (simple check)
@@ -609,9 +609,47 @@
       });
 
       if (errors.length === 0) {
-        setStatus('✅ Validation passed');
+        setStatus('✅ Local validation passed');
       } else {
         setStatus('❌ ' + errors.join('; '));
+      }
+    }
+
+    async function validateChain() {
+      const mermaid = generateMermaid();
+      setStatus('Validating (strict)...');
+      try {
+        const res = await fetch('http://localhost:8932/mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: {
+              name: 'chain.validate',
+              arguments: {
+                mermaid: mermaid.replace(/\n/g, '\\n'),
+                strict: true
+              }
+            }
+          })
+        });
+
+        const text = await res.text();
+        const lines = text.split('\n').filter(l => l.startsWith('data:'));
+        if (lines.length === 0) throw new Error('No validation response');
+        const data = JSON.parse(lines[0].replace('data: ', ''));
+        if (data.result && !data.result.isError) {
+          const msg = data.result.content?.[0]?.text || 'Validation passed';
+          setStatus('✅ ' + msg);
+        } else {
+          const msg = data.result?.content?.[0]?.text || 'Validation failed';
+          setStatus('❌ ' + msg);
+        }
+      } catch (e) {
+        // Fallback to local validation if MCP server is unavailable
+        validateChainLocal();
       }
     }
 
