@@ -538,6 +538,33 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
       ]) in
       Http.Response.json body reqd
 
+  (* Readiness probe - for Kubernetes *)
+  | (`GET, "/ready") ->
+      (* Check if server can handle requests *)
+      let ready = true in (* TODO: Add deeper checks if needed *)
+      if ready then
+        Http.Response.json ~status:`OK
+          {|{"status":"ready"}|} reqd
+      else
+        Http.Response.json ~status:`Service_unavailable
+          {|{"status":"not_ready"}|} reqd
+
+  (* Prometheus metrics endpoint *)
+  | (`GET, "/metrics") ->
+      let session_count =
+        Eio.Mutex.use_ro store.mutex (fun () ->
+          Hashtbl.length store.sessions
+        )
+      in
+      Metrics.set_active_sessions session_count;
+      let body = Metrics.to_prometheus_text () in
+      let headers = Httpun.Headers.of_list [
+        ("content-type", "text/plain; version=0.0.4; charset=utf-8");
+        ("content-length", string_of_int (String.length body));
+      ] in
+      let response = Httpun.Response.create ~headers `OK in
+      Httpun.Reqd.respond_with_string reqd response body
+
   (* Chain viewer UI + run history - no auth required *)
   | (`GET, "/chain/view") ->
       Http.Response.html Chain_view_page.html reqd
@@ -566,7 +593,23 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
           send_unauthorized reqd msg
 
       | Ok () ->
-          (* Authentication passed - route to endpoint *)
+          (* Rate limiting - use client IP or session ID as key *)
+          let rate_key =
+            extract_session_id None headers
+            |> Option.value ~default:"anonymous"
+          in
+          if not (Rate_limit.check_global ~key:rate_key) then begin
+            Metrics.record_error ~error_type:"rate_limit" ();
+            let headers = Httpun.Headers.of_list [
+              ("content-type", "application/json");
+              ("retry-after", "1");
+            ] in
+            let response = Httpun.Response.create ~headers `Too_many_requests in
+            Httpun.Reqd.respond_with_string reqd response
+              (Rate_limit.too_many_requests_body ())
+          end
+          else
+          (* Authentication and rate limit passed - route to endpoint *)
           match (meth, path) with
           (* Session stats endpoint *)
           | (`GET, "/sessions") ->
