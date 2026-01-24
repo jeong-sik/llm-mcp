@@ -79,7 +79,7 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
 let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"qwen3-coder:30b" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"devstral" in
   let system_prompt = json |> member "system_prompt" |> to_string_option in
   let temperature =
     try json |> member "temperature" |> to_float

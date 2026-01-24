@@ -566,7 +566,7 @@ let test_mermaid_operators_roundtrip () =
 
     let chain = { id = "test"; nodes = [goal]; output = "goal"; config = default_config } in
 
-    let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false ~lossless:true chain in
+    let mermaid = Chain_mermaid_parser.chain_to_mermaid ~styled:false chain in
 
     (* Check operator in mermaid output *)
     let has_op = contains_s mermaid op_str || contains_s mermaid (String.uppercase_ascii op_str) in

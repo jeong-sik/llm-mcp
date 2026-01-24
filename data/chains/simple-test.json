@@ -33,6 +33,7 @@
       "output_key": "final_answer"
     }
   ],
+  "output": "merge-answers",
   "metadata": {
     "tags": ["test", "e2e"],
     "estimated_duration_sec": 30
