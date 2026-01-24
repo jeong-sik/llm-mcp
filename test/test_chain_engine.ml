@@ -2559,13 +2559,15 @@ let test_feedback_loop_basic () =
     ~evaluator_config:eval_config
     ~improver_prompt:"Improve based on: {{feedback}}"
     ~max_iterations:3
-    ~min_score:0.8 in
+    ~score_threshold:0.8
+    () in
   match node.node_type with
-  | Chain_types.FeedbackLoop { generator = gen; evaluator_config; max_iterations; min_score; _ } ->
+  | Chain_types.FeedbackLoop { generator = gen; evaluator_config; max_iterations; score_threshold; score_operator; _ } ->
       Alcotest.(check string) "generator id" "gen" gen.id;
       Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func;
       Alcotest.(check int) "max_iterations" 3 max_iterations;
-      Alcotest.(check (float 0.01)) "min_score" 0.8 min_score
+      Alcotest.(check (float 0.01)) "score_threshold" 0.8 score_threshold;
+      (match score_operator with Chain_types.Gte -> () | _ -> Alcotest.fail "Expected Gte operator")
   | _ -> Alcotest.fail "Expected FeedbackLoop node"
 
 (** Test FeedbackLoop JSON parsing *)
@@ -2599,10 +2601,10 @@ let test_feedback_loop_json_parse () =
       Alcotest.(check int) "node count" 1 (List.length chain.nodes);
       let node = List.hd chain.nodes in
       (match node.node_type with
-       | Chain_types.FeedbackLoop { generator; max_iterations; min_score; evaluator_config; _ } ->
+       | Chain_types.FeedbackLoop { generator; max_iterations; score_threshold; evaluator_config; _ } ->
            Alcotest.(check string) "generator id" "gen" generator.id;
            Alcotest.(check int) "max_iterations" 5 max_iterations;
-           Alcotest.(check (float 0.01)) "min_score" 0.75 min_score;
+           Alcotest.(check (float 0.01)) "score_threshold" 0.75 score_threshold;
            Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func
        | _ -> Alcotest.fail "Expected FeedbackLoop node")
   | Error e -> Alcotest.fail (Printf.sprintf "Parse error: %s" e)
@@ -2623,9 +2625,9 @@ let test_feedback_loop_mermaid_parse () =
       (match fb_node with
        | Some node ->
            (match node.node_type with
-            | Chain_types.FeedbackLoop { max_iterations; min_score; evaluator_config; _ } ->
+            | Chain_types.FeedbackLoop { max_iterations; score_threshold; evaluator_config; _ } ->
                 Alcotest.(check int) "max_iterations" 3 max_iterations;
-                Alcotest.(check (float 0.01)) "min_score" 0.7 min_score;
+                Alcotest.(check (float 0.01)) "score_threshold" 0.7 score_threshold;
                 Alcotest.(check string) "scoring_func" "llm_judge" evaluator_config.scoring_func
             | _ -> Alcotest.fail "Not a FeedbackLoop")
        | None ->
@@ -2652,7 +2654,8 @@ let test_feedback_loop_json_roundtrip () =
     ~evaluator_config:eval_config
     ~improver_prompt:"{{feedback}} -> {{previous_output}}"
     ~max_iterations:2
-    ~min_score:0.9 in
+    ~score_threshold:0.9
+    () in
   let chain : Chain_types.chain = {
     id = "roundtrip_test";
     nodes = [node];
@@ -2664,9 +2667,9 @@ let test_feedback_loop_json_roundtrip () =
   | Ok parsed ->
       let parsed_node = List.hd parsed.nodes in
       (match parsed_node.node_type with
-       | Chain_types.FeedbackLoop { max_iterations; min_score; evaluator_config; _ } ->
+       | Chain_types.FeedbackLoop { max_iterations; score_threshold; evaluator_config; _ } ->
            Alcotest.(check int) "max_iterations" 2 max_iterations;
-           Alcotest.(check (float 0.01)) "min_score" 0.9 min_score;
+           Alcotest.(check (float 0.01)) "score_threshold" 0.9 score_threshold;
            Alcotest.(check string) "scoring_func" "anti_fake" evaluator_config.scoring_func
        | _ -> Alcotest.fail "Expected FeedbackLoop after roundtrip")
   | Error e -> Alcotest.fail (Printf.sprintf "Roundtrip error: %s" e)
@@ -2689,7 +2692,8 @@ let test_feedback_loop_compile_depth () =
     ~evaluator_config:eval_config
     ~improver_prompt:"Improve"
     ~max_iterations:4
-    ~min_score:0.8 in
+    ~score_threshold:0.8
+    () in
   let chain : Chain_types.chain = {
     id = "depth_test";
     nodes = [node];
