@@ -8,6 +8,16 @@
 
 open Types
 
+let enabled () =
+  match Sys.getenv_opt "LLM_MCP_RUN_LOG" with
+  | Some "0" | Some "false" | Some "no" -> false
+  | _ -> true
+
+let stream_enabled () =
+  match Sys.getenv_opt "LLM_MCP_RUN_LOG_STREAM" with
+  | Some "1" | Some "true" | Some "yes" | Some "on" -> true
+  | _ -> false
+
 let default_log_path () =
   Common.me_path ["logs"; "llm_mcp_runs.jsonl"]
 
@@ -24,43 +34,133 @@ let ensure_log_dir () =
   Common.ensure_dir (Filename.dirname path);
   path
 
+let append_jsonl_unlocked ~fs json =
+  let path = ensure_log_dir () in
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  let file_path = Eio.Path.(fs / path) in
+  (* Open with O_APPEND for atomic appends *)
+  Eio.Path.with_open_out
+    ~append:true
+    ~create:(`If_missing 0o644)
+    file_path
+    (fun flow -> Eio.Flow.copy_string line flow)
+
+let append_jsonl_sys json =
+  let path = ensure_log_dir () in
+  let line = Yojson.Safe.to_string json ^ "\n" in
+  let oc =
+    open_out_gen [Open_creat; Open_append; Open_wronly] 0o644 path
+  in
+  output_string oc line;
+  close_out_noerr oc
+
 let assoc_of_kv (kvs : (string * string) list) =
   `Assoc (List.map (fun (k, v) -> (k, `String v)) kvs)
 
-(** Append a JSON line to the log file (Eio version) *)
-let append_jsonl ~fs json =
-  let path = ensure_log_dir () in
-  let line = Yojson.Safe.to_string json ^ "\n" in
-  Eio.Mutex.use_rw ~protect:true write_mutex (fun () ->
-    let file_path = Eio.Path.(fs / path) in
-    (* Open with O_APPEND for atomic appends *)
-    Eio.Path.with_open_out
-      ~append:true
-      ~create:(`If_missing 0o644)
-      file_path
-      (fun flow -> Eio.Flow.copy_string line flow))
+let assoc_of_json (kvs : (string * Yojson.Safe.t) list) =
+  `Assoc kvs
+
+let seq_counter = ref 0
+
+let build_fields ?run_id ?chain_id ?node_id ?node_type ?attempt ?duration_ms ?success
+    ?model ?tool ?streamed ?prompt_chars ?response_chars ?error_class ?error
+    ?(extra = []) ?(extra_json = []) ~event ~seq () =
+  let base = [
+    ("ts", `Int (int_of_float (Unix.gettimeofday ())));
+    ("iso", `String (Common.iso_timestamp ()));
+    ("event", `String event);
+    ("seq", `Int seq);
+  ] in
+  let add_opt name = function
+    | None -> fun acc -> acc
+    | Some v -> fun acc -> (name, v) :: acc
+  in
+  let fields = base in
+  let fields = add_opt "run_id" (Option.map (fun s -> `String s) run_id) fields in
+  let fields = add_opt "chain_id" (Option.map (fun s -> `String s) chain_id) fields in
+  let fields = add_opt "node_id" (Option.map (fun s -> `String s) node_id) fields in
+  let fields = add_opt "node_type" (Option.map (fun s -> `String s) node_type) fields in
+  let fields = add_opt "attempt" (Option.map (fun i -> `Int i) attempt) fields in
+  let fields = add_opt "duration_ms" (Option.map (fun i -> `Int i) duration_ms) fields in
+  let fields = add_opt "success" (Option.map (fun b -> `Bool b) success) fields in
+  let fields = add_opt "model" (Option.map (fun s -> `String s) model) fields in
+  let fields = add_opt "tool" (Option.map (fun s -> `String s) tool) fields in
+  let fields = add_opt "streamed" (Option.map (fun b -> `Bool b) streamed) fields in
+  let fields = add_opt "prompt_chars" (Option.map (fun i -> `Int i) prompt_chars) fields in
+  let fields = add_opt "response_chars" (Option.map (fun i -> `Int i) response_chars) fields in
+  let fields = add_opt "error_class" (Option.map (fun s -> `String s) error_class) fields in
+  let fields = add_opt "error" (Option.map (fun s -> `String s) error) fields in
+  let extra_fields = match (extra, extra_json) with
+    | [], [] -> []
+    | _ -> [
+        ("extra", `Assoc ((match assoc_of_kv extra with `Assoc l -> l | _ -> []) @
+                            (match assoc_of_json extra_json with `Assoc l -> l | _ -> [])))
+      ]
+  in
+  `Assoc (fields @ extra_fields)
+
+(** Record an event to the run log *)
+let record_event
+    ?fs
+    ?run_id
+    ?chain_id
+    ?node_id
+    ?node_type
+    ?attempt
+    ?duration_ms
+    ?success
+    ?model
+    ?tool
+    ?streamed
+    ?prompt_chars
+    ?response_chars
+    ?error_class
+    ?error
+    ?(extra = [])
+    ?(extra_json = [])
+    ~event
+    () =
+  if not (enabled ()) then ()
+  else
+    (try
+       Eio.Mutex.use_rw ~protect:true write_mutex (fun () ->
+         incr seq_counter;
+         let seq = !seq_counter in
+         let json = build_fields
+           ?run_id ?chain_id ?node_id ?node_type ?attempt ?duration_ms ?success
+           ?model ?tool ?streamed ?prompt_chars ?response_chars ?error_class ?error
+           ~extra ~extra_json ~event ~seq () in
+         match fs with
+         | Some f -> append_jsonl_unlocked ~fs:f json
+         | None -> append_jsonl_sys json;
+         if stream_enabled () then
+           (try Notification_sse.broadcast json with _ -> ()))
+     with exn ->
+       Printf.eprintf "[run_log_eio] Write failed: %s\n%!" (Printexc.to_string exn))
 
 (** Record a tool execution to the run log *)
 let record ~fs ~(tool : string) ~(streamed : bool) ~(prompt_chars : int) ~(duration_ms : int)
     (result : tool_result) =
-  let json =
-    `Assoc [
-      ("ts", `Int (int_of_float (Unix.gettimeofday ())));
-      ("iso", `String (Common.iso_timestamp ()));
-      ("tool", `String tool);
-      ("model", `String result.model);
-      ("returncode", `Int result.returncode);
-      ("duration_ms", `Int duration_ms);
-      ("prompt_chars", `Int prompt_chars);
-      ("response_chars", `Int (String.length result.response));
-      ("streamed", `Bool streamed);
-      ("extra", assoc_of_kv result.extra);
-    ]
+  let extra_json =
+    match List.assoc_opt "tool_calls" result.extra with
+    | Some json_str ->
+        (try [("tool_calls", Yojson.Safe.from_string json_str)] with _ -> [])
+    | None -> []
   in
-  try
-    append_jsonl ~fs json
-  with exn ->
-    Printf.eprintf "[run_log_eio] Write failed: %s\n%!" (Printexc.to_string exn)
+  let extra = List.filter (fun (k, _) -> k <> "tool_calls") result.extra in
+  record_event
+    ~fs
+    ~event:"tool_call"
+    ~tool
+    ~model:result.model
+    ~streamed
+    ~prompt_chars
+    ~response_chars:(String.length result.response)
+    ~duration_ms
+    ~success:(result.returncode = 0)
+    ~extra
+    ~extra_json
+    ()
 
 (** Read all events from the log file (Pure OCaml - no Eio needed) *)
 let read_events () =

@@ -165,7 +165,9 @@ let extract_session_id params headers =
   (* Try to get session ID from X-Session-Id header *)
   let header_session =
     List.find_map (fun (name, value) ->
-      if String.lowercase_ascii name = "x-session-id" then Some value else None
+      match String.lowercase_ascii name with
+      | "x-session-id" | "mcp-session-id" -> Some value
+      | _ -> None
     ) headers
   in
   match header_session with
@@ -176,7 +178,38 @@ let extract_session_id params headers =
       | Some (`Assoc fields) ->
           (match List.assoc_opt "sessionId" fields with
            | Some (`String sid) -> Some sid
-           | _ -> None)
+           | _ ->
+               (match List.assoc_opt "session_id" fields with
+                | Some (`String sid) -> Some sid
+                | _ -> None))
+      | _ -> None
+
+(** Extract last event id from headers or params (for SSE ack). *)
+let extract_last_event_id params headers =
+  let parse_int_opt value =
+    try Some (int_of_string value) with _ -> None
+  in
+  let header_last_event =
+    List.find_map (fun (name, value) ->
+      if String.lowercase_ascii name = "last-event-id" then
+        parse_int_opt value
+      else
+        None
+    ) headers
+  in
+  match header_last_event with
+  | Some id -> Some id
+  | None ->
+      match params with
+      | Some (`Assoc fields) ->
+          (match List.assoc_opt "last_event_id" fields with
+           | Some (`Int id) -> Some id
+           | Some (`String value) -> parse_int_opt value
+           | _ ->
+               (match List.assoc_opt "lastEventId" fields with
+                | Some (`Int id) -> Some id
+                | Some (`String value) -> parse_int_opt value
+                | _ -> None))
       | _ -> None
 
 (** Handle initialize request *)
@@ -358,8 +391,16 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
            | Some sid -> touch_session store sid
            | None -> ());
 
-          (* Notifications (no id) get no response *)
-          if req.id = None then
+          (* Notification ack can arrive without id; update SSE state then return Null. *)
+          if String.equal req.method_ "notifications/ack" then begin
+            let last_event_id_opt = extract_last_event_id req.params headers in
+            (match session_id_opt, last_event_id_opt with
+             | Some sid, Some last_id ->
+                 Notification_sse.update_last_event_id sid last_id
+             | _ -> ());
+            (session_id_opt, `Null)
+          end else if req.id = None then
+            (* Notifications (no id) get no response *)
             (None, `Null)
           else
             match req.method_ with
@@ -553,11 +594,29 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
 
           (* SSE streaming endpoint for MCP Streamable HTTP *)
           | (`GET, "/sse") ->
-              let session_id = List.assoc_opt "mcp-session-id" headers
-                |> Option.value ~default:(generate_session_id ()) in
+              let session_id =
+                extract_session_id None headers
+                |> Option.value ~default:(generate_session_id ())
+              in
               let protocol_version = List.assoc_opt "mcp-protocol-version" headers
                 |> Option.value ~default:"2024-11-05" in
+              let last_event_id =
+                extract_last_event_id None headers |> Option.value ~default:0
+              in
               Http.Response.sse_stream ~session_id ~protocol_version reqd ~on_write:(fun body ->
+                let push_event ev =
+                  try
+                    Httpun.Body.Writer.write_string body ev;
+                    Httpun.Body.Writer.flush body ignore
+                  with _ -> ()
+                in
+                let notif_client_id =
+                  Notification_sse.register session_id ~push:push_event ~last_event_id
+                in
+                (* Replay missed events if client provides Last-Event-Id *)
+                if last_event_id > 0 then
+                  Notification_sse.get_events_after last_event_id
+                  |> List.iter push_event;
                 (* Register for shutdown notifications *)
                 let client_id = Http.register_sse_client body in
                 (* Send initial connection event *)
@@ -568,7 +627,7 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 let rec heartbeat_loop n =
                   Eio.Time.sleep clock 30.0;  (* 30s heartbeat interval *)
                   if Http.sse_client_count () > 0 then begin
-                    Http.send_sse_event_with_id body ~id:n ~event:"heartbeat"
+                    Http.send_sse_event body ~event:"heartbeat"
                       ~data:(sprintf {|{"timestamp":%f}|} (Unix.gettimeofday ()));
                     heartbeat_loop (n + 1)
                   end
@@ -581,6 +640,7 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 Eio.Fiber.fork ~sw (fun () ->
                   Eio.Time.sleep clock 3600.0;  (* 1h max connection time *)
                   Http.unregister_sse_client client_id;
+                  Notification_sse.unregister_if_current session_id notif_client_id;
                   try Httpun.Body.Writer.close body with _ -> ()
                 )
               )

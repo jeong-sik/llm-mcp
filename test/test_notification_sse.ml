@@ -78,6 +78,18 @@ let test_update_last_event_id () =
   Notification_sse.update_last_event_id session_id 50;
   Notification_sse.unregister session_id
 
+(** Test ack blocks already-acked events *)
+let test_ack_blocks_event () =
+  let session_id = "test-session-5" in
+  let pushed = ref [] in
+  let push_fn s = pushed := s :: !pushed in
+  let _ = Notification_sse.register session_id ~push:push_fn ~last_event_id:0 in
+  Notification_sse.update_last_event_id session_id Int.max_int;
+  let json = `Assoc [("type", `String "test"); ("msg", `String "hello")] in
+  Notification_sse.broadcast json;
+  check int "no broadcast after ack" 0 (List.length !pushed);
+  Notification_sse.unregister session_id
+
 (** Test broadcast *)
 let test_broadcast () =
   let session_id = "test-session-4" in
@@ -114,6 +126,7 @@ let () =
     ];
     "update_last_event_id", [
       test_case "updates without crash" `Quick test_update_last_event_id;
+      test_case "ack blocks event" `Quick test_ack_blocks_event;
     ];
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast;

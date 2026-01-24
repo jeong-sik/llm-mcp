@@ -498,16 +498,81 @@ let get_input_for_tracing = function
        | None -> "(orchestrate: preset)")
   | _ -> "(non-llm operation)"
 
+let classify_error_class (r : tool_result) : string option =
+  if r.returncode = 0 then None
+  else if String.length r.response >= 7 && String.sub r.response 0 7 = "Timeout" then
+    Some "timeout"
+  else if String.length r.response >= 6 && String.sub r.response 0 6 = "Error:" then
+    Some "tool_error"
+  else
+    Some "llm_error"
+
+let result_streamed (r : tool_result) : bool =
+  match List.assoc_opt "streamed" r.extra with
+  | Some "true" -> true
+  | _ -> false
+
 (** {1 Main Execute Function} *)
 
 (** Execute a tool and return result - Direct Style *)
 let rec execute ~sw ~proc_mgr ~clock args : tool_result =
+  let log_enabled = Run_log_eio.enabled () in
+  let stream_flag = match args with
+    | Ollama { stream; _ } -> stream
+    | _ -> false
+  in
+  let model_for_log = get_model_name_for_tracing args in
+  let tool_for_log = match args with
+    | ChainRun _ -> "chain.run"
+    | ChainValidate _ -> "chain.validate"
+    | ChainList -> "chain.list"
+    | ChainToMermaid _ -> "chain.to_mermaid"
+    | ChainVisualize _ -> "chain.visualize"
+    | ChainConvert _ -> "chain.convert"
+    | ChainOrchestrate _ -> "chain.orchestrate"
+    | ChainCheckpoints _ -> "chain.checkpoints"
+    | ChainResume _ -> "chain.resume"
+    | OllamaList -> "ollama.list"
+    | PromptRegister _ -> "prompt.register"
+    | PromptList -> "prompt.list"
+    | PromptGet _ -> "prompt.get"
+    | GhPrDiff _ -> "gh.pr.diff"
+    | SlackPost _ -> "slack.post"
+    | _ -> "llm"
+  in
+  let prompt_for_log = get_input_for_tracing args in
+  let log_start_ts = Unix.gettimeofday () in
+  if log_enabled then
+    Run_log_eio.record_event
+      ~event:"llm_call"
+      ~tool:tool_for_log
+      ~model:model_for_log
+      ~prompt_chars:(String.length prompt_for_log)
+      ~streamed:stream_flag
+      ()
+  else
+    ();
   match args with
   | Gemini { model; thinking_level; timeout; _ } ->
-      execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~args ()
+      let result = execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~args () in
+      if log_enabled then
+        Run_log_eio.record_event
+          ~event:"llm_complete"
+          ~tool:tool_for_log
+          ~model:model_for_log
+          ~prompt_chars:(String.length prompt_for_log)
+          ~response_chars:(String.length result.response)
+          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~success:(result.returncode = 0)
+          ~streamed:(result_streamed result)
+          ?error_class:(classify_error_class result)
+          ()
+      else
+        ();
+      result
 
   | Claude { model; long_context; working_directory = _; timeout; _ } ->
-      (match build_claude_cmd args with
+      let result = (match build_claude_cmd args with
       | Error err ->
           { model = sprintf "claude-cli (%s)" model;
             returncode = -1;
@@ -533,9 +598,25 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 returncode = -1;
                 response = sprintf "Error: %s" msg;
                 extra = [("long_context", string_of_bool long_context)]; })
+      in
+      if log_enabled then
+        Run_log_eio.record_event
+          ~event:"llm_complete"
+          ~tool:tool_for_log
+          ~model:model_for_log
+          ~prompt_chars:(String.length prompt_for_log)
+          ~response_chars:(String.length result.response)
+          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~success:(result.returncode = 0)
+          ~streamed:(result_streamed result)
+          ?error_class:(classify_error_class result)
+          ()
+      else
+        ();
+      result
 
   | Codex { model; reasoning_effort; timeout; _ } ->
-      (match build_codex_cmd args with
+      let result = (match build_codex_cmd args with
       | Error err ->
           { model = sprintf "codex (%s)" model;
             returncode = -1;
@@ -561,76 +642,130 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 returncode = -1;
                 response = sprintf "Error: %s" msg;
                 extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; })
+      in
+      if log_enabled then
+        Run_log_eio.record_event
+          ~event:"llm_complete"
+          ~tool:tool_for_log
+          ~model:model_for_log
+          ~prompt_chars:(String.length prompt_for_log)
+          ~response_chars:(String.length result.response)
+          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~success:(result.returncode = 0)
+          ~streamed:(result_streamed result)
+          ?error_class:(classify_error_class result)
+          ()
+      else
+        ();
+      result
 
-  | Ollama { model; temperature; timeout; tools; _ } ->
-      (* Force stream=false for non-streaming execute path *)
+  | Ollama { model; temperature; timeout; tools; stream; _ } ->
       let has_tools = match tools with Some l when List.length l > 0 -> true | _ -> false in
-      (match build_ollama_curl_cmd ~force_stream:(Some false) args with
-      | Error err ->
-          { model = sprintf "ollama (%s)" model;
-            returncode = -1;
-            response = err;
-            extra = [("temperature", sprintf "%.1f" temperature); ("local", "true"); ("invalid_args", "true")]; }
-      | Ok cmd_list ->
-          let cmd = List.hd cmd_list in
-          let cmd_args = List.tl cmd_list in
-          let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
-          match result with
-          | Ok r ->
-              (* Use chat parser when tools are present, otherwise use generate parser *)
-              let (response, extra_fields) =
-                if has_tools then begin
-                  match Ollama_parser.parse_chat_result r.stdout with
-                  | Ok (Ollama_parser.TextResponse (text, thinking)) ->
-                      let extra = match thinking with
-                        | Some t -> [("thinking", t)]
-                        | None -> []
-                      in
-                      (text, extra)
-                  | Ok (Ollama_parser.ToolCalls (calls, thinking)) ->
-                      let calls_json = tool_calls_to_json calls in
-                      let extra = [("tool_calls", calls_json)] in
-                      let extra = match thinking with
-                        | Some t -> ("thinking", t) :: extra
-                        | None -> extra
-                      in
-                      ("", extra)
-                  | Ok (Ollama_parser.TextWithTools (text, calls, thinking)) ->
-                      let calls_json = tool_calls_to_json calls in
-                      let extra = [("tool_calls", calls_json)] in
-                      let extra = match thinking with
-                        | Some t -> ("thinking", t) :: extra
-                        | None -> extra
-                      in
-                      (text, extra)
-                  | Error err -> (sprintf "Error: %s" err, [])
-                end else begin
-                  match parse_ollama_response r.stdout with
-                  | Ok resp -> (resp, [])
-                  | Error err -> (sprintf "Error: %s" err, [])
-                end
-              in
-              (* Success if: has response text OR has tool_calls, and not an error *)
-              let has_tool_calls = List.exists (fun (k, _) -> k = "tool_calls") extra_fields in
-              let returncode =
-                if (String.length response > 0 || has_tool_calls) &&
-                   not (String.length response >= 6 && String.sub response 0 6 = "Error:")
-                then 0 else -1
-              in
-              { model = sprintf "ollama (%s)" model;
-                returncode;
-                response;
-                extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")] @ extra_fields; }
-          | Error (Timeout t) ->
-              { model = sprintf "ollama (%s)" model;
-                returncode = -1;
-                response = sprintf "Timeout after %ds" t;
-                extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")]; }
-          | Error (ProcessError msg) ->
-              { model = sprintf "ollama (%s)" model;
-                returncode = -1;
-                response = sprintf "Error: %s" msg;
-                extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")]; })
+      let execute_nonstream () =
+        match build_ollama_curl_cmd ~force_stream:(Some false) args with
+        | Error err ->
+            { model = sprintf "ollama (%s)" model;
+              returncode = -1;
+              response = err;
+              extra = [("temperature", sprintf "%.1f" temperature); ("local", "true"); ("invalid_args", "true")]; }
+        | Ok cmd_list ->
+            let cmd = List.hd cmd_list in
+            let cmd_args = List.tl cmd_list in
+            let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+            match result with
+            | Ok r ->
+                (* Use chat parser when tools are present, otherwise use generate parser *)
+                let (response, extra_fields) =
+                  if has_tools then begin
+                    match Ollama_parser.parse_chat_result r.stdout with
+                    | Ok (Ollama_parser.TextResponse (text, thinking)) ->
+                        let extra = match thinking with
+                          | Some t -> [("thinking", t)]
+                          | None -> []
+                        in
+                        (text, extra)
+                    | Ok (Ollama_parser.ToolCalls (calls, thinking)) ->
+                        let calls_json = tool_calls_to_json calls in
+                        let extra = [("tool_calls", calls_json)] in
+                        let extra = match thinking with
+                          | Some t -> ("thinking", t) :: extra
+                          | None -> extra
+                        in
+                        ("", extra)
+                    | Ok (Ollama_parser.TextWithTools (text, calls, thinking)) ->
+                        let calls_json = tool_calls_to_json calls in
+                        let extra = [("tool_calls", calls_json)] in
+                        let extra = match thinking with
+                          | Some t -> ("thinking", t) :: extra
+                          | None -> extra
+                        in
+                        (text, extra)
+                    | Error err -> (sprintf "Error: %s" err, [])
+                  end else begin
+                    match parse_ollama_response r.stdout with
+                    | Ok resp -> (resp, [])
+                    | Error err -> (sprintf "Error: %s" err, [])
+                  end
+                in
+                (* Success if: has response text OR has tool_calls, and not an error *)
+                let has_tool_calls = List.exists (fun (k, _) -> k = "tool_calls") extra_fields in
+                let returncode =
+                  if (String.length response > 0 || has_tool_calls) &&
+                     not (String.length response >= 6 && String.sub response 0 6 = "Error:")
+                  then 0 else -1
+                in
+                { model = sprintf "ollama (%s)" model;
+                  returncode;
+                  response;
+                  extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")] @ extra_fields; }
+            | Error (Timeout t) ->
+                { model = sprintf "ollama (%s)" model;
+                  returncode = -1;
+                  response = sprintf "Timeout after %ds" t;
+                  extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")]; }
+            | Error (ProcessError msg) ->
+                { model = sprintf "ollama (%s)" model;
+                  returncode = -1;
+                  response = sprintf "Error: %s" msg;
+                  extra = [("temperature", sprintf "%.1f" temperature); ("local", "true")]; }
+      in
+      let result =
+        if stream then
+          let streaming = execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token:(fun _ -> ()) args in
+          if streaming.returncode = 0 then streaming
+          else begin
+            if log_enabled then
+              Run_log_eio.record_event
+                ~event:"stream_fallback"
+                ~tool:tool_for_log
+                ~model:model_for_log
+                ~success:false
+                ~error_class:"stream_fallback"
+                ~error:streaming.response
+                ~extra:[("fallback", "non_stream")]
+                ()
+            else
+              ();
+            execute_nonstream ()
+          end
+        else
+          execute_nonstream ()
+      in
+      if log_enabled then
+        Run_log_eio.record_event
+          ~event:"llm_complete"
+          ~tool:tool_for_log
+          ~model:model_for_log
+          ~prompt_chars:(String.length prompt_for_log)
+          ~response_chars:(String.length result.response)
+          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~success:(result.returncode = 0)
+          ~streamed:(result_streamed result)
+          ?error_class:(classify_error_class result)
+          ()
+      else
+        ();
+      result
 
   | OllamaList ->
       let cmd = "ollama" in
