@@ -1636,7 +1636,7 @@ let chain_to_mermaid ?(styled=true) (chain : chain) : string =
   Buffer.add_string buf (Printf.sprintf "graph %s\n" dir);
 
   (* Always emit lossless metadata as comments *)
-  let full_json = Chain_parser.chain_to_json_string ~pretty:false chain in
+  let full_json = Chain_parser.chain_to_json_string ~pretty:false ~include_empty_inputs:true chain in
   Buffer.add_string buf (Printf.sprintf "    %%%% @chain_full %s\n" full_json);
   Buffer.add_string buf (Printf.sprintf "    %%%% @chain_json %s\n" full_json);
   let config_json = Yojson.Safe.to_string (config_meta_to_json chain) in
