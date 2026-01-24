@@ -108,6 +108,7 @@ type tool_args =
   | ChainValidate of {
       chain : Yojson.Safe.t option;  (* Chain definition to validate *)
       mermaid : string option;       (* Mermaid flowchart text to validate *)
+      strict : bool;                 (* Strict validation (completeness + format) *)
     }
   | ChainList
   | ChainToMermaid of {
@@ -619,7 +620,8 @@ let chain_validate_schema : tool_schema = {
 
 Parameters:
 - chain: Chain DSL JSON to validate (one of chain/mermaid required)
-- mermaid: Mermaid flowchart text to validate (one of chain/mermaid required)|};
+- mermaid: Mermaid flowchart text to validate (one of chain/mermaid required)
+- strict: Strict validation (completeness + format), default true|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -630,6 +632,11 @@ Parameters:
       ("mermaid", `Assoc [
         ("type", `String "string");
         ("description", `String "Mermaid flowchart text to validate");
+      ]);
+      ("strict", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Strict validation: completeness + format");
+        ("default", `Bool true);
       ]);
     ]);
   ];

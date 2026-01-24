@@ -41,15 +41,28 @@ val parse_config : Yojson.Safe.t -> Chain_types.chain_config
 
 (** {1 Validation} *)
 
-(** [validate_chain chain] validates the chain structure.
+(** [validate_chain chain] validates the chain structure (basic).
     Checks:
     - Output node exists
-    - No duplicate node IDs
+    - No duplicate node IDs (top-level)
     - No unresolved placeholder nodes
 
     @param chain The chain to validate
     @return Unit on success, error message on failure *)
 val validate_chain : Chain_types.chain -> (unit, string) result
+
+(** [validate_chain_strict chain] validates completeness + format.
+    Checks:
+    - Output node exists
+    - No duplicate IDs across all nodes (including nested/subgraphs)
+    - No unresolved placeholder nodes
+    - Required fields and list sizes per node type
+    - Input mapping references resolve to known nodes or allowed external vars
+    - Config sanity (positive limits)
+
+    @param chain The chain to validate
+    @return Unit on success, error message on failure *)
+val validate_chain_strict : Chain_types.chain -> (unit, string) result
 
 (** [has_placeholder_node node] checks if a node contains unresolved placeholders.
     Placeholders are created during Mermaid parsing and should be resolved

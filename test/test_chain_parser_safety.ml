@@ -114,6 +114,62 @@ let valid_chain_no_placeholder_json = {|
 }
 |}
 
+(** Strict validation: unknown external ref should fail *)
+let strict_unknown_ref_json = {|
+{
+  "id": "strict_unknown",
+  "nodes": [
+    {
+      "id": "step",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Hello {{foo}}"
+    }
+  ],
+  "output": "step"
+}
+|}
+
+(** Strict validation: input_schema allows external ref *)
+let strict_schema_ok_json = {|
+{
+  "id": "strict_schema_ok",
+  "input_schema": {
+    "type": "object",
+    "properties": { "foo": { "type": "string" } },
+    "required": ["foo"]
+  },
+  "nodes": [
+    {
+      "id": "step",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Hello {{foo}}"
+    }
+  ],
+  "output": "step"
+}
+|}
+
+(** Strict validation: metadata.external_inputs allows external ref *)
+let strict_metadata_ok_json = {|
+{
+  "id": "strict_metadata_ok",
+  "metadata": {
+    "external_inputs": ["user"]
+  },
+  "nodes": [
+    {
+      "id": "step",
+      "type": "llm",
+      "model": "gemini",
+      "prompt": "Hello {{user}}"
+    }
+  ],
+  "output": "step"
+}
+|}
+
 (* ============================================================================
    Test Helpers
    ============================================================================ *)
@@ -159,6 +215,28 @@ let test_validate_chain json_str expected_result name =
           Printf.printf "[FAIL] %s: Expected Ok but got Error: %s\n%!" name msg;
           false
 
+let test_validate_chain_strict json_str expected_result name =
+  let json = parse_json_string json_str in
+  match parse_chain json with
+  | Error msg ->
+      Printf.printf "[SKIP] %s: Parse failed: %s\n%!" name msg;
+      expected_result = `ParseError
+  | Ok chain ->
+      match validate_chain_strict chain with
+      | Ok () when expected_result = `Ok ->
+          Printf.printf "[OK] %s (strict validation passed)\n%!" name;
+          true
+      | Error msg when expected_result = `Error ->
+          Printf.printf "[OK] %s (got expected strict error: %s)\n%!" name
+            (String.sub msg 0 (min 60 (String.length msg)));
+          true
+      | Ok () ->
+          Printf.printf "[FAIL] %s: Expected strict error but got Ok\n%!" name;
+          false
+      | Error msg ->
+          Printf.printf "[FAIL] %s: Expected Ok but got Error: %s\n%!" name msg;
+          false
+
 (* ============================================================================
    Test: Error Handling for Required Fields
    ============================================================================ *)
@@ -186,6 +264,22 @@ let test_placeholder_validation () =
       "Chain with _placeholder fails validation";
     test_validate_chain valid_chain_no_placeholder_json `Ok
       "Chain without placeholder passes validation";
+  ] in
+  List.for_all Fun.id results
+
+(* ============================================================================
+   Test: Strict Validation (External Inputs)
+   ============================================================================ *)
+
+let test_strict_validation () =
+  Printf.printf "\n=== Testing Strict Validation ===\n%!";
+  let results = [
+    test_validate_chain_strict strict_unknown_ref_json `Error
+      "Strict: unknown external ref fails";
+    test_validate_chain_strict strict_schema_ok_json `Ok
+      "Strict: input_schema allows external ref";
+    test_validate_chain_strict strict_metadata_ok_json `Ok
+      "Strict: metadata.external_inputs allows external ref";
   ] in
   List.for_all Fun.id results
 
@@ -294,6 +388,7 @@ let () =
   if not (test_json_helpers ()) then all_passed := false;
   if not (test_required_fields ()) then all_passed := false;
   if not (test_placeholder_validation ()) then all_passed := false;
+  if not (test_strict_validation ()) then all_passed := false;
   if not (test_operator_parsing ()) then all_passed := false;
 
   Printf.printf "\n";
