@@ -277,6 +277,8 @@ type node_type =
       max_iterations : int;          (** Maximum iteration count *)
       score_threshold : float;       (** Score threshold (0.0-1.0) *)
       score_operator : threshold_op; (** Comparison operator: Gte, Lte, Gt, Lt, Eq *)
+      conversational : bool;         (** Enable conversational mode with context accumulation *)
+      relay_models : string list;    (** Models to rotate through: ["gemini"; "claude"; "codex"] *)
     }
 [@@deriving yojson]
 
@@ -430,10 +432,12 @@ let make_race ~id ~nodes ?timeout () =
 
 (** Helper: Create a feedback loop node for iterative quality improvement *)
 let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
-    ~max_iterations ~score_threshold ?(score_operator=Gte) () =
+    ~max_iterations ~score_threshold ?(score_operator=Gte)
+    ?(conversational=false) ?(relay_models=[]) () =
   { id; node_type = FeedbackLoop {
       generator; evaluator_config; improver_prompt;
-      max_iterations; score_threshold; score_operator
+      max_iterations; score_threshold; score_operator;
+      conversational; relay_models
     }; input_mapping = [] }
 
 (** {1 Batch Execution Types - Phase 5} *)

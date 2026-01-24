@@ -241,8 +241,8 @@ let test_conversation_helpers () =
   Printf.printf "[OK] conversation ctx - creation\n%!";
 
   (* Add messages *)
-  add_message conv ~role:"user" ~content:"Hello" ~iteration:1;
-  add_message conv ~role:"assistant" ~content:"Hi there!" ~iteration:1;
+  add_message conv ~role:"user" ~content:"Hello" ~iteration:1 ~model:conv.current_model;
+  add_message conv ~role:"assistant" ~content:"Hi there!" ~iteration:1 ~model:conv.current_model;
   assert (List.length conv.history = 2);
   Printf.printf "[OK] conversation ctx - add messages\n%!";
 

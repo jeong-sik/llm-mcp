@@ -627,6 +627,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               max_iterations;
               score_threshold;
               score_operator;
+              conversational = false;
+              relay_models = [];
             })
         | [scoring_func; max_iter_str] ->
             let max_iterations = try int_of_string max_iter_str with _ -> 3 in
@@ -641,6 +643,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               max_iterations;
               score_threshold = 0.7;
               score_operator = Gte;
+              conversational = false;
+              relay_models = [];
             })
         | [scoring_func] ->
             Ok (FeedbackLoop {
@@ -654,6 +658,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
               max_iterations = 3;
               score_threshold = 0.7;
               score_operator = Gte;
+              conversational = false;
+              relay_models = [];
             })
         | _ ->
             Error (Printf.sprintf "FeedbackLoop format: func or func,max or func,max,>=0.95, got: %s" content))
