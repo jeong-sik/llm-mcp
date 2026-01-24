@@ -172,3 +172,14 @@
  (name test_goaldriven_gemini)
  (modules test_goaldriven_gemini)
  (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main str unix yojson))
+
+; QCheck Property-Based Tests for Chain Roundtrip
+(test
+ (name test_chain_qcheck)
+ (libraries llm_mcp.common alcotest qcheck qcheck-alcotest))
+
+; Formal Verification: Exhaustive + Property-Based Proof
+(executable
+ (name test_chain_formal)
+ (modules test_chain_formal)
+ (libraries llm_mcp.common qcheck))
