@@ -965,6 +965,7 @@ dune runtest
 - Mermaid output always embeds full chain JSON:
   - `%% @chain_full {...}`
 - Mermaid → JSON conversion prioritizes `@chain_full` for 1:1 restoration.
+- Proof sketch and invariants: `docs/CHAIN_INTEROP_GUARANTEE.md`.
 
 ### Streaming Events (`/chain/events`)
 
