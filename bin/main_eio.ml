@@ -1568,9 +1568,12 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
 
   (* Chain history endpoint - read past executions from JSONL *)
   | `GET, "/chain/history" ->
-      let history_file = match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+      let history_file = match Sys.getenv_opt "LLM_MCP_CHAIN_HISTORY_FILE" with
         | Some path -> path
-        | None -> "data/chain_history.jsonl"
+        | None ->
+            match Sys.getenv_opt "CHAIN_HISTORY_FILE" with  (* Legacy fallback *)
+            | Some path -> path
+            | None -> "data/chain_history.jsonl"
       in
       let records =
         try
@@ -1598,9 +1601,12 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
 
   (* Prometheus metrics endpoint for monitoring integration *)
   | `GET, "/metrics" ->
-      let history_file = match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+      let history_file = match Sys.getenv_opt "LLM_MCP_CHAIN_HISTORY_FILE" with
         | Some path -> path
-        | None -> "data/chain_history.jsonl"
+        | None ->
+            match Sys.getenv_opt "CHAIN_HISTORY_FILE" with  (* Legacy fallback *)
+            | Some path -> path
+            | None -> "data/chain_history.jsonl"
       in
       let records =
         try

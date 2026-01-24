@@ -21,11 +21,16 @@ let with_mutex mutex f =
 
 (** {1 History Persistence} *)
 
-(** History file path - configurable via environment *)
+(** History file path - configurable via environment
+    Note: CHAIN_HISTORY_FILE is deprecated, use LLM_MCP_CHAIN_HISTORY_FILE *)
 let history_file =
-  match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+  match Sys.getenv_opt "LLM_MCP_CHAIN_HISTORY_FILE" with
   | Some path -> path
-  | None -> "data/chain_history.jsonl"
+  | None ->
+      (* Fallback to legacy env var for backwards compatibility *)
+      match Sys.getenv_opt "CHAIN_HISTORY_FILE" with
+      | Some path -> path
+      | None -> "data/chain_history.jsonl"
 
 (** Append a JSON record to history file (thread-safe via OS) *)
 let append_history (json : Yojson.Safe.t) =
