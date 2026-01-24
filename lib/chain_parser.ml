@@ -907,24 +907,6 @@ let validate_chain (c : Chain_types.chain) : (unit, string) result =
 
 let is_blank s = String.trim s = ""
 
-let collect_schema_vars (schema : Yojson.Safe.t option) : string list =
-  match schema with
-  | None -> []
-  | Some (`Assoc fields) ->
-      let props =
-        match List.assoc_opt "properties" fields with
-        | Some (`Assoc props) -> List.map fst props
-        | _ -> []
-      in
-      let required =
-        match List.assoc_opt "required" fields with
-        | Some (`List items) ->
-            List.filter_map (function `String s -> Some s | _ -> None) items
-        | _ -> []
-      in
-      List.sort_uniq String.compare (props @ required)
-  | _ -> []
-
 let strip_braces (s : string) : string option =
   let t = String.trim s in
   if String.length t >= 4 &&
@@ -1038,19 +1020,9 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
     addf "Unresolved placeholder nodes found: %s"
       (String.concat ", " (List.sort_uniq String.compare placeholders));
 
+  (* Default allowed external variables for strict validation *)
   let allowed_external =
-    let schema_vars = collect_schema_vars c.Chain_types.input_schema in
-    let metadata_vars =
-      match c.Chain_types.metadata with
-      | Some (`Assoc fields) ->
-          (match List.assoc_opt "external_inputs" fields with
-           | Some (`List items) ->
-               List.filter_map (function `String s -> Some s | _ -> None) items
-           | _ -> [])
-      | _ -> []
-    in
-    let defaults = ["input"; "parent"; "context"; "vars"; "env"; "secrets"] in
-    List.sort_uniq String.compare (defaults @ schema_vars @ metadata_vars)
+    ["input"; "parent"; "context"; "vars"; "env"; "secrets"]
   in
 
   let is_allowed_external id = List.mem id allowed_external in
@@ -1069,8 +1041,6 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
   let rec validate_node (path : string) (n : Chain_types.node) : unit =
     if is_blank n.id then
       addf "%s: node id is empty" path;
-    (match n.output_key with Some k when is_blank k -> addf "%s: output_key is empty" path | _ -> ());
-    (match n.condition with Some c when is_blank c -> addf "%s: condition is empty" path | _ -> ());
 
     (* input_mapping key uniqueness *)
     let keys = List.map fst n.input_mapping in
@@ -1116,13 +1086,13 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         if is_blank condition then addf "%s: gate.condition is empty" path;
         validate_node (path ^ "/gate/then") then_node;
         (match else_node with Some n2 -> validate_node (path ^ "/gate/else") n2 | None -> ())
-    | Chain_types.Subgraph chain ->
-        if is_blank chain.Chain_types.id then addf "%s: subgraph.id is empty" path;
-        if chain.Chain_types.nodes = [] then addf "%s: subgraph has no nodes" path;
-        let sub_ids = List.map (fun (n2 : Chain_types.node) -> n2.id) chain.Chain_types.nodes in
-        if not (List.mem chain.Chain_types.output sub_ids) then
-          addf "%s: subgraph output '%s' not found" path chain.Chain_types.output;
-        List.iter (fun n2 -> validate_node (path ^ "/subgraph") n2) chain.Chain_types.nodes
+    | Chain_types.Subgraph sub_chain ->
+        if is_blank sub_chain.Chain_types.id then addf "%s: subgraph.id is empty" path;
+        if sub_chain.Chain_types.nodes = [] then addf "%s: subgraph has no nodes" path;
+        let sub_ids = List.map (fun (n2 : Chain_types.node) -> n2.id) sub_chain.Chain_types.nodes in
+        if not (List.mem sub_chain.Chain_types.output sub_ids) then
+          addf "%s: subgraph output '%s' not found" path sub_chain.Chain_types.output;
+        List.iter (fun n2 -> validate_node (path ^ "/subgraph") n2) sub_chain.Chain_types.nodes
     | Chain_types.ChainRef ref_id ->
         if is_blank ref_id then addf "%s: chain_ref is empty" path
     | Chain_types.Map { func; inner } ->
@@ -1206,7 +1176,7 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
     )
   in
 
-  List.iter (fun n -> validate_node ("node:" ^ n.id) n) c.Chain_types.nodes;
+  List.iter (fun (n : Chain_types.node) -> validate_node ("node:" ^ n.id) n) c.Chain_types.nodes;
 
   if !errors = [] then Ok ()
   else
