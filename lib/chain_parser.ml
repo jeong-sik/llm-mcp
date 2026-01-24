@@ -898,24 +898,6 @@ let validate_chain (c : Chain_types.chain) : (unit, string) result =
 
 let is_blank s = String.trim s = ""
 
-let collect_schema_vars (schema : Yojson.Safe.t option) : string list =
-  match schema with
-  | None -> []
-  | Some (`Assoc fields) ->
-      let props =
-        match List.assoc_opt "properties" fields with
-        | Some (`Assoc props) -> List.map fst props
-        | _ -> []
-      in
-      let required =
-        match List.assoc_opt "required" fields with
-        | Some (`List items) ->
-            List.filter_map (function `String s -> Some s | _ -> None) items
-        | _ -> []
-      in
-      List.sort_uniq String.compare (props @ required)
-  | _ -> []
-
 let strip_braces (s : string) : string option =
   let t = String.trim s in
   if String.length t >= 4 &&
@@ -940,6 +922,26 @@ let extract_ref_root ~known_ids (s : string) : string option =
         | [] -> None
     else
       None
+
+let extract_template_vars (s : string) : string list =
+  let re = Str.regexp "{{\\([^}]+\\)}}" in
+  let rec loop pos acc =
+    try
+      let _ = Str.search_forward re s pos in
+      let var = Str.matched_group 1 s |> String.trim in
+      let next = Str.match_end () in
+      loop next (var :: acc)
+    with Not_found -> List.rev acc
+  in
+  loop 0 []
+
+let rec collect_template_vars_json acc (json : Yojson.Safe.t) =
+  match json with
+  | `String s -> extract_template_vars s @ acc
+  | `List items -> List.fold_left collect_template_vars_json acc items
+  | `Assoc fields ->
+      List.fold_left (fun acc (_, v) -> collect_template_vars_json acc v) acc fields
+  | _ -> acc
 
 let rec collect_all_nodes (acc : Chain_types.node list) (n : Chain_types.node) : Chain_types.node list =
   let acc = n :: acc in
@@ -1029,19 +1031,9 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
     addf "Unresolved placeholder nodes found: %s"
       (String.concat ", " (List.sort_uniq String.compare placeholders));
 
+  (* Default allowed external variables for strict validation *)
   let allowed_external =
-    let schema_vars = collect_schema_vars c.Chain_types.input_schema in
-    let metadata_vars =
-      match c.Chain_types.metadata with
-      | Some (`Assoc fields) ->
-          (match List.assoc_opt "external_inputs" fields with
-           | Some (`List items) ->
-               List.filter_map (function `String s -> Some s | _ -> None) items
-           | _ -> [])
-      | _ -> []
-    in
-    let defaults = ["input"; "parent"; "context"; "vars"; "env"; "secrets"] in
-    List.sort_uniq String.compare (defaults @ schema_vars @ metadata_vars)
+    ["input"; "parent"; "context"; "vars"; "env"; "secrets"]
   in
 
   let is_allowed_external id = List.mem id allowed_external in
@@ -1060,8 +1052,26 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
   let rec validate_node (path : string) (n : Chain_types.node) : unit =
     if is_blank n.id then
       addf "%s: node id is empty" path;
-    (match n.output_key with Some k when is_blank k -> addf "%s: output_key is empty" path | _ -> ());
-    (match n.condition with Some c when is_blank c -> addf "%s: condition is empty" path | _ -> ());
+
+    (* Template refs inside prompts/args should resolve to known nodes or allowed externals *)
+    (match n.node_type with
+     | Chain_types.Llm { prompt; system; _ } ->
+         let vars = extract_template_vars prompt in
+         let vars = match system with
+           | Some s -> vars @ extract_template_vars s
+           | None -> vars
+         in
+         List.iter (fun v ->
+           let ref_str = Printf.sprintf "{{%s}}" v in
+           validate_ref ~node_id:n.id ~key:"prompt" ~ref_str
+         ) vars
+     | Chain_types.Tool { args; _ } ->
+         let vars = collect_template_vars_json [] args in
+         List.iter (fun v ->
+           let ref_str = Printf.sprintf "{{%s}}" v in
+           validate_ref ~node_id:n.id ~key:"args" ~ref_str
+         ) vars
+     | _ -> ());
 
     (* input_mapping key uniqueness *)
     let keys = List.map fst n.input_mapping in
@@ -1197,7 +1207,7 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
     )
   in
 
-  List.iter (fun n -> validate_node ("node:" ^ n.id) n) c.Chain_types.nodes;
+  List.iter (fun (n : Chain_types.node) -> validate_node ("node:" ^ n.id) n) c.Chain_types.nodes;
 
   if !errors = [] then Ok ()
   else
