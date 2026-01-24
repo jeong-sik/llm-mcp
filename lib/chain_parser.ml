@@ -1117,13 +1117,13 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         if is_blank condition then addf "%s: gate.condition is empty" path;
         validate_node (path ^ "/gate/then") then_node;
         (match else_node with Some n2 -> validate_node (path ^ "/gate/else") n2 | None -> ())
-    | Chain_types.Subgraph chain ->
-        if is_blank chain.Chain_types.id then addf "%s: subgraph.id is empty" path;
-        if chain.Chain_types.nodes = [] then addf "%s: subgraph has no nodes" path;
-        let sub_ids = List.map (fun (n2 : Chain_types.node) -> n2.id) chain.Chain_types.nodes in
-        if not (List.mem chain.Chain_types.output sub_ids) then
-          addf "%s: subgraph output '%s' not found" path chain.Chain_types.output;
-        List.iter (fun n2 -> validate_node (path ^ "/subgraph") n2) chain.Chain_types.nodes
+    | Chain_types.Subgraph sub_chain ->
+        if is_blank sub_chain.Chain_types.id then addf "%s: subgraph.id is empty" path;
+        if sub_chain.Chain_types.nodes = [] then addf "%s: subgraph has no nodes" path;
+        let sub_ids = List.map (fun (n2 : Chain_types.node) -> n2.id) sub_chain.Chain_types.nodes in
+        if not (List.mem sub_chain.Chain_types.output sub_ids) then
+          addf "%s: subgraph output '%s' not found" path sub_chain.Chain_types.output;
+        List.iter (fun n2 -> validate_node (path ^ "/subgraph") n2) sub_chain.Chain_types.nodes
     | Chain_types.ChainRef ref_id ->
         if is_blank ref_id then addf "%s: chain_ref is empty" path
     | Chain_types.Map { func; inner } ->
