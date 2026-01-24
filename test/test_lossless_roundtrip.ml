@@ -1734,6 +1734,206 @@ let test_stress_resilience_pyramid () =
             j1 = j2
   )
 
+(* ============================================================
+   REVERSE ROUNDTRIP - Mermaid → JSON → Mermaid → JSON
+   ============================================================ *)
+
+(* Helper for reverse roundtrip verification *)
+let verify_reverse_roundtrip mermaid_input =
+  (* Step 1: Mermaid → Chain₁ *)
+  match Mermaid_parser.parse_mermaid_to_chain ~id:"test" mermaid_input with
+  | Error e -> failwith ("Mermaid₁ parse failed: " ^ e)
+  | Ok chain1 ->
+      (* Step 2: Chain₁ → JSON₁ *)
+      let json1 = Json_parser.chain_to_json_string ~pretty:false chain1 in
+      (* Step 3: JSON₁ → Chain₂ *)
+      let json1_parsed = Yojson.Safe.from_string json1 in
+      match Json_parser.parse_chain json1_parsed with
+      | Error e -> failwith ("JSON₁ parse failed: " ^ e)
+      | Ok chain2 ->
+          (* Step 4: Chain₂ → Mermaid₂ *)
+          let mermaid2 = Mermaid_parser.chain_to_mermaid ~styled:false chain2 in
+          (* Step 5: Mermaid₂ → Chain₃ *)
+          match Mermaid_parser.parse_mermaid_to_chain ~id:"test" mermaid2 with
+          | Error e -> failwith ("Mermaid₂ parse failed: " ^ e)
+          | Ok chain3 ->
+              (* Step 6: Chain₃ → JSON₃ *)
+              let json3 = Json_parser.chain_to_json_string ~pretty:false chain3 in
+              (* Verify: JSON₁ = JSON₃ *)
+              json1 = json3
+
+(* Reverse: Simple pipeline *)
+let test_reverse_simple_pipeline () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_pipe","nodes":[{"id":"a","type":"llm","model":"gemini","prompt":"Hello"},{"id":"b","type":"llm","model":"claude","prompt":"World: {{a}}"}],"output":"b","config":{"timeout":60,"trace":false,"max_depth":3,"max_concurrency":1}}
+    a["LLM:gemini 'Hello'"]
+    b["LLM:claude 'World: {{a}}'"]
+    a --> b
+|} in
+  Alcotest.(check bool) "reverse simple pipeline" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Fanout with Quorum *)
+let test_reverse_fanout_quorum () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_fanout","nodes":[{"id":"fan","type":"fanout","nodes":[{"id":"f1","type":"llm","model":"gemini","prompt":"A"},{"id":"f2","type":"llm","model":"claude","prompt":"B"},{"id":"f3","type":"llm","model":"codex","prompt":"C"}]},{"id":"vote","type":"quorum","required":2,"nodes":[{"id":"q1","type":"llm","model":"gemini","prompt":"Vote1"},{"id":"q2","type":"llm","model":"claude","prompt":"Vote2"}]}],"output":"vote","config":{"timeout":120,"trace":true,"max_depth":5,"max_concurrency":3}}
+    fan[["Fanout"]]
+    vote{Quorum:2}
+    fan --> vote
+|} in
+  Alcotest.(check bool) "reverse fanout quorum" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Nested retry with fallback *)
+let test_reverse_nested_resilience () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_resil","nodes":[{"id":"robust","type":"retry","max_attempts":3,"backoff":{"Exponential":{"base":1.0,"max":10.0}},"retry_on":["timeout"],"node":{"id":"fb","type":"fallback","primary":{"id":"main","type":"llm","model":"claude","prompt":"Main"},"fallbacks":[{"id":"backup","type":"llm","model":"gemini","prompt":"Backup"}]}}],"output":"robust","config":{"timeout":180,"trace":true,"max_depth":6,"max_concurrency":1}}
+    robust("Retry 3x (exp 1.0x)")
+|} in
+  Alcotest.(check bool) "reverse nested resilience" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Gate with branches *)
+let test_reverse_gate () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_gate","nodes":[{"id":"check","type":"llm","model":"gemini","prompt":"Check"},{"id":"gate","type":"gate","condition":"{{check.score}} > 0.5","then":{"id":"high","type":"llm","model":"claude","prompt":"High"},"else":{"id":"low","type":"llm","model":"codex","prompt":"Low"}}],"output":"gate","config":{"timeout":60,"trace":false,"max_depth":4,"max_concurrency":1}}
+    check["LLM:gemini 'Check'"]
+    gate{Gate:{{check.score}} > 0.5}
+    check --> gate
+|} in
+  Alcotest.(check bool) "reverse gate" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Subgraph with inner chain *)
+let test_reverse_subgraph () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_sub","nodes":[{"id":"outer","type":"subgraph","graph":{"id":"inner","nodes":[{"id":"a","type":"llm","model":"gemini","prompt":"Inner A"},{"id":"b","type":"llm","model":"claude","prompt":"Inner B"}],"output":"b","config":{"timeout":30,"trace":true,"max_depth":2,"max_concurrency":1}}}],"output":"outer","config":{"timeout":90,"trace":true,"max_depth":5,"max_concurrency":1}}
+    outer[/"Subgraph:inner"/]
+|} in
+  Alcotest.(check bool) "reverse subgraph" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Evaluator with candidates *)
+let test_reverse_evaluator () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_eval","nodes":[{"id":"eval","type":"evaluator","scoring_func":"llm_judge","select_strategy":"best","min_score":0.7,"candidates":[{"id":"c1","type":"llm","model":"gemini","prompt":"Candidate 1"},{"id":"c2","type":"llm","model":"claude","prompt":"Candidate 2"}]}],"output":"eval","config":{"timeout":120,"trace":true,"max_depth":4,"max_concurrency":2}}
+    eval{Evaluator:llm_judge:best}
+|} in
+  Alcotest.(check bool) "reverse evaluator" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: GoalDriven with action *)
+let test_reverse_goaldriven () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_goal","nodes":[{"id":"opt","type":"goal_driven","goal_metric":"quality","goal_operator":"gte","goal_value":0.8,"max_iterations":5,"measure_func":"check","conversational":false,"action_node":{"id":"act","type":"llm","model":"claude","prompt":"Generate"}}],"output":"opt","config":{"timeout":300,"trace":true,"max_depth":8,"max_concurrency":1}}
+    opt{GoalDriven:quality:gte:0.80:5}
+|} in
+  Alcotest.(check bool) "reverse goaldriven" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: MCTS with strategies *)
+let test_reverse_mcts () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_mcts","nodes":[{"id":"search","type":"mcts","strategies":[{"id":"s1","type":"llm","model":"gemini","prompt":"Strategy A"},{"id":"s2","type":"llm","model":"claude","prompt":"Strategy B"}],"simulation":{"id":"sim","type":"llm","model":"codex","prompt":"Simulate"},"evaluator":"llm_judge","evaluator_prompt":null,"policy":{"UCB1":1.414},"max_iterations":5,"max_depth":3,"expansion_threshold":2,"early_stop":null,"parallel_sims":1}],"output":"search","config":{"timeout":300,"trace":true,"max_depth":8,"max_concurrency":1}}
+    search[[MCTS UCB1:1.41 5iter]]
+|} in
+  Alcotest.(check bool) "reverse mcts" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: FeedbackLoop *)
+let test_reverse_feedbackloop () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_loop","nodes":[{"id":"loop","type":"feedback_loop","generator":{"id":"gen","type":"llm","model":"claude","prompt":"Generate"},"evaluator_config":{"scoring_func":"anti_fake","scoring_prompt":"Check quality"},"improver_prompt":"Improve: {{feedback}}","max_iterations":3,"score_threshold":0.9,"score_operator":"gte"}],"output":"loop","config":{"timeout":180,"trace":true,"max_depth":6,"max_concurrency":1}}
+    loop[[FeedbackLoop:3:>=0.90]]
+|} in
+  Alcotest.(check bool) "reverse feedbackloop" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Threshold with branches *)
+let test_reverse_threshold () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_thresh","nodes":[{"id":"th","type":"threshold","metric":"confidence","operator":"gte","value":0.8,"input_node":{"id":"check","type":"llm","model":"gemini","prompt":"Check"},"on_pass":{"id":"pass","type":"llm","model":"claude","prompt":"Pass"},"on_fail":{"id":"fail","type":"llm","model":"codex","prompt":"Fail"}}],"output":"th","config":{"timeout":90,"trace":true,"max_depth":5,"max_concurrency":1}}
+    th{Threshold:confidence:gte:0.80}
+|} in
+  Alcotest.(check bool) "reverse threshold" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Race with timeout *)
+let test_reverse_race () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_race","nodes":[{"id":"race","type":"race","timeout":30.0,"nodes":[{"id":"r1","type":"llm","model":"gemini","prompt":"Fast"},{"id":"r2","type":"llm","model":"claude","prompt":"Slow"}]}],"output":"race","config":{"timeout":60,"trace":false,"max_depth":3,"max_concurrency":2}}
+    race("Race 30.0s")
+|} in
+  Alcotest.(check bool) "reverse race" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Tool node *)
+let test_reverse_tool () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_tool","nodes":[{"id":"lint","type":"tool","name":"eslint","args":{"pattern":"*.ts","fix":true}}],"output":"lint","config":{"timeout":60,"trace":false,"max_depth":2,"max_concurrency":1}}
+    lint["Tool:eslint"]
+|} in
+  Alcotest.(check bool) "reverse tool" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: ChainRef *)
+let test_reverse_chainref () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_ref","nodes":[{"id":"ref","type":"chain_ref","ref":"magi-code-review"}],"output":"ref","config":{"timeout":120,"trace":true,"max_depth":3,"max_concurrency":1}}
+    ref[/"Ref:magi-code-review"/]
+|} in
+  Alcotest.(check bool) "reverse chainref" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Merge with strategy *)
+let test_reverse_merge () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_merge","nodes":[{"id":"merge","type":"merge","strategy":"concat","nodes":[{"id":"m1","type":"llm","model":"gemini","prompt":"Part 1"},{"id":"m2","type":"llm","model":"claude","prompt":"Part 2"}]}],"output":"merge","config":{"timeout":60,"trace":false,"max_depth":3,"max_concurrency":2}}
+    merge{Merge:concat}
+|} in
+  Alcotest.(check bool) "reverse merge" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Map node *)
+let test_reverse_map () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_map","nodes":[{"id":"map","type":"map","func":"extract","inner":{"id":"inner","type":"llm","model":"claude","prompt":"Transform"}}],"output":"map","config":{"timeout":90,"trace":true,"max_depth":4,"max_concurrency":1}}
+    map[/"Map:extract"/]
+|} in
+  Alcotest.(check bool) "reverse map" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse: Spawn node *)
+let test_reverse_spawn () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_spawn","nodes":[{"id":"spawn","type":"spawn","clean":true,"pass_vars":["input","config"],"inherit_cache":false,"inner":{"id":"child","type":"llm","model":"claude","prompt":"Child task"}}],"output":"spawn","config":{"timeout":120,"trace":true,"max_depth":5,"max_concurrency":1}}
+    spawn[[Spawn:clean]]
+|} in
+  Alcotest.(check bool) "reverse spawn" true (verify_reverse_roundtrip mermaid)
+
+(* ============================================================
+   REVERSE STRESS - Complex Mermaid → JSON → Mermaid
+   ============================================================ *)
+
+(* Reverse Stress: 5-level nesting *)
+let test_reverse_stress_5level () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_5level","nodes":[{"id":"l1","type":"subgraph","graph":{"id":"inner1","nodes":[{"id":"l2","type":"pipeline","nodes":[{"id":"prep","type":"llm","model":"gemini","prompt":"Prep"},{"id":"l3","type":"retry","max_attempts":2,"backoff":{"Fixed":1.0},"retry_on":["error"],"node":{"id":"l4","type":"fanout","nodes":[{"id":"l5a","type":"gate","condition":"{{x}}>0","then":{"id":"yes","type":"llm","model":"claude","prompt":"Yes"}},{"id":"l5b","type":"llm","model":"codex","prompt":"Simple"}]}}]}],"output":"l2","config":{"timeout":60,"trace":true,"max_depth":5,"max_concurrency":1}}}],"output":"l1","config":{"timeout":180,"trace":true,"max_depth":10,"max_concurrency":1}}
+    l1[/"Subgraph:inner1"/]
+|} in
+  Alcotest.(check bool) "reverse stress 5level" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse Stress: All node types *)
+let test_reverse_stress_all_types () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_all","nodes":[{"id":"n1","type":"llm","model":"gemini","prompt":"Start"},{"id":"n2","type":"tool","name":"lint","args":{}},{"id":"n3","type":"chain_ref","ref":"other"},{"id":"n4","type":"pipeline","nodes":[{"id":"p1","type":"llm","model":"claude","prompt":"P1"}]},{"id":"n5","type":"fanout","nodes":[{"id":"f1","type":"llm","model":"codex","prompt":"F1"}]},{"id":"n6","type":"quorum","required":1,"nodes":[{"id":"q1","type":"llm","model":"gemini","prompt":"Q1"}]},{"id":"n7","type":"gate","condition":"true","then":{"id":"t","type":"llm","model":"claude","prompt":"T"}},{"id":"n8","type":"retry","max_attempts":1,"backoff":{"Fixed":0.5},"retry_on":[],"node":{"id":"r","type":"llm","model":"codex","prompt":"R"}},{"id":"n9","type":"race","timeout":10.0,"nodes":[{"id":"rc","type":"llm","model":"gemini","prompt":"RC"}]},{"id":"n10","type":"merge","strategy":"first","nodes":[{"id":"mg","type":"llm","model":"claude","prompt":"MG"}]},{"id":"n11","type":"evaluator","scoring_func":"custom","select_strategy":"best","candidates":[{"id":"ev","type":"llm","model":"codex","prompt":"EV"}]}],"output":"n11","config":{"timeout":300,"trace":true,"max_depth":10,"max_concurrency":3}}
+    n1["LLM:gemini 'Start'"]
+    n11{Evaluator:custom:best}
+    n1 --> n11
+|} in
+  Alcotest.(check bool) "reverse stress all types" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse Stress: Deeply nested resilience *)
+let test_reverse_stress_resilience_tower () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_tower","nodes":[{"id":"r1","type":"retry","max_attempts":3,"backoff":{"Exponential":{"base":1.0,"max":30.0}},"retry_on":["timeout","error"],"node":{"id":"r2","type":"retry","max_attempts":2,"backoff":{"Fixed":2.0},"retry_on":["rate_limit"],"node":{"id":"fb","type":"fallback","primary":{"id":"race","type":"race","timeout":30.0,"nodes":[{"id":"fast","type":"llm","model":"gemini","prompt":"Fast"},{"id":"slow","type":"llm","model":"claude","prompt":"Slow"}]},"fallbacks":[{"id":"backup","type":"llm","model":"codex","prompt":"Backup"}]}}}],"output":"r1","config":{"timeout":600,"trace":true,"max_depth":10,"max_concurrency":2}}
+    r1("Retry 3x (exp 1.0x)")
+|} in
+  Alcotest.(check bool) "reverse stress resilience tower" true (verify_reverse_roundtrip mermaid)
+
+(* Reverse Stress: GoalDriven + MCTS + FeedbackLoop combo *)
+let test_reverse_stress_meta_combo () =
+  let mermaid = {|graph LR
+    %% @chain_full {"id":"rev_meta","nodes":[{"id":"goal","type":"goal_driven","goal_metric":"quality","goal_operator":"gte","goal_value":0.9,"max_iterations":5,"measure_func":"test","conversational":true,"action_node":{"id":"loop","type":"feedback_loop","generator":{"id":"gen","type":"llm","model":"claude","prompt":"Gen"},"evaluator_config":{"scoring_func":"llm_judge"},"improver_prompt":"Fix: {{feedback}}","max_iterations":3,"score_threshold":0.8,"score_operator":"gte"}}],"output":"goal","config":{"timeout":900,"trace":true,"max_depth":15,"max_concurrency":1}}
+    goal{GoalDriven:quality:gte:0.90:5}
+|} in
+  Alcotest.(check bool) "reverse stress meta combo" true (verify_reverse_roundtrip mermaid)
+
 let () =
   Alcotest.run "Lossless Roundtrip" [
     "roundtrip", [
@@ -1800,5 +2000,29 @@ let () =
       Alcotest.test_case "mermaid-to-chain.json" `Quick test_chain_mermaid_to_chain;
       Alcotest.test_case "pr-review-pipeline.json" `Quick test_chain_pr_review;
       Alcotest.test_case "simple-test.json" `Quick test_chain_simple_test;
+    ];
+    "reverse_roundtrip", [
+      Alcotest.test_case "Simple pipeline (Mermaid→JSON→Mermaid)" `Quick test_reverse_simple_pipeline;
+      Alcotest.test_case "Fanout with Quorum" `Quick test_reverse_fanout_quorum;
+      Alcotest.test_case "Nested resilience (Retry>Fallback>Race)" `Quick test_reverse_nested_resilience;
+      Alcotest.test_case "Gate with branches" `Quick test_reverse_gate;
+      Alcotest.test_case "Subgraph (inner chain)" `Quick test_reverse_subgraph;
+      Alcotest.test_case "Evaluator node" `Quick test_reverse_evaluator;
+      Alcotest.test_case "GoalDriven node" `Quick test_reverse_goaldriven;
+      Alcotest.test_case "MCTS node" `Quick test_reverse_mcts;
+      Alcotest.test_case "FeedbackLoop node" `Quick test_reverse_feedbackloop;
+      Alcotest.test_case "Threshold node" `Quick test_reverse_threshold;
+      Alcotest.test_case "Race node" `Quick test_reverse_race;
+      Alcotest.test_case "Tool node" `Quick test_reverse_tool;
+      Alcotest.test_case "ChainRef node" `Quick test_reverse_chainref;
+      Alcotest.test_case "Merge node" `Quick test_reverse_merge;
+      Alcotest.test_case "Map node" `Quick test_reverse_map;
+      Alcotest.test_case "Spawn node" `Quick test_reverse_spawn;
+    ];
+    "reverse_stress", [
+      Alcotest.test_case "5-level deep nesting" `Quick test_reverse_stress_5level;
+      Alcotest.test_case "All node types (11 types)" `Quick test_reverse_stress_all_types;
+      Alcotest.test_case "Resilience tower (4-layer)" `Quick test_reverse_stress_resilience_tower;
+      Alcotest.test_case "Meta combo (GoalDriven+FeedbackLoop)" `Quick test_reverse_stress_meta_combo;
     ];
   ]
