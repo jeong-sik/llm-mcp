@@ -15,6 +15,7 @@ Note: This is a personal project.
 
 ## 문서
 
+- [Setup](docs/SETUP.md) - 설치/실행/연동
 - [Use Cases](docs/USE_CASES.md) - 유즈케이스랑 다이어그램
 - [Compact Protocol](docs/PROTOCOL.md) - LLM끼리 통신할 때 토큰 아끼는 프로토콜
 - [Streaming & SSE](docs/STREAMING.md) - 운영 옵션/재연결/델타 로그
