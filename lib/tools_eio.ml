@@ -22,6 +22,7 @@ let parse_claude_args = Tool_parsers.parse_claude_args
 let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
+let parse_glm_args = Tool_parsers.parse_glm_args
 let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let parse_chain_to_mermaid_args = Tool_parsers.parse_chain_to_mermaid_args
@@ -589,6 +590,7 @@ let get_model_name_for_tracing = function
   | Codex { model; _ } -> sprintf "codex:%s" model
   | Ollama { model; _ } -> sprintf "ollama:%s" model
   | OllamaList -> "ollama:list"
+  | Glm { model; _ } -> sprintf "glm:%s" model
   | ChainRun _ -> "chain:run"
   | ChainValidate _ -> "chain:validate"
   | ChainList -> "chain:list"
@@ -611,6 +613,7 @@ let get_input_for_tracing = function
   | Codex { prompt; _ } -> prompt
   | Ollama { prompt; _ } -> prompt
   | OllamaList -> "(list models)"
+  | Glm { prompt; _ } -> prompt
   | ChainRun { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
   | ChainValidate { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
   | ChainOrchestrate { chain; _ } ->
@@ -917,6 +920,97 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       else
         ();
       result
+
+  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream = _ } ->
+      (* Z.ai GLM Cloud API - OpenAI-compatible *)
+      let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
+        | Some k -> k
+        | None -> ""
+      in
+      if String.length api_key = 0 then
+        { model = sprintf "glm (%s)" model;
+          returncode = -1;
+          response = "Error: ZAI_API_KEY environment variable not set";
+          extra = [("error", "missing_api_key")]; }
+      else begin
+        (* Build OpenAI-compatible request body *)
+        let messages = match system_prompt with
+          | Some sys ->
+              `List [
+                `Assoc [("role", `String "system"); ("content", `String sys)];
+                `Assoc [("role", `String "user"); ("content", `String prompt)]
+              ]
+          | None ->
+              `List [
+                `Assoc [("role", `String "user"); ("content", `String prompt)]
+              ]
+        in
+        let body_fields = [
+          ("model", `String model);
+          ("messages", messages);
+          ("temperature", `Float temperature);
+        ] in
+        let body_fields = match max_tokens with
+          | Some n -> body_fields @ [("max_tokens", `Int n)]
+          | None -> body_fields
+        in
+        let body = Yojson.Safe.to_string (`Assoc body_fields) in
+        let cmd = "curl" in
+        let cmd_args = [
+          "-s"; "-X"; "POST";
+          "https://api.z.ai/api/paas/v4/chat/completions";
+          "-H"; "Content-Type: application/json";
+          "-H"; sprintf "Authorization: Bearer %s" api_key;
+          "-d"; body;
+          "--max-time"; string_of_int timeout;
+        ] in
+        let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+        match result with
+        | Ok r ->
+            (* Parse OpenAI-compatible response *)
+            (try
+              let json = Yojson.Safe.from_string r.stdout in
+              let open Yojson.Safe.Util in
+              let choices = json |> member "choices" |> to_list in
+              if List.length choices > 0 then
+                let first_choice = List.hd choices in
+                let message = first_choice |> member "message" in
+                let content = message |> member "content" |> to_string in
+                { model = sprintf "glm (%s)" model;
+                  returncode = 0;
+                  response = content;
+                  extra = [("temperature", sprintf "%.1f" temperature); ("cloud", "zai")]; }
+              else
+                { model = sprintf "glm (%s)" model;
+                  returncode = -1;
+                  response = "Error: No choices in response";
+                  extra = [("error", "no_choices")]; }
+            with e ->
+              (* Check if it's an API error *)
+              (try
+                let json = Yojson.Safe.from_string r.stdout in
+                let open Yojson.Safe.Util in
+                let error_msg = json |> member "error" |> member "message" |> to_string in
+                { model = sprintf "glm (%s)" model;
+                  returncode = -1;
+                  response = sprintf "API Error: %s" error_msg;
+                  extra = [("error", "api_error")]; }
+              with _ ->
+                { model = sprintf "glm (%s)" model;
+                  returncode = -1;
+                  response = sprintf "Error parsing response: %s. Raw: %s" (Printexc.to_string e) r.stdout;
+                  extra = [("error", "parse_error")]; }))
+        | Error (Timeout t) ->
+            { model = sprintf "glm (%s)" model;
+              returncode = -1;
+              response = sprintf "Timeout after %ds" t;
+              extra = [("error", "timeout")]; }
+        | Error (ProcessError msg) ->
+            { model = sprintf "glm (%s)" model;
+              returncode = -1;
+              response = sprintf "Error: %s" msg;
+              extra = [("error", "process_error")]; }
+      end
 
   | OllamaList ->
       let cmd = "ollama" in

@@ -104,6 +104,22 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
 let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
   OllamaList
 
+(** Parse JSON arguments for GLM (Z.ai) tool *)
+let parse_glm_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let prompt = json |> member "prompt" |> to_string in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"GLM-4.7" in
+  let system_prompt = json |> member "system_prompt" |> to_string_option in
+  let temperature =
+    try json |> member "temperature" |> to_float
+    with Type_error _ -> 0.7 in
+  let max_tokens =
+    try Some (json |> member "max_tokens" |> to_int)
+    with Type_error _ -> None in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream }
+
 (** Parse JSON arguments for chain.run tool *)
 let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in

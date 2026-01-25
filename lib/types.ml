@@ -160,6 +160,15 @@ type tool_args =
       id : string;
       version : string option;
     }
+  | Glm of {
+      prompt : string;
+      model : string;  (* GLM-4.7, GLM-4.6, GLM-4.5 *)
+      system_prompt : string option;
+      temperature : float;
+      max_tokens : int option;
+      timeout : int;
+      stream : bool;
+    }
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -567,6 +576,81 @@ Use this to discover which models are available before calling the ollama tool.|
 }
 
 (* ============================================================================
+   GLM (Z.ai) Cloud API Schema
+   ============================================================================ *)
+
+let glm_schema : tool_schema = {
+  name = "glm";
+  description = {|Run GLM-4.7 via Z.ai Cloud API (OpenAI-compatible).
+
+GLM-4.7 is a 355B parameter MoE model (32B active) with:
+- State-of-the-art reasoning, coding, and agent capabilities
+- 200K context window, 128K output
+- 55+ tokens per second
+
+Use cases:
+- Complex reasoning and multi-step problem solving
+- Code generation with long context (200K)
+- Agent workflows requiring fast responses
+- MAGI Trinity: Use as cloud alternative to local Ollama
+
+Models:
+- GLM-4.7 (default): Best performance, MoE 355B/32B active
+- GLM-4.6: Previous generation
+- GLM-4.5: Older, cost-efficient
+
+Parameters:
+- prompt: The prompt to send (required)
+- model: Model name (default: GLM-4.7)
+- system_prompt: System prompt for context (optional)
+- temperature: Creativity level 0.0-2.0 (default: 0.7)
+- max_tokens: Max tokens to generate (optional, model default)
+- timeout: Timeout in seconds (default: 300)
+- stream: Enable streaming (default: true)
+
+Requires ZAI_API_KEY environment variable.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("prompt", `Assoc [
+        ("type", `String "string");
+        ("description", `String "The prompt to send to GLM");
+      ]);
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Model name: GLM-4.7 (default), GLM-4.6, GLM-4.5");
+        ("default", `String "GLM-4.7");
+      ]);
+      ("system_prompt", `Assoc [
+        ("type", `String "string");
+        ("description", `String "System prompt for context");
+      ]);
+      ("temperature", `Assoc [
+        ("type", `String "number");
+        ("description", `String "Creativity level 0.0-2.0");
+        ("default", `Float 0.7);
+      ]);
+      ("max_tokens", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Max tokens to generate");
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 300);
+      ]);
+      ("stream", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable SSE streaming");
+        ("default", `Bool true);
+      ]);
+      response_format_schema;
+    ]);
+    ("required", `List [`String "prompt"]);
+  ];
+}
+
+(* ============================================================================
    Chain Engine Schemas - Workflow Orchestration DSL
    ============================================================================ *)
 
@@ -947,6 +1031,7 @@ let all_schemas = [
   codex_schema;
   ollama_schema;
   ollama_list_schema;
+  glm_schema;
   chain_run_schema;
   chain_validate_schema;
   chain_convert_schema;
