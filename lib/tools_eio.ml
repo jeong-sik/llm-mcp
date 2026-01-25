@@ -921,7 +921,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream = _; thinking; do_sample } ->
+  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample } ->
       (* Z.ai GLM Cloud API - OpenAI-compatible *)
       let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
         | Some k -> k
@@ -953,6 +953,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ("temperature", `Float temperature);
           ("do_sample", `Bool do_sample);
           ("thinking", thinking_obj);
+          ("stream", `Bool stream);
         ] in
         let body_fields = match max_tokens with
           | Some n -> body_fields @ [("max_tokens", `Int n)]
@@ -960,15 +961,120 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         in
         let body = Yojson.Safe.to_string (`Assoc body_fields) in
         let cmd = "curl" in
-        let cmd_args = [
-          "-s"; "-X"; "POST";
-          "https://api.z.ai/api/coding/paas/v4/chat/completions";  (* Coding Plan subscription *)
-          "-H"; "Content-Type: application/json";
-          "-H"; sprintf "Authorization: Bearer %s" api_key;
-          "-d"; body;
-          "--max-time"; string_of_int timeout;
-        ] in
-        let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+
+        if stream then begin
+          (* Streaming mode: use run_streaming_command with SSE passthrough *)
+          let cmd_args = [
+            "-s"; "-N"; "-X"; "POST";  (* -N for no-buffer SSE *)
+            "https://api.z.ai/api/coding/paas/v4/chat/completions";
+            "-H"; "Content-Type: application/json";
+            "-H"; sprintf "Authorization: Bearer %s" api_key;
+            "-d"; body;
+            "--max-time"; string_of_int timeout;
+          ] in
+          let content_buffer = Buffer.create 1024 in
+          let reasoning_buffer = Buffer.create 1024 in
+          let chunk_count = ref 0 in
+          let on_line line =
+            (* Parse SSE data lines: "data: {...}" or "data: [DONE]" *)
+            if String.length line > 6 && String.sub line 0 6 = "data: " then begin
+              let data = String.sub line 6 (String.length line - 6) in
+              if data <> "[DONE]" then begin
+                try
+                  let json = Yojson.Safe.from_string data in
+                  let open Yojson.Safe.Util in
+                  let choices = json |> member "choices" |> to_list in
+                  if List.length choices > 0 then begin
+                    let delta = (List.hd choices) |> member "delta" in
+                    (* Extract content chunk *)
+                    (try
+                      let content_chunk = delta |> member "content" |> to_string in
+                      if String.length content_chunk > 0 then begin
+                        Buffer.add_string content_buffer content_chunk;
+                        incr chunk_count;
+                        (* Broadcast chunk via MCP SSE *)
+                        Notification_sse.broadcast (`Assoc [
+                          ("jsonrpc", `String "2.0");
+                          ("method", `String "notifications/glm/chunk");
+                          ("params", `Assoc [
+                            ("model", `String model);
+                            ("chunk", `String content_chunk);
+                            ("type", `String "content");
+                            ("index", `Int !chunk_count);
+                          ]);
+                        ])
+                      end
+                    with _ -> ());
+                    (* Extract reasoning chunk *)
+                    (try
+                      let reasoning_chunk = delta |> member "reasoning_content" |> to_string in
+                      if String.length reasoning_chunk > 0 then begin
+                        Buffer.add_string reasoning_buffer reasoning_chunk;
+                        (* Broadcast reasoning chunk *)
+                        Notification_sse.broadcast (`Assoc [
+                          ("jsonrpc", `String "2.0");
+                          ("method", `String "notifications/glm/chunk");
+                          ("params", `Assoc [
+                            ("model", `String model);
+                            ("chunk", `String reasoning_chunk);
+                            ("type", `String "reasoning");
+                            ("index", `Int !chunk_count);
+                          ]);
+                        ])
+                      end
+                    with _ -> ())
+                  end
+                with _ -> ()
+              end else begin
+                (* [DONE] - broadcast completion *)
+                Notification_sse.broadcast (`Assoc [
+                  ("jsonrpc", `String "2.0");
+                  ("method", `String "notifications/glm/done");
+                  ("params", `Assoc [
+                    ("model", `String model);
+                    ("total_chunks", `Int !chunk_count);
+                  ]);
+                ])
+              end
+            end
+          in
+          let result = run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd cmd_args in
+          match result with
+          | Ok _ ->
+              let content = Buffer.contents content_buffer in
+              let reasoning = Buffer.contents reasoning_buffer in
+              let final_response =
+                if String.length content > 0 then content
+                else if String.length reasoning > 0 then sprintf "[Thinking]\n%s" reasoning
+                else "Empty response" in
+              let extra = [("temperature", sprintf "%.1f" temperature); ("cloud", "zai"); ("streamed", "true")] in
+              let extra = if String.length reasoning > 0 then extra @ [("has_reasoning", "true")] else extra in
+              { model = sprintf "glm (%s)" model;
+                returncode = 0;
+                response = final_response;
+                extra; }
+          | Error (Timeout t) ->
+              { model = sprintf "glm (%s)" model;
+                returncode = -1;
+                response = sprintf "Timeout after %ds" t;
+                extra = [("error", "timeout")]; }
+          | Error (ProcessError msg) ->
+              { model = sprintf "glm (%s)" model;
+                returncode = -1;
+                response = sprintf "Error: %s" msg;
+                extra = [("error", "process_error")]; }
+        end
+        else begin
+          (* Non-streaming mode: wait for complete response *)
+          let cmd_args = [
+            "-s"; "-X"; "POST";
+            "https://api.z.ai/api/coding/paas/v4/chat/completions";
+            "-H"; "Content-Type: application/json";
+            "-H"; sprintf "Authorization: Bearer %s" api_key;
+            "-d"; body;
+            "--max-time"; string_of_int timeout;
+          ] in
+          let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
         match result with
         | Ok r ->
             (* Parse OpenAI-compatible response with GLM-4.7 thinking support *)
@@ -1028,7 +1134,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               returncode = -1;
               response = sprintf "Error: %s" msg;
               extra = [("error", "process_error")]; }
-      end
+        end  (* close else begin for non-streaming *)
+      end  (* close else begin for api_key check *)
 
   | OllamaList ->
       let cmd = "ollama" in
