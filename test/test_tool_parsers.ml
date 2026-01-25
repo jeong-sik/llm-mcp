@@ -308,6 +308,7 @@ let test_build_codex_cmd () =
     working_directory = None;
     timeout = 60;
     stream = false;
+    search = false;
   } in
   match Tool_parsers.build_codex_cmd args with
   | Ok cmd_list ->

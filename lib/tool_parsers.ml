@@ -73,7 +73,8 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
   let working_directory = json |> member "working_directory" |> to_string_option in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  Codex { prompt; model; reasoning_effort; sandbox; working_directory; timeout; stream }
+  let search = json |> member "search" |> to_bool_option |> Option.value ~default:true in
+  Codex { prompt; model; reasoning_effort; sandbox; working_directory; timeout; stream; search }
 
 (** Parse JSON arguments for Ollama (local LLM) tool *)
 let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
@@ -120,7 +121,8 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
   let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:true in
   let do_sample = json |> member "do_sample" |> to_bool_option |> Option.value ~default:true in
-  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample }
+  let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:true in
+  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search }
 
 (** Parse JSON arguments for chain.run tool *)
 let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
@@ -334,7 +336,7 @@ let build_claude_cmd args =
 (** Build Codex CLI command *)
 let build_codex_cmd args =
   match args with
-  | Codex { prompt; model; reasoning_effort; sandbox; working_directory; _ } ->
+  | Codex { prompt; model; reasoning_effort; sandbox; working_directory; search; _ } ->
       let effort_str = string_of_reasoning_effort reasoning_effort in
       let sandbox_str = string_of_sandbox_policy sandbox in
       let cmd = [
@@ -348,6 +350,8 @@ let build_codex_cmd args =
         | Some dir -> cmd @ ["-C"; dir]
         | None -> cmd
       in
+      (* Add --search flag for web search capability *)
+      let cmd = if search then cmd @ ["--search"] else cmd in
       Ok (cmd @ [prompt])
   | _ -> Error "Invalid args for Codex"
 

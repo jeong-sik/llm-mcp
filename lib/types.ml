@@ -88,6 +88,7 @@ type tool_args =
       working_directory : string option;
       timeout : int;
       stream : bool;
+      search : bool;  (* Enable web search via --search flag *)
     }
   | Ollama of {
       prompt : string;
@@ -170,6 +171,7 @@ type tool_args =
       stream : bool;
       thinking : bool;  (* Enable/disable chain-of-thought reasoning *)
       do_sample : bool;  (* true=diverse sampling, false=greedy deterministic *)
+      web_search : bool;  (* Enable web search tool for current information *)
     }
 
 (** Gemini-specific error classification for retry logic.
@@ -325,7 +327,7 @@ Parameters:
       ("stream", `Assoc [
         ("type", `String "boolean");
         ("description", `String "Enable SSE keepalive streaming");
-        ("default", `Bool false);
+        ("default", `Bool true);
       ]);
       response_format_schema;
     ]);
@@ -403,7 +405,7 @@ Note: long_context=true uses API key (charges apply), false uses Max subscriptio
       ("stream", `Assoc [
         ("type", `String "boolean");
         ("description", `String "Enable SSE keepalive streaming");
-        ("default", `Bool false);
+        ("default", `Bool true);
       ]);
       response_format_schema;
     ]);
@@ -481,7 +483,12 @@ CLI Direct Usage (without MCP):
       ("stream", `Assoc [
         ("type", `String "boolean");
         ("description", `String "Enable SSE keepalive streaming");
-        ("default", `Bool false);
+        ("default", `Bool true);
+      ]);
+      ("search", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable web search (Bing) for Codex to access current information");
+        ("default", `Bool true);
       ]);
       response_format_schema;
     ]);
@@ -553,6 +560,11 @@ Model must support tools capability (devstral, qwen3, llama3.3, etc).|};
             ("input_schema", `Assoc [("type", `String "object")]);
           ]);
         ]);
+      ]);
+      ("stream", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable SSE streaming with token deltas");
+        ("default", `Bool true);
       ]);
       response_format_schema;
     ]);
@@ -659,6 +671,11 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ("do_sample", `Assoc [
         ("type", `String "boolean");
         ("description", `String "true=diverse sampling, false=greedy deterministic");
+        ("default", `Bool true);
+      ]);
+      ("web_search", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable web search tool for accessing current information with citations");
         ("default", `Bool true);
       ]);
       response_format_schema;

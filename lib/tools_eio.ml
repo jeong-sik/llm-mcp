@@ -429,6 +429,118 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token ?stream_id args =
               extra = extra_base; }
       end
 
+(** {1 Generic CLI Streaming} *)
+
+(** Execute a plain-text CLI tool with line-by-line streaming.
+    Used for Claude CLI, Codex CLI, and Gemini CLI which output text lines. *)
+let execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args =
+  let stream_id = generate_stream_id model_name in
+  let delta_enabled = stream_delta_enabled () in
+  let delta_max_events = stream_delta_max_events () in
+  let delta_max_chars = stream_delta_max_chars () in
+  let delta_count = ref 0 in
+  let delta_truncated = ref false in
+  let total_chars = ref 0 in
+  let broadcast_delta json =
+    if delta_enabled then
+      try Notification_sse.broadcast json
+      with exn ->
+        (* Log broadcast failures but don't interrupt streaming *)
+        eprintf "[cli_streaming] SSE broadcast failed: %s\n%!" (Printexc.to_string exn)
+    else
+      ()
+  in
+  let emit_start () =
+    broadcast_delta (`Assoc [
+      ("type", `String "llm_stream_start");
+      ("stream_id", `String stream_id);
+      ("model", `String model_name);
+      ("has_tools", `Bool false);
+    ])
+  in
+  let emit_end ~success ?error () =
+    let base = [
+      ("type", `String "llm_stream_end");
+      ("stream_id", `String stream_id);
+      ("model", `String model_name);
+      ("success", `Bool success);
+      ("chunks", `Int !delta_count);
+      ("total_chars", `Int !total_chars);
+      ("truncated", `Bool !delta_truncated);
+    ] in
+    let fields = match error with
+      | Some msg -> base @ [("error", `String msg)]
+      | None -> base
+    in
+    broadcast_delta (`Assoc fields)
+  in
+  emit_start ();
+  let full_response = Buffer.create 4096 in
+  let truncated_notice_sent = ref false in
+  let on_line line =
+    (* Each line is a text chunk - add newline back for proper formatting *)
+    (* Preserve empty lines for markdown/code formatting *)
+    let chunk = line ^ "\n" in
+    Buffer.add_string full_response chunk;
+    total_chars := !total_chars + String.length chunk;
+    incr delta_count;
+    if !delta_count <= delta_max_events then begin
+      let truncated = String.length chunk > delta_max_chars in
+      let delta =
+        if truncated then String.sub chunk 0 delta_max_chars else chunk
+      in
+      if truncated then delta_truncated := true;
+      broadcast_delta (`Assoc [
+        ("type", `String "llm_delta");
+        ("stream_id", `String stream_id);
+        ("index", `Int !delta_count);
+        ("delta", `String delta);
+        ("truncated", `Bool truncated);
+        ("orig_len", `Int (String.length chunk));
+      ])
+    end else if not !truncated_notice_sent then begin
+      truncated_notice_sent := true;
+      delta_truncated := true;
+      broadcast_delta (`Assoc [
+        ("type", `String "llm_delta_truncated");
+        ("stream_id", `String stream_id);
+        ("max_events", `Int delta_max_events);
+      ])
+    end
+  in
+  let result = run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd cmd_args in
+  let partial_response = Buffer.contents full_response in
+  let extra_with_stream = extra_base @ [("streamed", "true"); ("stream_id", stream_id)] in
+  match result with
+  | Ok exit_code ->
+      let success = (exit_code = 0) in
+      emit_end ~success ();
+      { model = model_name;
+        returncode = exit_code;
+        response = partial_response;
+        extra = extra_with_stream; }
+  | Error (Timeout t) ->
+      (* Preserve partial response on timeout - don't lose streamed content *)
+      let error_msg = sprintf "Timeout after %ds" t in
+      emit_end ~success:false ~error:error_msg ();
+      let response = if String.length partial_response > 0
+        then partial_response ^ "\n\n[TIMEOUT: " ^ error_msg ^ "]"
+        else error_msg in
+      { model = model_name;
+        returncode = -1;
+        response;
+        extra = extra_with_stream @ [("timeout", "true")]; }
+  | Error (ProcessError msg) ->
+      (* Preserve partial response on error - don't lose streamed content *)
+      emit_end ~success:false ~error:msg ();
+      let response = if String.length partial_response > 0
+        then partial_response ^ "\n\n[ERROR: " ^ msg ^ "]"
+        else sprintf "Error: %s" msg in
+      { model = model_name;
+        returncode = -1;
+        response;
+        extra = extra_with_stream @ [("process_error", "true")]; }
+
 (** {1 Gemini with Resilience} *)
 
 let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli" ~failure_threshold:3 ()
@@ -436,65 +548,68 @@ let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli" ~f
 (** Execute Gemini with automatic retry for recoverable errors *)
 let execute_gemini_with_retry ~sw ~proc_mgr ~clock
     ?(max_retries = 2)
-    ~model ~thinking_level ~timeout ~args () =
+    ~model ~thinking_level ~timeout ~stream ~args () =
 
   let thinking_applied = thinking_level = High in
+  let model_name = sprintf "gemini (%s)" model in
+  let extra_base = [
+    ("thinking_level", string_of_thinking_level thinking_level);
+    ("thinking_prompt_applied", string_of_bool thinking_applied);
+  ] in
 
   match build_gemini_cmd args with
   | Error err ->
-      let extra = [
-        ("thinking_level", string_of_thinking_level thinking_level);
-        ("thinking_prompt_applied", string_of_bool thinking_applied);
-        ("invalid_args", "true");
-      ] in
-      { model = sprintf "gemini (%s)" model;
+      { model = model_name;
         returncode = -1;
         response = err;
-        extra; }
+        extra = extra_base @ [("invalid_args", "true")]; }
   | Ok cmd_list ->
       let cmd = List.hd cmd_list in
       let cmd_args = List.tl cmd_list in
-      let policy = { Mcp_resilience.default_policy with max_attempts = max_retries + 1 } in
-      
-      let op () =
-        let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
-        let outcome =
-          match result with
-          | Ok r ->
-              let response = get_output r in
-              (match classify_gemini_error response with
-              | Some error when is_recoverable_gemini_error error ->
-                  Result.Error (string_of_gemini_error error)
-              | _ -> Result.Ok (r.exit_code, response))
-          | Error (Timeout t) -> Result.Error (sprintf "Timeout after %ds" t)
-          | Error (ProcessError msg) -> Result.Error (sprintf "Error: %s" msg)
+
+      (* Use streaming mode if enabled *)
+      if stream then
+        execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args
+      else begin
+        (* Non-streaming mode with retry logic *)
+        let policy = { Mcp_resilience.default_policy with max_attempts = max_retries + 1 } in
+
+        let op () =
+          let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+          let outcome =
+            match result with
+            | Ok r ->
+                let response = get_output r in
+                (match classify_gemini_error response with
+                | Some error when is_recoverable_gemini_error error ->
+                    Result.Error (string_of_gemini_error error)
+                | _ -> Result.Ok (r.exit_code, response))
+            | Error (Timeout t) -> Result.Error (sprintf "Timeout after %ds" t)
+            | Error (ProcessError msg) -> Result.Error (sprintf "Error: %s" msg)
+          in
+          match outcome with
+          | Ok value -> Mcp_resilience.Ok value
+          | Error err -> Mcp_resilience.Error err
         in
-        match outcome with
-        | Ok value -> Mcp_resilience.Ok value
-        | Error err -> Mcp_resilience.Error err
-      in
-      
-      let classify _ = Mcp_resilience.Retry in
-      match Mcp_resilience.with_retry_eio
-              ~clock
-              ~policy
-              ~circuit_breaker:(Some gemini_breaker)
-              ~op_name:"gemini_call"
-              ~classify
-              op
-      with
-      | Ok (exit_code, response) ->
-          let extra = [
-            ("thinking_level", string_of_thinking_level thinking_level);
-            ("thinking_prompt_applied", string_of_bool thinking_applied);
-          ] in
-          { model = sprintf "gemini (%s)" model; returncode = exit_code; response; extra }
-      | Error err ->
-          { model = sprintf "gemini (%s)" model; returncode = -1; response = err; extra = [] }
-      | CircuitOpen ->
-          { model = sprintf "gemini (%s)" model; returncode = -1; response = "Circuit breaker open"; extra = [] }
-      | TimedOut ->
-          { model = sprintf "gemini (%s)" model; returncode = -1; response = "Operation timed out"; extra = [] }
+
+        let classify _ = Mcp_resilience.Retry in
+        match Mcp_resilience.with_retry_eio
+                ~clock
+                ~policy
+                ~circuit_breaker:(Some gemini_breaker)
+                ~op_name:"gemini_call"
+                ~classify
+                op
+        with
+        | Ok (exit_code, response) ->
+            { model = model_name; returncode = exit_code; response; extra = extra_base }
+        | Error err ->
+            { model = model_name; returncode = -1; response = err; extra = [] }
+        | CircuitOpen ->
+            { model = model_name; returncode = -1; response = "Circuit breaker open"; extra = [] }
+        | TimedOut ->
+            { model = model_name; returncode = -1; response = "Operation timed out"; extra = [] }
+      end
 
 (** {1 External Tools} *)
 
@@ -643,12 +758,20 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   let log_enabled = Run_log_eio.enabled () in
   let stream_flag = match args with
     | Ollama { stream; _ } -> stream
+    | Gemini { stream; _ } -> stream
+    | Claude { stream; _ } -> stream
+    | Codex { stream; _ } -> stream
+    | Glm { stream; _ } -> stream
     | _ -> false
   in
   let model_for_log = get_model_name_for_tracing args in
   let stream_id_opt =
     match args with
     | Ollama { stream = true; _ } -> Some (generate_stream_id model_for_log)
+    | Gemini { stream = true; _ } -> Some (generate_stream_id model_for_log)
+    | Claude { stream = true; _ } -> Some (generate_stream_id model_for_log)
+    | Codex { stream = true; _ } -> Some (generate_stream_id model_for_log)
+    | Glm { stream = true; _ } -> Some (generate_stream_id model_for_log)
     | _ -> None
   in
   let log_extra =
@@ -688,8 +811,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   else
     ();
   match args with
-  | Gemini { model; thinking_level; timeout; _ } ->
-      let result = execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~args () in
+  | Gemini { model; thinking_level; timeout; stream; _ } ->
+      let result = execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args () in
       if log_enabled then
         Run_log_eio.record_event
           ~event:"llm_complete"
@@ -707,33 +830,41 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Claude { model; long_context; working_directory = _; timeout; _ } ->
+  | Claude { model; long_context; working_directory = _; timeout; stream; _ } ->
+      let model_name = sprintf "claude-cli (%s)" model in
+      let extra_base = [("long_context", string_of_bool long_context)] in
       let result = (match build_claude_cmd args with
       | Error err ->
-          { model = sprintf "claude-cli (%s)" model;
+          { model = model_name;
             returncode = -1;
             response = err;
-            extra = [("long_context", string_of_bool long_context); ("invalid_args", "true")]; }
+            extra = extra_base @ [("invalid_args", "true")]; }
       | Ok cmd_list ->
           let cmd = List.hd cmd_list in
           let cmd_args = List.tl cmd_list in
-          let result = run_command ~sw ~proc_mgr ~clock ~safe_tmpdir:true ~timeout cmd cmd_args in
-          match result with
-          | Ok r ->
-              { model = sprintf "claude-cli (%s)" model;
-                returncode = r.exit_code;
-                response = get_output r;
-                extra = [("long_context", string_of_bool long_context)]; }
-          | Error (Timeout t) ->
-              { model = sprintf "claude-cli (%s)" model;
-                returncode = -1;
-                response = sprintf "Timeout after %ds" t;
-                extra = [("long_context", string_of_bool long_context)]; }
-          | Error (ProcessError msg) ->
-              { model = sprintf "claude-cli (%s)" model;
-                returncode = -1;
-                response = sprintf "Error: %s" msg;
-                extra = [("long_context", string_of_bool long_context)]; })
+          if stream then
+            (* Streaming mode: broadcast each line as it arrives *)
+            execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args
+          else begin
+            (* Non-streaming mode: wait for complete output *)
+            let result = run_command ~sw ~proc_mgr ~clock ~safe_tmpdir:true ~timeout cmd cmd_args in
+            match result with
+            | Ok r ->
+                { model = model_name;
+                  returncode = r.exit_code;
+                  response = get_output r;
+                  extra = extra_base; }
+            | Error (Timeout t) ->
+                { model = model_name;
+                  returncode = -1;
+                  response = sprintf "Timeout after %ds" t;
+                  extra = extra_base; }
+            | Error (ProcessError msg) ->
+                { model = model_name;
+                  returncode = -1;
+                  response = sprintf "Error: %s" msg;
+                  extra = extra_base; }
+          end)
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -752,33 +883,43 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Codex { model; reasoning_effort; timeout; _ } ->
+  | Codex { model; reasoning_effort; timeout; stream; _ } ->
+      let model_name = sprintf "codex (%s)" model in
+      let extra_base = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)] in
       let result = (match build_codex_cmd args with
       | Error err ->
-          { model = sprintf "codex (%s)" model;
+          { model = model_name;
             returncode = -1;
             response = err;
-            extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort); ("invalid_args", "true")]; }
+            extra = extra_base @ [("invalid_args", "true")]; }
       | Ok cmd_list ->
           let cmd = List.hd cmd_list in
           let cmd_args = List.tl cmd_list in
-          let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
-          match result with
-          | Ok r ->
-              { model = sprintf "codex (%s)" model;
-                returncode = r.exit_code;
-                response = clean_codex_output (get_output r);
-                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
-          | Error (Timeout t) ->
-              { model = sprintf "codex (%s)" model;
-                returncode = -1;
-                response = sprintf "Timeout after %ds" t;
-                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; }
-          | Error (ProcessError msg) ->
-              { model = sprintf "codex (%s)" model;
-                returncode = -1;
-                response = sprintf "Error: %s" msg;
-                extra = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)]; })
+          if stream then begin
+            (* Streaming mode: broadcast each line as it arrives *)
+            let stream_result = execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args in
+            (* Apply clean_codex_output to the accumulated response *)
+            { stream_result with response = clean_codex_output stream_result.response }
+          end else begin
+            (* Non-streaming mode: wait for complete output *)
+            let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+            match result with
+            | Ok r ->
+                { model = model_name;
+                  returncode = r.exit_code;
+                  response = clean_codex_output (get_output r);
+                  extra = extra_base; }
+            | Error (Timeout t) ->
+                { model = model_name;
+                  returncode = -1;
+                  response = sprintf "Timeout after %ds" t;
+                  extra = extra_base; }
+            | Error (ProcessError msg) ->
+                { model = model_name;
+                  returncode = -1;
+                  response = sprintf "Error: %s" msg;
+                  extra = extra_base; }
+          end)
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -921,7 +1062,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample } ->
+  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search } ->
       (* Z.ai GLM Cloud API - OpenAI-compatible *)
       let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
         | Some k -> k
@@ -959,6 +1100,20 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           | Some n -> body_fields @ [("max_tokens", `Int n)]
           | None -> body_fields
         in
+        (* Add web_search tool if enabled *)
+        let body_fields = if web_search then
+          body_fields @ [
+            ("tools", `List [
+              `Assoc [
+                ("type", `String "web_search");
+                ("web_search", `Assoc [
+                  ("enable", `Bool true);
+                  ("search_result", `Bool true);
+                ])
+              ]
+            ])
+          ]
+        else body_fields in
         let body = Yojson.Safe.to_string (`Assoc body_fields) in
         let cmd = "curl" in
 
@@ -1291,6 +1446,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         working_directory = None;
                         timeout = node_timeout;
                         stream = false;
+                        search = false;
                       }
                   | "ollama" ->
                       (* Plain ollama defaults to qwen3:1.7b for fast testing *)
@@ -1603,6 +1759,7 @@ This chain will execute the goal using a stub model.|}
               working_directory = Some (Sys.getcwd ());
               timeout = 120;
               stream = false;
+              search = false;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -1861,7 +2018,8 @@ This chain will execute the goal using a stub model.|}
                          else if starts_with ~prefix:"codex" model_name || starts_with ~prefix:"gpt" model_name then
                            execute ~sw ~proc_mgr ~clock (Codex {
                              prompt; model; reasoning_effort = RHigh; sandbox = ReadOnly;
-                             working_directory = None; timeout = node_timeout; stream = false
+                             working_directory = None; timeout = node_timeout; stream = false;
+                             search = false
                            })
                          else if starts_with ~prefix:"ollama" model_name then
                            let ollama_model = match String.index_opt model ':' with
@@ -2439,6 +2597,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   working_directory = None;
                   timeout;
                   stream = false;
+                  search = false;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
