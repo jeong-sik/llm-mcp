@@ -492,11 +492,12 @@ let test_chain_json_roundtrip () =
   let chain = {
     id = "test_chain";
     nodes = [
-      make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test" ();
+      make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"test prompt here" ();
+      make_llm_node ~id:"n2" ~model:"claude" ~system:"sys" ~prompt:"another {{n1}}" ();
     ];
-    output = "n1";
+    output = "n2";
     config = default_config;
-    name = None; description = None; version = None;
+    name = Some "Test Chain"; description = Some "A test chain"; version = Some "1.0.0";
     input_schema = None; output_schema = None; metadata = None
   } in
   let json = chain_to_yojson chain in
@@ -504,7 +505,26 @@ let test_chain_json_roundtrip () =
   | Ok parsed ->
       Alcotest.(check string) "id" chain.id parsed.id;
       Alcotest.(check string) "output" chain.output parsed.output;
-      Alcotest.(check int) "nodes" (List.length chain.nodes) (List.length parsed.nodes)
+      Alcotest.(check int) "nodes count" 2 (List.length parsed.nodes);
+      Alcotest.(check (option string)) "name" (Some "Test Chain") parsed.name;
+      Alcotest.(check (option string)) "description" (Some "A test chain") parsed.description;
+      Alcotest.(check (option string)) "version" (Some "1.0.0") parsed.version;
+      (* Verify node 1 field-by-field *)
+      let n1 = List.find (fun (n : node) -> n.id = "n1") parsed.nodes in
+      (match n1.node_type with
+       | Llm { model; prompt; system; _ } ->
+           Alcotest.(check string) "n1.model" "gemini" model;
+           Alcotest.(check string) "n1.prompt" "test prompt here" prompt;
+           Alcotest.(check (option string)) "n1.system" None system
+       | _ -> Alcotest.fail "n1 should be Llm");
+      (* Verify node 2 field-by-field *)
+      let n2 = List.find (fun (n : node) -> n.id = "n2") parsed.nodes in
+      (match n2.node_type with
+       | Llm { model; prompt; system; _ } ->
+           Alcotest.(check string) "n2.model" "claude" model;
+           Alcotest.(check string) "n2.prompt" "another {{n1}}" prompt;
+           Alcotest.(check (option string)) "n2.system" (Some "sys") system
+       | _ -> Alcotest.fail "n2 should be Llm")
   | Error e -> Alcotest.fail e
 
 let test_make_threshold () =
@@ -1943,7 +1963,10 @@ let test_chain_exec_json_roundtrip () =
                 Alcotest.(check int) "max_depth" c1.max_depth c2.max_depth;
                 Alcotest.(check bool) "sandbox" c1.sandbox c2.sandbox;
                 Alcotest.(check bool) "pass_outputs" c1.pass_outputs c2.pass_outputs;
-                Alcotest.(check int) "context_inject len" (List.length c1.context_inject) (List.length c2.context_inject)
+                Alcotest.(check int) "context_inject len" (List.length c1.context_inject) (List.length c2.context_inject);
+                (* Verify context_inject content, not just count *)
+                let key1_val = List.assoc_opt "key1" c2.context_inject in
+                Alcotest.(check (option string)) "context_inject key1" (Some "value1") key1_val
             | _ -> Alcotest.fail "Expected ChainExec nodes")
        | Error e -> Alcotest.fail (Printf.sprintf "Roundtrip parse error: %s" e))
   | Error e -> Alcotest.fail (Printf.sprintf "Initial parse error: %s" e)
@@ -2676,11 +2699,11 @@ let test_feedback_loop_json_roundtrip () =
   let generator = Chain_types.make_llm_node
     ~id:"gen"
     ~model:"gemini"
-    ~prompt:"Generate"
+    ~prompt:"Generate code"
     () in
   let eval_config : Chain_types.evaluator_config = {
     scoring_func = "anti_fake";
-    scoring_prompt = None;
+    scoring_prompt = Some "Score the code quality";
     select_strategy = Chain_types.AboveThreshold 0.6;
   } in
   let node = Chain_types.make_feedback_loop
@@ -2690,6 +2713,7 @@ let test_feedback_loop_json_roundtrip () =
     ~improver_prompt:"{{feedback}} -> {{previous_output}}"
     ~max_iterations:2
     ~score_threshold:0.9
+    ~score_operator:Chain_types.Gte
     () in
   let chain : Chain_types.chain = {
     id = "roundtrip_test";
@@ -2704,10 +2728,22 @@ let test_feedback_loop_json_roundtrip () =
   | Ok parsed ->
       let parsed_node = List.hd parsed.nodes in
       (match parsed_node.node_type with
-       | Chain_types.FeedbackLoop { max_iterations; score_threshold; evaluator_config; _ } ->
+       | Chain_types.FeedbackLoop { generator; max_iterations; score_threshold;
+           score_operator; evaluator_config; improver_prompt; _ } ->
+           (* Verify all fields, not just a few *)
            Alcotest.(check int) "max_iterations" 2 max_iterations;
            Alcotest.(check (float 0.01)) "score_threshold" 0.9 score_threshold;
-           Alcotest.(check string) "scoring_func" "anti_fake" evaluator_config.scoring_func
+           Alcotest.(check bool) "score_operator is Gte" true (score_operator = Chain_types.Gte);
+           Alcotest.(check string) "scoring_func" "anti_fake" evaluator_config.scoring_func;
+           Alcotest.(check (option string)) "scoring_prompt" (Some "Score the code quality") evaluator_config.scoring_prompt;
+           Alcotest.(check string) "improver_prompt" "{{feedback}} -> {{previous_output}}" improver_prompt;
+           (* Verify generator node preserved *)
+           Alcotest.(check string) "generator.id" "gen" generator.id;
+           (match generator.node_type with
+            | Chain_types.Llm { model; prompt; _ } ->
+                Alcotest.(check string) "generator.model" "gemini" model;
+                Alcotest.(check string) "generator.prompt" "Generate code" prompt
+            | _ -> Alcotest.fail "generator should be Llm")
        | _ -> Alcotest.fail "Expected FeedbackLoop after roundtrip")
   | Error e -> Alcotest.fail (Printf.sprintf "Roundtrip error: %s" e)
 
@@ -3228,10 +3264,19 @@ let test_checkpoint_json_roundtrip () =
   | Ok loaded ->
       Alcotest.(check string) "run_id" "test_run_123" loaded.Checkpoint_store.run_id;
       Alcotest.(check string) "chain_id" "test-chain" loaded.Checkpoint_store.chain_id;
-      Alcotest.(check int) "outputs" 2 (List.length loaded.Checkpoint_store.outputs);
+      Alcotest.(check string) "node_id" "final" loaded.Checkpoint_store.node_id;
+      Alcotest.(check int) "outputs count" 2 (List.length loaded.Checkpoint_store.outputs);
+      (* Verify outputs content, not just count *)
+      let out_a = List.assoc_opt "a" loaded.Checkpoint_store.outputs in
+      let out_b = List.assoc_opt "b" loaded.Checkpoint_store.outputs in
+      Alcotest.(check (option string)) "output a" (Some "result_a") out_a;
+      Alcotest.(check (option string)) "output b" (Some "result_b") out_b;
       (match loaded.Checkpoint_store.total_tokens with
        | Some t ->
-           Alcotest.(check int) "total_tokens" 150 t.Chain_category.total_tokens
+           Alcotest.(check int) "prompt_tokens" 100 t.Chain_category.prompt_tokens;
+           Alcotest.(check int) "completion_tokens" 50 t.Chain_category.completion_tokens;
+           Alcotest.(check int) "total_tokens" 150 t.Chain_category.total_tokens;
+           Alcotest.(check (float 0.0001)) "estimated_cost_usd" 0.001 t.Chain_category.estimated_cost_usd
        | None -> Alcotest.fail "Expected total_tokens")
   | Error msg -> Alcotest.fail (Printf.sprintf "JSON roundtrip failed: %s" msg)
 
