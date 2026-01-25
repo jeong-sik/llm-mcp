@@ -958,7 +958,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         let cmd = "curl" in
         let cmd_args = [
           "-s"; "-X"; "POST";
-          "https://api.z.ai/api/paas/v4/chat/completions";
+          "https://api.z.ai/api/coding/paas/v4/chat/completions";  (* Coding Plan subscription *)
           "-H"; "Content-Type: application/json";
           "-H"; sprintf "Authorization: Bearer %s" api_key;
           "-d"; body;
