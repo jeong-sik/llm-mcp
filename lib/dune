@@ -69,8 +69,8 @@
  (public_name llm_mcp.resilience)
  (wrapped false)
  (modules mcp_resilience)
- (libraries eio unix)
- ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support)
+ (libraries eio unix))
+ ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support
 
 ; =============================================================================
 ; llm_mcp_eio - Pure Eio Library (NO Lwt!)
