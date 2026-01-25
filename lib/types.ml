@@ -581,9 +581,9 @@ Use this to discover which models are available before calling the ollama tool.|
 
 let glm_schema : tool_schema = {
   name = "glm";
-  description = {|Run GLM-4.7 via Z.ai Cloud API (OpenAI-compatible).
+  description = {|Run glm-4.7 via Z.ai Cloud API (OpenAI-compatible).
 
-GLM-4.7 is a 355B parameter MoE model (32B active) with:
+glm-4.7 is a 355B parameter MoE model (32B active) with:
 - State-of-the-art reasoning, coding, and agent capabilities
 - 200K context window, 128K output
 - 55+ tokens per second
@@ -594,21 +594,23 @@ Use cases:
 - Agent workflows requiring fast responses
 - MAGI Trinity: Use as cloud alternative to local Ollama
 
-Models:
-- GLM-4.7 (default): Best performance, MoE 355B/32B active
-- GLM-4.6: Previous generation
-- GLM-4.5: Older, cost-efficient
+Models (lowercase required by Z.ai API):
+- glm-4.7 (default): Best performance, MoE 355B/32B active
+- glm-4.6: Previous generation
+- glm-4.5: Older, cost-efficient
+- glm-4.5-air: Lightweight version
 
 Parameters:
 - prompt: The prompt to send (required)
-- model: Model name (default: GLM-4.7)
+- model: Model name (default: glm-4.7)
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - max_tokens: Max tokens to generate (optional, model default)
 - timeout: Timeout in seconds (default: 300)
 - stream: Enable streaming (default: true)
 
-Requires ZAI_API_KEY environment variable.|};
+Requires ZAI_API_KEY environment variable.
+Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
   input_schema = `Assoc [
     ("type", `String "object");
     ("properties", `Assoc [
@@ -618,8 +620,8 @@ Requires ZAI_API_KEY environment variable.|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name: GLM-4.7 (default), GLM-4.6, GLM-4.5");
-        ("default", `String "GLM-4.7");
+        ("description", `String "Model name: glm-4.7 (default), glm-4.6, glm-4.5, glm-4.5-air (lowercase required)");
+        ("default", `String "glm-4.7");
       ]);
       ("system_prompt", `Assoc [
         ("type", `String "string");

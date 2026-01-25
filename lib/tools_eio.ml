@@ -967,7 +967,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
         match result with
         | Ok r ->
-            (* Parse OpenAI-compatible response *)
+            (* Parse OpenAI-compatible response with GLM-4.7 thinking support *)
             (try
               let json = Yojson.Safe.from_string r.stdout in
               let open Yojson.Safe.Util in
@@ -975,11 +975,25 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               if List.length choices > 0 then
                 let first_choice = List.hd choices in
                 let message = first_choice |> member "message" in
-                let content = message |> member "content" |> to_string in
+                (* GLM-4.7 returns reasoning_content for thinking, content for final answer *)
+                let content =
+                  try message |> member "content" |> to_string
+                  with _ -> "" in
+                let reasoning =
+                  try message |> member "reasoning_content" |> to_string
+                  with _ -> "" in
+                (* Use content if available, otherwise use reasoning_content *)
+                let final_response =
+                  if String.length content > 0 then content
+                  else if String.length reasoning > 0 then sprintf "[Thinking]\n%s" reasoning
+                  else "Empty response" in
+                let extra = [("temperature", sprintf "%.1f" temperature); ("cloud", "zai")] in
+                let extra = if String.length reasoning > 0 then
+                  extra @ [("has_reasoning", "true")] else extra in
                 { model = sprintf "glm (%s)" model;
                   returncode = 0;
-                  response = content;
-                  extra = [("temperature", sprintf "%.1f" temperature); ("cloud", "zai")]; }
+                  response = final_response;
+                  extra; }
               else
                 { model = sprintf "glm (%s)" model;
                   returncode = -1;

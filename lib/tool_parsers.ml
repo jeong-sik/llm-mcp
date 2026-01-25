@@ -108,7 +108,7 @@ let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
 let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"GLM-4.7" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7" in
   let system_prompt = json |> member "system_prompt" |> to_string_option in
   let temperature =
     try json |> member "temperature" |> to_float
