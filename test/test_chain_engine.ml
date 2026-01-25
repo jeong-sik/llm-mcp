@@ -2352,6 +2352,9 @@ let test_stream_merge_mermaid_parse () =
         | StreamMerge _ -> "StreamMerge"
         | Subgraph _ -> "Subgraph"
         | FeedbackLoop _ -> "FeedbackLoop"
+        | Masc_broadcast _ -> "Masc_broadcast"
+        | Masc_listen _ -> "Masc_listen"
+        | Masc_claim _ -> "Masc_claim"
       in
       (match merge_node.node_type with
        | StreamMerge { reducer; min_results; timeout; _ } ->

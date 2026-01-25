@@ -260,6 +260,20 @@ type node_type =
       conversational : bool;
       relay_models : string list;
     }
+  | Masc_broadcast of {
+      message : string;
+      room : string option;
+      mention : string list;
+    }
+  | Masc_listen of {
+      filter : string option;
+      timeout_sec : float;
+      room : string option;
+    }
+  | Masc_claim of {
+      task_id : string option;
+      room : string option;
+    }
 
 (** A single execution node *)
 and node = {

@@ -72,7 +72,8 @@ let rec collect_nodes acc (node : node) =
       collect_nodes acc simulation
   | FeedbackLoop { generator; _ } ->
       collect_nodes acc generator
-  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ ->
+  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
+  | Masc_broadcast _ | Masc_listen _ | Masc_claim _ ->
       acc
 
 let collect_all_nodes (chain : chain) : node list =

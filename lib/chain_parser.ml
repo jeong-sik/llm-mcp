@@ -1020,7 +1020,10 @@ let rec collect_all_nodes (acc : Chain_types.node list) (n : Chain_types.node) :
   | Chain_types.Tool _
   | Chain_types.ChainRef _
   | Chain_types.ChainExec _
-  | Chain_types.Adapter _ ->
+  | Chain_types.Adapter _
+  | Chain_types.Masc_broadcast _
+  | Chain_types.Masc_listen _
+  | Chain_types.Masc_claim _ ->
       acc
 
 let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
@@ -1237,6 +1240,11 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         if max_iterations <= 0 then addf "%s: feedback_loop.max_iterations must be > 0" path;
         if score_threshold < 0.0 then addf "%s: feedback_loop.score_threshold must be >= 0" path;
         validate_node (path ^ "/feedback_loop") generator
+    | Chain_types.Masc_broadcast { message; _ } ->
+        if is_blank message then addf "%s: masc_broadcast.message is empty" path
+    | Chain_types.Masc_listen { timeout_sec; _ } ->
+        if timeout_sec <= 0.0 then addf "%s: masc_listen.timeout_sec must be > 0" path
+    | Chain_types.Masc_claim _ -> ()  (* No validation needed for claim *)
     )
   in
 
@@ -1613,6 +1621,24 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
           else fields @ [("relay_models", `List (List.map (fun s -> `String s) relay_models))]
         in
         fields
+    | Masc_broadcast { message; room; mention } ->
+        let fields = [
+          ("type", `String "masc_broadcast");
+          ("message", `String message);
+          ("mention", `List (List.map (fun s -> `String s) mention));
+        ] in
+        (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
+    | Masc_listen { filter; timeout_sec; room } ->
+        let fields = [
+          ("type", `String "masc_listen");
+          ("timeout_sec", `Float timeout_sec);
+        ] in
+        let fields = match filter with Some f -> fields @ [("filter", `String f)] | None -> fields in
+        (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
+    | Masc_claim { task_id; room } ->
+        let fields = [("type", `String "masc_claim")] in
+        let fields = match task_id with Some t -> fields @ [("task_id", `String t)] | None -> fields in
+        (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
   in
   `Assoc (base @ type_fields @ input_mapping)
 
