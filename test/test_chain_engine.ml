@@ -2781,7 +2781,8 @@ let test_masc_broadcast_json_parse () =
        | Masc_broadcast { message; room; mention } ->
            Alcotest.(check string) "message" "Starting task: {{input.task}}" message;
            Alcotest.(check (option string)) "room" (Some "test-room") room;
-           Alcotest.(check int) "mention count" 2 (List.length mention)
+           Alcotest.(check int) "mention count" 2 (List.length mention);
+           Alcotest.(check (list string)) "mention values" ["@codex"; "@gemini"] mention
        | _ -> Alcotest.fail "Expected Masc_broadcast")
   | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
 
@@ -2911,18 +2912,20 @@ let test_masc_json_roundtrip () =
         "type": "masc_broadcast",
         "message": "Hello {{name}}",
         "room": "main",
-        "mention": ["@alice"]
+        "mention": ["@alice", "@bob"]
       },
       {
         "id": "listen",
         "type": "masc_listen",
-        "filter": "response",
-        "timeout_sec": 30.0
+        "filter": "response|ack",
+        "timeout_sec": 45.5,
+        "room": "listen-room"
       },
       {
         "id": "claim",
         "type": "masc_claim",
-        "task_id": "task-456"
+        "task_id": "task-456",
+        "room": "claim-room"
       }
     ],
     "output": "claim"
@@ -2935,7 +2938,121 @@ let test_masc_json_roundtrip () =
       (match Chain_parser.parse_chain serialized with
        | Ok reparsed ->
            Alcotest.(check int) "node count preserved" 3 (List.length reparsed.nodes);
-           Alcotest.(check string) "chain id preserved" "masc_roundtrip" reparsed.id
+           Alcotest.(check string) "chain id preserved" "masc_roundtrip" reparsed.id;
+           (* Verify broadcast node field-by-field *)
+           let broadcast_node = List.find (fun (n : node) -> n.id = "broadcast") reparsed.nodes in
+           (match broadcast_node.node_type with
+            | Masc_broadcast { message; room; mention } ->
+                Alcotest.(check string) "broadcast.message" "Hello {{name}}" message;
+                Alcotest.(check (option string)) "broadcast.room" (Some "main") room;
+                Alcotest.(check (list string)) "broadcast.mention" ["@alice"; "@bob"] mention
+            | _ -> Alcotest.fail "broadcast node type mismatch");
+           (* Verify listen node field-by-field *)
+           let listen_node = List.find (fun (n : node) -> n.id = "listen") reparsed.nodes in
+           (match listen_node.node_type with
+            | Masc_listen { filter; timeout_sec; room } ->
+                Alcotest.(check (option string)) "listen.filter" (Some "response|ack") filter;
+                Alcotest.(check (float 0.1)) "listen.timeout_sec" 45.5 timeout_sec;
+                Alcotest.(check (option string)) "listen.room" (Some "listen-room") room
+            | _ -> Alcotest.fail "listen node type mismatch");
+           (* Verify claim node field-by-field *)
+           let claim_node = List.find (fun (n : node) -> n.id = "claim") reparsed.nodes in
+           (match claim_node.node_type with
+            | Masc_claim { task_id; room } ->
+                Alcotest.(check (option string)) "claim.task_id" (Some "task-456") task_id;
+                Alcotest.(check (option string)) "claim.room" (Some "claim-room") room
+            | _ -> Alcotest.fail "claim node type mismatch")
+       | Error msg -> Alcotest.fail (Printf.sprintf "Re-parse failed: %s" msg))
+  | Error msg -> Alcotest.fail (Printf.sprintf "Initial parse failed: %s" msg)
+
+(** Test MASC edge cases: optional fields missing, empty lists *)
+let test_masc_edge_cases () =
+  (* Test broadcast with no room, empty mention *)
+  let broadcast_minimal = {|{
+    "id": "edge_test",
+    "nodes": [{ "id": "b", "type": "masc_broadcast", "message": "minimal" }],
+    "output": "b"
+  }|} in
+  (match Chain_parser.parse_chain (Yojson.Safe.from_string broadcast_minimal) with
+   | Ok chain ->
+       let node = List.hd chain.nodes in
+       (match node.node_type with
+        | Masc_broadcast { message; room; mention } ->
+            Alcotest.(check string) "minimal.message" "minimal" message;
+            Alcotest.(check (option string)) "minimal.room is None" None room;
+            Alcotest.(check (list string)) "minimal.mention is empty" [] mention
+        | _ -> Alcotest.fail "Expected Masc_broadcast")
+   | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg));
+  (* Test listen with no filter, no room (only timeout defaults) *)
+  let listen_minimal = {|{
+    "id": "edge_test2",
+    "nodes": [{ "id": "l", "type": "masc_listen" }],
+    "output": "l"
+  }|} in
+  (match Chain_parser.parse_chain (Yojson.Safe.from_string listen_minimal) with
+   | Ok chain ->
+       let node = List.hd chain.nodes in
+       (match node.node_type with
+        | Masc_listen { filter; timeout_sec; room } ->
+            Alcotest.(check (option string)) "listen_minimal.filter is None" None filter;
+            Alcotest.(check (float 0.1)) "listen_minimal.timeout_sec default" 30.0 timeout_sec;
+            Alcotest.(check (option string)) "listen_minimal.room is None" None room
+        | _ -> Alcotest.fail "Expected Masc_listen")
+   | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg));
+  (* Test claim with no task_id, no room *)
+  let claim_minimal = {|{
+    "id": "edge_test3",
+    "nodes": [{ "id": "c", "type": "masc_claim" }],
+    "output": "c"
+  }|} in
+  (match Chain_parser.parse_chain (Yojson.Safe.from_string claim_minimal) with
+   | Ok chain ->
+       let node = List.hd chain.nodes in
+       (match node.node_type with
+        | Masc_claim { task_id; room } ->
+            Alcotest.(check (option string)) "claim_minimal.task_id is None" None task_id;
+            Alcotest.(check (option string)) "claim_minimal.room is None" None room
+        | _ -> Alcotest.fail "Expected Masc_claim")
+   | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg))
+
+(** Test MASC roundtrip with minimal fields (edge case) *)
+let test_masc_roundtrip_minimal () =
+  let original_json = {|{
+    "id": "minimal_roundtrip",
+    "nodes": [
+      { "id": "b", "type": "masc_broadcast", "message": "hi" },
+      { "id": "l", "type": "masc_listen" },
+      { "id": "c", "type": "masc_claim" }
+    ],
+    "output": "c"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string original_json) with
+  | Ok chain ->
+      let serialized = Chain_parser.chain_to_json chain in
+      (match Chain_parser.parse_chain serialized with
+       | Ok reparsed ->
+           (* broadcast: room=None, mention=[] should be preserved *)
+           let b = List.find (fun (n : node) -> n.id = "b") reparsed.nodes in
+           (match b.node_type with
+            | Masc_broadcast { room; mention; _ } ->
+                Alcotest.(check (option string)) "roundtrip broadcast.room" None room;
+                Alcotest.(check (list string)) "roundtrip broadcast.mention" [] mention
+            | _ -> Alcotest.fail "Expected Masc_broadcast");
+           (* listen: filter=None, room=None, timeout=30.0 *)
+           let l = List.find (fun (n : node) -> n.id = "l") reparsed.nodes in
+           (match l.node_type with
+            | Masc_listen { filter; timeout_sec; room } ->
+                Alcotest.(check (option string)) "roundtrip listen.filter" None filter;
+                Alcotest.(check (float 0.1)) "roundtrip listen.timeout_sec" 30.0 timeout_sec;
+                Alcotest.(check (option string)) "roundtrip listen.room" None room
+            | _ -> Alcotest.fail "Expected Masc_listen");
+           (* claim: task_id=None, room=None *)
+           let c = List.find (fun (n : node) -> n.id = "c") reparsed.nodes in
+           (match c.node_type with
+            | Masc_claim { task_id; room } ->
+                Alcotest.(check (option string)) "roundtrip claim.task_id" None task_id;
+                Alcotest.(check (option string)) "roundtrip claim.room" None room
+            | _ -> Alcotest.fail "Expected Masc_claim")
        | Error msg -> Alcotest.fail (Printf.sprintf "Re-parse failed: %s" msg))
   | Error msg -> Alcotest.fail (Printf.sprintf "Initial parse failed: %s" msg)
 
@@ -2947,6 +3064,8 @@ let masc_tests = [
   "masc_broadcast_validation_empty_message", `Quick, test_masc_broadcast_validation_empty_message;
   "masc_listen_validation_invalid_timeout", `Quick, test_masc_listen_validation_invalid_timeout;
   "masc_json_roundtrip", `Quick, test_masc_json_roundtrip;
+  "masc_edge_cases", `Quick, test_masc_edge_cases;
+  "masc_roundtrip_minimal", `Quick, test_masc_roundtrip_minimal;
 ]
 
 (* ============================================================================
