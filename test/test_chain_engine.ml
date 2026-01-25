@@ -539,8 +539,12 @@ let test_make_threshold () =
       Alcotest.(check bool) "operator is Gte" true (operator = Gte);
       Alcotest.(check (float 0.001)) "value" 0.8 value;
       Alcotest.(check string) "input_node id" "scorer" input_node.id;
-      Alcotest.(check bool) "on_pass present" true (Option.is_some on_pass);
-      Alcotest.(check bool) "on_fail absent" true (Option.is_none on_fail)
+      (* Verify on_pass content, not just Option.is_some *)
+      (match on_pass with
+       | Some pass_node -> Alcotest.(check string) "on_pass id" "accept" pass_node.id
+       | None -> Alcotest.fail "on_pass should be Some");
+      Alcotest.(check (option string)) "on_fail is None" None
+        (Option.map (fun (n : node) -> n.id) on_fail)
   | _ -> Alcotest.fail "Expected Threshold node"
 
 let test_make_goal_driven () =
@@ -561,9 +565,14 @@ let test_make_goal_driven () =
       Alcotest.(check string) "measure_func" "exec_test" measure_func;
       Alcotest.(check int) "max_iterations" 10 max_iterations;
       Alcotest.(check int) "strategy_hints count" 2 (List.length strategy_hints);
+      (* Verify strategy_hints content, not just count *)
+      let hint_below = List.assoc_opt "below_50" strategy_hints in
+      let hint_above = List.assoc_opt "above_50" strategy_hints in
+      Alcotest.(check (option string)) "hint below_50" (Some "fast") hint_below;
+      Alcotest.(check (option string)) "hint above_50" (Some "accurate") hint_above;
       (* Default values for new fields *)
       Alcotest.(check bool) "conversational default" false conversational;
-      Alcotest.(check int) "relay_models default empty" 0 (List.length relay_models)
+      Alcotest.(check (list string)) "relay_models default empty" [] relay_models
   | _ -> Alcotest.fail "Expected GoalDriven node"
 
 let test_make_goal_driven_conversational () =
@@ -593,11 +602,15 @@ let test_make_evaluator () =
   Alcotest.(check string) "id" "picker" evaluator.id;
   match evaluator.node_type with
   | Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score } ->
-      Alcotest.(check int) "candidates" 3 (List.length candidates);
+      Alcotest.(check int) "candidates count" 3 (List.length candidates);
+      (* Verify candidates content, not just count *)
+      let candidate_ids = List.map (fun (n : node) -> n.id) candidates in
+      Alcotest.(check (list string)) "candidate ids" ["fast"; "accurate"; "creative"] candidate_ids;
       Alcotest.(check string) "scoring_func" "llm_judge" scoring_func;
-      Alcotest.(check bool) "scoring_prompt present" true (Option.is_some scoring_prompt);
+      (* Verify actual values, not just Option.is_some *)
+      Alcotest.(check (option string)) "scoring_prompt" (Some "Score 0-1") scoring_prompt;
       Alcotest.(check bool) "select_strategy is Best" true (select_strategy = Best);
-      Alcotest.(check bool) "min_score present" true (Option.is_some min_score)
+      Alcotest.(check (option (float 0.01))) "min_score" (Some 0.7) min_score
   | _ -> Alcotest.fail "Expected Evaluator node"
 
 (* ============================================================================
@@ -613,9 +626,11 @@ let test_make_retry () =
   | Retry { node; max_attempts; backoff; retry_on } ->
       Alcotest.(check string) "inner node id" "inner" node.id;
       Alcotest.(check int) "max_attempts" 3 max_attempts;
-      Alcotest.(check bool) "backoff is exponential" true
-        (match backoff with Exponential _ -> true | _ -> false);
-      Alcotest.(check int) "retry_on count" 2 (List.length retry_on)
+      (match backoff with
+       | Exponential base -> Alcotest.(check (float 0.01)) "backoff base" 2.0 base
+       | _ -> Alcotest.fail "backoff should be Exponential");
+      (* Verify retry_on content, not just count *)
+      Alcotest.(check (list string)) "retry_on" ["timeout"; "rate_limit"] retry_on
   | _ -> Alcotest.fail "Expected Retry node"
 
 let test_make_fallback () =
@@ -627,7 +642,10 @@ let test_make_fallback () =
   match fallback.node_type with
   | Fallback { primary; fallbacks } ->
       Alcotest.(check string) "primary id" "primary" primary.id;
-      Alcotest.(check int) "fallbacks count" 2 (List.length fallbacks)
+      Alcotest.(check int) "fallbacks count" 2 (List.length fallbacks);
+      (* Verify fallbacks content, not just count *)
+      let fallback_ids = List.map (fun (n : node) -> n.id) fallbacks in
+      Alcotest.(check (list string)) "fallback ids" ["fb1"; "fb2"] fallback_ids
   | _ -> Alcotest.fail "Expected Fallback node"
 
 let test_make_race () =
@@ -669,7 +687,9 @@ let test_parse_fallback_chain () =
        | Fallback { primary; fallbacks } ->
            Alcotest.(check string) "primary id" "fast_llm" primary.id;
            Alcotest.(check int) "fallbacks count" 2 (List.length fallbacks);
-           Alcotest.(check string) "first fallback" "accurate_llm" (List.hd fallbacks).id
+           (* Verify all fallbacks, not just the first *)
+           let fallback_ids = List.map (fun (n : node) -> n.id) fallbacks in
+           Alcotest.(check (list string)) "fallback ids" ["accurate_llm"; "local_llm"] fallback_ids
        | _ -> Alcotest.fail "Expected Fallback node type")
   | Error e -> Alcotest.fail ("Parse error: " ^ e)
 
