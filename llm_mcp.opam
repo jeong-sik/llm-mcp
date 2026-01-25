@@ -15,6 +15,7 @@ depends: [
   "dune" {>= "3.13" & >= "3.13"}
   "mcp_protocol" {>= "0.1.0"}
   "grpc-direct" {>= "0.1.0"}
+  "neo4j_bolt_eio" {>= "0.1.0"}
   "yojson" {>= "2.0"}
   "cmdliner" {>= "1.1"}
   "ppx_deriving_yojson" {>= "3.6"}
