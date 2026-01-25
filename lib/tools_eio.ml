@@ -921,7 +921,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream = _ } ->
+  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream = _; thinking; do_sample } ->
       (* Z.ai GLM Cloud API - OpenAI-compatible *)
       let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
         | Some k -> k
@@ -945,10 +945,14 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 `Assoc [("role", `String "user"); ("content", `String prompt)]
               ]
         in
+        (* GLM-4.7 thinking parameter: {"type": "enabled"} or {"type": "disabled"} *)
+        let thinking_obj = `Assoc [("type", `String (if thinking then "enabled" else "disabled"))] in
         let body_fields = [
           ("model", `String model);
           ("messages", messages);
           ("temperature", `Float temperature);
+          ("do_sample", `Bool do_sample);
+          ("thinking", thinking_obj);
         ] in
         let body_fields = match max_tokens with
           | Some n -> body_fields @ [("max_tokens", `Int n)]

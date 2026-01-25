@@ -162,12 +162,14 @@ type tool_args =
     }
   | Glm of {
       prompt : string;
-      model : string;  (* GLM-4.7, GLM-4.6, GLM-4.5 *)
+      model : string;  (* glm-4.7, glm-4.6, glm-4.5, glm-4.5-air *)
       system_prompt : string option;
       temperature : float;
       max_tokens : int option;
       timeout : int;
       stream : bool;
+      thinking : bool;  (* Enable/disable chain-of-thought reasoning *)
+      do_sample : bool;  (* true=diverse sampling, false=greedy deterministic *)
     }
 
 (** Gemini-specific error classification for retry logic.
@@ -605,9 +607,11 @@ Parameters:
 - model: Model name (default: glm-4.7)
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
-- max_tokens: Max tokens to generate (optional, model default)
+- max_tokens: Max tokens to generate (default: 131072 = 128K full)
 - timeout: Timeout in seconds (default: 300)
 - stream: Enable streaming (default: true)
+- thinking: Enable chain-of-thought reasoning (default: true)
+- do_sample: true=diverse sampling, false=greedy deterministic (default: true)
 
 Requires ZAI_API_KEY environment variable.
 Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
@@ -634,7 +638,8 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("max_tokens", `Assoc [
         ("type", `String "integer");
-        ("description", `String "Max tokens to generate");
+        ("description", `String "Max tokens to generate (default: 131072 = 128K full)");
+        ("default", `Int 131072);
       ]);
       ("timeout", `Assoc [
         ("type", `String "integer");
@@ -644,6 +649,16 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ("stream", `Assoc [
         ("type", `String "boolean");
         ("description", `String "Enable SSE streaming");
+        ("default", `Bool true);
+      ]);
+      ("thinking", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable chain-of-thought reasoning (disable for faster, direct responses)");
+        ("default", `Bool true);
+      ]);
+      ("do_sample", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "true=diverse sampling, false=greedy deterministic");
         ("default", `Bool true);
       ]);
       response_format_schema;

@@ -118,7 +118,9 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
     with Type_error _ -> Some 131072 in  (* GLM-4.7: 200K context, 128K (131072) output max *)
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream }
+  let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:true in
+  let do_sample = json |> member "do_sample" |> to_bool_option |> Option.value ~default:true in
+  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample }
 
 (** Parse JSON arguments for chain.run tool *)
 let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
