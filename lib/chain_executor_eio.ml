@@ -803,53 +803,157 @@ let _masc_mcp_url () =
   try Sys.getenv "MASC_MCP_URL"
   with Not_found -> "http://localhost:7432/mcp"
 
-(** Execute MASC broadcast node *)
-let execute_masc_broadcast ctx (node : node) ~message ~room ~mention : (string, string) result =
+(** Get MASC agent name from env or default *)
+let masc_agent_name () =
+  try Sys.getenv "MASC_AGENT_NAME"
+  with Not_found -> "chain-engine"
+
+(** Execute MASC broadcast node - calls masc.masc_broadcast via tool_exec *)
+let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention : (string, string) result =
   record_start ctx node.id ~node_type:"masc_broadcast";
   let start = Unix.gettimeofday () in
   let inputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
   let resolved_message = substitute_prompt message inputs in
   let mentions_str = if mention = [] then "" else " " ^ String.concat " " mention in
   let full_message = resolved_message ^ mentions_str in
-  (* For now, just record the broadcast - actual HTTP call would go here *)
-  let result_json = Printf.sprintf {|{"broadcasted": true, "message": "%s", "room": %s}|}
-    (String.escaped full_message)
-    (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+  (* Build MASC arguments *)
+  let args = `Assoc ([
+    ("agent_name", `String (masc_agent_name ()));
+    ("message", `String full_message);
+    ("format", `String "compact");
+  ] @ (match room with Some r -> [("room", `String r)] | None -> []))
+  in
+  (* Call masc.masc_broadcast via tool_exec *)
+  let result =
+    try tool_exec ~name:"masc.masc_broadcast" ~args
+    with exn -> Error (Printexc.to_string exn)
   in
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-  record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_broadcast";
-  Hashtbl.replace ctx.outputs node.id result_json;
-  Ok result_json
+  match result with
+  | Ok output ->
+      record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_broadcast";
+      Hashtbl.replace ctx.outputs node.id output;
+      Ok output
+  | Error msg ->
+      record_error ctx node.id msg;
+      record_complete ctx node.id ~duration_ms ~success:false ~node_type:"masc_broadcast";
+      Error msg
 
-(** Execute MASC listen node *)
-let execute_masc_listen ctx ~clock (node : node) ~filter ~timeout_sec ~room : (string, string) result =
+(** Execute MASC listen node - polls masc.masc_messages with timeout *)
+let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec ~room : (string, string) result =
   record_start ctx node.id ~node_type:"masc_listen";
   let start = Unix.gettimeofday () in
-  (* Simulate listening with timeout - actual implementation would poll MASC *)
-  let _ = clock in (* suppress unused warning for now *)
-  let result_json = Printf.sprintf {|{"listened": true, "filter": %s, "timeout_sec": %.1f, "room": %s, "messages": []}|}
-    (match filter with Some f -> Printf.sprintf {|"%s"|} f | None -> "null")
-    timeout_sec
-    (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
-  in
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-  record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_listen";
-  Hashtbl.replace ctx.outputs node.id result_json;
-  Ok result_json
+  let poll_interval = 0.5 in (* Poll every 500ms *)
+  let filter_re = Option.map Re.Pcre.regexp filter in
 
-(** Execute MASC claim node *)
-let execute_masc_claim ctx (node : node) ~task_id ~room : (string, string) result =
+  (* Poll loop with timeout *)
+  let rec poll_loop ~since_seq ~collected =
+    let elapsed = Unix.gettimeofday () -. start in
+    if elapsed >= timeout_sec then begin
+      (* Timeout reached, return collected messages *)
+      let messages_json = Printf.sprintf "[%s]" (String.concat "," (List.rev collected)) in
+      let result_json = Printf.sprintf {|{"listened": true, "filter": %s, "timeout_sec": %.1f, "room": %s, "messages": %s}|}
+        (match filter with Some f -> Printf.sprintf {|"%s"|} (String.escaped f) | None -> "null")
+        timeout_sec
+        (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+        messages_json
+      in
+      Ok result_json
+    end else begin
+      (* Build arguments for masc_messages *)
+      let args = `Assoc ([
+        ("since_seq", `Int since_seq);
+        ("limit", `Int 20);
+      ] @ (match room with Some r -> [("room", `String r)] | None -> []))
+      in
+      match tool_exec ~name:"masc.masc_messages" ~args with
+      | Error msg -> Error msg
+      | Ok output ->
+          (* Parse messages and filter if needed *)
+          let open Yojson.Safe.Util in
+          (try
+            let json = Yojson.Safe.from_string output in
+            let messages = json |> member "messages" |> to_list in
+            let max_seq =
+              List.fold_left (fun acc m ->
+                max acc (m |> member "seq" |> to_int_option |> Option.value ~default:acc)
+              ) since_seq messages
+            in
+            let filtered = match filter_re with
+              | None -> messages
+              | Some re -> List.filter (fun m ->
+                  let content = m |> member "content" |> to_string_option |> Option.value ~default:"" in
+                  Re.execp re content
+                ) messages
+            in
+            let new_collected = List.fold_left (fun acc m ->
+              (Yojson.Safe.to_string m) :: acc
+            ) collected filtered in
+            (* If we got messages matching filter, we can return early *)
+            if filtered <> [] then begin
+              let messages_json = Printf.sprintf "[%s]" (String.concat "," (List.rev new_collected)) in
+              let result_json = Printf.sprintf {|{"listened": true, "filter": %s, "timeout_sec": %.1f, "room": %s, "messages": %s}|}
+                (match filter with Some f -> Printf.sprintf {|"%s"|} (String.escaped f) | None -> "null")
+                timeout_sec
+                (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+                messages_json
+              in
+              Ok result_json
+            end else begin
+              (* Wait and poll again *)
+              Eio.Time.sleep clock poll_interval;
+              poll_loop ~since_seq:max_seq ~collected:new_collected
+            end
+          with _ ->
+            (* Parse error, wait and retry *)
+            Eio.Time.sleep clock poll_interval;
+            poll_loop ~since_seq ~collected)
+    end
+  in
+  let result = poll_loop ~since_seq:0 ~collected:[] in
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  match result with
+  | Ok output ->
+      record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_listen";
+      Hashtbl.replace ctx.outputs node.id output;
+      Ok output
+  | Error msg ->
+      record_error ctx node.id msg;
+      record_complete ctx node.id ~duration_ms ~success:false ~node_type:"masc_listen";
+      Error msg
+
+(** Execute MASC claim node - calls masc.masc_claim or masc.masc_claim_next *)
+let execute_masc_claim ctx ~tool_exec (node : node) ~task_id ~room : (string, string) result =
   record_start ctx node.id ~node_type:"masc_claim";
   let start = Unix.gettimeofday () in
-  (* For now, return a stub - actual implementation would call MASC claim *)
-  let result_json = Printf.sprintf {|{"claimed": true, "task_id": %s, "room": %s}|}
-    (match task_id with Some t -> Printf.sprintf {|"%s"|} t | None -> "null")
-    (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+  (* Choose tool based on whether task_id is provided *)
+  let tool_name, args = match task_id with
+    | Some tid ->
+        (* Specific task claim *)
+        ("masc.masc_claim", `Assoc ([
+          ("agent_name", `String (masc_agent_name ()));
+          ("task_id", `String tid);
+        ] @ (match room with Some r -> [("room", `String r)] | None -> [])))
+    | None ->
+        (* Claim next available task *)
+        ("masc.masc_claim_next", `Assoc ([
+          ("agent_name", `String (masc_agent_name ()));
+        ] @ (match room with Some r -> [("room", `String r)] | None -> [])))
+  in
+  let result =
+    try tool_exec ~name:tool_name ~args
+    with exn -> Error (Printexc.to_string exn)
   in
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-  record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_claim";
-  Hashtbl.replace ctx.outputs node.id result_json;
-  Ok result_json
+  match result with
+  | Ok output ->
+      record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_claim";
+      Hashtbl.replace ctx.outputs node.id output;
+      Ok output
+  | Error msg ->
+      record_error ctx node.id msg;
+      record_complete ctx node.id ~duration_ms ~success:false ~node_type:"masc_claim";
+      Error msg
 
 (** Execute a tool node *)
 let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string, string) result =
@@ -1011,11 +1115,11 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
         ~conversational ~relay_models
   (* MASC coordination nodes *)
   | Masc_broadcast { message; room; mention } ->
-      execute_masc_broadcast ctx node ~message ~room ~mention
+      execute_masc_broadcast ctx ~tool_exec node ~message ~room ~mention
   | Masc_listen { filter; timeout_sec; room } ->
-      execute_masc_listen ctx ~clock node ~filter ~timeout_sec ~room
+      execute_masc_listen ctx ~clock ~tool_exec node ~filter ~timeout_sec ~room
   | Masc_claim { task_id; room } ->
-      execute_masc_claim ctx node ~task_id ~room
+      execute_masc_claim ctx ~tool_exec node ~task_id ~room
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
