@@ -30,9 +30,6 @@ jobs:
           opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
           opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
           opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
-          opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
-          opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
-          opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 
       - name: Install dependencies
         run: |
@@ -40,7 +37,8 @@ jobs:
 
       - name: Build
         run: |
-          opam exec -- dune build
+          # Build core libraries only (neo4j-related bins require local deps)
+          opam exec -- dune build lib/
 
       - name: Run tests
         run: |
@@ -89,9 +87,6 @@ jobs:
           opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#main -n -y
           opam pin add grpc-direct-core https://github.com/jeong-sik/grpc-direct.git#main -n -y
           opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git#main -n -y
-          opam pin add neo4j_packstream https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
-          opam pin add neo4j_bolt https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
-          opam pin add neo4j_bolt_eio https://github.com/jeong-sik/ocaml-neo4j-bolt.git#main -n -y
 
       - name: Install dependencies
         run: |
