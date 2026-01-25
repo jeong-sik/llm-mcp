@@ -26,6 +26,7 @@
   ; External dependencies (opam pin)
   (mcp_protocol (>= 0.1.0))
   (grpc-direct (>= 0.1.0))
+  (compact-protocol (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
   (cmdliner (>= 1.1))
