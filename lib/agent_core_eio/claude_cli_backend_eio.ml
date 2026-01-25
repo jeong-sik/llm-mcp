@@ -11,7 +11,7 @@
       Eio.Switch.run @@ fun sw ->
         let proc_mgr = Eio.Stdenv.process_mgr env in
         let config = Claude_cli_backend_eio.{
-          model = "sonnet";  (* or "opus", "haiku" *)
+          model = "opus";  (* or "sonnet", "haiku" *)
           timeout_ms = Some 120_000;
           system_prompt = None;
           allowed_tools = None;
@@ -28,7 +28,7 @@ open Agent_types
 (** {1 Configuration} *)
 
 type config = {
-  model : string;              (** Model alias: "sonnet", "opus", "haiku" *)
+  model : string;              (** Model alias: "opus", "sonnet", "haiku" *)
   timeout_ms : int option;     (** Command timeout in ms (None = no timeout) *)
   system_prompt : string option;  (** Optional system prompt override *)
   allowed_tools : string list option;  (** Allowed tools (None = default) *)
@@ -36,7 +36,7 @@ type config = {
 }
 
 let default_config = {
-  model = "sonnet";
+  model = "opus";
   timeout_ms = Some 120_000;  (* 2 minutes default *)
   system_prompt = None;
   allowed_tools = None;

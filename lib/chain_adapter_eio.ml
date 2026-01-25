@@ -428,6 +428,147 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
        | "uppercase" -> Ok (String.uppercase_ascii input)
        | "lowercase" -> Ok (String.lowercase_ascii input)
        | "trim" -> Ok (String.trim input)
+       | "extract_json" | "extract_json_object" | "extract_json_array" ->
+           let len = String.length input in
+           let rec find_start i =
+             if i >= len then None
+             else
+               match input.[i] with
+               | '{' | '[' -> Some i
+               | _ -> find_start (i + 1)
+           in
+           let extract_from start =
+             let open_ch = input.[start] in
+             let close_ch = if open_ch = '{' then '}' else ']' in
+             let rec scan i depth in_string escape =
+               if i >= len then
+                 Error "Unbalanced JSON: no closing bracket found"
+               else
+                 let c = input.[i] in
+                 if in_string then
+                   if escape then
+                     scan (i + 1) depth in_string false
+                   else if c = '\\' then
+                     scan (i + 1) depth in_string true
+                   else if c = '"' then
+                     scan (i + 1) depth false false
+                   else
+                     scan (i + 1) depth in_string false
+                 else
+                   match c with
+                   | '"' -> scan (i + 1) depth true false
+                   | _ when c = open_ch ->
+                       scan (i + 1) (depth + 1) false false
+                   | _ when c = close_ch ->
+                       let new_depth = depth - 1 in
+                       if new_depth = 0 then
+                         Ok (String.sub input start (i - start + 1))
+                       else
+                         scan (i + 1) new_depth false false
+                   | _ ->
+                       scan (i + 1) depth false false
+             in
+             scan start 0 false false
+           in
+           (match find_start 0 with
+            | None -> Error "No JSON object/array found in input"
+            | Some start -> extract_from start)
+       | "figma_summary_to_spec" ->
+           (try
+             let open Yojson.Safe.Util in
+             let json = Yojson.Safe.from_string input in
+             let get_string key =
+               try json |> member key |> to_string with _ -> ""
+             in
+             let get_int key =
+               try json |> member key |> to_int with _ -> 0
+             in
+             let get_bool key =
+               try json |> member key |> to_bool with _ -> false
+             in
+             let get_string_opt key =
+               try json |> member key |> to_string_option |> Option.value ~default:""
+               with _ -> ""
+             in
+             let name = get_string "name" in
+             let typ = get_string "type" in
+             let children =
+               try json |> member "children" |> to_list
+               with _ -> []
+             in
+             let child_entries =
+               List.filter_map (fun child ->
+                 try
+                   let cname = child |> member "name" |> to_string in
+                   let ctype = child |> member "type" |> to_string in
+                   Some (ctype, cname)
+                 with _ -> None
+               ) children
+             in
+             let texts =
+               let names =
+                 child_entries
+                 |> List.map (fun (_, cname) -> cname)
+                 |> List.filter (fun s -> s <> "")
+               in
+               let base = if name <> "" then [name] else [] in
+               base @ names
+             in
+             let structure =
+               let root =
+                 if typ <> "" || name <> "" then
+                   [Printf.sprintf "%s: %s" (if typ = "" then "NODE" else typ) name]
+                 else []
+               in
+               let children_lines =
+                 child_entries
+                 |> List.map (fun (ctype, cname) ->
+                     Printf.sprintf "  - %s: %s" (if ctype = "" then "NODE" else ctype) cname)
+               in
+               root @ children_lines
+             in
+             let children_count = get_int "children_count" in
+             let truncated = get_bool "truncated" in
+             let hint = get_string_opt "hint" in
+             let layout_notes =
+               let base = Printf.sprintf "children=%d%s"
+                 children_count (if truncated then " (truncated)" else "")
+               in
+               base
+             in
+             let impl_notes =
+               let base = [
+                 "Generated from Figma summary; design tokens not available at this depth."
+               ] in
+               let base =
+                 if truncated then
+                   base @ ["Summary is truncated; use figma_get_node_chunk for full details."]
+                 else base
+               in
+               let base =
+                 if hint <> "" then base @ [hint] else base
+               in
+               base
+             in
+             let spec = `Assoc [
+               ("component_name", `String name);
+               ("component_type", `String typ);
+               ("layout", `Assoc [
+                 ("type", `String (if typ = "" then "UNKNOWN" else typ));
+                 ("notes", `String layout_notes);
+               ]);
+               ("tokens", `Assoc [
+                 ("colors", `List []);
+                 ("spacing", `List []);
+                 ("typography", `List []);
+               ]);
+               ("texts", `List (List.map (fun s -> `String s) texts));
+               ("structure", `List (List.map (fun s -> `String s) structure));
+               ("implementation_notes", `List (List.map (fun s -> `String s) impl_notes));
+             ] in
+             Ok (Yojson.Safe.to_string spec)
+           with _ ->
+             Error "Failed to parse figma summary JSON")
        | "reverse" ->
            let chars = String.to_seq input |> List.of_seq |> List.rev in
            Ok (String.of_seq (List.to_seq chars))
