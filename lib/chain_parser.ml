@@ -786,6 +786,24 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         conversational; relay_models
       })
 
+  (* MASC Coordination Nodes *)
+  | "masc_broadcast" ->
+      let* message = require_string json "message" in
+      let room = parse_string_opt json "room" in
+      let mention = parse_string_list_opt json "mention" in
+      Ok (Masc_broadcast { message; room; mention })
+
+  | "masc_listen" ->
+      let filter = parse_string_opt json "filter" in
+      let timeout_sec = Option.value (parse_float_opt json "timeout_sec") ~default:30.0 in
+      let room = parse_string_opt json "room" in
+      Ok (Masc_listen { filter; timeout_sec; room })
+
+  | "masc_claim" ->
+      let task_id = parse_string_opt json "task_id" in
+      let room = parse_string_opt json "room" in
+      Ok (Masc_claim { task_id; room })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 

@@ -2754,6 +2754,202 @@ let feedback_loop_tests = [
 ]
 
 (* ============================================================================
+   MASC Coordination Node Tests
+   ============================================================================ *)
+
+(** Test MASC broadcast JSON parsing *)
+let test_masc_broadcast_json_parse () =
+  let json = {|{
+    "id": "masc_test",
+    "nodes": [
+      {
+        "id": "notify",
+        "type": "masc_broadcast",
+        "message": "Starting task: {{input.task}}",
+        "room": "test-room",
+        "mention": ["@codex", "@gemini"]
+      }
+    ],
+    "output": "notify"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      Alcotest.(check int) "node count" 1 (List.length chain.nodes);
+      let node = List.hd chain.nodes in
+      Alcotest.(check string) "node id" "notify" node.id;
+      (match node.node_type with
+       | Masc_broadcast { message; room; mention } ->
+           Alcotest.(check string) "message" "Starting task: {{input.task}}" message;
+           Alcotest.(check (option string)) "room" (Some "test-room") room;
+           Alcotest.(check int) "mention count" 2 (List.length mention)
+       | _ -> Alcotest.fail "Expected Masc_broadcast")
+  | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
+
+(** Test MASC listen JSON parsing *)
+let test_masc_listen_json_parse () =
+  let json = {|{
+    "id": "masc_listen_test",
+    "nodes": [
+      {
+        "id": "wait",
+        "type": "masc_listen",
+        "filter": "done|complete",
+        "timeout_sec": 60.0,
+        "room": "test-room"
+      }
+    ],
+    "output": "wait"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Masc_listen { filter; timeout_sec; room } ->
+           Alcotest.(check (option string)) "filter" (Some "done|complete") filter;
+           Alcotest.(check (float 0.1)) "timeout_sec" 60.0 timeout_sec;
+           Alcotest.(check (option string)) "room" (Some "test-room") room
+       | _ -> Alcotest.fail "Expected Masc_listen")
+  | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
+
+(** Test MASC claim JSON parsing *)
+let test_masc_claim_json_parse () =
+  let json = {|{
+    "id": "masc_claim_test",
+    "nodes": [
+      {
+        "id": "claim",
+        "type": "masc_claim",
+        "task_id": "task-123",
+        "room": "test-room"
+      }
+    ],
+    "output": "claim"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Masc_claim { task_id; room } ->
+           Alcotest.(check (option string)) "task_id" (Some "task-123") task_id;
+           Alcotest.(check (option string)) "room" (Some "test-room") room
+       | _ -> Alcotest.fail "Expected Masc_claim")
+  | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
+
+(** Test MASC claim_next (no task_id) JSON parsing *)
+let test_masc_claim_next_json_parse () =
+  let json = {|{
+    "id": "masc_claim_next_test",
+    "nodes": [
+      {
+        "id": "claim_next",
+        "type": "masc_claim"
+      }
+    ],
+    "output": "claim_next"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      let node = List.hd chain.nodes in
+      (match node.node_type with
+       | Masc_claim { task_id; room } ->
+           Alcotest.(check (option string)) "task_id" None task_id;
+           Alcotest.(check (option string)) "room" None room
+       | _ -> Alcotest.fail "Expected Masc_claim")
+  | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
+
+(** Test MASC broadcast validation - empty message should fail *)
+let test_masc_broadcast_validation_empty_message () =
+  let json = {|{
+    "id": "invalid_masc",
+    "nodes": [
+      {
+        "id": "bad_notify",
+        "type": "masc_broadcast",
+        "message": ""
+      }
+    ],
+    "output": "bad_notify"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      (match Chain_parser.validate_chain_strict chain with
+       | Error msg ->
+           Alcotest.(check bool) "error contains message" true
+             (String.length msg > 0 && (try let _ = Str.search_forward (Str.regexp "message") msg 0 in true with Not_found -> false))
+       | Ok () -> Alcotest.fail "Validation should fail for empty message")
+  | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
+
+(** Test MASC listen validation - timeout must be > 0 *)
+let test_masc_listen_validation_invalid_timeout () =
+  let json = {|{
+    "id": "invalid_listen",
+    "nodes": [
+      {
+        "id": "bad_wait",
+        "type": "masc_listen",
+        "timeout_sec": -1.0
+      }
+    ],
+    "output": "bad_wait"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string json) with
+  | Ok chain ->
+      (match Chain_parser.validate_chain_strict chain with
+       | Error msg ->
+           Alcotest.(check bool) "error contains timeout" true
+             (String.length msg > 0 && (try let _ = Str.search_forward (Str.regexp "timeout") msg 0 in true with Not_found -> false))
+       | Ok () -> Alcotest.fail "Validation should fail for negative timeout")
+  | Error msg -> Alcotest.fail (Printf.sprintf "Parse failed: %s" msg)
+
+(** Test MASC JSON serialization roundtrip *)
+let test_masc_json_roundtrip () =
+  let original_json = {|{
+    "id": "masc_roundtrip",
+    "nodes": [
+      {
+        "id": "broadcast",
+        "type": "masc_broadcast",
+        "message": "Hello {{name}}",
+        "room": "main",
+        "mention": ["@alice"]
+      },
+      {
+        "id": "listen",
+        "type": "masc_listen",
+        "filter": "response",
+        "timeout_sec": 30.0
+      },
+      {
+        "id": "claim",
+        "type": "masc_claim",
+        "task_id": "task-456"
+      }
+    ],
+    "output": "claim"
+  }|} in
+  match Chain_parser.parse_chain (Yojson.Safe.from_string original_json) with
+  | Ok chain ->
+      (* Serialize back to JSON *)
+      let serialized = Chain_parser.chain_to_json chain in
+      (* Parse again *)
+      (match Chain_parser.parse_chain serialized with
+       | Ok reparsed ->
+           Alcotest.(check int) "node count preserved" 3 (List.length reparsed.nodes);
+           Alcotest.(check string) "chain id preserved" "masc_roundtrip" reparsed.id
+       | Error msg -> Alcotest.fail (Printf.sprintf "Re-parse failed: %s" msg))
+  | Error msg -> Alcotest.fail (Printf.sprintf "Initial parse failed: %s" msg)
+
+let masc_tests = [
+  "masc_broadcast_json_parse", `Quick, test_masc_broadcast_json_parse;
+  "masc_listen_json_parse", `Quick, test_masc_listen_json_parse;
+  "masc_claim_json_parse", `Quick, test_masc_claim_json_parse;
+  "masc_claim_next_json_parse", `Quick, test_masc_claim_next_json_parse;
+  "masc_broadcast_validation_empty_message", `Quick, test_masc_broadcast_validation_empty_message;
+  "masc_listen_validation_invalid_timeout", `Quick, test_masc_listen_validation_invalid_timeout;
+  "masc_json_roundtrip", `Quick, test_masc_json_roundtrip;
+]
+
+(* ============================================================================
    Checkpoint Store Tests
    ============================================================================ *)
 
@@ -2943,4 +3139,5 @@ let () =
     "StreamMerge Node", stream_merge_tests;
     "FeedbackLoop Node", feedback_loop_tests;
     "Checkpoint Store", checkpoint_tests;
+    "MASC Coordination", masc_tests;
   ]
