@@ -414,19 +414,31 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
             | "tools/call" ->
                 (match req.params with
                  | Some params ->
-                     (* Verify session exists for tools/call *)
-                     (match session_id_opt with
-                      | Some sid ->
-                          (match get_session store sid with
-                           | Some _ ->
-                               (session_id_opt, handle_call_tool ~sw ~proc_mgr ~clock id params)
-                           | None ->
-                               eprintf "[session] Session %s not found, rejecting tools/call\n%!" sid;
-                               (None, make_error ~id (-32000) "Session not found. Please call initialize first."))
-                      | None ->
-                          (* Allow tools/call without session for compatibility with Claude Code *)
-                          eprintf "[session] No session ID, allowing tools/call anyway\n%!";
-                          (None, handle_call_tool ~sw ~proc_mgr ~clock id params))
+                     (* Get or create session for tools/call *)
+                     let effective_session_id = match session_id_opt with
+                       | Some sid ->
+                           (match get_session store sid with
+                            | Some _ ->
+                                (* Session exists, use it *)
+                                Some sid
+                            | None ->
+                                (* Session expired/not found, auto-create new one *)
+                                let now = Unix.gettimeofday () in
+                                let new_session = {
+                                  id = generate_session_id ();
+                                  protocol_version = P.protocol_version;
+                                  created_at = now;
+                                  last_accessed = now;
+                                } in
+                                put_session store new_session;
+                                eprintf "[session] Old session %s not found, auto-created: %s\n%!" sid new_session.id;
+                                Some new_session.id)
+                       | None ->
+                           (* No session ID provided, allow for compatibility *)
+                           eprintf "[session] No session ID, allowing tools/call anyway\n%!";
+                           None
+                     in
+                     (effective_session_id, handle_call_tool ~sw ~proc_mgr ~clock id params)
                  | None ->
                      (session_id_opt, make_error ~id (-32602) "Missing params"))
             | "resources/list" ->
