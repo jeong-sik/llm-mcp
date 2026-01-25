@@ -280,6 +280,21 @@ type node_type =
       conversational : bool;         (** Enable conversational mode with context accumulation *)
       relay_models : string list;    (** Models to rotate through: ["gemini"; "claude"; "codex"] *)
     }
+  (* MASC - Multi-Agent Streaming Coordination nodes *)
+  | Masc_broadcast of {
+      message : string;               (** Message template with {{var}} placeholders *)
+      room : string option;           (** Room name (None = current room) *)
+      mention : string list;          (** Agent mentions: ["@codex"; "@gemini"] *)
+    }
+  | Masc_listen of {
+      filter : string option;         (** Message filter pattern (regex) *)
+      timeout_sec : float;            (** Timeout in seconds *)
+      room : string option;           (** Room name (None = current room) *)
+    }
+  | Masc_claim of {
+      task_id : string option;        (** Specific task ID (None = claim_next) *)
+      room : string option;           (** Room name (None = current room) *)
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -391,6 +406,9 @@ let node_type_name = function
   | Mcts _ -> "mcts"
   | StreamMerge _ -> "stream_merge"
   | FeedbackLoop _ -> "feedback_loop"
+  | Masc_broadcast _ -> "masc_broadcast"
+  | Masc_listen _ -> "masc_listen"
+  | Masc_claim _ -> "masc_claim"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) () =
@@ -578,7 +596,8 @@ let rec count_parallel_groups (node: node) : int =
   | FeedbackLoop { generator; _ } ->
       (* FeedbackLoop wraps generator - count generator's parallel groups *)
       count_parallel_groups generator
-  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _ -> 0
+  | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
+  | Masc_broadcast _ | Masc_listen _ | Masc_claim _ -> 0
 
 (** Count total parallel groups in a chain *)
 let count_chain_parallel_groups (chain: chain) : int =

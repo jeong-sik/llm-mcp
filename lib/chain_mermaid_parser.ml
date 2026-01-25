@@ -1456,6 +1456,9 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
         | Gt -> "gt" | Gte -> "gte" | Lt -> "lt" | Lte -> "lte" | Eq -> "eq" | Neq -> "neq"
       in
       Printf.sprintf "feedback_%s_%d_%s%.2f" evaluator_config.scoring_func max_iterations op_str score_threshold
+  | Masc_broadcast { message; _ } -> Printf.sprintf "masc_broadcast_%s" (String.sub message 0 (min 20 (String.length message)))
+  | Masc_listen { timeout_sec; _ } -> Printf.sprintf "masc_listen_%.0fs" timeout_sec
+  | Masc_claim { task_id; _ } -> Printf.sprintf "masc_claim_%s" (Option.value task_id ~default:"next")
 
 (** Escape text for Mermaid node labels:
     - Newlines → space (Mermaid doesn't support \n in labels)
@@ -1577,6 +1580,14 @@ let node_type_to_text (nt : node_type) : string =
         | Gt -> ">" | Gte -> ">=" | Lt -> "<" | Lte -> "<=" | Eq -> "=" | Neq -> "!="
       in
       Printf.sprintf "FeedbackLoop:%s,%d,%s%.2f" evaluator_config.scoring_func max_iterations op_sym score_threshold
+  | Masc_broadcast { message; mention; _ } ->
+      let mentions = if mention = [] then "" else " " ^ String.concat " " mention in
+      Printf.sprintf "MASC:broadcast '%s'%s" (escape_for_mermaid ~max_len:30 message) mentions
+  | Masc_listen { filter; timeout_sec; _ } ->
+      let filter_str = Option.value filter ~default:"*" in
+      Printf.sprintf "MASC:listen '%s' %.0fs" filter_str timeout_sec
+  | Masc_claim { task_id; _ } ->
+      Printf.sprintf "MASC:claim %s" (Option.value task_id ~default:"next")
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -1589,6 +1600,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
   | Mcts _ -> ("{", "}")  (* MCTS: diamond like decision nodes *)
   | StreamMerge _ -> ("[[", "]]")  (* StreamMerge: double brackets like Pipeline/Fanout *)
+  | Masc_broadcast _ | Masc_listen _ | Masc_claim _ -> ("((", "))")  (* MASC: circle for coordination *)
 
 (** Map node type to CSS class name for Mermaid styling *)
 let node_type_to_class (nt : node_type) : string =
@@ -1618,6 +1630,7 @@ let node_type_to_class (nt : node_type) : string =
   | Mcts _ -> "mcts"
   | StreamMerge _ -> "streammerge"
   | FeedbackLoop _ -> "feedbackloop"
+  | Masc_broadcast _ | Masc_listen _ | Masc_claim _ -> "masc"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -1801,6 +1814,9 @@ let chain_to_ascii (chain : chain) : string =
       | Mcts _ -> "🌳"
       | StreamMerge _ -> "🌊"
       | FeedbackLoop _ -> "🔄"
+      | Masc_broadcast _ -> "📢"
+      | Masc_listen _ -> "👂"
+      | Masc_claim _ -> "✋"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

@@ -798,6 +798,59 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
           Error msg)
   | _ -> Error "execute_llm_node called with non-LLM node"
 
+(** MASC MCP endpoint - configurable via MASC_MCP_URL env var *)
+let _masc_mcp_url () =
+  try Sys.getenv "MASC_MCP_URL"
+  with Not_found -> "http://localhost:7432/mcp"
+
+(** Execute MASC broadcast node *)
+let execute_masc_broadcast ctx (node : node) ~message ~room ~mention : (string, string) result =
+  record_start ctx node.id ~node_type:"masc_broadcast";
+  let start = Unix.gettimeofday () in
+  let inputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
+  let resolved_message = substitute_prompt message inputs in
+  let mentions_str = if mention = [] then "" else " " ^ String.concat " " mention in
+  let full_message = resolved_message ^ mentions_str in
+  (* For now, just record the broadcast - actual HTTP call would go here *)
+  let result_json = Printf.sprintf {|{"broadcasted": true, "message": "%s", "room": %s}|}
+    (String.escaped full_message)
+    (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+  in
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_broadcast";
+  Hashtbl.replace ctx.outputs node.id result_json;
+  Ok result_json
+
+(** Execute MASC listen node *)
+let execute_masc_listen ctx ~clock (node : node) ~filter ~timeout_sec ~room : (string, string) result =
+  record_start ctx node.id ~node_type:"masc_listen";
+  let start = Unix.gettimeofday () in
+  (* Simulate listening with timeout - actual implementation would poll MASC *)
+  let _ = clock in (* suppress unused warning for now *)
+  let result_json = Printf.sprintf {|{"listened": true, "filter": %s, "timeout_sec": %.1f, "room": %s, "messages": []}|}
+    (match filter with Some f -> Printf.sprintf {|"%s"|} f | None -> "null")
+    timeout_sec
+    (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+  in
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_listen";
+  Hashtbl.replace ctx.outputs node.id result_json;
+  Ok result_json
+
+(** Execute MASC claim node *)
+let execute_masc_claim ctx (node : node) ~task_id ~room : (string, string) result =
+  record_start ctx node.id ~node_type:"masc_claim";
+  let start = Unix.gettimeofday () in
+  (* For now, return a stub - actual implementation would call MASC claim *)
+  let result_json = Printf.sprintf {|{"claimed": true, "task_id": %s, "room": %s}|}
+    (match task_id with Some t -> Printf.sprintf {|"%s"|} t | None -> "null")
+    (match room with Some r -> Printf.sprintf {|"%s"|} r | None -> "null")
+  in
+  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_claim";
+  Hashtbl.replace ctx.outputs node.id result_json;
+  Ok result_json
+
 (** Execute a tool node *)
 let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string, string) result =
   match tool with
@@ -956,6 +1009,13 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
       execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec node
         ~generator ~evaluator_config ~improver_prompt ~max_iterations ~score_threshold ~score_operator
         ~conversational ~relay_models
+  (* MASC coordination nodes *)
+  | Masc_broadcast { message; room; mention } ->
+      execute_masc_broadcast ctx node ~message ~room ~mention
+  | Masc_listen { filter; timeout_sec; room } ->
+      execute_masc_listen ctx ~clock node ~filter ~timeout_sec ~room
+  | Masc_claim { task_id; room } ->
+      execute_masc_claim ctx node ~task_id ~room
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
