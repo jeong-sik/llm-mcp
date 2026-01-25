@@ -178,6 +178,45 @@ let normalize_node (node : CT.node) : CT.node =
 let normalize_chain (chain : CT.chain) : CT.chain =
   { chain with CT.nodes = sort_nodes_by_id (List.map normalize_node chain.CT.nodes) }
 
+(** Node type content equality - verifies ALL fields, not just structure *)
+let node_type_equal (t1 : CT.node_type) (t2 : CT.node_type) : bool =
+  match t1, t2 with
+  | CT.Llm l1, CT.Llm l2 ->
+      l1.model = l2.model &&
+      l1.prompt = l2.prompt &&
+      l1.system = l2.system &&
+      l1.timeout = l2.timeout
+  | CT.Tool t1, CT.Tool t2 ->
+      t1.name = t2.name &&
+      Yojson.Safe.equal t1.args t2.args
+  | CT.Quorum q1, CT.Quorum q2 ->
+      q1.required = q2.required &&
+      List.length q1.nodes = List.length q2.nodes
+  | CT.ChainRef r1, CT.ChainRef r2 ->
+      r1 = r2
+  | _ -> false
+
+(** Node equality - ID + content *)
+let node_equal (n1 : CT.node) (n2 : CT.node) : bool =
+  n1.id = n2.id && node_type_equal n1.node_type n2.node_type
+
+(** Find node by ID *)
+let find_node (nodes : CT.node list) (id : string) : CT.node option =
+  List.find_opt (fun (n : CT.node) -> n.id = id) nodes
+
+(** Chain equivalence - FULL field comparison (not just counts) *)
+let chain_content_equal c1 c2 =
+  get_node_ids c1 = get_node_ids c2 &&
+  c1.CT.output = c2.CT.output &&
+  List.for_all (fun (n1 : CT.node) ->
+    match n1.node_type with
+    | CT.ChainRef _ -> true
+    | _ ->
+        match find_node c2.CT.nodes n1.id with
+        | None -> false
+        | Some n2 -> node_equal n1 n2
+  ) c1.CT.nodes
+
 (* ══════════════════════════════════════════════════════════════════════════
    Properties
    ══════════════════════════════════════════════════════════════════════════ *)
@@ -248,7 +287,7 @@ let prop_mermaid_parse_safe =
       | Ok _ -> true
       | Error _ -> true)  (* Error is OK, crash is not - test passes if no exception *)
 
-(** Property 7: JSON roundtrip preserves structure *)
+(** Property 7: JSON roundtrip preserves ALL fields (not just structure) *)
 let prop_json_roundtrip =
   QCheck.Test.make ~count:100 ~name:"json_roundtrip"
     arbitrary_chain
@@ -256,9 +295,7 @@ let prop_json_roundtrip =
       let json = CP.chain_to_json chain in
       match CP.parse_chain json with
       | Error _ -> false
-      | Ok chain' ->
-          count_real_nodes chain = count_real_nodes chain' &&
-          chain.CT.output = chain'.CT.output)
+      | Ok chain' -> chain_content_equal chain chain')
 
 (** Property 8: chain_full metadata roundtrip is exact *)
 let prop_chain_full_roundtrip_exact =

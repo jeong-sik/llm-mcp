@@ -79,10 +79,48 @@ let get_edges chain =
        ) n.input_mapping)
   |> List.sort_uniq compare
 
+(** Node type content equality - verifies ALL fields, not just structure *)
+let node_type_equal (t1 : CT.node_type) (t2 : CT.node_type) : bool =
+  match t1, t2 with
+  | CT.Llm l1, CT.Llm l2 ->
+      l1.model = l2.model &&
+      l1.prompt = l2.prompt &&
+      l1.system = l2.system &&
+      l1.timeout = l2.timeout
+  | CT.Tool t1, CT.Tool t2 ->
+      t1.name = t2.name &&
+      Yojson.Safe.equal t1.args t2.args
+  | CT.Quorum q1, CT.Quorum q2 ->
+      q1.required = q2.required &&
+      List.length q1.nodes = List.length q2.nodes
+  | CT.ChainRef r1, CT.ChainRef r2 ->
+      r1 = r2
+  | _ -> false  (* Different types = not equal *)
+
+(** Node equality - ID + content *)
+let node_equal (n1 : CT.node) (n2 : CT.node) : bool =
+  n1.id = n2.id &&
+  node_type_equal n1.node_type n2.node_type
+
+(** Find node by ID *)
+let find_node_by_id (nodes : CT.node list) (id : string) : CT.node option =
+  List.find_opt (fun (n : CT.node) -> n.id = id) nodes
+
+(** Chain equivalence - FULL field comparison *)
 let chain_equiv c1 c2 =
+  (* Structure check *)
   get_real_ids c1 = get_real_ids c2 &&
   get_edges c1 = get_edges c2 &&
-  c1.CT.output = c2.CT.output
+  c1.CT.output = c2.CT.output &&
+  (* Content check - verify each node's fields *)
+  List.for_all (fun (n1 : CT.node) ->
+    match n1.node_type with
+    | CT.ChainRef _ -> true  (* Skip refs, they're just edges *)
+    | _ ->
+        match find_node_by_id c2.CT.nodes n1.id with
+        | None -> false
+        | Some n2 -> node_equal n1 n2
+  ) c1.CT.nodes
 
 (* ══════════════════════════════════════════════════════════════════════════
    Part 3: Exhaustive Small Model Checking
