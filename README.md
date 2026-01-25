@@ -6,6 +6,27 @@ Claude Code 안에서 다른 LLM 호출할 때 쓰려고 만든 CLI 래퍼.
 
 Note: This is a personal project.
 
+## Quickstart
+
+```bash
+opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git -y
+opam pin add grpc-direct https://github.com/jeong-sik/grpc-direct.git -y
+opam install . --deps-only
+dune build
+dune exec llm-mcp -- --port 8932
+```
+
+```json
+{
+  "mcpServers": {
+    "llm-mcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:8932/mcp"
+    }
+  }
+}
+```
+
 ## 도구
 
 - `gemini` - Gemini CLI
