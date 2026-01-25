@@ -65,6 +65,9 @@ graph LR
 | GoalDriven | `{GoalDriven:evaluator}` | `{diamond}` |
 | Spawn | `[["Spawn:clean,node"]]` | `[[double]]` |
 | FeedbackLoop | `[[FeedbackLoop:eval_id,max_iter,min_score]]` | `[[double]]` |
+| Masc_broadcast | `((📢 MASC:broadcast))` | `((circle))` |
+| Masc_listen | `((👂 MASC:listen))` | `((circle))` |
+| Masc_claim | `((✋ MASC:claim))` | `((circle))` |
 
 ### LLM Node Format
 ```
@@ -301,6 +304,74 @@ This chain:
 3. Evaluator checks type safety
 4. If score < 0.9: improver refines code with feedback
 5. Repeats until score >= 0.9 or 5 iterations
+
+---
+
+## MASC Coordination Nodes (Multi-Agent)
+
+MASC nodes enable chain coordination with other agents via masc-mcp.
+
+### Node Types
+
+| Node | Purpose | MCP Tool |
+|------|---------|----------|
+| `Masc_broadcast` | Send message to all agents | `masc.masc_broadcast` |
+| `Masc_listen` | Wait for messages with filter | `masc.masc_messages` |
+| `Masc_claim` | Claim task from backlog | `masc.masc_claim` / `masc.masc_claim_next` |
+
+### Environment Variables
+
+```bash
+MASC_AGENT_NAME=my-agent  # Agent name for MASC calls (default: "chain-engine")
+```
+
+### JSON Format
+
+```json
+{
+  "id": "notify",
+  "type": "masc_broadcast",
+  "message": "Starting task: {{input.task_name}}",
+  "room": "my-room",
+  "mention": ["@codex", "@gemini"]
+}
+```
+
+```json
+{
+  "id": "wait",
+  "type": "masc_listen",
+  "filter": "done|complete",
+  "timeout_sec": 30.0,
+  "room": "my-room"
+}
+```
+
+```json
+{
+  "id": "claim",
+  "type": "masc_claim",
+  "task_id": null,
+  "room": "my-room"
+}
+```
+
+### Example: Multi-Agent Pipeline
+
+```mermaid
+graph LR
+    start((📢 broadcast))
+    work["LLM:gemini 'Do work'"]
+    wait((👂 listen))
+    finish((📢 broadcast))
+    start --> work --> wait --> finish
+```
+
+This chain:
+1. Broadcasts "Starting work" to other agents
+2. Performs LLM work
+3. Waits for "done" message from another agent (30s timeout)
+4. Broadcasts completion
 
 ---
 
