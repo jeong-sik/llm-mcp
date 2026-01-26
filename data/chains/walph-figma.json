@@ -1,8 +1,8 @@
 {
   "id": "walph-figma",
-  "name": "Walph Figma Implementation Loop",
-  "description": "Figma design to code loop - repeats until SSIM >= 0.95 (95% visual fidelity)",
-  "version": "1.0.0",
+  "name": "Walph Figma Implementation Loop (Vision-First)",
+  "description": "Figma design to code with REAL SSIM verification via figma_verify_visual",
+  "version": "2.0.0",
   "nodes": [
     {
       "id": "extract",
@@ -25,15 +25,25 @@
         "type": "llm",
         "llm": {
           "model": "claude-cli",
-          "prompt": "You are a Figma-to-Code expert. Convert this Figma DSL to production-ready code.\n\nFigma DSL:\n{{figma_bundle.dsl}}\n\nPlatform: {{platform}}\n\nRules:\n1. Match exact colors (use rgb(), not hex for precision)\n2. Match exact spacing, padding, margins\n3. Match exact typography (font-size, line-height, letter-spacing)\n4. Use flexbox for layout (ax/cx alignment)\n5. Preserve ALL text content exactly as shown in DSL\n\nOutput ONLY the code, no explanations."
+          "prompt": "You are a Figma-to-Code expert. Convert this Figma DSL to production-ready code.\n\nFigma DSL:\n{{figma_bundle.dsl}}\n\nReference Image: {{figma_bundle.render_url}}\n\nPlatform: {{platform}}\n\nCRITICAL Rules for 95%+ SSIM:\n1. Colors: Use rgb() not hex - e.g., rgb(32,141,249) not #1F8CF8\n2. Typography: Include letter-spacing and line-height EXACTLY\n3. Layout: Use flexbox with exact align-items/justify-content\n4. TEXT: Copy characters EXACTLY from DSL - NO translation/modification\n5. Flat HTML: 2-level max nesting (container + elements)\n\nOutput ONLY the HTML+CSS code, no explanations."
         }
       },
       "evaluator_config": {
-        "scoring_func": "custom",
-        "scoring_prompt": "You are a visual fidelity evaluator.\n\nCompare the generated code output with the Figma design.\nScore based on:\n1. Layout accuracy (positioning, alignment)\n2. Color accuracy (exact RGB match)\n3. Typography accuracy (size, weight, spacing)\n4. Spacing accuracy (margins, padding, gaps)\n5. Text content match (exact characters)\n\nOutput a score from 0.0 to 1.0 where:\n- 0.95+ = Production ready\n- 0.85-0.94 = Minor tweaks needed\n- <0.85 = Significant issues\n\nScore:",
+        "scoring_func": "tool",
+        "scoring_tool": {
+          "name": "figma.figma_verify_visual",
+          "arguments": {
+            "file_key": "{{file_key}}",
+            "node_id": "{{node_id}}",
+            "html": "{{last_output}}",
+            "target_ssim": 0.95,
+            "max_iterations": 1
+          },
+          "score_path": "ssim"
+        },
         "select_strategy": "best"
       },
-      "improver_prompt": "The code scored {{score}} (target: 0.95+).\n\nFeedback: {{feedback}}\n\nOriginal Figma DSL:\n{{figma_bundle.dsl}}\n\nCurrent code:\n{{last_output}}\n\nFix the issues mentioned in feedback. Focus on:\n- Exact color values\n- Precise spacing\n- Typography details\n- Layout alignment\n\nOutput ONLY the improved code.",
+      "improver_prompt": "SSIM Score: {{score}} (target: 0.95+)\n\nVisual Feedback from figma_verify_visual:\n{{feedback}}\n\nOriginal Figma DSL:\n{{figma_bundle.dsl}}\n\nCurrent code:\n{{last_output}}\n\nFix the visual differences. Common issues:\n- Color mismatch: Use exact rgb() values from DSL\n- Typography: Check font-size, line-height, letter-spacing\n- Spacing: Verify padding, margin, gap values\n- Alignment: Check flex alignment properties\n\nOutput ONLY the improved HTML+CSS code.",
       "max_iterations": 5,
       "score_threshold": 0.95,
       "score_operator": "gte",
@@ -64,11 +74,12 @@
     "required": ["file_key", "node_id"]
   },
   "metadata": {
-    "tags": ["walph", "figma", "design", "ui"],
+    "tags": ["walph", "figma", "design", "ui", "vision-first"],
     "category": "design-to-code",
-    "estimated_duration_sec": 180,
+    "estimated_duration_sec": 300,
+    "vision_first": true,
     "stop_conditions": {
-      "goal": "ssim >= 0.95",
+      "goal": "ssim >= 0.95 (REAL pixel comparison)",
       "max_iterations": 5,
       "drain": false
     },
