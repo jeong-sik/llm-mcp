@@ -1,0 +1,110 @@
+{
+  "id": "vision-first-topnode-scout",
+  "name": "Vision-First Top-Node Scout",
+  "description": "상위 프레임 후보를 추려서 이미지 스냅샷까지 수집합니다. 구현 대상을 빠르게 정하는 1단계 전용.",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "parse-url",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": { "url": "{{input.figma_url}}" }
+      },
+      "output_key": "figma_meta"
+    },
+    {
+      "id": "list-screens",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_list_screens",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}"
+        }
+      },
+      "depends_on": ["parse-url"],
+      "output_key": "screens"
+    },
+    {
+      "id": "shortlist",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "다음 Figma 화면 목록에서 구현 대상이 될 상위 프레임을 추려주세요.\n\n규칙:\n- width >= {{input.min_width}} AND height >= {{input.min_height}}\n- 이름에 {{input.keywords}} 가 포함되면 우선\n- wrapper, empty frame, annotation 성격이면 제외\n- 최대 {{input.max_candidates}}개만\n\n화면 목록(JSON):\n{{screens}}\n\n출력(JSON): {\"candidates\":[{\"node_id\":\"...\",\"name\":\"...\",\"width\":0,\"height\":0,\"reason\":\"...\"}]}\n"
+      },
+      "depends_on": ["list-screens"],
+      "output_key": "shortlist"
+    },
+    {
+      "id": "export-candidates",
+      "type": "fanout",
+      "fanout": {
+        "items": "{{shortlist.candidates}}",
+        "node": {
+          "id": "export-{{$index}}",
+          "type": "tool",
+          "tool": {
+            "server": "figma",
+            "name": "figma_export_image",
+            "args": {
+              "file_key": "{{figma_meta.file_key}}",
+              "node_id": "{{$item.node_id}}",
+              "scale": 2,
+              "format": "png"
+            }
+          }
+        }
+      },
+      "depends_on": ["shortlist"],
+      "output_key": "candidate_images"
+    },
+    {
+      "id": "report",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "상위 프레임 후보를 요약하고 다음 단계(vision-first 구현) 대상 1~3개를 추천하세요.\n\n후보 목록:\n{{shortlist}}\n\n이미지 스냅샷 결과:\n{{candidate_images}}\n\n출력 포맷:\n1) 추천 대상 (node_id, name, reason)\n2) 제외한 후보와 이유\n3) 다음 단계 체크리스트"
+      },
+      "depends_on": ["export-candidates"],
+      "output_key": "final_report"
+    }
+  ],
+  "output": "report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma URL (design/file with node-id)"
+      },
+      "keywords": {
+        "type": "string",
+        "description": "우선순위 키워드 (예: to-be, 초대, login)"
+      },
+      "min_width": {
+        "type": "number",
+        "description": "최소 너비",
+        "default": 600
+      },
+      "min_height": {
+        "type": "number",
+        "description": "최소 높이",
+        "default": 400
+      },
+      "max_candidates": {
+        "type": "number",
+        "description": "후보 최대 개수",
+        "default": 6
+      }
+    },
+    "required": ["figma_url"]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": ["figma", "vision-first", "triage", "top-node"],
+    "estimated_duration_sec": 60,
+    "estimated_cost_usd": 0.02
+  }
+}

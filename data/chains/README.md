@@ -13,6 +13,7 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 | [code-migration](#code-migration) | Code transformation with verification | 180s | $0.25 |
 | [mermaid-to-chain](#mermaid-to-chain) | Convert Mermaid diagrams to Chain JSON | 60s | $0.10 |
 | [figma-to-component-spec](#figma-to-component-spec) | Figma summary → component spec JSON | 30s | $0.02 |
+| [vision-first-topnode-scout](#vision-first-topnode-scout) | Vision-First 상위 프레임 후보 선정 | 60s | $0.02 |
 
 ---
 
@@ -128,6 +129,17 @@ graph LR
 **Usage:**
 ```bash
 chain.run figma-to-component-spec url="https://www.figma.com/design/...?...node-id=2089-10737"
+```
+
+---
+
+## Vision-First Top-Node Scout
+
+상위 노드를 빠르게 추려서 Vision-First 구현 대상으로 좁히는 1단계 체인입니다.
+
+**Usage:**
+```bash
+chain.run vision-first-topnode-scout figma_url="https://www.figma.com/design/...?...node-id=2089-10737" keywords="to-be,초대" min_width=600 min_height=400 max_candidates=6
 ```
 
 ## Incident Response
