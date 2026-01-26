@@ -124,6 +124,7 @@ let test_full_orchestration_cycle () =
     ~tool_exec:mock_tool_exec
     ~goal:"Complete user registration workflow"
     ~tasks
+    ~initial_chain:None
   in
 
   match result with
@@ -212,6 +213,7 @@ This pipeline:
     ~tool_exec:mock_tool_exec
     ~goal:"Process user data"
     ~tasks
+    ~initial_chain:None
   in
 
   match result with
@@ -263,6 +265,7 @@ let test_timeout_handling () =
     ~tool_exec:mock_tool_exec
     ~goal:"Test timeout"
     ~tasks
+    ~initial_chain:None
   in
 
   match result with

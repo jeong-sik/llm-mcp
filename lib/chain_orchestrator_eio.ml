@@ -184,17 +184,24 @@ let orchestrate
     ~(tool_exec: tool_exec)
     ~(goal: string)
     ~(tasks: masc_task list)
+    ~(initial_chain : chain option)
     : (orchestration_result, orchestration_error) result =
 
   let session_id = Printf.sprintf "orch-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
   let state = ref (init_state ~session_id ~goal ~tasks ~max_replans:config.max_replans) in
   let started_at = Unix.gettimeofday () in
 
-  (* Design phase: Get chain from LLM *)
+  (* Design phase: Get chain from LLM (or use provided initial chain once) *)
+  let pending_chain = ref initial_chain in
   let design_chain () =
-    let context = get_design_context !state in
-    let response = llm_call ~prompt:context in
-    parse_chain_design response
+    match !pending_chain with
+    | Some chain ->
+        pending_chain := None;
+        Ok chain
+    | None ->
+        let context = get_design_context !state in
+        let response = llm_call ~prompt:context in
+        parse_chain_design response
   in
 
   (* Execute phase: Run chain with Conductor *)
@@ -392,7 +399,7 @@ let orchestrate_quick
     ~(goal: string)
     ~(tasks: masc_task list)
     : (orchestration_result, orchestration_error) result =
-  orchestrate ~sw ~clock ~config:default_config ~llm_call ~tool_exec ~goal ~tasks
+  orchestrate ~sw ~clock ~config:default_config ~llm_call ~tool_exec ~goal ~tasks ~initial_chain:None
 
 (** Create MASC tasks from simple string descriptions *)
 let tasks_from_strings (descriptions: string list) : masc_task list =
