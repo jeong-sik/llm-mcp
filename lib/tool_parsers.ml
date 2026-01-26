@@ -367,7 +367,6 @@ let build_claude_cmd args =
       let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
       let repo_root = find_repo_root me_root in
       let wrapper = Filename.concat repo_root "scripts/claude-wrapper.sh" in
-      let model = resolve_claude_model model in
       let cmd = [wrapper; "-p"; "--model"; model] in
       (* --betas context-1m enables 1M context but requires API key (charges apply)
          Only add when: 1) explicitly requested via long_context=true
