@@ -123,10 +123,10 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
     try Some (json |> member "max_tokens" |> to_int)
     with Type_error _ -> Some 131072 in  (* GLM-4.7: 200K context, 128K (131072) output max *)
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:true in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
+  let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:false in
   let do_sample = json |> member "do_sample" |> to_bool_option |> Option.value ~default:true in
-  let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:true in
+  let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:false in
   Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search }
 
 (** Parse JSON arguments for set_stream_delta tool *)

@@ -630,9 +630,13 @@ Parameters:
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - max_tokens: Max tokens to generate (default: 131072 = 128K full)
 - timeout: Timeout in seconds (default: 300)
-- stream: Enable streaming (default: true)
-- thinking: Enable chain-of-thought reasoning (default: true)
+- stream: Enable SSE streaming (default: false, MCP-friendly)
+- thinking: Enable chain-of-thought reasoning (default: false, MCP-friendly)
+- web_search: Enable web search (default: false, MCP-friendly)
 - do_sample: true=diverse sampling, false=greedy deterministic (default: true)
+
+NOTE: Defaults are optimized for MCP tool calls (synchronous, immediate response).
+For SSE streaming or CoT reasoning, explicitly set stream=true or thinking=true.
 
 Requires ZAI_API_KEY environment variable.
 Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
@@ -669,13 +673,13 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("stream", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable SSE streaming");
-        ("default", `Bool true);
+        ("description", `String "Enable SSE streaming (false recommended for MCP tool calls)");
+        ("default", `Bool false);
       ]);
       ("thinking", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable chain-of-thought reasoning (disable for faster, direct responses)");
-        ("default", `Bool true);
+        ("description", `String "Enable chain-of-thought reasoning (false recommended for MCP tool calls)");
+        ("default", `Bool false);
       ]);
       ("do_sample", `Assoc [
         ("type", `String "boolean");
@@ -684,8 +688,8 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("web_search", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable web search tool for accessing current information with citations");
-        ("default", `Bool true);
+        ("description", `String "Enable web search for current info (false recommended for MCP tool calls)");
+        ("default", `Bool false);
       ]);
       response_format_schema;
     ]);
