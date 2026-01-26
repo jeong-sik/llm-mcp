@@ -240,6 +240,11 @@ let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_a
     | `Null -> None
     | c -> Some c
   in
+  let tasks =
+    match json |> member "tasks" with
+    | `Null -> None
+    | t -> Some t
+  in
   let chain_id = json |> member "chain_id" |> to_string_option in
   let max_replans =
     try json |> member "max_replans" |> to_int
@@ -261,7 +266,7 @@ let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_a
     json |> member "orchestrator_model" |> to_string_option
     |> Option.value ~default:"gemini"
   in
-  ChainOrchestrate { goal; chain; chain_id; max_replans; timeout; trace; verify_on_complete; orchestrator_model }
+  ChainOrchestrate { goal; chain; tasks; chain_id; max_replans; timeout; trace; verify_on_complete; orchestrator_model }
 
 (** Parse JSON arguments for gh_pr_diff tool *)
 let parse_gh_pr_diff_args (json : Yojson.Safe.t) : tool_args =

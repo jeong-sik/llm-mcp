@@ -133,6 +133,7 @@ type tool_args =
   | ChainOrchestrate of {
       goal : string;                       (* Goal description for the orchestration *)
       chain : Yojson.Safe.t option;        (* Initial chain definition (optional) *)
+      tasks : Yojson.Safe.t option;        (* Optional task list for design (overrides chain-derived tasks) *)
       chain_id : string option;            (* Registered chain ID to load from data/chains/ *)
       max_replans : int;                   (* Maximum re-planning attempts *)
       timeout : int;                       (* Overall timeout in seconds *)
@@ -1043,6 +1044,7 @@ Unlike chain.run which executes once, chain.orchestrate will:
 Parameters:
 - goal: Goal description to achieve (required)
 - chain: Initial chain definition (optional, will be auto-designed if not provided)
+- tasks: Optional task list for design (overrides chain-derived tasks)
 - max_replans: Maximum re-planning attempts (default: 3)
 - timeout: Overall timeout in seconds (default: 600)
 - trace: Enable execution tracing (default: false)
@@ -1057,6 +1059,21 @@ Parameters:
       ("chain", `Assoc [
         ("type", `String "object");
         ("description", `String "Initial chain definition (optional)");
+      ]);
+      ("tasks", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Optional task list for design (overrides chain-derived tasks)");
+        ("items", `Assoc [
+          ("type", `String "object");
+          ("properties", `Assoc [
+            ("task_id", `Assoc [("type", `String "string")]);
+            ("title", `Assoc [("type", `String "string")]);
+            ("description", `Assoc [("type", `String "string")]);
+            ("priority", `Assoc [("type", `String "integer")]);
+            ("status", `Assoc [("type", `String "string")]);
+            ("assignee", `Assoc [("type", `String "string")]);
+          ]);
+        ]);
       ]);
       ("max_replans", `Assoc [
         ("type", `String "integer");

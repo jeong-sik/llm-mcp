@@ -2109,7 +2109,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
              response = sprintf "Unsupported conversion: %s → %s (supported: json↔mermaid)" f t;
              extra = [("from", f); ("to", t)]; })
 
-  | ChainOrchestrate { goal; chain; chain_id; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
+  | ChainOrchestrate { goal; chain; tasks; chain_id; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
       (* Build orchestration config *)
       let config : Chain_orchestrator_eio.orchestration_config = {
         max_replans;
@@ -2301,8 +2301,23 @@ This chain will execute the goal using a stub model.|}
              | None -> None)
       in
 
-      (* Create tasks from chain if provided, otherwise empty *)
-      let tasks = match effective_chain with
+      let parse_tasks_from_json (json: Yojson.Safe.t) =
+        match json with
+        | `List items ->
+            List.filter_map (fun item ->
+              match Chain_composer.masc_task_of_yojson item with
+              | Ok t -> Some t
+              | Error _ -> None
+            ) items
+        | _ -> []
+      in
+
+      (* Create tasks from explicit tasks list or from chain if provided, otherwise empty *)
+      let tasks_from_input = match tasks with
+        | Some t -> parse_tasks_from_json t
+        | None -> []
+      in
+      let tasks_from_chain = match effective_chain with
         | Some chain_json ->
             (try
               let open Yojson.Safe.Util in
@@ -2322,6 +2337,7 @@ This chain will execute the goal using a stub model.|}
             with _ -> [])
         | None -> []
       in
+      let tasks = if tasks_from_input <> [] then tasks_from_input else tasks_from_chain in
 
       (* FIXED: Use effective_chain (includes chain_id loaded file), not just chain *)
       let initial_chain =

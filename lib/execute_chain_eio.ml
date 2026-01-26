@@ -433,7 +433,7 @@ let execute_chain_convert ~from_format ~to_format ~input ~pretty =
 
 let execute_chain_orchestrate
     ~sw ~proc_mgr ~clock ~execute ~call_mcp
-    ~goal ~chain ~max_replans ~timeout ~trace ~verify_on_complete ~orchestrator_model =
+    ~goal ~chain ~tasks ~max_replans ~timeout ~trace ~verify_on_complete ~orchestrator_model =
   let config : Chain_orchestrator_eio.orchestration_config = {
     max_replans;
     timeout_ms = timeout * 1000;
@@ -553,8 +553,23 @@ This chain will execute the goal using a stub model.|}
           `Assoc [("error", `String result.response)]
   in
 
-  (* Create tasks from chain if provided *)
-  let tasks = match chain with
+  let parse_tasks_from_json (json: Yojson.Safe.t) =
+    match json with
+    | `List items ->
+        List.filter_map (fun item ->
+          match Chain_composer.masc_task_of_yojson item with
+          | Ok t -> Some t
+          | Error _ -> None
+        ) items
+    | _ -> []
+  in
+
+  (* Create tasks from explicit tasks list or from chain if provided *)
+  let tasks_from_input = match tasks with
+    | Some t -> parse_tasks_from_json t
+    | None -> []
+  in
+  let tasks_from_chain = match chain with
     | Some chain_json ->
         (try
           let open Yojson.Safe.Util in
@@ -574,6 +589,7 @@ This chain will execute the goal using a stub model.|}
         with _ -> [])
     | None -> []
   in
+  let tasks = if tasks_from_input <> [] then tasks_from_input else tasks_from_chain in
 
   (* Run orchestration *)
   match Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks with
