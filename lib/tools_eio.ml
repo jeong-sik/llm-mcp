@@ -2193,13 +2193,14 @@ This chain will execute the goal using a stub model.|}
 
   | SetStreamDelta { enabled } ->
       let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
+      let was = stream_delta_enabled () in  (* Capture BEFORE setting *)
       let current = set_stream_delta enabled in
       { model = "set_stream_delta";
         returncode = 0;
         response = sprintf "SSE stream delta broadcasting %s (was: %s)"
           (if current then "enabled" else "disabled")
-          (if stream_delta_enabled () then "enabled" else "disabled");
-        extra = [("enabled", string_of_bool current)]; }
+          (if was then "enabled" else "disabled");
+        extra = [("enabled", string_of_bool current); ("was", string_of_bool was)]; }
 
   | GetStreamDelta ->
       let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
