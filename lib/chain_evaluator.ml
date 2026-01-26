@@ -339,6 +339,27 @@ let parse_verification_response (response: string) : verification_result =
     let prefix_len = String.length prefix in
     String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
   in
+  let try_parse_json_block s =
+    let json_pattern = Str.regexp "```json\n\\([^`]+\\)```" in
+    try
+      let _ = Str.search_forward json_pattern s 0 in
+      Some (Str.matched_group 1 s)
+    with Not_found ->
+      (* Fallback: extract first JSON object-like block *)
+      match (String.index_opt s '{', String.rindex_opt s '}') with
+      | (Some l, Some r) when r > l -> Some (String.sub s l (r - l + 1))
+      | _ -> None
+  in
+  let parse_string_list json key =
+    let open Yojson.Safe.Util in
+    match json |> member key with
+    | `List items ->
+        List.filter_map (fun v ->
+          try Some (to_string v) with _ -> None
+        ) items
+    | `String s -> [s]
+    | _ -> []
+  in
   let strip_markdown s =
     let buf = Buffer.create (String.length s) in
     String.iter (fun c ->
@@ -369,8 +390,55 @@ let parse_verification_response (response: string) : verification_result =
     | None -> false
     | Some idx ->
         let value = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) |> String.trim in
+        let value =
+          value
+          |> String.trim
+          |> String.lowercase_ascii
+          |> String.trim
+        in
+        let value = String.trim value in
+        let value = if String.length value > 0 && value.[String.length value - 1] = ',' then
+          String.sub value 0 (String.length value - 1) else value in
+        let value =
+          if String.length value >= 2 && value.[0] = '"' && value.[String.length value - 1] = '"' then
+            String.sub value 1 (String.length value - 2)
+          else value
+        in
         value = "true" || value = "yes"
   in
+  (* 1) JSON-first parsing (if present) *)
+  let parsed_json =
+    match try_parse_json_block response with
+    | None -> None
+    | Some json_str ->
+        (try Some (Yojson.Safe.from_string json_str)
+         with Yojson.Json_error _ -> None)
+  in
+  (match parsed_json with
+  | Some json ->
+      let open Yojson.Safe.Util in
+      let is_complete =
+        match json |> member "is_complete" with
+        | `Bool b -> b
+        | `String s -> (String.lowercase_ascii (String.trim s) = "true")
+        | _ -> false
+      in
+      let confidence =
+        match json |> member "confidence" with
+        | `Float f -> f
+        | `Int i -> float_of_int i
+        | `String s -> (try float_of_string s with _ -> if is_complete then 0.9 else 0.3)
+        | _ -> if is_complete then 0.9 else 0.3
+      in
+      let reason =
+        match json |> member "reason" with
+        | `String s -> s
+        | _ -> response
+      in
+      let missing_criteria = parse_string_list json "missing_criteria" in
+      let suggested_next_steps = parse_string_list json "suggested_next_steps" in
+      { is_complete; confidence; reason; missing_criteria; suggested_next_steps }
+  | None ->
   let keys = [
     "is_complete";
     "complete";
@@ -401,7 +469,7 @@ let parse_verification_response (response: string) : verification_result =
     reason = response;
     missing_criteria = [];
     suggested_next_steps = [];
-  }
+  })
 
 (* ============================================================
    Evaluation Report Generation

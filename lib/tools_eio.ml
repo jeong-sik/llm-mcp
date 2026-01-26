@@ -620,6 +620,7 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
        - Preview: gemini-3-pro-preview, gemini-3-flash-preview
        - Deprecated (2026/03/31): gemini-2.0-* *)
     let api_model = match model with
+      | "gemini" -> "gemini-3-pro-preview"
       | "pro" -> "gemini-2.5-pro"
       | "flash" -> "gemini-2.5-flash"
       | "flash-lite" -> "gemini-2.5-flash-lite"
@@ -3108,7 +3109,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   output_format = Text;
                   timeout;
                   stream = false;
-                  use_cli = true;  (* MASC integration enabled *)
+                  use_cli = false;  (* Avoid CLI exec issues; use direct API *)
                         fallback_to_api = true;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
@@ -3135,8 +3136,8 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
             | "codex" ->
                 let args = Codex {
                   prompt;
-                  model = "gpt-5.2-codex";
-                  reasoning_effort = RXhigh;
+                  model = "gpt-5.2";
+                  reasoning_effort = RHigh;
                   sandbox = WorkspaceWrite;
                   working_directory = None;
                   timeout;
