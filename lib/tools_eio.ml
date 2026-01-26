@@ -2114,7 +2114,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
              response = sprintf "Unsupported conversion: %s → %s (supported: json↔mermaid)" f t;
              extra = [("from", f); ("to", t)]; })
 
-  | ChainOrchestrate { goal; chain; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
+  | ChainOrchestrate { goal; chain; chain_id; max_replans; timeout; trace; verify_on_complete; orchestrator_model } ->
       (* Build orchestration config *)
       let config : Chain_orchestrator_eio.orchestration_config = {
         max_replans;
@@ -2262,8 +2262,25 @@ This chain will execute the goal using a stub model.|}
               `Assoc [("error", `String result.response)]
       in
 
+      (* Load chain from chain_id if provided and chain is not given *)
+      let effective_chain = match chain with
+        | Some _ -> chain  (* Use provided chain *)
+        | None ->
+            (* Try to load from chain_id *)
+            (match chain_id with
+             | Some cid ->
+                 let chain_path = Printf.sprintf "data/chains/%s.json" cid in
+                 (try
+                   let ic = open_in chain_path in
+                   let content = really_input_string ic (in_channel_length ic) in
+                   close_in ic;
+                   Some (Yojson.Safe.from_string content)
+                 with _ -> None)
+             | None -> None)
+      in
+
       (* Create tasks from chain if provided, otherwise empty *)
-      let tasks = match chain with
+      let tasks = match effective_chain with
         | Some chain_json ->
             (try
               let open Yojson.Safe.Util in

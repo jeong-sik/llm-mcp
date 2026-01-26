@@ -133,6 +133,7 @@ type tool_args =
   | ChainOrchestrate of {
       goal : string;                       (* Goal description for the orchestration *)
       chain : Yojson.Safe.t option;        (* Initial chain definition (optional) *)
+      chain_id : string option;            (* Registered chain ID to load from data/chains/ *)
       max_replans : int;                   (* Maximum re-planning attempts *)
       timeout : int;                       (* Overall timeout in seconds *)
       trace : bool;                        (* Enable execution tracing *)
