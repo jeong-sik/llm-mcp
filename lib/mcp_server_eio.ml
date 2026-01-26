@@ -284,6 +284,8 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "prompt.get" -> Tools_eio.parse_prompt_get_args arguments
     | "gh_pr_diff" -> Tools_eio.parse_gh_pr_diff_args arguments
     | "slack_post" -> Tools_eio.parse_slack_post_args arguments
+    | "set_stream_delta" -> Tools_eio.parse_set_stream_delta_args arguments
+    | "get_stream_delta" -> Tools_eio.parse_get_stream_delta_args arguments
     | _ -> failwith (sprintf "Unknown tool: %s" name)
   in
 

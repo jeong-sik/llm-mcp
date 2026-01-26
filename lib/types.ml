@@ -173,6 +173,8 @@ type tool_args =
       do_sample : bool;  (* true=diverse sampling, false=greedy deterministic *)
       web_search : bool;  (* Enable web search tool for current information *)
     }
+  | SetStreamDelta of { enabled : bool }  (* Runtime toggle for SSE stream delta *)
+  | GetStreamDelta  (* Get current stream delta status *)
 
 (** Gemini-specific error classification for retry logic.
     These errors are detected by parsing Gemini CLI stderr/stdout.
@@ -685,6 +687,47 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
 }
 
 (* ============================================================================
+   Stream Delta Runtime Toggle Schemas
+   ============================================================================ *)
+
+let set_stream_delta_schema : tool_schema = {
+  name = "set_stream_delta";
+  description = {|Toggle SSE stream delta broadcasting at runtime (no restart needed).
+
+When enabled, LLM streaming responses broadcast token-by-token SSE events.
+Use this for:
+- Real-time token display in dashboards
+- Debugging streaming behavior
+- Agent monitoring
+
+Default: disabled (for performance).
+Changes take effect immediately for subsequent LLM calls.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("enabled", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Enable (true) or disable (false) SSE stream delta broadcasting");
+        ("default", `Bool true);
+      ]);
+    ]);
+    ("required", `List []);
+  ];
+}
+
+let get_stream_delta_schema : tool_schema = {
+  name = "get_stream_delta";
+  description = {|Get current SSE stream delta status.
+
+Returns whether stream delta broadcasting is currently enabled.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc []);
+    ("required", `List []);
+  ];
+}
+
+(* ============================================================================
    Chain Engine Schemas - Workflow Orchestration DSL
    ============================================================================ *)
 
@@ -1066,6 +1109,8 @@ let all_schemas = [
   ollama_schema;
   ollama_list_schema;
   glm_schema;
+  set_stream_delta_schema;
+  get_stream_delta_schema;
   chain_run_schema;
   chain_validate_schema;
   chain_convert_schema;

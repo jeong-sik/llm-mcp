@@ -124,6 +124,16 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:true in
   Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search }
 
+(** Parse JSON arguments for set_stream_delta tool *)
+let parse_set_stream_delta_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let enabled = json |> member "enabled" |> to_bool_option |> Option.value ~default:true in
+  SetStreamDelta { enabled }
+
+(** Parse JSON arguments for get_stream_delta tool *)
+let parse_get_stream_delta_args (_json : Yojson.Safe.t) : tool_args =
+  GetStreamDelta
+
 (** Parse JSON arguments for chain.run tool *)
 let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in

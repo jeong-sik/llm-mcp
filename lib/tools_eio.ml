@@ -35,6 +35,8 @@ let parse_chain_checkpoints_args = Tool_parsers.parse_chain_checkpoints_args
 let parse_chain_resume_args = Tool_parsers.parse_chain_resume_args
 let parse_prompt_register_args = Tool_parsers.parse_prompt_register_args
 let parse_prompt_get_args = Tool_parsers.parse_prompt_get_args
+let parse_set_stream_delta_args = Tool_parsers.parse_set_stream_delta_args
+let parse_get_stream_delta_args = Tool_parsers.parse_get_stream_delta_args
 let build_gemini_cmd = Tool_parsers.build_gemini_cmd
 let build_claude_cmd = Tool_parsers.build_claude_cmd
 let build_codex_cmd = Tool_parsers.build_codex_cmd
@@ -242,10 +244,23 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
 
 (** {1 Streaming Execution} *)
 
+(** Runtime toggle for stream delta (can be changed without restart) *)
+let stream_delta_override : bool option ref = ref None
+
 let stream_delta_enabled () =
-  match Sys.getenv_opt "LLM_MCP_STREAM_DELTA" with
-  | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
-  | _ -> false
+  match !stream_delta_override with
+  | Some v -> v  (* Runtime override takes precedence *)
+  | None ->
+      match Sys.getenv_opt "LLM_MCP_STREAM_DELTA" with
+      | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
+      | _ -> false
+
+let set_stream_delta enabled =
+  stream_delta_override := Some enabled;
+  enabled
+
+let get_stream_delta () =
+  stream_delta_enabled ()
 
 let stream_delta_max_events () =
   match Sys.getenv_opt "LLM_MCP_STREAM_DELTA_MAX_EVENTS" with
@@ -720,6 +735,8 @@ let get_model_name_for_tracing = function
   | PromptGet _ -> "prompt:get"
   | GhPrDiff _ -> "tool:gh_pr_diff"
   | SlackPost _ -> "tool:slack_post"
+  | SetStreamDelta _ -> "config:set_stream_delta"
+  | GetStreamDelta -> "config:get_stream_delta"
 
 (** Extract input/prompt from tool_args for tracing *)
 let get_input_for_tracing = function
@@ -2133,6 +2150,30 @@ This chain will execute the goal using a stub model.|}
              response = sprintf "Prompt '%s'%s not found"
                id (match version with Some v -> " v" ^ v | None -> "");
              extra = []; })
+
+  | SetStreamDelta { enabled } ->
+      let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
+      let current = set_stream_delta enabled in
+      { model = "set_stream_delta";
+        returncode = 0;
+        response = sprintf "SSE stream delta broadcasting %s (was: %s)"
+          (if current then "enabled" else "disabled")
+          (if stream_delta_enabled () then "enabled" else "disabled");
+        extra = [("enabled", string_of_bool current)]; }
+
+  | GetStreamDelta ->
+      let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
+      let status = get_stream_delta () in
+      let source = match !stream_delta_override with
+        | Some _ -> "runtime"
+        | None -> "environment"
+      in
+      { model = "get_stream_delta";
+        returncode = 0;
+        response = sprintf "SSE stream delta: %s (source: %s)"
+          (if status then "enabled" else "disabled")
+          source;
+        extra = [("enabled", string_of_bool status); ("source", source)]; }
 
 (** {1 Convenience Wrappers} *)
 
