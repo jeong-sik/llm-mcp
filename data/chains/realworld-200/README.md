@@ -17,3 +17,7 @@ chain.orchestrate rw-onboarding-spec-to-tasks figma_url=...
 ## Notes
 
 Some chains call external audit tools (web:*). Provide base_url/repo inputs.
+
+## Workflow
+
+Vision-first implementation guide: `docs/VISION_FIRST_FIGMA_WORKFLOW.md`
