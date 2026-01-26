@@ -39,6 +39,14 @@ let default_fallback_to_api () =
   | Some "false" | Some "0" | Some "no" -> false
   | _ -> true
 
+(** Resolve Claude model aliases to stable IDs. *)
+let resolve_claude_model (model : string) : string =
+  match String.lowercase_ascii model with
+  | "claude" | "sonnet" -> "claude-3-5-sonnet-20241022"
+  | "haiku" -> "claude-3-5-haiku-20241022"
+  | "opus" | "opus-4" -> "claude-opus-4-20250514"
+  | _ -> model
+
 (** {1 Argument Parsers} *)
 
 (** Parse JSON arguments for Gemini tool *)
@@ -66,7 +74,7 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
 let parse_claude_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"opus" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"sonnet" in
   (* long_context enables 1M context beta (requires API key, charges apply)
      Also support legacy "ultrathink" parameter for backwards compatibility *)
   let long_context =
@@ -359,6 +367,7 @@ let build_claude_cmd args =
       let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
       let repo_root = find_repo_root me_root in
       let wrapper = Filename.concat repo_root "scripts/claude-wrapper.sh" in
+      let model = resolve_claude_model model in
       let cmd = [wrapper; "-p"; "--model"; model] in
       (* --betas context-1m enables 1M context but requires API key (charges apply)
          Only add when: 1) explicitly requested via long_context=true
