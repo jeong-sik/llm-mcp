@@ -31,7 +31,7 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
     |> Option.value ~default:"text"
     |> output_format_of_string in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
   let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:true in
   Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream; use_cli }
 
@@ -58,7 +58,7 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
     json |> member "working_directory" |> to_string_option
     |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
   Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream }
 
 (** Parse JSON arguments for Codex tool *)
@@ -77,7 +77,7 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
     |> sandbox_policy_of_string in
   let working_directory = json |> member "working_directory" |> to_string_option in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
   let search = json |> member "search" |> to_bool_option |> Option.value ~default:true in
   Codex { prompt; model; reasoning_effort; sandbox; working_directory; timeout; stream; search }
 
@@ -91,7 +91,7 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
     try json |> member "temperature" |> to_float
     with Type_error _ -> 0.7 in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
   let tools = match json |> member "tools" with
     | `Null -> None
     | `List tool_list ->

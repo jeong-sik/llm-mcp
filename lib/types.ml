@@ -330,8 +330,8 @@ Parameters:
       ]);
       ("stream", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable SSE keepalive streaming");
-        ("default", `Bool true);
+        ("description", `String "Enable SSE streaming (false recommended for MCP)");
+        ("default", `Bool false);
       ]);
       ("use_cli", `Assoc [
         ("type", `String "boolean");
@@ -413,8 +413,8 @@ Note: long_context=true uses API key (charges apply), false uses Max subscriptio
       ]);
       ("stream", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable SSE keepalive streaming");
-        ("default", `Bool true);
+        ("description", `String "Enable SSE streaming (false recommended for MCP)");
+        ("default", `Bool false);
       ]);
       response_format_schema;
     ]);
@@ -491,8 +491,8 @@ CLI Direct Usage (without MCP):
       ]);
       ("stream", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable SSE keepalive streaming");
-        ("default", `Bool true);
+        ("description", `String "Enable SSE streaming (false recommended for MCP)");
+        ("default", `Bool false);
       ]);
       ("search", `Assoc [
         ("type", `String "boolean");
@@ -572,8 +572,8 @@ Model must support tools capability (devstral, qwen3, llama3.3, etc).|};
       ]);
       ("stream", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable SSE streaming with token deltas");
-        ("default", `Bool true);
+        ("description", `String "Enable SSE streaming (false recommended for MCP)");
+        ("default", `Bool false);
       ]);
       response_format_schema;
     ]);
