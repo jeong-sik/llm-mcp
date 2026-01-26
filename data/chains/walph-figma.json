@@ -1,0 +1,80 @@
+{
+  "id": "walph-figma",
+  "name": "Walph Figma Implementation Loop",
+  "description": "Figma design to code loop - repeats until SSIM >= 0.95 (95% visual fidelity)",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "extract",
+      "type": "tool",
+      "tool": {
+        "name": "figma.figma_get_node_bundle",
+        "arguments": {
+          "file_key": "{{file_key}}",
+          "node_id": "{{node_id}}",
+          "include_render": true
+        }
+      },
+      "output_key": "figma_bundle"
+    },
+    {
+      "id": "figma_loop",
+      "type": "feedback_loop",
+      "generator": {
+        "id": "generate_code",
+        "type": "llm",
+        "llm": {
+          "model": "claude-cli",
+          "prompt": "You are a Figma-to-Code expert. Convert this Figma DSL to production-ready code.\n\nFigma DSL:\n{{figma_bundle.dsl}}\n\nPlatform: {{platform}}\n\nRules:\n1. Match exact colors (use rgb(), not hex for precision)\n2. Match exact spacing, padding, margins\n3. Match exact typography (font-size, line-height, letter-spacing)\n4. Use flexbox for layout (ax/cx alignment)\n5. Preserve ALL text content exactly as shown in DSL\n\nOutput ONLY the code, no explanations."
+        }
+      },
+      "evaluator_config": {
+        "scoring_func": "custom",
+        "scoring_prompt": "You are a visual fidelity evaluator.\n\nCompare the generated code output with the Figma design.\nScore based on:\n1. Layout accuracy (positioning, alignment)\n2. Color accuracy (exact RGB match)\n3. Typography accuracy (size, weight, spacing)\n4. Spacing accuracy (margins, padding, gaps)\n5. Text content match (exact characters)\n\nOutput a score from 0.0 to 1.0 where:\n- 0.95+ = Production ready\n- 0.85-0.94 = Minor tweaks needed\n- <0.85 = Significant issues\n\nScore:",
+        "select_strategy": "best"
+      },
+      "improver_prompt": "The code scored {{score}} (target: 0.95+).\n\nFeedback: {{feedback}}\n\nOriginal Figma DSL:\n{{figma_bundle.dsl}}\n\nCurrent code:\n{{last_output}}\n\nFix the issues mentioned in feedback. Focus on:\n- Exact color values\n- Precise spacing\n- Typography details\n- Layout alignment\n\nOutput ONLY the improved code.",
+      "max_iterations": 5,
+      "score_threshold": 0.95,
+      "score_operator": "gte",
+      "conversational": true,
+      "relay_models": ["claude-cli", "gemini"],
+      "depends_on": ["extract"]
+    }
+  ],
+  "output": "figma_loop",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "file_key": {
+        "type": "string",
+        "description": "Figma file key (from URL)"
+      },
+      "node_id": {
+        "type": "string",
+        "description": "Node ID to implement (e.g., 7:488)"
+      },
+      "platform": {
+        "type": "string",
+        "enum": ["web", "ios", "android", "flutter"],
+        "default": "web",
+        "description": "Target platform for code generation"
+      }
+    },
+    "required": ["file_key", "node_id"]
+  },
+  "metadata": {
+    "tags": ["walph", "figma", "design", "ui"],
+    "category": "design-to-code",
+    "estimated_duration_sec": 180,
+    "stop_conditions": {
+      "goal": "ssim >= 0.95",
+      "max_iterations": 5,
+      "drain": false
+    },
+    "hat_rotation": {
+      "pattern": "alternate",
+      "hats": ["builder", "reviewer"]
+    }
+  }
+}
