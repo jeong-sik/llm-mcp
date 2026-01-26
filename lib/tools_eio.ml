@@ -706,12 +706,7 @@ let execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt
       extra = extra_base @ [("error", "missing_api_key")]; }
   else begin
     (* Map model alias to API model ID *)
-    let api_model = match model with
-      | "opus" -> "claude-opus-4-20250514"
-      | "sonnet" -> "claude-sonnet-4-20250514"
-      | "haiku" -> "claude-3-5-haiku-20241022"
-      | m -> m
-    in
+    let api_model = Tool_parsers.resolve_claude_model model in
 
     (* Build API request body *)
     let messages = `List [

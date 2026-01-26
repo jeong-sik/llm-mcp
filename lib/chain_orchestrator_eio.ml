@@ -75,23 +75,57 @@ let parse_chain_design (response: string) : (chain, string) result =
   (* NOTE: Must use regular string for \n to be interpreted as newline *)
   let mermaid_pattern = Str.regexp "```mermaid\n\\(graph[^`]+\\)```" in
   let json_pattern = Str.regexp "```json\n\\([^`]+\\)```" in
+  let try_parse_mermaid code =
+    match Chain_mermaid_parser.parse_chain code with
+    | Ok chain -> Ok chain
+    | Error e -> Error (Printf.sprintf "Mermaid parse error: %s" e)
+  in
+  let try_parse_json json_str =
+    try
+      match Yojson.Safe.from_string json_str |> Chain_parser.parse_chain with
+      | Ok chain -> Ok chain
+      | Error e -> Error (Printf.sprintf "JSON parse error: %s" e)
+    with Yojson.Json_error e -> Error (Printf.sprintf "Invalid JSON: %s" e)
+  in
 
   try
     let _ = Str.search_forward mermaid_pattern response 0 in
     let mermaid_code = Str.matched_group 1 response in
-    match Chain_mermaid_parser.parse_chain mermaid_code with
-    | Ok chain -> Ok chain
-    | Error e -> Error (Printf.sprintf "Mermaid parse error: %s" e)
+    try_parse_mermaid mermaid_code
   with Not_found ->
     try
       let _ = Str.search_forward json_pattern response 0 in
       let json_str = Str.matched_group 1 response in
-      match Yojson.Safe.from_string json_str |> Chain_parser.parse_chain with
-      | Ok chain -> Ok chain
-      | Error e -> Error (Printf.sprintf "JSON parse error: %s" e)
-      | exception Yojson.Json_error e -> Error (Printf.sprintf "Invalid JSON: %s" e)
+      try_parse_json json_str
     with Not_found ->
-      Error "No valid chain format found in LLM response"
+      let trimmed = String.trim response in
+      match try_parse_json trimmed with
+      | Ok chain -> Ok chain
+      | Error _ ->
+          let json_fallback =
+            match (String.index_opt response '{', String.rindex_opt response '}') with
+            | (Some l, Some r) when r > l ->
+                Some (String.sub response l (r - l + 1))
+            | _ -> None
+          in
+          (match json_fallback with
+          | Some json_str -> (match try_parse_json json_str with
+              | Ok chain -> Ok chain
+              | Error _ ->
+                  let graph_idx =
+                    try Some (Str.search_forward (Str.regexp "graph") response 0)
+                    with Not_found -> None
+                  in
+                  (match graph_idx with
+                  | Some idx ->
+                      let mermaid_code = String.sub response idx (String.length response - idx) in
+                      try_parse_mermaid mermaid_code
+                  | None ->
+                      let snippet = String.sub response 0 (min 400 (String.length response)) in
+                      Error (Printf.sprintf "No valid chain format found in LLM response. Snippet: %s" snippet)))
+          | None ->
+              let snippet = String.sub response 0 (min 400 (String.length response)) in
+              Error (Printf.sprintf "No valid chain format found in LLM response. Snippet: %s" snippet))
 
 (** Calculate chain parallelization efficiency:
     Ratio of parallel_groups to total_nodes (0.0 = fully sequential, 1.0 = maximally parallel) *)
@@ -199,9 +233,36 @@ let orchestrate
         pending_chain := None;
         Ok chain
     | None ->
-        let context = get_design_context !state in
-        let response = llm_call ~prompt:context in
-        parse_chain_design response
+        if tasks = [] then
+          let node =
+            {
+              id = "goal";
+              node_type = Llm {
+                model = "sonnet";
+                system = None;
+                prompt = goal;
+                timeout = None;
+                tools = None;
+                prompt_ref = None;
+                prompt_vars = [];
+              };
+              input_mapping = [];
+              output_key = None;
+              depends_on = None;
+            }
+          in
+          Ok (Chain_types.make_chain
+                ~id:"auto_goal"
+                ~nodes:[node]
+                ~output:"goal"
+                ~config:Chain_types.default_config
+                ~name:"auto_goal"
+                ~description:"Auto-generated chain (no tasks provided)"
+                ())
+        else
+          let context = get_design_context !state in
+          let response = llm_call ~prompt:context in
+          parse_chain_design response
   in
 
   (* Execute phase: Run chain with Conductor *)

@@ -138,8 +138,10 @@ Design an optimal execution chain for these tasks. Consider:
    - Consider task priorities
 
 ### Expected Output Format (Chain DSL)
-Return a chain in this format:
-```
+Return ONLY one fenced code block and nothing else.
+
+Use Mermaid:
+```mermaid
 graph LR
   task_001 --> task_002
   task_001 --> task_003
@@ -147,7 +149,7 @@ graph LR
   task_003 --> task_004
 ```
 
-Or for complex chains:
+Or JSON:
 ```json
 {
   "type": "pipeline",
@@ -157,11 +159,6 @@ Or for complex chains:
   ]
 }
 ```
-
-Also provide:
-- estimated_duration_ms: total expected time
-- critical_path: list of tasks that determine duration
-- parallelizable_groups: groups of tasks that can run together
 |}
     goal
     (String.concat "\n" task_descriptions)
