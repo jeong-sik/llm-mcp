@@ -66,6 +66,7 @@ type tool_args =
       model : string;
       thinking_level : thinking_level;
       yolo : bool;
+      output_format : output_format;
       timeout : int;
       stream : bool;
     }
@@ -695,6 +696,7 @@ let chain_run_schema : tool_schema = {
 Parameters:
 - chain: Chain DSL JSON (one of chain/mermaid required)
 - mermaid: Mermaid flowchart text (one of chain/mermaid required)
+- input: Initial input (string or JSON object) available as {{input.*}}
 - trace: Enable execution trace (default: false)
 - timeout: Overall timeout in seconds (default: 300)
 
@@ -715,6 +717,13 @@ graph LR
       ("mermaid", `Assoc [
         ("type", `String "string");
         ("description", `String "Mermaid flowchart text (WYSIWYE - What You See Is What You Execute)");
+      ]);
+      ("input", `Assoc [
+        ("oneOf", `List [
+          `Assoc [("type", `String "string")];
+          `Assoc [("type", `String "object")];
+        ]);
+        ("description", `String "Initial input for chain (string or JSON object). Accessible as {{input.*}}");
       ]);
       ("trace", `Assoc [
         ("type", `String "boolean");

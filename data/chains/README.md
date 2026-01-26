@@ -12,6 +12,7 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 | [incident-response](#incident-response) | Automated incident triage | 120s | $0.18 |
 | [code-migration](#code-migration) | Code transformation with verification | 180s | $0.25 |
 | [mermaid-to-chain](#mermaid-to-chain) | Convert Mermaid diagrams to Chain JSON | 60s | $0.10 |
+| [figma-to-component-spec](#figma-to-component-spec) | Figma summary → component spec JSON | 30s | $0.02 |
 
 ---
 
@@ -104,6 +105,21 @@ chain.orchestrate pr-review-pipeline repo=owner/repo pr_number=123
 ```
 
 ---
+
+## Figma → Component Spec (JSON)
+
+Figma summary를 기반으로 컴포넌트 스펙(JSON)을 생성합니다. 실패 시 fallback JSON을 반환합니다.
+
+```mermaid
+graph LR
+  A[figma_get_node_summary] --> B[claude-cli spec]
+  B --> C[json validate]
+```
+
+**Usage:**
+```bash
+chain.run figma-to-component-spec url="https://www.figma.com/design/...?...node-id=2089-10737"
+```
 
 ## Incident Response
 

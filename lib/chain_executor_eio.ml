@@ -384,6 +384,7 @@ let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry l
 
 (** {1 Input Resolution} *)
 
+
 (** Resolve a single input reference to its value
 
     Supports:
@@ -392,37 +393,99 @@ let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry l
     - literal string - returns as-is
 *)
 let resolve_single_input ctx (ref_str : string) : string =
+  let starts_with ~prefix s =
+    let p = String.length prefix in
+    String.length s >= p && String.sub s 0 p = prefix
+  in
+  let ends_with ~suffix s =
+    let p = String.length suffix in
+    let len = String.length s in
+    len >= p && String.sub s (len - p) p = suffix
+  in
+  let try_extract_json_path raw path_parts =
+    let parse_index part =
+      if String.length part >= 3 && part.[0] = '[' && part.[String.length part - 1] = ']' then
+        try Some (int_of_string (String.sub part 1 (String.length part - 2))) with _ -> None
+      else
+        try Some (int_of_string part) with _ -> None
+    in
+    try
+      let json = Yojson.Safe.from_string raw in
+      let rec walk j = function
+        | [] ->
+            (match j with
+             | `String s -> Ok s
+             | `Int i -> Ok (string_of_int i)
+             | `Float f -> Ok (string_of_float f)
+             | `Bool b -> Ok (string_of_bool b)
+             | `Null -> Ok "null"
+             | _ -> Ok (Yojson.Safe.to_string j))
+        | key :: rest ->
+            (match j with
+             | `Assoc fields ->
+                 (match List.assoc_opt key fields with
+                  | Some v -> walk v rest
+                  | None -> Error (Printf.sprintf "Key '%s' not found" key))
+             | `List items ->
+                 (match parse_index key with
+                  | Some idx when idx >= 0 && idx < List.length items ->
+                      walk (List.nth items idx) rest
+                  | _ -> Error "Invalid array index")
+             | _ -> Error (Printf.sprintf "Cannot extract '%s' from non-object" key))
+      in
+      walk json path_parts
+    with _ -> Error "JSON parse error"
+  in
   (* Check if it's a {{variable}} reference *)
   let trimmed = String.trim ref_str in
-  if String.length trimmed > 4 &&
-     String.sub trimmed 0 2 = "{{" &&
-     String.sub trimmed (String.length trimmed - 2) 2 = "}}" then
+  let is_placeholder =
+    starts_with ~prefix:"{{" trimmed && ends_with ~suffix:"}}" trimmed
+  in
+  if is_placeholder then
     (* Extract variable name from {{var}} *)
     let var = String.sub trimmed 2 (String.length trimmed - 4) in
-    let node_id = match String.split_on_char '.' var with
-      | id :: _ -> id
-      | [] -> var
+    let parts = String.split_on_char '.' var in
+    let node_id, path = match parts with
+      | id :: rest -> (id, rest)
+      | [] -> (var, [])
+    in
+    (match Hashtbl.find_opt ctx.outputs node_id with
+     | Some value ->
+         if path = [] then value
+         else (match try_extract_json_path value path with
+               | Ok v -> v
+               | Error _ -> value)
+     | None -> ref_str)  (* Return original if not found *)
+  else
+    (* Direct node_id reference or literal, with optional dot-path *)
+    let parts = String.split_on_char '.' trimmed in
+    let node_id, path = match parts with
+      | id :: rest -> (id, rest)
+      | [] -> (trimmed, [])
     in
     match Hashtbl.find_opt ctx.outputs node_id with
-    | Some value -> value
-    | None -> ref_str  (* Return original if not found *)
-  else
-    (* Direct node_id reference or literal *)
-    match Hashtbl.find_opt ctx.outputs trimmed with
-    | Some value -> value
+    | Some value ->
+        if path = [] then value
+        else (match try_extract_json_path value path with
+              | Ok v -> v
+              | Error _ -> value)
     | None -> ref_str  (* Return as literal *)
 
 (** Resolve input mappings to actual values *)
 let resolve_inputs ctx (mappings : (string * string) list) : (string * string) list =
+  let use_key_as_source ~key ~ref_str =
+    if ref_str = key then true
+    else
+      let klen = String.length key in
+      let rlen = String.length ref_str in
+      klen > rlen &&
+      String.sub key 0 rlen = ref_str &&
+      (key.[rlen] = '.' || key.[rlen] = '[')
+  in
   List.filter_map (fun (key, ref_str) ->
-    (* Parse "node_id.output" or just "node_id" *)
-    let node_id = match String.split_on_char '.' ref_str with
-      | id :: _ -> id
-      | [] -> ref_str
-    in
-    match Hashtbl.find_opt ctx.outputs node_id with
-    | Some value -> Some (key, value)
-    | None -> None
+    let source = if use_key_as_source ~key ~ref_str then key else ref_str in
+    let value = resolve_single_input ctx source in
+    if value = source then None else Some (key, value)
   ) mappings
 
 (** Substitute {{var}} in prompt with resolved inputs *)
@@ -2815,7 +2878,7 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 (** {1 Main Execution Entry Point} *)
 
 (** Execute a compiled execution plan *)
-let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : execution_plan) : chain_result =
+let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?input ?checkpoint (plan : execution_plan) : chain_result =
   let start_time = Unix.gettimeofday () in
 
   (* Create Langfuse trace for observability if enabled *)
@@ -2829,6 +2892,11 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?checkpoint (plan : e
   in
 
   let ctx = make_context ~start_time ~trace_enabled:trace ~timeout ~chain_id:plan.chain.Chain_types.id ?langfuse_trace ?checkpoint ()  in
+
+  (* Inject chain.run input as a reserved output key *)
+  (match input with
+   | Some s -> Hashtbl.replace ctx.outputs "input" s
+   | None -> ());
 
   (* Restore state from checkpoint if resuming *)
   (match ctx.checkpoint.resume_from with

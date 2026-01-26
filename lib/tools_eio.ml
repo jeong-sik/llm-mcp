@@ -67,6 +67,56 @@ let string_of_gemini_error = Types.string_of_gemini_error
 
 (** {1 MCP Client Calls - Direct Style} *)
 
+(** Parse MCP HTTP response (streamable-http SSE or plain JSON-RPC) *)
+let parse_mcp_http_response (body : string) : string option =
+  let parse_json_result json_str =
+    try
+      let json = Yojson.Safe.from_string json_str in
+      let open Yojson.Safe.Util in
+      let result = json |> member "result" in
+      let error = json |> member "error" in
+      if error <> `Null then
+        let msg = try error |> member "message" |> to_string
+                  with _ -> "Unknown error" in
+        Some (Printf.sprintf "Error: %s" msg)
+      else
+        let content = result |> member "content" in
+        (match content with
+         | `List items ->
+             let texts = List.filter_map (fun item ->
+               match item |> member "type" |> to_string_option with
+               | Some "text" -> item |> member "text" |> to_string_option
+               | _ -> None
+             ) items in
+             Some (String.concat "\n" texts)
+         | _ ->
+             (match result with
+              | `Assoc _ | `List _ ->
+                  Some (Yojson.Safe.to_string result)
+              | _ ->
+                  let result_str = result |> to_string_option in
+                  Some (Option.value result_str ~default:json_str)))
+    with _ -> None
+  in
+  let lines = String.split_on_char '\n' body in
+  let data_lines =
+    List.filter_map (fun l ->
+      if String.length l > 5 && String.sub l 0 5 = "data:" then
+        Some (String.sub l 5 (String.length l - 5) |> String.trim)
+      else None
+    ) lines
+  in
+  let rec find_last_json = function
+    | [] -> None
+    | h :: t ->
+        (match parse_json_result h with
+         | Some v -> Some v
+         | None -> find_last_json t)
+  in
+  match find_last_json (List.rev data_lines) with
+  | Some v -> Some v
+  | None -> parse_json_result body
+
 (** Call an external MCP tool via HTTP using curl subprocess *)
 let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout =
   match Tool_config.get_mcp_server_url server_name with
@@ -92,34 +142,7 @@ let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~t
       | Error (Timeout t) -> sprintf "Error: MCP call to %s/%s timed out after %ds" server_name tool_name t
       | Error (ProcessError msg) -> sprintf "Error: MCP call failed: %s" msg
       | Ok r ->
-          (* Parse SSE response to extract result *)
-          let lines = String.split_on_char '\n' r.stdout in
-          let data_line = List.find_opt (fun l -> String.length l > 5 && String.sub l 0 5 = "data:") lines in
-          match data_line with
-          | None -> r.stdout  (* Return raw output if no SSE data *)
-          | Some line ->
-              let json_str = String.sub line 6 (String.length line - 6) |> String.trim in
-              try
-                let json = Yojson.Safe.from_string json_str in
-                let open Yojson.Safe.Util in
-                let result = json |> member "result" in
-                let error = json |> member "error" in
-                if error <> `Null then
-                  let msg = try error |> member "message" |> to_string
-                            with _ -> "Unknown error" in
-                  sprintf "Error: %s" msg
-                else
-                  let content = result |> member "content" in
-                  match content with
-                  | `List items ->
-                      let texts = List.filter_map (fun item ->
-                        match item |> member "type" |> to_string_option with
-                        | Some "text" -> item |> member "text" |> to_string_option
-                        | _ -> None
-                      ) items in
-                      String.concat "\n" texts
-                  | _ -> json_str
-              with _ -> r.stdout
+          parse_mcp_http_response r.stdout |> Option.value ~default:r.stdout
 
 (** Call MCP via stdio subprocess - shell injection safe *)
 let call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command ~args ~tool_name ~arguments ~timeout =
@@ -1375,7 +1398,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
               in
               let split_tool_name name =
-                match String.index_opt name '.' with
+                let delim_idx =
+                  match String.index_opt name '.' with
+                  | Some idx -> Some idx
+                  | None -> String.index_opt name ':'
+                in
+                match delim_idx with
                 | None -> None
                 | Some idx ->
                     let server = String.sub name 0 idx in
@@ -1413,6 +1441,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         model = "stub";
                         thinking_level = Types.Low;
                         yolo = false;
+                        output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
                       }
@@ -1422,6 +1451,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         model = "gemini-3-pro-preview";
                         thinking_level = Types.High;
                         yolo = false;
+                        output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
                       }
@@ -1477,6 +1507,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         model = "gemini-3-pro-preview";
                         thinking_level = Types.High;
                         yolo = false;
+                        output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
                       }
@@ -1532,12 +1563,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     in
                     if result.returncode = 0 then Ok result.response else Error result.response
               in
-              (* Input is passed directly to executor for first node injection *)
-              let _ = input in  (* Will be used by executor *)
               let result =
                 with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.run" (fun () ->
                   Chain_executor_eio.execute
-                    ~sw ~clock ~timeout:node_timeout ~trace:trace_effective ~exec_fn ~tool_exec plan)
+                    ~sw ~clock ~timeout:node_timeout ~trace:trace_effective ~exec_fn ~tool_exec ?input plan)
               in
               let run_id = List.assoc_opt "run_id" result.Chain_types.metadata in
               { model = "chain.run";
@@ -1783,6 +1812,7 @@ This chain will execute the goal using a stub model.|}
               model = "gemini-3-pro-preview";
               thinking_level = Types.High;
               yolo = false;
+              output_format = Types.Text;
               timeout = 120;
               stream = false;
             } in
@@ -1793,7 +1823,12 @@ This chain will execute the goal using a stub model.|}
 
       (* Helper: parse "server.tool" format *)
       let split_tool_name name =
-        match String.index_opt name '.' with
+        let delim_idx =
+          match String.index_opt name '.' with
+          | Some idx -> Some idx
+          | None -> String.index_opt name ':'
+        in
+        match delim_idx with
         | None -> None
         | Some idx ->
             let server = String.sub name 0 idx in
@@ -1974,7 +2009,12 @@ This chain will execute the goal using a stub model.|}
                        String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
                      in
                      let split_tool_name name =
-                       match String.index_opt name '.' with
+                       let delim_idx =
+                         match String.index_opt name '.' with
+                         | Some idx -> Some idx
+                         | None -> String.index_opt name ':'
+                       in
+                       match delim_idx with
                        | None -> None
                        | Some idx ->
                            let server = String.sub name 0 idx in
@@ -2005,10 +2045,10 @@ This chain will execute the goal using a stub model.|}
                        in
                        let model_name = String.lowercase_ascii model in
                        let result =
-                         if starts_with ~prefix:"gemini" model_name then
-                           execute ~sw ~proc_mgr ~clock (Gemini {
-                             prompt; model; thinking_level = High; yolo = false; timeout = node_timeout; stream = false
-                           })
+                        if starts_with ~prefix:"gemini" model_name then
+                          execute ~sw ~proc_mgr ~clock (Gemini {
+                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false
+                          })
                          else if starts_with ~prefix:"claude" model_name then
                            execute ~sw ~proc_mgr ~clock (Claude {
                              prompt; model; long_context = false; system_prompt = None;
@@ -2528,13 +2568,18 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
             String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
           in
           let split_tool_name name =
-            match String.index_opt name '.' with
-            | None -> None
-            | Some idx ->
-                let server = String.sub name 0 idx in
-                let tool_len = String.length name - idx - 1 in
-                if server = "" || tool_len <= 0 then None
-                else Some (server, String.sub name (idx + 1) tool_len)
+                       let delim_idx =
+                         match String.index_opt name '.' with
+                         | Some idx -> Some idx
+                         | None -> String.index_opt name ':'
+                       in
+                       match delim_idx with
+                       | None -> None
+                       | Some idx ->
+                           let server = String.sub name 0 idx in
+                           let tool_len = String.length name - idx - 1 in
+                           if server = "" || tool_len <= 0 then None
+                           else Some (server, String.sub name (idx + 1) tool_len)
           in
           let exec_fn ~model ?system ~prompt ?tools () =
             let _ = system in  (* Unused for now, available for future enhancement *)
@@ -2566,6 +2611,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   model = "gemini-3-pro-preview";
                   thinking_level = High;
                   yolo = false;
+                  output_format = Text;
                   timeout;
                   stream = false;
                 } in
