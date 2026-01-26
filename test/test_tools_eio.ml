@@ -173,4 +173,63 @@ data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",
       Printf.printf "[OK] execute_with_env test passed\n%!"
     in
 
-    Printf.printf "\n✅ All 11 tools_eio tests passed!\n%!"
+    (* Test 12: Stream delta runtime toggle - get/set/get cycle *)
+    let () =
+      (* Get initial state *)
+      let initial = get_stream_delta () in
+
+      (* Toggle to opposite *)
+      let new_val = set_stream_delta (not initial) in
+      assert (new_val = not initial);
+
+      (* Verify get returns new value *)
+      let after_set = get_stream_delta () in
+      assert (after_set = not initial);
+
+      (* Restore original *)
+      let _ = set_stream_delta initial in
+      let restored = get_stream_delta () in
+      assert (restored = initial);
+
+      Printf.printf "[OK] stream_delta runtime toggle test passed\n%!"
+    in
+
+    (* Test 13: Stream delta execute - SetStreamDelta returns correct model *)
+    let () =
+      let result = execute ~sw ~proc_mgr ~clock (SetStreamDelta { enabled = true }) in
+      assert (result.model = "set_stream_delta");
+      assert (result.returncode = 0);
+      assert (List.mem_assoc "enabled" result.extra);
+      assert (List.mem_assoc "was" result.extra);
+      Printf.printf "[OK] SetStreamDelta execute test passed\n%!"
+    in
+
+    (* Test 14: Stream delta execute - GetStreamDelta returns correct model *)
+    let () =
+      let result = execute ~sw ~proc_mgr ~clock GetStreamDelta in
+      assert (result.model = "get_stream_delta");
+      assert (result.returncode = 0);
+      assert (List.mem_assoc "enabled" result.extra);
+      assert (List.mem_assoc "source" result.extra);
+      Printf.printf "[OK] GetStreamDelta execute test passed\n%!"
+    in
+
+    (* Test 15: Stream delta 'was' value captures previous state correctly *)
+    let () =
+      (* Set to known state first *)
+      let _ = set_stream_delta false in
+
+      (* Now set to true and check 'was' *)
+      let result = execute ~sw ~proc_mgr ~clock (SetStreamDelta { enabled = true }) in
+      let was_val = List.assoc "was" result.extra in
+      assert (was_val = "false");  (* was false before we set to true *)
+
+      (* Set back to false and check 'was' *)
+      let result2 = execute ~sw ~proc_mgr ~clock (SetStreamDelta { enabled = false }) in
+      let was_val2 = List.assoc "was" result2.extra in
+      assert (was_val2 = "true");  (* was true before we set to false *)
+
+      Printf.printf "[OK] stream_delta 'was' value test passed\n%!"
+    in
+
+    Printf.printf "\n✅ All 15 tools_eio tests passed!\n%!"
