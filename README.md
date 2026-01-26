@@ -38,6 +38,7 @@ dune exec llm-mcp -- --port 8932
 
 - [Setup](docs/SETUP.md) - 설치/실행/연동
 - [Install Checklist](docs/INSTALL-CHECKLIST.md) - 설치 후 확인
+- [Local Dev Best Practice](docs/LOCAL_DEV_BEST_PRACTICE.md) - 로컬 테스트 → 실로컬 승격
 - [MCP Config Template](docs/MCP-TEMPLATE.md) - ~/.mcp.json 템플릿
 - [Use Cases](docs/USE_CASES.md) - 유즈케이스랑 다이어그램
 - [Compact Protocol](docs/PROTOCOL.md) - LLM끼리 통신할 때 토큰 아끼는 프로토콜
