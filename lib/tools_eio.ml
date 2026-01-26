@@ -2284,9 +2284,25 @@ This chain will execute the goal using a stub model.|}
         | None -> []
       in
 
+      let initial_chain =
+        match chain with
+        | None -> Ok None
+        | Some chain_json ->
+            (match Chain_parser.parse_chain chain_json with
+             | Ok parsed -> Ok (Some parsed)
+             | Error msg -> Error msg)
+      in
+
       (* Run orchestration *)
+      (match initial_chain with
+      | Error msg ->
+          { model = "chain.orchestrate";
+            returncode = 1;
+            response = Printf.sprintf "Chain parse error: %s" msg;
+            extra = [("stage", "parse")]; }
+      | Ok initial_chain ->
       (match with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.orchestrate" (fun () ->
-        Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks) with
+        Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks ~initial_chain) with
       | Ok result ->
           let metrics_json = match result.final_metrics with
             | Some m -> Chain_evaluator.chain_metrics_to_yojson m |> Yojson.Safe.to_string
@@ -2318,6 +2334,7 @@ This chain will execute the goal using a stub model.|}
             returncode = 1;
             response = error_msg;
             extra = [("error_type", Yojson.Safe.to_string (Chain_orchestrator_eio.orchestration_error_to_yojson err))]; })
+      )
 
   | GhPrDiff { repo; pr_number } ->
       execute_gh_pr_diff ~sw ~proc_mgr ~clock ~repo ~pr_number
