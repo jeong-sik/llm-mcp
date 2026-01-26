@@ -1142,12 +1142,19 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   else
     ();
   match args with
-  | Gemini { prompt; model; thinking_level; timeout; stream; use_cli; _ } ->
+  | Gemini { prompt; model; thinking_level; timeout; stream; use_cli; fallback_to_api; _ } ->
       let result =
-        if use_cli then
+        if use_cli then begin
           (* CLI mode: slower but MASC-enabled *)
-          execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args ()
-        else
+          let cli_result =
+            execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args ()
+          in
+          if cli_result.returncode <> 0 && fallback_to_api then
+            (* CLI failed, try API fallback *)
+            execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream
+          else
+            cli_result
+        end else
           (* Direct API mode: faster, no MASC *)
           execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream
       in
@@ -2159,7 +2166,7 @@ This chain will execute the goal using a stub model.|}
             let args = Types.Codex {
               prompt;
               model = "gpt-5.2";
-              reasoning_effort = Types.RHigh;
+              reasoning_effort = Types.RLow;
               sandbox = Types.WorkspaceWrite;
               working_directory = Some (Sys.getcwd ());
               timeout = 120;
@@ -2192,8 +2199,8 @@ This chain will execute the goal using a stub model.|}
               output_format = Types.Text;
               timeout = 120;
               stream = false;
-              use_cli = true;  (* MASC integration enabled *)
-                        fallback_to_api = true;
+              use_cli = false;  (* Avoid CLI exec issues in orchestration *)
+              fallback_to_api = false;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
