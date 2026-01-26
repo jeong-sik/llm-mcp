@@ -49,7 +49,7 @@ let dashboard_html = {|<!DOCTYPE html>
     .card-value { font-size: 32px; font-weight: bold; color: #4ade80; text-shadow: 0 0 20px rgba(74,222,128,0.3); }
     .card-value.warn { color: #fbbf24; text-shadow: 0 0 20px rgba(251,191,36,0.3); }
     .card-value.error { color: #f87171; text-shadow: 0 0 20px rgba(248,113,113,0.3); }
-    .mermaid-container { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 15px; margin-bottom: 20px; border: 1px solid #2a2a4e; height: 280px; overflow: hidden; }
+    .mermaid-container { background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 12px; padding: 15px; margin-bottom: 20px; border: 1px solid #2a2a4e; height: 450px; overflow: hidden; }
     .mermaid-container.expanded { position: fixed; top: 20px; left: 20px; right: 20px; bottom: 20px; z-index: 1000; overflow: auto; height: auto; }
     .mermaid-container .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; height: 32px; flex-shrink: 0; }
     .mermaid-container h2 { font-size: 12px; color: #4ade80; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0; }

@@ -70,6 +70,7 @@ type tool_args =
       timeout : int;
       stream : bool;
       use_cli : bool;  (* true=CLI with MASC, false=direct API (faster) *)
+      fallback_to_api : bool;  (* true=fallback to API on CLI failure *)
     }
   | Claude of {
       prompt : string;
@@ -81,6 +82,8 @@ type tool_args =
       working_directory : string;
       timeout : int;
       stream : bool;
+      use_cli : bool;  (* true=CLI, false=direct Anthropic API *)
+      fallback_to_api : bool;  (* true=fallback to API on CLI failure *)
     }
   | Codex of {
       prompt : string;
@@ -90,7 +93,8 @@ type tool_args =
       working_directory : string option;
       timeout : int;
       stream : bool;
-      search : bool;  (* Enable web search via --search flag *)
+      use_cli : bool;  (* true=CLI, false=direct OpenAI API *)
+      fallback_to_api : bool;  (* true=fallback to API on CLI failure *)
     }
   | Ollama of {
       prompt : string;
@@ -338,6 +342,11 @@ Parameters:
         ("description", `String "Use CLI (slower, MASC-enabled) or direct API (faster, no MASC)");
         ("default", `Bool true);
       ]);
+      ("fallback_to_api", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Fallback to direct API if CLI fails.");
+        ("default", `Bool true);
+      ]);
       response_format_schema;
     ]);
     ("required", `List [`String "prompt"]);
@@ -415,6 +424,16 @@ Note: long_context=true uses API key (charges apply), false uses Max subscriptio
         ("type", `String "boolean");
         ("description", `String "Enable SSE streaming (false recommended for MCP)");
         ("default", `Bool false);
+      ]);
+      ("use_cli", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Use CLI mode (MASC integration). Set false for direct Anthropic API.");
+        ("default", `Bool true);
+      ]);
+      ("fallback_to_api", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Fallback to direct API if CLI fails.");
+        ("default", `Bool true);
       ]);
       response_format_schema;
     ]);
@@ -494,9 +513,14 @@ CLI Direct Usage (without MCP):
         ("description", `String "Enable SSE streaming (false recommended for MCP)");
         ("default", `Bool false);
       ]);
-      ("search", `Assoc [
+      ("use_cli", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable web search (Bing) for Codex to access current information");
+        ("description", `String "Use CLI mode (MASC integration). Set false for direct API (faster).");
+        ("default", `Bool true);
+      ]);
+      ("fallback_to_api", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Fallback to direct API if CLI fails.");
         ("default", `Bool true);
       ]);
       response_format_schema;

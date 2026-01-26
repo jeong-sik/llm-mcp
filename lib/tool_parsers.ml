@@ -13,6 +13,32 @@ open Types
 (* Re-export Tool_config utilities *)
 let budget_mode_value = Tool_config.budget_mode_value
 
+(** {1 Environment-based Defaults}
+    These can be configured in .mcp.json's env field:
+    {
+      "mcpServers": {
+        "llm-mcp": {
+          "env": {
+            "LLM_MCP_USE_CLI": "true",
+            "LLM_MCP_FALLBACK_TO_API": "true"
+          }
+        }
+      }
+    }
+*)
+
+(** Get use_cli default from LLM_MCP_USE_CLI env var (default: true) *)
+let default_use_cli () =
+  match Sys.getenv_opt "LLM_MCP_USE_CLI" with
+  | Some "false" | Some "0" | Some "no" -> false
+  | _ -> true
+
+(** Get fallback_to_api default from LLM_MCP_FALLBACK_TO_API env var (default: true) *)
+let default_fallback_to_api () =
+  match Sys.getenv_opt "LLM_MCP_FALLBACK_TO_API" with
+  | Some "false" | Some "0" | Some "no" -> false
+  | _ -> true
+
 (** {1 Argument Parsers} *)
 
 (** Parse JSON arguments for Gemini tool *)
@@ -31,9 +57,10 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
     |> Option.value ~default:"text"
     |> output_format_of_string in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
-  let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:true in
-  Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream; use_cli }
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
+  let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
+  Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream; use_cli; fallback_to_api }
 
 (** Parse JSON arguments for Claude tool *)
 let parse_claude_args (json : Yojson.Safe.t) : tool_args =
@@ -58,8 +85,10 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
     json |> member "working_directory" |> to_string_option
     |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
-  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream }
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
+  let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
+  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream; use_cli; fallback_to_api }
 
 (** Parse JSON arguments for Codex tool *)
 let parse_codex_args (json : Yojson.Safe.t) : tool_args =
@@ -77,9 +106,10 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
     |> sandbox_policy_of_string in
   let working_directory = json |> member "working_directory" |> to_string_option in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
-  let search = json |> member "search" |> to_bool_option |> Option.value ~default:true in
-  Codex { prompt; model; reasoning_effort; sandbox; working_directory; timeout; stream; search }
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
+  let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
+  Codex { prompt; model; reasoning_effort; sandbox; working_directory; timeout; stream; use_cli; fallback_to_api }
 
 (** Parse JSON arguments for Ollama (local LLM) tool *)
 let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
@@ -91,7 +121,7 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
     try json |> member "temperature" |> to_float
     with Type_error _ -> 0.7 in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
   let tools = match json |> member "tools" with
     | `Null -> None
     | `List tool_list ->
@@ -123,7 +153,7 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
     try Some (json |> member "max_tokens" |> to_int)
     with Type_error _ -> Some 131072 in  (* GLM-4.7: 200K context, 128K (131072) output max *)
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
   let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:false in
   let do_sample = json |> member "do_sample" |> to_bool_option |> Option.value ~default:true in
   let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:false in
@@ -356,7 +386,7 @@ let build_claude_cmd args =
 (** Build Codex CLI command *)
 let build_codex_cmd args =
   match args with
-  | Codex { prompt; model; reasoning_effort; sandbox; working_directory; search; _ } ->
+  | Codex { prompt; model; reasoning_effort; sandbox; working_directory; _ } ->
       let effort_str = string_of_reasoning_effort reasoning_effort in
       let sandbox_str = string_of_sandbox_policy sandbox in
       let cmd = [
@@ -370,8 +400,6 @@ let build_codex_cmd args =
         | Some dir -> cmd @ ["-C"; dir]
         | None -> cmd
       in
-      (* Add --search flag for web search capability *)
-      let cmd = if search then cmd @ ["--search"] else cmd in
       Ok (cmd @ [prompt])
   | _ -> Error "Invalid args for Codex"
 

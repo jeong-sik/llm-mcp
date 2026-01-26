@@ -95,6 +95,7 @@ data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",
         timeout = 30;
         stream = false;
         use_cli = false;  (* Use direct API for tests *)
+        fallback_to_api = false;
       } in
       let result = execute ~sw ~proc_mgr ~clock invalid_args in
       (* Should still execute but will fail due to empty prompt *)
@@ -114,6 +115,8 @@ data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",
         working_directory = "";
         timeout = 30;
         stream = false;
+        use_cli = false;  (* Use direct API for tests *)
+        fallback_to_api = false;
       } in
       let result = execute ~sw ~proc_mgr ~clock invalid_args in
       assert (String.length result.model > 0);

@@ -689,6 +689,191 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
           extra = extra_base; }
   end
 
+(** Execute Claude via Direct Anthropic API (faster, no CLI overhead) *)
+let execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream =
+  let model_name = sprintf "claude-api (%s)" model in
+  let extra_base = [("use_cli", "false")] in
+
+  (* Get API key *)
+  let api_key = match Sys.getenv_opt "ANTHROPIC_API_KEY" with
+    | Some k -> k
+    | None -> ""
+  in
+  if String.length api_key = 0 then
+    { model = model_name;
+      returncode = -1;
+      response = "Error: ANTHROPIC_API_KEY environment variable not set";
+      extra = extra_base @ [("error", "missing_api_key")]; }
+  else begin
+    (* Map model alias to API model ID *)
+    let api_model = match model with
+      | "opus" -> "claude-opus-4-20250514"
+      | "sonnet" -> "claude-sonnet-4-20250514"
+      | "haiku" -> "claude-3-5-haiku-20241022"
+      | m -> m
+    in
+
+    (* Build API request body *)
+    let messages = `List [
+      `Assoc [("role", `String "user"); ("content", `String prompt)]
+    ] in
+    let body_fields = [
+      ("model", `String api_model);
+      ("max_tokens", `Int 4096);
+      ("messages", messages);
+    ] in
+    let body_fields = match system_prompt with
+      | Some sp -> ("system", `String sp) :: body_fields
+      | None -> body_fields
+    in
+    let body = `Assoc body_fields in
+    let body_str = Yojson.Safe.to_string body in
+
+    (* Build curl command *)
+    let curl_args = [
+      "-s"; "-S";
+      "-H"; sprintf "x-api-key: %s" api_key;
+      "-H"; "content-type: application/json";
+      "-H"; "anthropic-version: 2023-06-01";
+      "-d"; body_str;
+      "https://api.anthropic.com/v1/messages"
+    ] in
+
+    let _ = stream in  (* stream not supported in direct API mode *)
+    let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
+    match result with
+    | Ok r ->
+        let raw_response = get_output r in
+        (try
+          let json = Yojson.Safe.from_string raw_response in
+          let open Yojson.Safe.Util in
+          (* Extract text from content[0].text *)
+          let text = json
+            |> member "content"
+            |> index 0
+            |> member "text"
+            |> to_string
+          in
+          { model = model_name;
+            returncode = 0;
+            response = text;
+            extra = extra_base; }
+        with _ ->
+          (try
+            let json = Yojson.Safe.from_string raw_response in
+            let open Yojson.Safe.Util in
+            let error_msg = json |> member "error" |> member "message" |> to_string in
+            { model = model_name;
+              returncode = -1;
+              response = sprintf "API Error: %s" error_msg;
+              extra = extra_base @ [("api_error", "true")]; }
+          with _ ->
+            { model = model_name;
+              returncode = -1;
+              response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
+              extra = extra_base @ [("parse_error", "true")]; }))
+    | Error (Timeout t) ->
+        { model = model_name;
+          returncode = -1;
+          response = sprintf "Timeout after %ds" t;
+          extra = extra_base; }
+    | Error (ProcessError msg) ->
+        { model = model_name;
+          returncode = -1;
+          response = sprintf "Error: %s" msg;
+          extra = extra_base; }
+  end
+
+(** Execute Codex via Direct OpenAI API (faster, no CLI overhead) *)
+let execute_codex_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~timeout ~stream =
+  let model_name = sprintf "codex-api (%s)" model in
+  let extra_base = [("use_cli", "false")] in
+
+  (* Get API key *)
+  let api_key = match Sys.getenv_opt "OPENAI_API_KEY" with
+    | Some k -> k
+    | None -> ""
+  in
+  if String.length api_key = 0 then
+    { model = model_name;
+      returncode = -1;
+      response = "Error: OPENAI_API_KEY environment variable not set";
+      extra = extra_base @ [("error", "missing_api_key")]; }
+  else begin
+    (* Map model alias to API model ID *)
+    let api_model = match model with
+      | "gpt-5.2" -> "gpt-5.2"
+      | "gpt-5" -> "gpt-5"
+      | "o3" -> "o3"
+      | "o4-mini" -> "o4-mini"
+      | m -> m
+    in
+
+    (* Build API request body *)
+    let messages = `List [
+      `Assoc [("role", `String "user"); ("content", `String prompt)]
+    ] in
+    let body = `Assoc [
+      ("model", `String api_model);
+      ("messages", messages);
+    ] in
+    let body_str = Yojson.Safe.to_string body in
+
+    (* Build curl command *)
+    let curl_args = [
+      "-s"; "-S";
+      "-H"; sprintf "Authorization: Bearer %s" api_key;
+      "-H"; "Content-Type: application/json";
+      "-d"; body_str;
+      "https://api.openai.com/v1/chat/completions"
+    ] in
+
+    let _ = stream in  (* stream not supported in direct API mode *)
+    let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
+    match result with
+    | Ok r ->
+        let raw_response = get_output r in
+        (try
+          let json = Yojson.Safe.from_string raw_response in
+          let open Yojson.Safe.Util in
+          (* Extract text from choices[0].message.content *)
+          let text = json
+            |> member "choices"
+            |> index 0
+            |> member "message"
+            |> member "content"
+            |> to_string
+          in
+          { model = model_name;
+            returncode = 0;
+            response = text;
+            extra = extra_base; }
+        with _ ->
+          (try
+            let json = Yojson.Safe.from_string raw_response in
+            let open Yojson.Safe.Util in
+            let error_msg = json |> member "error" |> member "message" |> to_string in
+            { model = model_name;
+              returncode = -1;
+              response = sprintf "API Error: %s" error_msg;
+              extra = extra_base @ [("api_error", "true")]; }
+          with _ ->
+            { model = model_name;
+              returncode = -1;
+              response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
+              extra = extra_base @ [("parse_error", "true")]; }))
+    | Error (Timeout t) ->
+        { model = model_name;
+          returncode = -1;
+          response = sprintf "Timeout after %ds" t;
+          extra = extra_base; }
+    | Error (ProcessError msg) ->
+        { model = model_name;
+          returncode = -1;
+          response = sprintf "Error: %s" msg;
+          extra = extra_base; }
+  end
+
 (** Execute Gemini with automatic retry for recoverable errors *)
 let execute_gemini_with_retry ~sw ~proc_mgr ~clock
     ?(max_retries = 2)
@@ -983,41 +1168,61 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Claude { model; long_context; working_directory = _; timeout; stream; _ } ->
+  | Claude { prompt; model; long_context; system_prompt; working_directory = _; timeout; stream; use_cli; fallback_to_api; _ } ->
       let model_name = sprintf "claude-cli (%s)" model in
       let extra_base = [("long_context", string_of_bool long_context)] in
-      let result = (match build_claude_cmd args with
-      | Error err ->
-          { model = model_name;
-            returncode = -1;
-            response = err;
-            extra = extra_base @ [("invalid_args", "true")]; }
-      | Ok cmd_list ->
-          let cmd = List.hd cmd_list in
-          let cmd_args = List.tl cmd_list in
-          if stream then
-            (* Streaming mode: broadcast each line as it arrives *)
-            execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args
-          else begin
-            (* Non-streaming mode: wait for complete output *)
-            let result = run_command ~sw ~proc_mgr ~clock ~safe_tmpdir:true ~timeout cmd cmd_args in
-            match result with
-            | Ok r ->
-                { model = model_name;
-                  returncode = r.exit_code;
-                  response = get_output r;
-                  extra = extra_base; }
-            | Error (Timeout t) ->
-                { model = model_name;
-                  returncode = -1;
-                  response = sprintf "Timeout after %ds" t;
-                  extra = extra_base; }
-            | Error (ProcessError msg) ->
-                { model = model_name;
-                  returncode = -1;
-                  response = sprintf "Error: %s" msg;
-                  extra = extra_base; }
-          end)
+
+      (* Helper: execute via CLI *)
+      let execute_via_cli () =
+        match build_claude_cmd args with
+        | Error err ->
+            { model = model_name;
+              returncode = -1;
+              response = err;
+              extra = extra_base @ [("invalid_args", "true")]; }
+        | Ok cmd_list ->
+            let cmd = List.hd cmd_list in
+            let cmd_args = List.tl cmd_list in
+            if stream then
+              execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args
+            else begin
+              let result = run_command ~sw ~proc_mgr ~clock ~safe_tmpdir:true ~timeout cmd cmd_args in
+              match result with
+              | Ok r ->
+                  { model = model_name;
+                    returncode = r.exit_code;
+                    response = get_output r;
+                    extra = extra_base; }
+              | Error (Timeout t) ->
+                  { model = model_name;
+                    returncode = -1;
+                    response = sprintf "Timeout after %ds" t;
+                    extra = extra_base; }
+              | Error (ProcessError msg) ->
+                  { model = model_name;
+                    returncode = -1;
+                    response = sprintf "Error: %s" msg;
+                    extra = extra_base; }
+            end
+      in
+
+      (* Execute based on use_cli flag with optional fallback *)
+      let result =
+        if use_cli then begin
+          let cli_result = execute_via_cli () in
+          if cli_result.returncode <> 0 && fallback_to_api then begin
+            (* CLI failed, try API fallback *)
+            let api_result = execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream in
+            if api_result.returncode = 0 then
+              { api_result with extra = api_result.extra @ [("fallback_used", "true")] }
+            else
+              (* Both failed, return CLI error with note about fallback attempt *)
+              { cli_result with extra = cli_result.extra @ [("fallback_attempted", "true"); ("fallback_error", api_result.response)] }
+          end else
+            cli_result
+        end else
+          (* Direct API mode *)
+          execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -1036,43 +1241,60 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Codex { model; reasoning_effort; timeout; stream; _ } ->
+  | Codex { prompt; model; reasoning_effort; timeout; stream; use_cli; fallback_to_api; _ } ->
       let model_name = sprintf "codex (%s)" model in
       let extra_base = [("reasoning_effort", string_of_reasoning_effort reasoning_effort)] in
-      let result = (match build_codex_cmd args with
-      | Error err ->
-          { model = model_name;
-            returncode = -1;
-            response = err;
-            extra = extra_base @ [("invalid_args", "true")]; }
-      | Ok cmd_list ->
-          let cmd = List.hd cmd_list in
-          let cmd_args = List.tl cmd_list in
-          if stream then begin
-            (* Streaming mode: broadcast each line as it arrives *)
-            let stream_result = execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args in
-            (* Apply clean_codex_output to the accumulated response *)
-            { stream_result with response = clean_codex_output stream_result.response }
-          end else begin
-            (* Non-streaming mode: wait for complete output *)
-            let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
-            match result with
-            | Ok r ->
-                { model = model_name;
-                  returncode = r.exit_code;
-                  response = clean_codex_output (get_output r);
-                  extra = extra_base; }
-            | Error (Timeout t) ->
-                { model = model_name;
-                  returncode = -1;
-                  response = sprintf "Timeout after %ds" t;
-                  extra = extra_base; }
-            | Error (ProcessError msg) ->
-                { model = model_name;
-                  returncode = -1;
-                  response = sprintf "Error: %s" msg;
-                  extra = extra_base; }
-          end)
+
+      (* Helper: execute via CLI *)
+      let execute_via_cli () =
+        match build_codex_cmd args with
+        | Error err ->
+            { model = model_name;
+              returncode = -1;
+              response = err;
+              extra = extra_base @ [("invalid_args", "true")]; }
+        | Ok cmd_list ->
+            let cmd = List.hd cmd_list in
+            let cmd_args = List.tl cmd_list in
+            if stream then begin
+              let stream_result = execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args in
+              { stream_result with response = clean_codex_output stream_result.response }
+            end else begin
+              let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+              match result with
+              | Ok r ->
+                  { model = model_name;
+                    returncode = r.exit_code;
+                    response = clean_codex_output (get_output r);
+                    extra = extra_base; }
+              | Error (Timeout t) ->
+                  { model = model_name;
+                    returncode = -1;
+                    response = sprintf "Timeout after %ds" t;
+                    extra = extra_base; }
+              | Error (ProcessError msg) ->
+                  { model = model_name;
+                    returncode = -1;
+                    response = sprintf "Error: %s" msg;
+                    extra = extra_base; }
+            end
+      in
+
+      (* Execute based on use_cli flag with optional fallback *)
+      let result =
+        if use_cli then begin
+          let cli_result = execute_via_cli () in
+          if cli_result.returncode <> 0 && fallback_to_api then begin
+            (* CLI failed, try API fallback *)
+            let api_result = execute_codex_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~timeout ~stream in
+            if api_result.returncode = 0 then
+              { api_result with extra = api_result.extra @ [("fallback_used", "true")] }
+            else
+              { cli_result with extra = cli_result.extra @ [("fallback_attempted", "true"); ("fallback_error", api_result.response)] }
+          end else
+            cli_result
+        end else
+          execute_codex_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~timeout ~stream
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -1575,6 +1797,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         timeout = node_timeout;
                         stream = false;
                         use_cli = false;  (* Stub uses direct API *)
+                        fallback_to_api = false;
                       }
                   | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
                       Types.Gemini {
@@ -1586,6 +1809,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         timeout = node_timeout;
                         stream = false;
                         use_cli = true;  (* MASC integration enabled *)
+                        fallback_to_api = true;
                       }
                   | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
                       Types.Claude {
@@ -1598,6 +1822,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         working_directory = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp";
                         timeout = node_timeout;
                         stream = false;
+                        use_cli = true;
+                        fallback_to_api = true;
                       }
                   | "codex" | "gpt-5.2" ->
                       Types.Codex {
@@ -1608,7 +1834,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         working_directory = None;
                         timeout = node_timeout;
                         stream = false;
-                        search = false;
+                        use_cli = true;
+                        fallback_to_api = true;
                       }
                   | "ollama" ->
                       (* Plain ollama defaults to qwen3:1.7b for fast testing *)
@@ -1656,6 +1883,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         timeout = node_timeout;
                         stream = false;
                         use_cli = true;  (* MASC integration enabled *)
+                        fallback_to_api = true;
                       }
                 in
                 match args with
@@ -1921,6 +2149,8 @@ This chain will execute the goal using a stub model.|}
               working_directory = Sys.getcwd ();
               timeout = 120;
               stream = false;
+              use_cli = true;
+              fallback_to_api = true;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -1934,7 +2164,8 @@ This chain will execute the goal using a stub model.|}
               working_directory = Some (Sys.getcwd ());
               timeout = 120;
               stream = false;
-              search = false;
+              use_cli = true;
+              fallback_to_api = true;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -1962,6 +2193,7 @@ This chain will execute the goal using a stub model.|}
               timeout = 120;
               stream = false;
               use_cli = true;  (* MASC integration enabled *)
+                        fallback_to_api = true;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -2194,19 +2426,19 @@ This chain will execute the goal using a stub model.|}
                        let result =
                         if starts_with ~prefix:"gemini" model_name then
                           execute ~sw ~proc_mgr ~clock (Gemini {
-                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = true
+                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true
                           })
                          else if starts_with ~prefix:"claude" model_name then
                            execute ~sw ~proc_mgr ~clock (Claude {
                              prompt; model; long_context = false; system_prompt = None;
                              output_format = Text; allowed_tools = []; working_directory = "";
-                             timeout = node_timeout; stream = false
+                             timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true
                            })
                          else if starts_with ~prefix:"codex" model_name || starts_with ~prefix:"gpt" model_name then
                            execute ~sw ~proc_mgr ~clock (Codex {
                              prompt; model; reasoning_effort = RHigh; sandbox = ReadOnly;
                              working_directory = None; timeout = node_timeout; stream = false;
-                             search = false
+                             use_cli = true; fallback_to_api = true
                            })
                          else if starts_with ~prefix:"ollama" model_name then
                            let ollama_model = match String.index_opt model ':' with
@@ -2787,6 +3019,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   timeout;
                   stream = false;
                   use_cli = true;  (* MASC integration enabled *)
+                        fallback_to_api = true;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
@@ -2804,6 +3037,8 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   working_directory;
                   timeout;
                   stream = false;
+                  use_cli = true;
+                  fallback_to_api = true;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
@@ -2816,7 +3051,8 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   working_directory = None;
                   timeout;
                   stream = false;
-                  search = false;
+                  use_cli = true;
+                  fallback_to_api = true;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response

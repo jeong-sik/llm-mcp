@@ -1366,11 +1366,23 @@ let config_to_json (cfg : chain_config) : Yojson.Safe.t =
 (** Serialize node to JSON *)
 let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe.t =
   let base = [("id", `String n.id)] in
+  let filtered_mapping =
+    match n.node_type with
+    | Adapter { input_ref; _ } ->
+        List.filter (fun (k, _) ->
+          k <> input_ref &&
+          not (String.length k >= 5 && String.sub k 0 5 = "_dep_")
+        ) n.input_mapping
+    | _ ->
+        List.filter (fun (k, _) ->
+          not (String.length k >= 5 && String.sub k 0 5 = "_dep_")
+        ) n.input_mapping
+  in
   let input_mapping =
-    if n.input_mapping = [] then
+    if filtered_mapping = [] then
       if include_empty_inputs then [("inputs", `Assoc [])] else []
     else
-      [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) n.input_mapping))]
+      [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) filtered_mapping))]
   in
   let type_fields = match n.node_type with
     | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars } ->

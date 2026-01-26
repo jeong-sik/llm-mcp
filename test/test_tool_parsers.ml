@@ -237,6 +237,7 @@ let test_build_gemini_cmd () =
     timeout = 60;
     stream = false;
     use_cli = true;
+    fallback_to_api = true;
   } in
   match Tool_parsers.build_gemini_cmd args with
   | Ok cmd_list ->
@@ -256,6 +257,7 @@ let test_build_gemini_cmd_with_yolo () =
     timeout = 300;
     stream = false;
     use_cli = true;
+    fallback_to_api = true;
   } in
   match Tool_parsers.build_gemini_cmd args with
   | Ok cmd_list ->
@@ -273,6 +275,8 @@ let test_build_claude_cmd () =
     working_directory = "";
     timeout = 60;
     stream = false;
+    use_cli = true;
+    fallback_to_api = true;
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->
@@ -285,6 +289,7 @@ let test_build_claude_cmd () =
   | Error e -> fail ("build_claude_cmd failed: " ^ e)
 
 let test_build_claude_cmd_with_long_context () =
+  Unix.putenv "ANTHROPIC_API_KEY" "test-key";
   let args = Claude {
     prompt = "Test";
     model = "opus";
@@ -295,6 +300,8 @@ let test_build_claude_cmd_with_long_context () =
     working_directory = "/tmp";
     timeout = 300;
     stream = false;
+    use_cli = true;
+    fallback_to_api = true;
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->
@@ -313,7 +320,8 @@ let test_build_codex_cmd () =
     working_directory = None;
     timeout = 60;
     stream = false;
-    search = false;
+    use_cli = true;
+    fallback_to_api = true;
   } in
   match Tool_parsers.build_codex_cmd args with
   | Ok cmd_list ->

@@ -5,6 +5,11 @@
 
 set -e
 
+# Load API keys from user environment
+if [ -f "$HOME/.zshenv" ]; then
+    source "$HOME/.zshenv" 2>/dev/null || true
+fi
+
 # Ensure OCaml environment
 if command -v opam >/dev/null 2>&1; then
     eval $(opam env)
