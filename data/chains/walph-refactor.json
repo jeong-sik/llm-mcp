@@ -1,0 +1,52 @@
+{
+  "id": "walph-refactor",
+  "name": "Walph Refactor Loop",
+  "description": "Lint error elimination loop - repeats until zero lint errors",
+  "version": "1.1.0",
+  "nodes": [
+    {
+      "id": "scan_errors",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Analyze lint output and categorize errors:\n\nLint results: {{lint_output}}\n\nFor each error:\n1. Category (type safety, unused, formatting, etc.)\n2. Fix strategy\n3. Priority\n\nOutput JSON: {\"errors\": [...], \"fix_order\": [...]}"
+      },
+      "output_key": "error_analysis"
+    },
+    {
+      "id": "refactor_loop",
+      "type": "feedback_loop",
+      "generator": {
+        "id": "fix_errors",
+        "type": "llm",
+        "llm": {
+          "model": "claude-cli",
+          "prompt": "Based on this error analysis:\n{{error_analysis}}\n\nFix the highest priority lint errors.\nPreserve existing behavior.\n\nOutput the corrected code only."
+        }
+      },
+      "evaluator_config": {
+        "scoring_func": "llm_judge",
+        "scoring_prompt": "Evaluate the fix:\n1. Does it resolve the lint error?\n2. Does it preserve behavior?\n3. Is it clean, not hacky?\n\nScore 0.0-1.0.",
+        "select_strategy": "best"
+      },
+      "improver_prompt": "The fix scored {{score}} with feedback:\n{{feedback}}\n\nImprove the fix to address the feedback.\nDo not introduce new lint errors.\n\nOutput improved code only.",
+      "max_iterations": 10,
+      "score_threshold": 0.9,
+      "score_operator": "gte",
+      "conversational": true,
+      "relay_models": ["claude-cli", "codex"],
+      "depends_on": ["scan_errors"]
+    }
+  ],
+  "output": "refactor_loop",
+  "metadata": {
+    "tags": ["walph", "refactor", "lint"],
+    "category": "quality",
+    "estimated_duration_sec": 180,
+    "stop_conditions": {
+      "goal": "lint_errors <= 0",
+      "max_iterations": 10,
+      "drain": false
+    }
+  }
+}

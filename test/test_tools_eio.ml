@@ -94,6 +94,7 @@ data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",
         output_format = Text;
         timeout = 30;
         stream = false;
+        use_cli = false;  (* Use direct API for tests *)
       } in
       let result = execute ~sw ~proc_mgr ~clock invalid_args in
       (* Should still execute but will fail due to empty prompt *)

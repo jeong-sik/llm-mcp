@@ -236,6 +236,7 @@ let test_build_gemini_cmd () =
     output_format = Text;
     timeout = 60;
     stream = false;
+    use_cli = true;
   } in
   match Tool_parsers.build_gemini_cmd args with
   | Ok cmd_list ->
@@ -254,6 +255,7 @@ let test_build_gemini_cmd_with_yolo () =
     output_format = Text;
     timeout = 300;
     stream = false;
+    use_cli = true;
   } in
   match Tool_parsers.build_gemini_cmd args with
   | Ok cmd_list ->

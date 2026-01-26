@@ -1,0 +1,52 @@
+{
+  "id": "walph-docs",
+  "name": "Walph Documentation Loop",
+  "description": "Documentation completeness loop - repeats until all public APIs documented",
+  "version": "1.1.0",
+  "nodes": [
+    {
+      "id": "analyze_docs",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Analyze documentation completeness for:\n\nFile: {{target}}\n\nIdentify:\n1. Undocumented public functions/types\n2. Missing examples\n3. Incomplete descriptions\n\nOutput JSON: {\"missing\": [...], \"incomplete\": [...], \"priority\": [...]}"
+      },
+      "output_key": "doc_analysis"
+    },
+    {
+      "id": "docs_loop",
+      "type": "feedback_loop",
+      "generator": {
+        "id": "write_docs",
+        "type": "llm",
+        "llm": {
+          "model": "claude-cli",
+          "prompt": "Based on this documentation analysis:\n{{doc_analysis}}\n\nWrite documentation for the highest priority item.\nInclude:\n- Description\n- Parameters\n- Return value\n- Example usage\n\nOutput the documentation in the project's format."
+        }
+      },
+      "evaluator_config": {
+        "scoring_func": "llm_judge",
+        "scoring_prompt": "Evaluate documentation quality:\n1. Is it accurate to the code?\n2. Is the example useful?\n3. Is the description clear?\n\nScore 0.0-1.0.",
+        "select_strategy": "best"
+      },
+      "improver_prompt": "The documentation scored {{score}} with feedback:\n{{feedback}}\n\nImprove the documentation to be more accurate and useful.\n\nOutput improved documentation only.",
+      "max_iterations": 5,
+      "score_threshold": 0.85,
+      "score_operator": "gte",
+      "conversational": true,
+      "relay_models": ["claude-cli", "gemini"],
+      "depends_on": ["analyze_docs"]
+    }
+  ],
+  "output": "docs_loop",
+  "metadata": {
+    "tags": ["walph", "docs", "documentation"],
+    "category": "quality",
+    "estimated_duration_sec": 90,
+    "stop_conditions": {
+      "goal": "doc_coverage >= 90%",
+      "max_iterations": 5,
+      "drain": false
+    }
+  }
+}

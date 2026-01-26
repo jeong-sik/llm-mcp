@@ -32,7 +32,8 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
     |> output_format_of_string in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream }
+  let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:true in
+  Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream; use_cli }
 
 (** Parse JSON arguments for Claude tool *)
 let parse_claude_args (json : Yojson.Safe.t) : tool_args =

@@ -583,6 +583,154 @@ let execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base 
 
 let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli" ~failure_threshold:3 ()
 
+(** Execute Gemini via Direct API (faster, no MASC) *)
+let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream =
+  let model_name = sprintf "gemini-api (%s)" model in
+  let thinking_applied = thinking_level = High in
+  let extra_base = [
+    ("thinking_level", string_of_thinking_level thinking_level);
+    ("thinking_prompt_applied", string_of_bool thinking_applied);
+    ("use_cli", "false");
+  ] in
+
+  (* Get API key *)
+  let api_key = match Sys.getenv_opt "GEMINI_API_KEY" with
+    | Some k -> k
+    | None -> ""
+  in
+  if String.length api_key = 0 then
+    { model = model_name;
+      returncode = -1;
+      response = "Error: GEMINI_API_KEY environment variable not set";
+      extra = extra_base @ [("error", "missing_api_key")]; }
+  else begin
+    (* Build API request body *)
+    let contents = `List [
+      `Assoc [
+        ("parts", `List [
+          `Assoc [("text", `String prompt)]
+        ])
+      ]
+    ] in
+    let body = `Assoc [("contents", contents)] in
+    let body_str = Yojson.Safe.to_string body in
+
+    (* Map model name to API model ID *)
+    let api_model = match model with
+      | "gemini-3-pro-preview" | "gemini-2.5-pro" | "pro" -> "gemini-2.0-flash"  (* Default to fast model *)
+      | "gemini-2.5-flash" | "flash" | "gemini-2.0-flash" -> "gemini-2.0-flash"
+      | m -> m  (* Pass through exact model names *)
+    in
+
+    (* Build curl command *)
+    let url = sprintf "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" api_model in
+    let curl_args = [
+      "-s"; "-S";  (* silent but show errors *)
+      "-H"; sprintf "x-goog-api-key: %s" api_key;
+      "-H"; "Content-Type: application/json";
+      "-d"; body_str;
+      url
+    ] in
+
+    if stream then begin
+      (* For streaming, just run and return *)
+      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
+      match result with
+      | Ok r ->
+          let raw_response = get_output r in
+          (* Parse Gemini API response - extract text from candidates[0].content.parts[0].text *)
+          (try
+            let json = Yojson.Safe.from_string raw_response in
+            let open Yojson.Safe.Util in
+            let text = json
+              |> member "candidates"
+              |> index 0
+              |> member "content"
+              |> member "parts"
+              |> index 0
+              |> member "text"
+              |> to_string
+            in
+            { model = model_name;
+              returncode = 0;
+              response = text;
+              extra = extra_base; }
+          with _ ->
+            (* Check for error response *)
+            (try
+              let json = Yojson.Safe.from_string raw_response in
+              let open Yojson.Safe.Util in
+              let error_msg = json |> member "error" |> member "message" |> to_string in
+              { model = model_name;
+                returncode = -1;
+                response = sprintf "API Error: %s" error_msg;
+                extra = extra_base @ [("api_error", "true")]; }
+            with _ ->
+              { model = model_name;
+                returncode = -1;
+                response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
+                extra = extra_base @ [("parse_error", "true")]; }))
+      | Error (Timeout t) ->
+          { model = model_name;
+            returncode = -1;
+            response = sprintf "Timeout after %ds" t;
+            extra = extra_base; }
+      | Error (ProcessError msg) ->
+          { model = model_name;
+            returncode = -1;
+            response = sprintf "Error: %s" msg;
+            extra = extra_base; }
+    end
+    else begin
+      (* Non-streaming mode *)
+      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
+      match result with
+      | Ok r ->
+          let raw_response = get_output r in
+          (* Parse Gemini API response *)
+          (try
+            let json = Yojson.Safe.from_string raw_response in
+            let open Yojson.Safe.Util in
+            let text = json
+              |> member "candidates"
+              |> index 0
+              |> member "content"
+              |> member "parts"
+              |> index 0
+              |> member "text"
+              |> to_string
+            in
+            { model = model_name;
+              returncode = 0;
+              response = text;
+              extra = extra_base; }
+          with _ ->
+            (try
+              let json = Yojson.Safe.from_string raw_response in
+              let open Yojson.Safe.Util in
+              let error_msg = json |> member "error" |> member "message" |> to_string in
+              { model = model_name;
+                returncode = -1;
+                response = sprintf "API Error: %s" error_msg;
+                extra = extra_base @ [("api_error", "true")]; }
+            with _ ->
+              { model = model_name;
+                returncode = -1;
+                response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
+                extra = extra_base @ [("parse_error", "true")]; }))
+      | Error (Timeout t) ->
+          { model = model_name;
+            returncode = -1;
+            response = sprintf "Timeout after %ds" t;
+            extra = extra_base; }
+      | Error (ProcessError msg) ->
+          { model = model_name;
+            returncode = -1;
+            response = sprintf "Error: %s" msg;
+            extra = extra_base; }
+    end
+  end
+
 (** Execute Gemini with automatic retry for recoverable errors *)
 let execute_gemini_with_retry ~sw ~proc_mgr ~clock
     ?(max_retries = 2)
@@ -851,8 +999,15 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   else
     ();
   match args with
-  | Gemini { model; thinking_level; timeout; stream; _ } ->
-      let result = execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args () in
+  | Gemini { prompt; model; thinking_level; timeout; stream; use_cli; _ } ->
+      let result =
+        if use_cli then
+          (* CLI mode: slower but MASC-enabled *)
+          execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args ()
+        else
+          (* Direct API mode: faster, no MASC *)
+          execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream
+      in
       if log_enabled then
         Run_log_eio.record_event
           ~event:"llm_complete"
@@ -1461,6 +1616,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
+                        use_cli = false;  (* Stub uses direct API *)
                       }
                   | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
                       Types.Gemini {
@@ -1471,6 +1627,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
+                        use_cli = false;  (* Chain engine uses direct API for speed *)
                       }
                   | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
                       Types.Claude {
@@ -1527,6 +1684,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
+                        use_cli = false;  (* Chain engine uses direct API for speed *)
                       }
                 in
                 match args with
@@ -1832,6 +1990,7 @@ This chain will execute the goal using a stub model.|}
               output_format = Types.Text;
               timeout = 120;
               stream = false;
+              use_cli = false;  (* Evaluator uses direct API for speed *)
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -2064,7 +2223,7 @@ This chain will execute the goal using a stub model.|}
                        let result =
                         if starts_with ~prefix:"gemini" model_name then
                           execute ~sw ~proc_mgr ~clock (Gemini {
-                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false
+                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = false
                           })
                          else if starts_with ~prefix:"claude" model_name then
                            execute ~sw ~proc_mgr ~clock (Claude {
@@ -2656,6 +2815,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   output_format = Text;
                   timeout;
                   stream = false;
+                  use_cli = false;  (* FeedbackLoop uses direct API *)
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response

@@ -69,6 +69,7 @@ type tool_args =
       output_format : output_format;
       timeout : int;
       stream : bool;
+      use_cli : bool;  (* true=CLI with MASC, false=direct API (faster) *)
     }
   | Claude of {
       prompt : string;
@@ -330,6 +331,11 @@ Parameters:
       ("stream", `Assoc [
         ("type", `String "boolean");
         ("description", `String "Enable SSE keepalive streaming");
+        ("default", `Bool true);
+      ]);
+      ("use_cli", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Use CLI (slower, MASC-enabled) or direct API (faster, no MASC)");
         ("default", `Bool true);
       ]);
       response_format_schema;
