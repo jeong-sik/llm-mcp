@@ -1,91 +1,32 @@
 {
   "id": "walph-figma",
-  "name": "Walph Figma Implementation Loop (Vision-First)",
-  "description": "Figma design to code with REAL SSIM verification via figma_verify_visual",
-  "version": "2.0.0",
+  "name": "Walph Figma",
+  "description": "Figma to code: extract design, generate component",
+  "version": "1.0.0",
   "nodes": [
     {
       "id": "extract",
-      "type": "tool",
-      "tool": {
-        "name": "figma.figma_get_node_bundle",
-        "arguments": {
-          "file_key": "{{file_key}}",
-          "node_id": "{{node_id}}",
-          "include_render": true
-        }
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Extract design specs from Figma node:\n\n{{input.figma_dsl}}\n\nOutput JSON: {\"component\": \"...\", \"styles\": {...}, \"layout\": {...}, \"children\": [...]}"
       },
-      "output_key": "figma_bundle"
+      "output_key": "design_spec"
     },
     {
-      "id": "figma_loop",
-      "type": "feedback_loop",
-      "generator": {
-        "id": "generate_code",
-        "type": "llm",
-        "llm": {
-          "model": "claude-cli",
-          "prompt": "You are a Figma-to-Code expert. Convert this Figma DSL to production-ready code.\n\nFigma DSL:\n{{figma_bundle.dsl}}\n\nReference Image: {{figma_bundle.render_url}}\n\nPlatform: {{platform}}\n\nCRITICAL Rules for 95%+ SSIM:\n1. Colors: Use rgb() not hex - e.g., rgb(32,141,249) not #1F8CF8\n2. Typography: Include letter-spacing and line-height EXACTLY\n3. Layout: Use flexbox with exact align-items/justify-content\n4. TEXT: Copy characters EXACTLY from DSL - NO translation/modification\n5. Flat HTML: 2-level max nesting (container + elements)\n\nOutput ONLY the HTML+CSS code, no explanations."
-        }
+      "id": "generate",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Generate React component from design spec:\n\n{{design_spec}}\n\nUse Tailwind CSS. Output clean, typed TypeScript component."
       },
-      "evaluator_config": {
-        "scoring_func": "tool",
-        "scoring_tool": {
-          "name": "figma.figma_verify_visual",
-          "arguments": {
-            "file_key": "{{file_key}}",
-            "node_id": "{{node_id}}",
-            "html": "{{last_output}}",
-            "target_ssim": 0.95,
-            "max_iterations": 1
-          },
-          "score_path": "ssim"
-        },
-        "select_strategy": "best"
-      },
-      "improver_prompt": "SSIM Score: {{score}} (target: 0.95+)\n\nVisual Feedback from figma_verify_visual:\n{{feedback}}\n\nOriginal Figma DSL:\n{{figma_bundle.dsl}}\n\nCurrent code:\n{{last_output}}\n\nFix the visual differences. Common issues:\n- Color mismatch: Use exact rgb() values from DSL\n- Typography: Check font-size, line-height, letter-spacing\n- Spacing: Verify padding, margin, gap values\n- Alignment: Check flex alignment properties\n\nOutput ONLY the improved HTML+CSS code.",
-      "max_iterations": 5,
-      "score_threshold": 0.95,
-      "score_operator": "gte",
-      "conversational": true,
-      "relay_models": ["claude-cli", "gemini"],
-      "depends_on": ["extract"]
+      "depends_on": ["extract"],
+      "output_key": "component_code"
     }
   ],
-  "output": "figma_loop",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "file_key": {
-        "type": "string",
-        "description": "Figma file key (from URL)"
-      },
-      "node_id": {
-        "type": "string",
-        "description": "Node ID to implement (e.g., 7:488)"
-      },
-      "platform": {
-        "type": "string",
-        "enum": ["web", "ios", "android", "flutter"],
-        "default": "web",
-        "description": "Target platform for code generation"
-      }
-    },
-    "required": ["file_key", "node_id"]
-  },
+  "output": "generate",
   "metadata": {
-    "tags": ["walph", "figma", "design", "ui", "vision-first"],
-    "category": "design-to-code",
-    "estimated_duration_sec": 300,
-    "vision_first": true,
-    "stop_conditions": {
-      "goal": "ssim >= 0.95 (REAL pixel comparison)",
-      "max_iterations": 5,
-      "drain": false
-    },
-    "hat_rotation": {
-      "pattern": "alternate",
-      "hats": ["builder", "reviewer"]
-    }
+    "tags": ["walph", "figma", "ui"],
+    "estimated_duration_sec": 60
   }
 }
