@@ -1632,6 +1632,19 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         stream = false;
                         tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
+                  | "glm" | "glm-4.7" | "glm-4.6" | "glm-4.5" ->
+                      Types.Glm {
+                        prompt;
+                        model = "glm-4.7";
+                        system_prompt = None;
+                        temperature = 0.7;
+                        max_tokens = Some 4096;
+                        timeout = node_timeout;
+                        stream = false;
+                        thinking = false;  (* Faster for chain execution *)
+                        do_sample = true;
+                        web_search = false;
+                      }
                   | _ ->
                       (* Default to Gemini for unknown models *)
                       Types.Gemini {
