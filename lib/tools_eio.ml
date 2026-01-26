@@ -617,8 +617,8 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
 
     (* Map model name to API model ID *)
     let api_model = match model with
-      | "gemini-3-pro-preview" | "gemini-2.5-pro" | "pro" -> "gemini-2.0-flash"  (* Default to fast model *)
-      | "gemini-2.5-flash" | "flash" | "gemini-2.0-flash" -> "gemini-2.0-flash"
+      | "gemini-3-pro-preview" | "gemini-2.5-pro" | "pro" -> "gemini-1.5-pro-latest"
+      | "gemini-2.5-flash" | "flash" | "gemini-2.0-flash" | "gemini-3.0-flash" -> "gemini-2.0-flash-001"
       | m -> m  (* Pass through exact model names *)
     in
 
@@ -632,103 +632,55 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
       url
     ] in
 
-    if stream then begin
-      (* For streaming, just run and return *)
-      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
-      match result with
-      | Ok r ->
-          let raw_response = get_output r in
-          (* Parse Gemini API response - extract text from candidates[0].content.parts[0].text *)
+    (* Note: stream parameter is ignored - Direct API always uses sync call.
+       For true streaming, use CLI mode (use_cli=true) *)
+    let _ = stream in
+    let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
+    match result with
+    | Ok r ->
+        let raw_response = get_output r in
+        (* Parse Gemini API response - extract text from candidates[0].content.parts[0].text *)
+        (try
+          let json = Yojson.Safe.from_string raw_response in
+          let open Yojson.Safe.Util in
+          let text = json
+            |> member "candidates"
+            |> index 0
+            |> member "content"
+            |> member "parts"
+            |> index 0
+            |> member "text"
+            |> to_string
+          in
+          { model = model_name;
+            returncode = 0;
+            response = text;
+            extra = extra_base; }
+        with _ ->
+          (* Check for error response *)
           (try
             let json = Yojson.Safe.from_string raw_response in
             let open Yojson.Safe.Util in
-            let text = json
-              |> member "candidates"
-              |> index 0
-              |> member "content"
-              |> member "parts"
-              |> index 0
-              |> member "text"
-              |> to_string
-            in
+            let error_msg = json |> member "error" |> member "message" |> to_string in
             { model = model_name;
-              returncode = 0;
-              response = text;
-              extra = extra_base; }
+              returncode = -1;
+              response = sprintf "API Error: %s" error_msg;
+              extra = extra_base @ [("api_error", "true")]; }
           with _ ->
-            (* Check for error response *)
-            (try
-              let json = Yojson.Safe.from_string raw_response in
-              let open Yojson.Safe.Util in
-              let error_msg = json |> member "error" |> member "message" |> to_string in
-              { model = model_name;
-                returncode = -1;
-                response = sprintf "API Error: %s" error_msg;
-                extra = extra_base @ [("api_error", "true")]; }
-            with _ ->
-              { model = model_name;
-                returncode = -1;
-                response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
-                extra = extra_base @ [("parse_error", "true")]; }))
-      | Error (Timeout t) ->
-          { model = model_name;
-            returncode = -1;
-            response = sprintf "Timeout after %ds" t;
-            extra = extra_base; }
-      | Error (ProcessError msg) ->
-          { model = model_name;
-            returncode = -1;
-            response = sprintf "Error: %s" msg;
-            extra = extra_base; }
-    end
-    else begin
-      (* Non-streaming mode *)
-      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" curl_args in
-      match result with
-      | Ok r ->
-          let raw_response = get_output r in
-          (* Parse Gemini API response *)
-          (try
-            let json = Yojson.Safe.from_string raw_response in
-            let open Yojson.Safe.Util in
-            let text = json
-              |> member "candidates"
-              |> index 0
-              |> member "content"
-              |> member "parts"
-              |> index 0
-              |> member "text"
-              |> to_string
-            in
             { model = model_name;
-              returncode = 0;
-              response = text;
-              extra = extra_base; }
-          with _ ->
-            (try
-              let json = Yojson.Safe.from_string raw_response in
-              let open Yojson.Safe.Util in
-              let error_msg = json |> member "error" |> member "message" |> to_string in
-              { model = model_name;
-                returncode = -1;
-                response = sprintf "API Error: %s" error_msg;
-                extra = extra_base @ [("api_error", "true")]; }
-            with _ ->
-              { model = model_name;
-                returncode = -1;
-                response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
-                extra = extra_base @ [("parse_error", "true")]; }))
-      | Error (Timeout t) ->
-          { model = model_name;
-            returncode = -1;
-            response = sprintf "Timeout after %ds" t;
-            extra = extra_base; }
-      | Error (ProcessError msg) ->
-          { model = model_name;
-            returncode = -1;
-            response = sprintf "Error: %s" msg;
-            extra = extra_base; }
-    end
+              returncode = -1;
+              response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
+              extra = extra_base @ [("parse_error", "true")]; }))
+    | Error (Timeout t) ->
+        { model = model_name;
+          returncode = -1;
+          response = sprintf "Timeout after %ds" t;
+          extra = extra_base; }
+    | Error (ProcessError msg) ->
+        { model = model_name;
+          returncode = -1;
+          response = sprintf "Error: %s" msg;
+          extra = extra_base; }
   end
 
 (** Execute Gemini with automatic retry for recoverable errors *)
