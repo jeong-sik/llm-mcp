@@ -73,15 +73,41 @@ LLM_MCP_RUN_LOG_STREAM=1
 
 이 경우 `Run_log_eio.record_event`가 SSE로도 broadcast됩니다.
 
-## 5) 스트림 델타 (Ollama)
+## 5) 스트림 델타 (모든 LLM)
 
-Ollama 스트리밍 델타는 옵션으로 SSE 이벤트로 발행됩니다.
+모든 LLM(Gemini, Claude, Codex, Ollama, GLM)의 스트리밍 델타를 SSE 이벤트로 발행할 수 있습니다.
 
-환경 변수:
+### 환경 변수 (시작 시 설정)
 
 - `LLM_MCP_STREAM_DELTA=1` (기본 off)
 - `LLM_MCP_STREAM_DELTA_MAX_EVENTS=2000` (최대 델타 이벤트 수)
 - `LLM_MCP_STREAM_DELTA_MAX_CHARS=200` (각 델타의 최대 길이)
+
+### 런타임 토글 (서버 재시작 없이)
+
+MCP 도구로 런타임에 on/off 전환이 가능합니다:
+
+```bash
+# 상태 확인
+curl -s http://localhost:8932/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"get_stream_delta","arguments":{}}}'
+
+# 활성화 (디버깅 시)
+curl -s http://localhost:8932/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"set_stream_delta","arguments":{"enabled":true}}}'
+
+# 비활성화
+curl -s http://localhost:8932/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"tools/call","id":1,"params":{"name":"set_stream_delta","arguments":{"enabled":false}}}'
+```
+
+Claude Code에서:
+```
+mcp__llm-mcp__get_stream_delta
+mcp__llm-mcp__set_stream_delta {"enabled": true}
+```
+
+우선순위: **런타임 설정 > 환경 변수**
 
 ### 이벤트 타입
 
