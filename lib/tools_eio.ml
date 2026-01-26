@@ -1627,7 +1627,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
-                        use_cli = false;  (* Chain engine uses direct API for speed *)
+                        use_cli = true;  (* MASC integration enabled *)
                       }
                   | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
                       Types.Claude {
@@ -1684,7 +1684,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = node_timeout;
                         stream = false;
-                        use_cli = false;  (* Chain engine uses direct API for speed *)
+                        use_cli = true;  (* MASC integration enabled *)
                       }
                 in
                 match args with
@@ -1990,7 +1990,7 @@ This chain will execute the goal using a stub model.|}
               output_format = Types.Text;
               timeout = 120;
               stream = false;
-              use_cli = false;  (* Evaluator uses direct API for speed *)
+              use_cli = true;  (* MASC integration enabled *)
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -2223,7 +2223,7 @@ This chain will execute the goal using a stub model.|}
                        let result =
                         if starts_with ~prefix:"gemini" model_name then
                           execute ~sw ~proc_mgr ~clock (Gemini {
-                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = false
+                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = true
                           })
                          else if starts_with ~prefix:"claude" model_name then
                            execute ~sw ~proc_mgr ~clock (Claude {
@@ -2815,7 +2815,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   output_format = Text;
                   timeout;
                   stream = false;
-                  use_cli = false;  (* FeedbackLoop uses direct API *)
+                  use_cli = true;  (* MASC integration enabled *)
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
