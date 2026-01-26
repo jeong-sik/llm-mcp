@@ -615,11 +615,17 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
     let body = `Assoc [("contents", contents)] in
     let body_str = Yojson.Safe.to_string body in
 
-    (* Map model name to API model ID *)
+    (* Map model alias to API model ID
+       - Stable: gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite
+       - Preview: gemini-3-pro-preview, gemini-3-flash-preview
+       - Deprecated (2026/03/31): gemini-2.0-* *)
     let api_model = match model with
-      | "gemini-3-pro-preview" | "gemini-2.5-pro" | "pro" -> "gemini-1.5-pro-latest"
-      | "gemini-2.5-flash" | "flash" | "gemini-2.0-flash" | "gemini-3.0-flash" -> "gemini-2.0-flash-001"
-      | m -> m  (* Pass through exact model names *)
+      | "pro" -> "gemini-2.5-pro"
+      | "flash" -> "gemini-2.5-flash"
+      | "flash-lite" -> "gemini-2.5-flash-lite"
+      | "3-pro" -> "gemini-3-pro-preview"
+      | "3-flash" -> "gemini-3-flash-preview"
+      | m -> m  (* Pass through exact model names like "gemini-2.5-pro" *)
     in
 
     (* Build curl command *)
