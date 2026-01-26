@@ -55,7 +55,7 @@ open Chain_types
 (** Parsed node from Mermaid *)
 type mermaid_node = {
   id : string;
-  shape : [ `Rect | `Diamond | `Subroutine | `Trap ];
+  shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stadium | `Circle ];
   content : string;
 }
 
@@ -247,6 +247,14 @@ let parse_meta_comment (line : string) (meta : mermaid_meta) : mermaid_meta =
 let rect_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)\[\([^]]*\)\]|}
 let diamond_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\){\([^}]*\)}|}
 let subroutine_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)\[\[\([^]]*\)\]\]|}
+(* Stadium (rounded): (...) - used for Retry, Fallback, Race *)
+let stadium_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)(("\([^"]*\)"))|}
+let stadium_noquote_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)((\([^)]*\)))|}
+(* Circle: ((...)) - used for MASC nodes - checked first due to double parens *)
+let circle_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)((("\([^"]*\)")))|}
+let circle_noquote_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)(((\([^)]*\))))|}
+(* Simple stadium without double parens: ("...") *)
+let stadium_simple_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)("\([^"]*\)")|}
 (* Trapezoid shape: id>/"content"/ used for Adapter nodes *)
 let trap_re = Str.regexp {|\([A-Za-z_][A-Za-z0-9_-]*\)>/"\([^"]*\)"/|}
 let arrow_re = Str.regexp {|[ ]*-->[ ]*|}
@@ -286,7 +294,7 @@ let make_tools_value (has_tools : bool) : Yojson.Safe.t option =
   else None
 
 (** Infer node type from node ID and shape *)
-let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (text : string)
+let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stadium | `Circle ]) (text : string)
     : (node_type, string) result =
   let id_lower = String.lowercase_ascii id in
   let text = strip_quotes text in
@@ -421,6 +429,61 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       (* Default to Template adapter with the text as template *)
       Ok (Adapter { input_ref = "input"; transform = Template text; on_error = `Fail })
 
+  | `Stadium ->
+      (* Stadium (rounded) nodes: Retry, Fallback, Race *)
+      (* Format: ("Retry:N") or ("Fallback") or ("Race") *)
+      if String.length text >= 6 && String.sub text 0 6 = "Retry:" then
+        let max_attempts = try int_of_string (String.sub text 6 (String.length text - 6)) with _ -> 3 in
+        (* Retry wraps an inner node - will be resolved from edges *)
+        let placeholder_node = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
+        Ok (Retry { max_attempts; backoff = Constant 1.0; retry_on = []; node = placeholder_node })
+      else if text = "Fallback" || String.length text >= 9 && String.sub text 0 9 = "Fallback:" then
+        (* Fallback wraps primary and fallback nodes - will be resolved from edges *)
+        let placeholder_primary = { id = "_fallback_primary"; node_type = ChainRef "_fallback_primary"; input_mapping = []; output_key = None; depends_on = None } in
+        Ok (Fallback { primary = placeholder_primary; fallbacks = [] })
+      else if text = "Race" || String.length text >= 5 && String.sub text 0 5 = "Race:" then
+        (* Race runs multiple nodes and returns first result *)
+        Ok (Race { nodes = []; timeout = None })
+      else
+        (* Unknown stadium text - treat as LLM with default model *)
+        Ok (Llm { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] })
+
+  | `Circle ->
+      (* Circle nodes: MASC coordination (broadcast, listen, claim) *)
+      (* Format: (("📢 MASC:broadcast")) or (("👂 MASC:listen")) or (("✋ MASC:claim")) *)
+      let text_lower = String.lowercase_ascii text in
+      (* Strip emoji prefix if present *)
+      let stripped =
+        if String.length text > 2 then
+          (* Try to find MASC: prefix *)
+          try
+            let masc_idx = Str.search_forward (Str.regexp_string "MASC:") text 0 in
+            String.sub text masc_idx (String.length text - masc_idx)
+          with Not_found -> text
+        else text
+      in
+      if String.length stripped >= 14 && String.sub (String.lowercase_ascii stripped) 0 14 = "masc:broadcast" then
+        let message = if String.length stripped > 15 then String.sub stripped 15 (String.length stripped - 15) else "" in
+        Ok (Masc_broadcast { room = None; message; mention = [] })
+      else if String.length stripped >= 11 && String.sub (String.lowercase_ascii stripped) 0 11 = "masc:listen" then
+        let filter = if String.length stripped > 12 then Some (String.sub stripped 12 (String.length stripped - 12)) else None in
+        Ok (Masc_listen { room = None; filter; timeout_sec = 30.0 })
+      else if String.length stripped >= 10 && String.sub (String.lowercase_ascii stripped) 0 10 = "masc:claim" then
+        let task_id = if String.length stripped > 11 then Some (String.sub stripped 11 (String.length stripped - 11)) else None in
+        Ok (Masc_claim { room = None; task_id })
+      else if String.contains text_lower 'b' && String.contains text_lower 'r' then
+        (* Heuristic: broadcast *)
+        Ok (Masc_broadcast { room = None; message = text; mention = [] })
+      else if String.contains text_lower 'l' && String.contains text_lower 'i' then
+        (* Heuristic: listen *)
+        Ok (Masc_listen { room = None; filter = None; timeout_sec = 30.0 })
+      else if String.contains text_lower 'c' && String.contains text_lower 'l' then
+        (* Heuristic: claim *)
+        Ok (Masc_claim { room = None; task_id = None })
+      else
+        (* Default to broadcast *)
+        Ok (Masc_broadcast { room = None; message = text; mention = [] })
+
 (** Parse node shape and extract content *)
 let parse_node_definition (s : string) : (string * mermaid_node) option =
   let s = trim s in
@@ -440,6 +503,28 @@ let parse_node_definition (s : string) : (string * mermaid_node) option =
     let id = Str.matched_group 1 s in
     let content = Str.matched_group 2 s in
     Some (id, { id; shape = `Diamond; content = trim content })
+  (* Stadium (rounded): ("...") - used for Retry, Fallback, Race *)
+  else if Str.string_match stadium_simple_re s 0 then
+    let id = Str.matched_group 1 s in
+    let content = Str.matched_group 2 s in
+    Some (id, { id; shape = `Stadium; content = trim content })
+  else if Str.string_match stadium_re s 0 then
+    let id = Str.matched_group 1 s in
+    let content = Str.matched_group 2 s in
+    Some (id, { id; shape = `Stadium; content = trim content })
+  else if Str.string_match stadium_noquote_re s 0 then
+    let id = Str.matched_group 1 s in
+    let content = Str.matched_group 2 s in
+    Some (id, { id; shape = `Stadium; content = trim content })
+  (* Circle: (((...))) - used for MASC nodes *)
+  else if Str.string_match circle_re s 0 then
+    let id = Str.matched_group 1 s in
+    let content = Str.matched_group 2 s in
+    Some (id, { id; shape = `Circle; content = trim content })
+  else if Str.string_match circle_noquote_re s 0 then
+    let id = Str.matched_group 1 s in
+    let content = Str.matched_group 2 s in
+    Some (id, { id; shape = `Circle; content = trim content })
   (* Finally rectangle: [...] *)
   else if Str.string_match rect_re s 0 then
     let id = Str.matched_group 1 s in
@@ -449,7 +534,7 @@ let parse_node_definition (s : string) : (string * mermaid_node) option =
     None
 
 (** Parse node content into Chain node_type *)
-let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (content : string)
+let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stadium | `Circle ]) (content : string)
     : (node_type, string) result =
   let content = trim content in
   match shape with
@@ -853,6 +938,49 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         (* Generic adapter using the content as template *)
         Ok (Adapter { input_ref = "input"; transform = Template content; on_error = `Fail })
 
+  | `Stadium ->
+      (* Stadium (rounded) nodes: Retry, Fallback, Race - same logic as infer_type_from_id *)
+      if String.length content >= 6 && String.sub content 0 6 = "Retry:" then
+        let max_attempts = try int_of_string (String.sub content 6 (String.length content - 6)) with _ -> 3 in
+        let placeholder_node = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
+        Ok (Retry { max_attempts; backoff = Constant 1.0; retry_on = []; node = placeholder_node })
+      else if content = "Fallback" || (String.length content >= 9 && String.sub content 0 9 = "Fallback:") then
+        let placeholder_primary = { id = "_fallback_primary"; node_type = ChainRef "_fallback_primary"; input_mapping = []; output_key = None; depends_on = None } in
+        Ok (Fallback { primary = placeholder_primary; fallbacks = [] })
+      else if content = "Race" || (String.length content >= 5 && String.sub content 0 5 = "Race:") then
+        Ok (Race { nodes = []; timeout = None })
+      else
+        Ok (Llm { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] })
+
+  | `Circle ->
+      (* Circle nodes: MASC coordination - same logic as infer_type_from_id *)
+      let content_lower = String.lowercase_ascii content in
+      let stripped =
+        if String.length content > 2 then
+          try
+            let masc_idx = Str.search_forward (Str.regexp_string "MASC:") content 0 in
+            String.sub content masc_idx (String.length content - masc_idx)
+          with Not_found -> content
+        else content
+      in
+      if String.length stripped >= 14 && String.sub (String.lowercase_ascii stripped) 0 14 = "masc:broadcast" then
+        let message = if String.length stripped > 15 then String.sub stripped 15 (String.length stripped - 15) else "" in
+        Ok (Masc_broadcast { room = None; message; mention = [] })
+      else if String.length stripped >= 11 && String.sub (String.lowercase_ascii stripped) 0 11 = "masc:listen" then
+        let filter = if String.length stripped > 12 then Some (String.sub stripped 12 (String.length stripped - 12)) else None in
+        Ok (Masc_listen { room = None; filter; timeout_sec = 30.0 })
+      else if String.length stripped >= 10 && String.sub (String.lowercase_ascii stripped) 0 10 = "masc:claim" then
+        let task_id = if String.length stripped > 11 then Some (String.sub stripped 11 (String.length stripped - 11)) else None in
+        Ok (Masc_claim { room = None; task_id })
+      else if String.contains content_lower 'b' && String.contains content_lower 'r' then
+        Ok (Masc_broadcast { room = None; message = content; mention = [] })
+      else if String.contains content_lower 'l' && String.contains content_lower 'i' then
+        Ok (Masc_listen { room = None; filter = None; timeout_sec = 30.0 })
+      else if String.contains content_lower 'c' && String.contains content_lower 'l' then
+        Ok (Masc_claim { room = None; task_id = None })
+      else
+        Ok (Masc_broadcast { room = None; message = content; mention = [] })
+
 (** Parse edge line: A --> B or A & B --> C or A -->|label| B *)
 let parse_edge_line (line : string) : mermaid_edge list =
   let line = trim line in
@@ -1160,7 +1288,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
         match parse_result with
         | Error e -> convert_result := Error e
         | Ok node_type ->
-            (* For Quorum and Merge nodes, we need to fill in the child nodes *)
+            (* For Quorum, Merge, and StreamMerge nodes, we need to fill in the child nodes *)
             (* Use ChainRef with _ref suffix to avoid duplicate node ID issues *)
             let node_type = match node_type with
               | Quorum { required; nodes = _ } ->
@@ -1184,6 +1312,59 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                     { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                   ) input_ids in
                   Merge { strategy; nodes = input_nodes }
+              | StreamMerge { reducer; initial; min_results; timeout; nodes = _ } ->
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let input_nodes = List.map (fun input_id ->
+                    { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                  ) input_ids in
+                  StreamMerge { reducer; initial; min_results; timeout; nodes = input_nodes }
+              | Race { timeout; nodes = _ } ->
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let input_nodes = List.map (fun input_id ->
+                    { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                  ) input_ids in
+                  Race { timeout; nodes = input_nodes }
+              | Fallback { primary = _; fallbacks = _ } ->
+                  (* First input is primary, rest are fallbacks *)
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  (match input_ids with
+                  | primary_id :: fallback_ids ->
+                      let primary = { id = primary_id ^ "_ref"; node_type = ChainRef primary_id; input_mapping = []; output_key = None; depends_on = None } in
+                      let fallbacks = List.map (fun fb_id ->
+                        { id = fb_id ^ "_ref"; node_type = ChainRef fb_id; input_mapping = []; output_key = None; depends_on = None }
+                      ) fallback_ids in
+                      Fallback { primary; fallbacks }
+                  | [] ->
+                      (* No inputs - keep placeholder *)
+                      let placeholder = { id = "_fallback_primary"; node_type = ChainRef "_fallback_primary"; input_mapping = []; output_key = None; depends_on = None } in
+                      Fallback { primary = placeholder; fallbacks = [] })
+              | Retry { max_attempts; backoff; retry_on; node = _ } ->
+                  (* First input is the node to retry *)
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  (match input_ids with
+                  | node_id :: _ ->
+                      let inner_node = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } in
+                      Retry { max_attempts; backoff; retry_on; node = inner_node }
+                  | [] ->
+                      (* No inputs - keep placeholder *)
+                      let placeholder = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
+                      Retry { max_attempts; backoff; retry_on; node = placeholder })
               | other -> other
             in
             let input_mapping =
@@ -1289,6 +1470,55 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                       { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                     ) input_ids in
                     Merge { strategy; nodes = input_nodes }
+                | StreamMerge { reducer; initial; min_results; timeout; nodes = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    let input_nodes = List.map (fun input_id ->
+                      { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                    ) input_ids in
+                    StreamMerge { reducer; initial; min_results; timeout; nodes = input_nodes }
+                | Race { timeout; nodes = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    let input_nodes = List.map (fun input_id ->
+                      { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                    ) input_ids in
+                    Race { timeout; nodes = input_nodes }
+                | Fallback { primary = _; fallbacks = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    (match input_ids with
+                    | primary_id :: fallback_ids ->
+                        let primary = { id = primary_id ^ "_ref"; node_type = ChainRef primary_id; input_mapping = []; output_key = None; depends_on = None } in
+                        let fallbacks = List.map (fun fb_id ->
+                          { id = fb_id ^ "_ref"; node_type = ChainRef fb_id; input_mapping = []; output_key = None; depends_on = None }
+                        ) fallback_ids in
+                        Fallback { primary; fallbacks }
+                    | [] ->
+                        let placeholder = { id = "_fallback_primary"; node_type = ChainRef "_fallback_primary"; input_mapping = []; output_key = None; depends_on = None } in
+                        Fallback { primary = placeholder; fallbacks = [] })
+                | Retry { max_attempts; backoff; retry_on; node = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    (match input_ids with
+                    | node_id :: _ ->
+                        let inner_node = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } in
+                        Retry { max_attempts; backoff; retry_on; node = inner_node }
+                    | [] ->
+                        let placeholder = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
+                        Retry { max_attempts; backoff; retry_on; node = placeholder })
                 | GoalDriven gd ->
                     (* Apply metadata if available *)
                     (match Hashtbl.find_opt meta.node_goaldriven_meta mnode.id with
