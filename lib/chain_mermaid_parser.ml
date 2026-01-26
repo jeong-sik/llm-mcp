@@ -63,6 +63,7 @@ type mermaid_node = {
 type mermaid_edge = {
   from_nodes : string list;  (* Multiple for merge: A & B --> C *)
   to_node : string;
+  label : string option;     (* Edge label for Gate: -->|true| or -->|false| *)
 }
 
 (** Parsed Mermaid graph *)
@@ -394,10 +395,13 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
 
         if is_llm then
           (* Extract model from ID (e.g., "gemini_parse" -> "gemini") *)
-          let model = List.find (fun m ->
+          let model = match List.find_opt (fun m ->
             String.length id_lower >= String.length m &&
             String.sub id_lower 0 (String.length m) = m
-          ) llm_models in
+          ) llm_models with
+            | Some m -> m
+            | None -> "gemini" (* fallback, shouldn't happen since is_llm is true *)
+          in
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then "{{input}}" else text_clean in
           let tools = make_tools_value has_tools in
@@ -849,37 +853,88 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap ]) (con
         (* Generic adapter using the content as template *)
         Ok (Adapter { input_ref = "input"; transform = Template content; on_error = `Fail })
 
-(** Parse edge line: A --> B or A & B --> C *)
+(** Parse edge line: A --> B or A & B --> C or A -->|label| B *)
 let parse_edge_line (line : string) : mermaid_edge list =
   let line = trim line in
-  (* Split by --> using pre-compiled regex *)
-  let parts = Str.split arrow_re line in
 
-  let rec build_edges acc = function
-    | [] | [_] -> List.rev acc
-    | from_part :: to_part :: rest ->
-        (* Parse from_part: could be "A" or "A & B" *)
-        let from_nodes =
-          from_part
-          |> Str.split ampersand_re
-          |> List.map (fun s ->
-              (* Extract just the ID, not the node definition *)
-              let s = trim s in
-              match parse_node_definition s with
-              | Some (id, _) -> id
-              | None -> s)
-        in
-        (* Extract to_node ID *)
-        let to_node =
-          let s = trim to_part in
+  (* Extract label from arrow if present: -->|label| becomes (-->, Some label) *)
+  let extract_label_and_split s =
+    (* Check for labeled edge pattern: A -->|label| B *)
+    (* Use string search instead of complex regex to avoid Str.regexp | escaping issues *)
+    match String.split_on_char '|' s with
+    | [before_pipe; label_part; after_pipe] when String.length before_pipe > 0 ->
+        (* Check if before_pipe ends with --> *)
+        let before_trimmed = trim before_pipe in
+        if String.length before_trimmed >= 3 &&
+           String.sub before_trimmed (String.length before_trimmed - 3) 3 = "-->" then
+          let from_part = String.sub before_trimmed 0 (String.length before_trimmed - 3) in
+          (trim from_part, trim after_pipe, Some (trim label_part))
+        else
+          (* No --> before |, try simple arrow pattern *)
+          (try
+            if Str.string_match (Str.regexp {|^\([^-]*\)-->\(.*\)$|}) s 0 then
+              let from_part = Str.matched_group 1 s in
+              let to_part = Str.matched_group 2 s in
+              (trim from_part, trim to_part, None)
+            else
+              (s, "", None)
+          with Not_found -> (s, "", None))
+    | _ ->
+        (* Try pattern: A --> B (no label) *)
+        (try
+          if Str.string_match (Str.regexp {|^\([^-]*\)-->\(.*\)$|}) s 0 then
+            let from_part = Str.matched_group 1 s in
+            let to_part = Str.matched_group 2 s in
+            (trim from_part, trim to_part, None)
+          else
+            (s, "", None)
+        with Not_found -> (s, "", None))
+  in
+
+  let (from_part, to_part, label) = extract_label_and_split line in
+
+  if to_part = "" then
+    (* Fall back to original logic for complex multi-arrow lines *)
+    let parts = Str.split arrow_re line in
+    let rec build_edges acc = function
+      | [] | [_] -> List.rev acc
+      | from_part :: to_part :: rest ->
+          let from_nodes =
+            from_part
+            |> Str.split ampersand_re
+            |> List.map (fun s ->
+                let s = trim s in
+                match parse_node_definition s with
+                | Some (id, _) -> id
+                | None -> s)
+          in
+          let to_node =
+            let s = trim to_part in
+            match parse_node_definition s with
+            | Some (id, _) -> id
+            | None -> s
+          in
+          let edge = { from_nodes; to_node; label = None } in
+          build_edges (edge :: acc) (to_part :: rest)
+    in
+    build_edges [] parts
+  else
+    (* Single labeled edge *)
+    let from_nodes =
+      from_part
+      |> Str.split ampersand_re
+      |> List.map (fun s ->
+          let s = trim s in
           match parse_node_definition s with
           | Some (id, _) -> id
-          | None -> s
-        in
-        let edge = { from_nodes; to_node } in
-        build_edges (edge :: acc) (to_part :: rest)
-  in
-  build_edges [] parts
+          | None -> s)
+    in
+    let to_node =
+      match parse_node_definition to_part with
+      | Some (id, _) -> id
+      | None -> to_part
+    in
+    [{ from_nodes; to_node; label }]
 
 (** Join lines that have unclosed brackets (handle multiline node content) *)
 (* Parse state: (bracket_count, in_double_quote, in_single_quote) *)
@@ -1022,7 +1077,7 @@ let parse_mermaid_text (text : string) : (mermaid_graph, string) result =
   | Ok (graph, _meta) -> Ok graph
   | Error e -> Error e
 
-(** Build dependency graph from edges *)
+(** Build dependency graph from edges (incoming: to_node -> [from_nodes]) *)
 let build_dependency_graph (edges : mermaid_edge list) : (string, string list) Hashtbl.t =
   let deps = Hashtbl.create 16 in
   List.iter (fun edge ->
@@ -1034,6 +1089,21 @@ let build_dependency_graph (edges : mermaid_edge list) : (string, string list) H
     Hashtbl.replace deps edge.to_node (existing @ edge.from_nodes)
   ) edges;
   deps
+
+(** Build outgoing edges map with labels (from_node -> [(to_node, label option)]) *)
+let build_outgoing_edges (edges : mermaid_edge list) : (string, (string * string option) list) Hashtbl.t =
+  let outgoing = Hashtbl.create 16 in
+  List.iter (fun edge ->
+    List.iter (fun from_node ->
+      let existing =
+        match Hashtbl.find_opt outgoing from_node with
+        | Some l -> l
+        | None -> []
+      in
+      Hashtbl.replace outgoing from_node (existing @ [(edge.to_node, edge.label)])
+    ) edge.from_nodes
+  ) edges;
+  outgoing
 
 (** Find nodes with no outgoing edges (terminal nodes) *)
 let find_output_nodes (graph : mermaid_graph) : string list =
@@ -1091,6 +1161,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
         | Error e -> convert_result := Error e
         | Ok node_type ->
             (* For Quorum and Merge nodes, we need to fill in the child nodes *)
+            (* Use ChainRef with _ref suffix to avoid duplicate node ID issues *)
             let node_type = match node_type with
               | Quorum { required; nodes = _ } ->
                   let input_ids =
@@ -1098,9 +1169,9 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                     | Some ids -> ids
                     | None -> []
                   in
-                  (* Create placeholder nodes for inputs *)
+                  (* Create ChainRef nodes for inputs with _ref suffix *)
                   let input_nodes = List.map (fun input_id ->
-                    { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                    { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                   ) input_ids in
                   Quorum { required; nodes = input_nodes }
               | Merge { strategy; nodes = _ } ->
@@ -1110,7 +1181,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                     | None -> []
                   in
                   let input_nodes = List.map (fun input_id ->
-                    { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                    { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                   ) input_ids in
                   Merge { strategy; nodes = input_nodes }
               | other -> other
@@ -1159,6 +1230,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
 let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (meta : mermaid_meta) : (chain, string) result =
   let fallback () =
     let deps = build_dependency_graph graph.edges in
+    let outgoing = build_outgoing_edges graph.edges in
 
     (* Convert each mermaid node to chain node *)
     let node_map = Hashtbl.create 16 in
@@ -1195,6 +1267,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
           match parse_result with
           | Error e -> convert_result := Error e
           | Ok node_type ->
+              (* Use ChainRef with _ref suffix to avoid duplicate node ID issues *)
               let node_type = match node_type with
                 | Quorum { required; nodes = _ } ->
                     let input_ids =
@@ -1203,7 +1276,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                       | None -> []
                     in
                     let input_nodes = List.map (fun input_id ->
-                      { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                      { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                     ) input_ids in
                     Quorum { required; nodes = input_nodes }
                 | Merge { strategy; nodes = _ } ->
@@ -1213,7 +1286,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                       | None -> []
                     in
                     let input_nodes = List.map (fun input_id ->
-                      { id = input_id; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                      { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                     ) input_ids in
                     Merge { strategy; nodes = input_nodes }
                 | GoalDriven gd ->
@@ -1288,6 +1361,47 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
               in
               let strategies = List.filter_map (fun id -> Hashtbl.find_opt node_map id) input_ids in
               { node with node_type = Mcts { mcts with strategies } }
+          | Gate gate ->
+              (* Resolve then_node and else_node from outgoing edges with labels *)
+              let out_edges = match Hashtbl.find_opt outgoing node.id with
+                | Some edges -> edges
+                | None -> []
+              in
+              (* Find edges labeled "true" and "false" *)
+              let then_id = List.find_map (fun (to_node, label) ->
+                match label with
+                | Some l when String.lowercase_ascii l = "true" -> Some to_node
+                | _ -> None
+              ) out_edges in
+              let else_id = List.find_map (fun (to_node, label) ->
+                match label with
+                | Some l when String.lowercase_ascii l = "false" -> Some to_node
+                | _ -> None
+              ) out_edges in
+              (* If no labels, use first two edges (first=then, second=else) *)
+              let (then_id, else_id) = match (then_id, else_id) with
+                | (Some t, Some e) -> (Some t, Some e)
+                | (None, None) ->
+                    (* No labeled edges, use positional *)
+                    (match out_edges with
+                     | [(to1, _)] -> (Some to1, None)
+                     | (to1, _) :: (to2, _) :: _ -> (Some to1, Some to2)
+                     | [] -> (None, None))
+                | other -> other
+              in
+              (* Use ChainRef instead of actual node to avoid duplicate node issues *)
+              (* The executor will resolve these refs at runtime *)
+              let then_node = match then_id with
+                | Some id ->
+                    { id = id ^ "_ref"; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
+                | None -> gate.then_node  (* Keep placeholder if not resolved *)
+              in
+              let else_node = match else_id with
+                | Some id ->
+                    Some { id = id ^ "_ref"; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
+                | None -> gate.else_node
+              in
+              { node with node_type = Gate { gate with then_node; else_node } }
           | _ -> node
         ) nodes_raw in
 

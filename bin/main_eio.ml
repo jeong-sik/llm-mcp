@@ -1842,6 +1842,8 @@ let port_arg =
   Arg.(value & opt int 8932 & info ["port"; "p"] ~docv:"PORT" ~doc)
 
 let main host port =
+  (* Enable backtrace recording for debugging *)
+  Printexc.record_backtrace true;
   (* Enable chain stats collection *)
   Chain_stats.enable ();
   let config = { default_config with host; port } in

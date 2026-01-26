@@ -115,7 +115,7 @@ let topological_sort (deps : (string, string list) Hashtbl.t) : (string list, st
       | Some current ->
           Hashtbl.replace reverse_deps dep (node :: current);
           (* Increment in-degree of node *)
-          let deg = Hashtbl.find in_degree node in
+          let deg = Hashtbl.find_opt in_degree node |> Option.value ~default:0 in
           Hashtbl.replace in_degree node (deg + 1)
       | None ->
           (* dep is not a node in the graph - could be external input or error *)
@@ -148,12 +148,13 @@ let topological_sort (deps : (string, string list) Hashtbl.t) : (string list, st
     else begin
       let node = Queue.pop queue in
       (* Decrement in-degree of all nodes that depend on this one *)
+      let dependents = Hashtbl.find_opt reverse_deps node |> Option.value ~default:[] in
       List.iter (fun dependent ->
-        let deg = Hashtbl.find in_degree dependent in
+        let deg = Hashtbl.find_opt in_degree dependent |> Option.value ~default:0 in
         let new_deg = deg - 1 in
         Hashtbl.replace in_degree dependent new_deg;
         if new_deg = 0 then Queue.add dependent queue
-      ) (Hashtbl.find reverse_deps node);
+      ) dependents;
       process (node :: acc)
     end
   in
@@ -168,7 +169,7 @@ let identify_parallel_groups
   let levels = Hashtbl.create (List.length nodes) in
 
   List.iter (fun node_id ->
-    let node_deps = Hashtbl.find deps node_id in
+    let node_deps = Hashtbl.find_opt deps node_id |> Option.value ~default:[] in
     let level =
       if node_deps = [] then 0
       else

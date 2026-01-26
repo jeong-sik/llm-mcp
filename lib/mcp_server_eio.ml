@@ -294,9 +294,10 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     try
       Tools_eio.execute_with_tracing ~sw ~proc_mgr ~clock args
     with exn ->
+      let bt = Printexc.get_backtrace () in
       { Types.model = "error";
         returncode = 1;
-        response = Printexc.to_string exn;
+        response = Printf.sprintf "%s\nBacktrace:\n%s" (Printexc.to_string exn) bt;
         extra = [];
       }
   in
