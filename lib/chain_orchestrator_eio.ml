@@ -104,25 +104,45 @@ let result_to_metrics ~(chain_id: string) ~(goal: string) ~(started_at: float)
     ~(max_depth: int) ?(chain: chain option = None)
     (result: Chain_executor_eio.chain_result) : chain_metrics =
   let now = Unix.gettimeofday () in
-  let node_metrics = List.map (fun (entry: Chain_types.trace_entry) ->
-    {
-      node_id = entry.node_id;
-      node_type = entry.node_type_name;
-      status = (match entry.status with
-        | `Success -> Succeeded
-        | `Failure -> Failed
-        | `Skipped -> Skipped);
-      started_at = Some entry.start_time;
-      completed_at = Some entry.end_time;
-      duration_ms = int_of_float ((entry.end_time -. entry.start_time) *. 1000.0);
-      estimated_duration_ms = None;
-      retry_count = 0;  (* trace_entry doesn't track retries *)
-      error_message = entry.error;
-      output_preview = (match entry.output_preview with
-        | Some o -> Some (String.sub o 0 (min 200 (String.length o)))
-        | None -> None);
-    }
-  ) result.trace in
+  let node_metrics =
+    match (result.trace, chain) with
+    | ([], Some c) ->
+        let status = if result.success then Succeeded else Failed in
+        List.map (fun (n: node) ->
+          {
+            node_id = n.id;
+            node_type = Chain_types.node_type_name n.node_type;
+            status;
+            started_at = None;
+            completed_at = None;
+            duration_ms = 0;
+            estimated_duration_ms = None;
+            retry_count = 0;
+            error_message = None;
+            output_preview = None;
+          }
+        ) c.nodes
+    | _ ->
+        List.map (fun (entry: Chain_types.trace_entry) ->
+          {
+            node_id = entry.node_id;
+            node_type = entry.node_type_name;
+            status = (match entry.status with
+              | `Success -> Succeeded
+              | `Failure -> Failed
+              | `Skipped -> Skipped);
+            started_at = Some entry.start_time;
+            completed_at = Some entry.end_time;
+            duration_ms = int_of_float ((entry.end_time -. entry.start_time) *. 1000.0);
+            estimated_duration_ms = None;
+            retry_count = 0;  (* trace_entry doesn't track retries *)
+            error_message = entry.error;
+            output_preview = (match entry.output_preview with
+              | Some o -> Some (String.sub o 0 (min 200 (String.length o)))
+              | None -> None);
+          }
+        ) result.trace
+  in
 
   let succeeded = List.length (List.filter (fun n -> n.status = Succeeded) node_metrics) in
   let failed = List.length (List.filter (fun n -> n.status = Failed) node_metrics) in
@@ -183,9 +203,51 @@ let orchestrate
     | Error e -> Error (Printf.sprintf "Compile error: %s" e)
     | Ok plan ->
       (* Create execution function for LLM nodes *)
-      let exec_fn ~model:_ ?system:_ ~prompt ?tools:_ () =
-        let result = llm_call ~prompt in
-        Ok result
+      let timeout_sec = max 1 (config.timeout_ms / 1000) in
+      let starts_with ~prefix s =
+        let prefix_len = String.length prefix in
+        String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+      in
+      let exec_via_tool ~name ~args =
+        let json = tool_exec ~name ~args:(`Assoc args) in
+        match json with
+        | `Assoc fields -> (match List.assoc_opt "error" fields with
+            | Some (`String msg) -> Error msg
+            | _ -> Ok (Yojson.Safe.to_string json))
+        | `String s -> Ok s
+        | _ -> Ok (Yojson.Safe.to_string json)
+      in
+      let exec_fn ~model ?system ~prompt ?tools () =
+        let base_args = [
+          ("prompt", `String prompt);
+          ("timeout", `Int timeout_sec);
+        ] in
+        let args = match system with
+          | Some s -> ("system_prompt", `String s) :: base_args
+          | None -> base_args
+        in
+        let args = match tools with
+          | Some t -> ("tools", t) :: args
+          | None -> args
+        in
+        let lowered = String.lowercase_ascii model in
+        match lowered with
+        | "stub" | "mock" -> Ok (Printf.sprintf "[stub]%s" prompt)
+        | "codex" | "gpt-5.2" ->
+            exec_via_tool ~name:"codex" ~args:(("model", `String "gpt-5.2") :: args)
+        | m when starts_with ~prefix:"gpt-" m ->
+            exec_via_tool ~name:"codex" ~args:(("model", `String model) :: args)
+        | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" | "haiku-4.5" ->
+            exec_via_tool ~name:"claude" ~args:(("model", `String model) :: args)
+        | "ollama" ->
+            exec_via_tool ~name:"ollama" ~args
+        | m when starts_with ~prefix:"ollama:" m ->
+            let ollama_model = String.sub model 7 (String.length model - 7) in
+            exec_via_tool ~name:"ollama" ~args:(("model", `String ollama_model) :: args)
+        | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
+            exec_via_tool ~name:"gemini" ~args:(("model", `String model) :: args)
+        | _ ->
+            exec_via_tool ~name:"gemini" ~args:(("model", `String "gemini-3-pro-preview") :: args)
       in
 
       (* Create tool execution wrapper *)
@@ -232,7 +294,7 @@ let orchestrate
         | Error e -> Error (ExecutionFailed e)
         | Ok exec_result ->
           let max_depth = chain.config.max_depth in
-          let metrics = result_to_metrics ~chain_id:session_id ~goal ~started_at ~max_depth exec_result in
+          let metrics = result_to_metrics ~chain_id:session_id ~goal ~started_at ~max_depth ~chain:(Some chain) exec_result in
 
           if not exec_result.success && metrics.nodes_failed > 0 then begin
           (* Execution had failures - check if we should replan *)

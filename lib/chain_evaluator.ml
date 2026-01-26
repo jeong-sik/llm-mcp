@@ -335,12 +335,66 @@ Respond with:
 
 (** Parse LLM verification response into structured result *)
 let parse_verification_response (response: string) : verification_result =
-  (* Simple parsing - in production, use JSON parsing *)
-  let is_complete = String.exists (fun c -> c = 't')
-    (try
-      let line = List.find (fun l -> String.length l > 0 && l.[0] = 'i') (String.split_on_char '\n' response)
-      in String.lowercase_ascii line
-    with Not_found -> "false") in
+  let starts_with ~prefix s =
+    let prefix_len = String.length prefix in
+    String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+  in
+  let strip_markdown s =
+    let buf = Buffer.create (String.length s) in
+    String.iter (fun c ->
+      if c <> '*' && c <> '`' then Buffer.add_char buf c
+    ) s;
+    Buffer.contents buf
+  in
+  let drop_leading_non_key s =
+    let len = String.length s in
+    let rec find i =
+      if i >= len then len
+      else
+        let c = s.[i] in
+        if (c >= 'a' && c <= 'z') || c = '_' then i else find (i + 1)
+    in
+    let i = find 0 in
+    if i >= len then s else String.sub s i (len - i)
+  in
+  let parse_bool_from_line line =
+    let trimmed =
+      line
+      |> String.trim
+      |> String.lowercase_ascii
+      |> strip_markdown
+      |> String.trim
+    in
+    match String.index_opt trimmed ':' with
+    | None -> false
+    | Some idx ->
+        let value = String.sub trimmed (idx + 1) (String.length trimmed - idx - 1) |> String.trim in
+        value = "true" || value = "yes"
+  in
+  let keys = [
+    "is_complete";
+    "complete";
+    "completed";
+    "goal_achieved";
+    "goal achieved";
+    "achieved";
+    "result";
+  ] in
+  let is_complete =
+    match List.find_opt (fun l ->
+      let t =
+        l
+        |> String.trim
+        |> String.lowercase_ascii
+        |> strip_markdown
+        |> String.trim
+        |> drop_leading_non_key
+      in
+      List.exists (fun key -> starts_with ~prefix:key t) keys
+    ) (String.split_on_char '\n' response) with
+    | Some line -> parse_bool_from_line line
+    | None -> false
+  in
   {
     is_complete;
     confidence = if is_complete then 0.9 else 0.3;
