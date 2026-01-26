@@ -145,6 +145,21 @@ let next_attempt ctx node_id =
   Hashtbl.replace ctx.node_attempts node_id next;
   next
 
+(** {1 Empty Response Guard} *)
+
+(** Maximum retries for empty LLM responses (configurable via CHAIN_EMPTY_RETRIES env) *)
+let max_empty_retries =
+  try int_of_string (Sys.getenv "CHAIN_EMPTY_RETRIES")
+  with _ -> 3
+
+(** Check if response is empty or whitespace-only *)
+let is_empty_response output =
+  String.length (String.trim output) = 0
+
+(** Enhancement prompt added on retry for empty responses *)
+let empty_retry_suffix =
+  "\n\n[IMPORTANT: You must provide a non-empty response. Do not return blank or empty output.]"
+
 (** Create checkpoint configuration for execution *)
 let make_checkpoint_config ?fs ?store ?(enabled = false) ?resume_from () =
   let store = match store with
@@ -790,53 +805,102 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
         | None -> None
       in
 
-      let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_with_context ?tools:tools_arg () in
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-      (match result with
-      | Ok output ->
-          (* Estimate tokens: ~4 chars per token (rough approximation) *)
-          let prompt_tokens = (String.length prompt_with_context + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
-          let completion_tokens = String.length output / 4 in
-          let node_tokens = {
-            Chain_category.prompt_tokens;
-            completion_tokens;
-            total_tokens = prompt_tokens + completion_tokens;
-            estimated_cost_usd = 0.0;
-          } in
-          ctx.total_tokens <- Chain_category.Token_monoid.concat ctx.total_tokens node_tokens;
+      (* Empty response guard: retry with enhanced prompt on empty output *)
+      let rec try_with_empty_guard ~attempt ~prompt_to_use =
+        let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_to_use ?tools:tools_arg () in
+        let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+        match result with
+        | Ok output when is_empty_response output && attempt < max_empty_retries ->
+            (* Empty response detected - log and retry with enhanced prompt *)
+            if Run_log_eio.enabled () then
+              Run_log_eio.record_event
+                ~event:"empty_response_retry"
+                ~run_id:ctx.checkpoint.run_id
+                ~chain_id:ctx.chain_id
+                ~node_id:node.id
+                ~node_type:"llm"
+                ~model:effective_model
+                ~success:false
+                ~extra:[
+                  ("attempt", string_of_int attempt);
+                  ("max_retries", string_of_int max_empty_retries);
+                  ("action", "retrying_with_enhanced_prompt");
+                ]
+                ();
+            (* Retry with enhanced prompt *)
+            let enhanced_prompt = prompt_to_use ^ empty_retry_suffix in
+            try_with_empty_guard ~attempt:(attempt + 1) ~prompt_to_use:enhanced_prompt
+        | Ok output when is_empty_response output ->
+            (* Max retries exhausted - return error *)
+            record_complete ctx node.id ~duration_ms ~success:false ~node_type:"llm";
+            record_error ctx node.id ~node_type:"llm"
+              (Printf.sprintf "Empty response after %d retries" max_empty_retries);
+            Error (Printf.sprintf "LLM returned empty response after %d retries" max_empty_retries)
+        | Ok output ->
+            (* Valid non-empty response *)
+            let prompt_tokens = (String.length prompt_to_use + (match final_system with Some s -> String.length s | None -> 0)) / 4 in
+            let completion_tokens = String.length output / 4 in
+            let node_tokens = {
+              Chain_category.prompt_tokens;
+              completion_tokens;
+              total_tokens = prompt_tokens + completion_tokens;
+              estimated_cost_usd = 0.0;
+            } in
+            ctx.total_tokens <- Chain_category.Token_monoid.concat ctx.total_tokens node_tokens;
 
-          (* End Langfuse generation with success *)
-          (match langfuse_gen with
-           | Some gen -> Langfuse.end_generation gen ~output ~prompt_tokens ~completion_tokens
-           | None -> ());
+            (* Log if retry was needed *)
+            if attempt > 1 && Run_log_eio.enabled () then
+              Run_log_eio.record_event
+                ~event:"empty_response_recovered"
+                ~run_id:ctx.checkpoint.run_id
+                ~chain_id:ctx.chain_id
+                ~node_id:node.id
+                ~node_type:"llm"
+                ~model:effective_model
+                ~success:true
+                ~extra:[
+                  ("attempts_needed", string_of_int attempt);
+                ]
+                ();
 
-          (* Update Prompt Registry metrics if prompt_ref was used *)
-          (match prompt_ref with
-           | Some ref ->
-               (* Parse ref format: "id" or "id@version" *)
-               let (id, version) = match String.split_on_char '@' ref with
-                 | [id; ver] -> (id, ver)
-                 | [id] ->
-                     (* Look up the version that was actually used *)
-                     (match Prompt_registry.get ~id () with
-                      | Some entry -> (id, entry.version)
-                      | None -> (id, "1.0"))
-                 | _ -> (ref, "1.0")
-               in
-               (* Calculate a simple quality score based on output length *)
-               (* In real usage, this could be replaced with a proper evaluation *)
-               let score = min 1.0 (float_of_int (String.length output) /. 500.0) in
-               Prompt_registry.update_metrics ~id ~version ~score ()
-           | None -> ());
+            (* End Langfuse generation with success *)
+            (match langfuse_gen with
+             | Some gen -> Langfuse.end_generation gen ~output ~prompt_tokens ~completion_tokens
+             | None -> ());
 
-          (match conv_opt with
-           | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
-           | None -> ());
+            (* Update Prompt Registry metrics if prompt_ref was used *)
+            (match prompt_ref with
+             | Some ref ->
+                 let (id, version) = match String.split_on_char '@' ref with
+                   | [id; ver] -> (id, ver)
+                   | [id] ->
+                       (match Prompt_registry.get ~id () with
+                        | Some entry -> (id, entry.version)
+                        | None -> (id, "1.0"))
+                   | _ -> (ref, "1.0")
+                 in
+                 let score = min 1.0 (float_of_int (String.length output) /. 500.0) in
+                 Prompt_registry.update_metrics ~id ~version ~score ()
+             | None -> ());
 
-          record_complete ctx node.id ~duration_ms ~success:true ~node_type:"llm";
-          Hashtbl.add ctx.outputs node.id output;
-          Ok output
+            (match conv_opt with
+             | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
+             | None -> ());
+
+            record_complete ctx node.id ~duration_ms ~success:true ~node_type:"llm";
+            Hashtbl.add ctx.outputs node.id output;
+            Ok output
+        | Error msg ->
+            (* Pass through LLM errors as before *)
+            Error msg
+      in
+      let final_result = try_with_empty_guard ~attempt:1 ~prompt_to_use:prompt_with_context in
+      (match final_result with
+      | Ok output -> Ok output
       | Error msg ->
+          (* Calculate duration for error case *)
+          let error_duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+
           (* End Langfuse generation with error *)
           (match langfuse_gen with
            | Some gen -> Langfuse.error_generation gen ~message:msg
@@ -856,7 +920,7 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
                Prompt_registry.update_metrics ~id ~version ~score:0.0 ()
            | None -> ());
 
-          record_complete ctx node.id ~duration_ms ~success:false ~node_type:"llm";
+          record_complete ctx node.id ~duration_ms:error_duration_ms ~success:false ~node_type:"llm";
           record_error ctx node.id ~node_type:"llm" msg;
           Error msg)
   | _ -> Error "execute_llm_node called with non-LLM node"
