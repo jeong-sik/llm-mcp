@@ -387,9 +387,10 @@ let decide_next_action ~state ~metrics ~verification : composer_decision =
     | Some _ ->
       Abort "Maximum replan attempts exceeded"
     | None when metrics.nodes_pending = 0 ->
-      (* All done but not verified complete - might need verification *)
-      Continue
+      (* All nodes done, no replan needed - complete even with low confidence *)
+      Complete metrics
     | None ->
+      (* Still have pending work - continue current execution *)
       Continue
 
 (* ============================================================

@@ -193,12 +193,16 @@ let orchestrate
 
   (* Design phase: Get chain from LLM (or use provided initial chain once) *)
   let pending_chain = ref initial_chain in
+  Log.info "orchestrator" "Initialized pending_chain=%s"
+    (match initial_chain with Some c -> Printf.sprintf "Some(id=%s)" c.id | None -> "None");
   let design_chain () =
     match !pending_chain with
     | Some chain ->
+        Log.info "orchestrator" "design_chain: Using pre-loaded chain (id=%s)" chain.id;
         pending_chain := None;
         Ok chain
     | None ->
+        Log.info "orchestrator" "design_chain: No pending_chain, calling LLM...";
         let context = get_design_context !state in
         let response = llm_call ~prompt:context in
         parse_chain_design response
@@ -309,7 +313,8 @@ let orchestrate
           let decision = decide_next_action ~state:!state ~metrics ~verification in
 
           match decision with
-          | Replan reason ->
+          | Replan reason when !state.replan_count < config.max_replans ->
+            (* Only replan if within max_replans limit *)
             state := increment_replan !state;
             state := add_checkpoint !state
               ~trigger:OnFailure
@@ -323,6 +328,10 @@ let orchestrate
                  | ContextChanged -> "Context changed"
                  | TimeoutApproaching -> "Timeout approaching"));
             loop ()  (* Retry with new design *)
+
+          | Replan _ ->
+            (* Hit max_replans limit, abort *)
+            Error (ExecutionFailed (Printf.sprintf "Execution failed and max_replans (%d) exceeded" config.max_replans))
 
           | Abort reason ->
             Error (ExecutionFailed reason)

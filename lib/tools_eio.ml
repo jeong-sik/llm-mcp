@@ -2266,16 +2266,43 @@ This chain will execute the goal using a stub model.|}
       let effective_chain = match chain with
         | Some _ -> chain  (* Use provided chain *)
         | None ->
-            (* Try to load from chain_id *)
+            (* Try to load from chain_id using LLM_MCP_REPO_ROOT for absolute path *)
             (match chain_id with
              | Some cid ->
-                 let chain_path = Printf.sprintf "data/chains/%s.json" cid in
+                 let default_me_root () =
+                   let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
+                   Filename.concat home "me"
+                 in
+                 let find_repo_root () =
+                   match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
+                   | Some path ->
+                       Log.info "chain_id_load" "Using LLM_MCP_REPO_ROOT: %s" path;
+                       path
+                   | None ->
+                       let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
+                       Log.info "chain_id_load" "ME_ROOT: %s" me_root;
+                       let candidates = [
+                         Filename.concat me_root "llm-mcp";
+                         Filename.concat (Filename.concat me_root "workspace") "llm-mcp";
+                         Filename.concat (Filename.concat (Filename.concat me_root "workspace") "yousleepwhen") "llm-mcp";
+                       ] in
+                       List.iter (fun c -> Log.info "chain_id_load" "Candidate: %s (exists: %b)" c (Sys.file_exists c)) candidates;
+                       match List.find_opt Sys.file_exists candidates with
+                       | Some path -> Log.info "chain_id_load" "Found repo root: %s" path; path
+                       | None -> Log.warn "chain_id_load" "No repo root found, using cwd"; "."
+                 in
+                 let repo_root = find_repo_root () in
+                 let chain_path = Filename.concat (Filename.concat repo_root "data") (Filename.concat "chains" (cid ^ ".json")) in
+                 Log.info "chain_id_load" "Chain path: %s (exists: %b)" chain_path (Sys.file_exists chain_path);
                  (try
                    let ic = open_in chain_path in
                    let content = really_input_string ic (in_channel_length ic) in
                    close_in ic;
+                   Log.info "chain_id_load" "Loaded chain file (%d bytes)" (String.length content);
                    Some (Yojson.Safe.from_string content)
-                 with _ -> None)
+                 with e ->
+                   Log.error "chain_id_load" "Failed to load chain: %s" (Printexc.to_string e);
+                   None)
              | None -> None)
       in
 
@@ -2301,13 +2328,22 @@ This chain will execute the goal using a stub model.|}
         | None -> []
       in
 
+      (* FIXED: Use effective_chain (includes chain_id loaded file), not just chain *)
       let initial_chain =
-        match chain with
-        | None -> Ok None
+        match effective_chain with
+        | None ->
+            Log.info "chain_orchestrate" "effective_chain is None";
+            Ok None
         | Some chain_json ->
+            Log.info "chain_orchestrate" "effective_chain present, attempting parse...";
             (match Chain_parser.parse_chain chain_json with
-             | Ok parsed -> Ok (Some parsed)
-             | Error msg -> Error msg)
+             | Ok parsed ->
+                 Log.info "chain_orchestrate" "Parse SUCCESS: chain id=%s, nodes=%d"
+                   parsed.id (List.length parsed.nodes);
+                 Ok (Some parsed)
+             | Error msg ->
+                 Log.error "chain_orchestrate" "Parse FAILED: %s" msg;
+                 Error msg)
       in
 
       (* Run orchestration *)
@@ -2318,6 +2354,8 @@ This chain will execute the goal using a stub model.|}
             response = Printf.sprintf "Chain parse error: %s" msg;
             extra = [("stage", "parse")]; }
       | Ok initial_chain ->
+      Log.info "chain_orchestrate" "Calling orchestrator with initial_chain=%s"
+        (match initial_chain with Some c -> Printf.sprintf "Some(id=%s)" c.id | None -> "None");
       (match with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.orchestrate" (fun () ->
         Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks ~initial_chain) with
       | Ok result ->

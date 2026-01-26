@@ -2580,8 +2580,9 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   in
 
   (* Helper: Substitute variables in improver_prompt *)
-  let substitute_prompt template ~feedback ~previous_output =
+  let substitute_prompt template ~score ~feedback ~previous_output =
     template
+    |> Str.global_replace (Str.regexp "{{score}}") (Printf.sprintf "%.2f" score)
     |> Str.global_replace (Str.regexp "{{feedback}}") feedback
     |> Str.global_replace (Str.regexp "{{previous_output}}") previous_output
   in
@@ -2621,7 +2622,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             Hashtbl.replace ctx.outputs (parent.id ^ ".feedback") feedback;
 
             (* Update generator prompt with feedback *)
-            let new_prompt = substitute_prompt improver_prompt ~feedback ~previous_output:output in
+            let new_prompt = substitute_prompt improver_prompt ~score ~feedback ~previous_output:output in
             let updated_generator = match (!current_generator).node_type with
               | Llm llm_config ->
                   { !current_generator with
