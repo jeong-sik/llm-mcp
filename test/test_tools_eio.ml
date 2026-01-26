@@ -60,6 +60,22 @@ let () = Eio_main.run @@ fun env ->
       Printf.printf "[OK] MCP missing server test passed (result=%s)\n%!" (String.sub result 0 (min 60 (String.length result)))
     in
 
+    (* Test 4b: MCP HTTP response parsing (SSE + plain JSON) *)
+    let () =
+      let plain =
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}}" in
+      let sse =
+        "event: message\n\
+data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"OK\"}]}}\n\n" in
+      (match parse_mcp_http_response plain with
+       | Some "OK" -> ()
+       | other -> failwith ("parse_mcp_http_response plain failed: " ^ (Option.value other ~default:"(none)")));
+      (match parse_mcp_http_response sse with
+       | Some "OK" -> ()
+       | other -> failwith ("parse_mcp_http_response sse failed: " ^ (Option.value other ~default:"(none)")));
+      Printf.printf "[OK] MCP HTTP response parsing test passed\n%!"
+    in
+
     (* Test 5: Execute OllamaList (tests parsing logic, may fail if ollama not installed) *)
     let () =
       let result = execute ~sw ~proc_mgr ~clock OllamaList in
@@ -75,6 +91,7 @@ let () = Eio_main.run @@ fun env ->
         model = "gemini-2.5-flash";
         thinking_level = Low;
         yolo = false;
+        output_format = Text;
         timeout = 30;
         stream = false;
       } in

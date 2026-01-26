@@ -196,8 +196,8 @@ let extract_input_mappings (prompt : string) : (string * string) list =
   |> List.map (fun ref ->
       (* Split "node.output" or just use as-is *)
       match String.split_on_char '.' ref with
-      | [node_id; _field] -> (ref, node_id)
-      | _ -> (ref, ref))
+      | node_id :: _ -> (ref, node_id)
+      | [] -> (ref, ref))
 
 (** Extract input mappings from JSON arguments *)
 let rec extract_json_mappings (json : Yojson.Safe.t) : (string * string) list =
@@ -385,6 +385,15 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
           let mapping = List.map (fun dep_id -> ("_dep_" ^ dep_id, dep_id)) parsed in
           (Some parsed, mapping)
       | _ -> (None, [])
+    in
+
+    (* Ensure Adapter input_ref contributes to dependency ordering *)
+    let input_mapping =
+      match node_type with
+      | Adapter { input_ref; _ } ->
+          if List.exists (fun (k, _) -> k = input_ref) input_mapping then input_mapping
+          else input_mapping @ [(input_ref, input_ref)]
+      | _ -> input_mapping
     in
 
     (* Combine input_mapping with depends_on *)

@@ -68,17 +68,25 @@ let init ?persist_dir () =
             try
               let content = In_channel.with_open_text path In_channel.input_all in
               let json = Yojson.Safe.from_string content in
-              (* Use Chain_parser.parse_chain which handles optional fields properly *)
-              match Chain_parser.parse_chain json with
-              | Ok chain ->
-                  Hashtbl.replace registry chain.id {
-                    chain;
-                    registered_at = Unix.gettimeofday ();
-                    version = 1;
-                    description = chain.description;
-                  }
-              | Error msg ->
-                  Printf.eprintf "[chain_registry] Failed to parse %s: %s\n%!" path msg
+              (* Prefer Chain_parser.parse_chain for optional/extended fields. *)
+              let parsed =
+                match Chain_parser.parse_chain json with
+                | Ok chain -> Ok chain
+                | Error msg ->
+                    (match chain_of_yojson json with
+                     | Ok chain -> Ok chain
+                     | Error _ -> Error msg)
+              in
+              (match parsed with
+               | Ok chain ->
+                   Hashtbl.replace registry chain.id {
+                     chain;
+                     registered_at = Unix.gettimeofday ();
+                     version = 1;
+                     description = chain.description;
+                   }
+               | Error msg ->
+                   Printf.eprintf "[chain_registry] Failed to parse %s: %s\n%!" path msg)
             with exn ->
               Printf.eprintf "[chain_registry] Exception loading %s: %s\n%!" path (Printexc.to_string exn)
           end

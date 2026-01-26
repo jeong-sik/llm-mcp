@@ -39,7 +39,12 @@ let starts_with ~prefix s =
   String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
 
 let split_tool_name name =
-  match String.index_opt name '.' with
+  let delim_idx =
+    match String.index_opt name '.' with
+    | Some idx -> Some idx
+    | None -> String.index_opt name ':'
+  in
+  match delim_idx with
   | None -> None
   | Some idx ->
       let server = String.sub name 0 idx in
@@ -115,6 +120,7 @@ let execute_chain_run
                     model = "stub";
                     thinking_level = Types.Low;
                     yolo = false;
+                    output_format = Types.Text;
                     timeout = node_timeout;
                     stream = false;
                   }
@@ -124,6 +130,7 @@ let execute_chain_run
                     model = "gemini-3-pro-preview";
                     thinking_level = Types.High;
                     yolo = false;
+                    output_format = Types.Text;
                     timeout = node_timeout;
                     stream = false;
                   }
@@ -176,6 +183,7 @@ let execute_chain_run
                     model = "gemini-3-pro-preview";
                     thinking_level = Types.High;
                     yolo = false;
+                    output_format = Types.Text;
                     timeout = node_timeout;
                     stream = false;
                   }
@@ -231,7 +239,7 @@ let execute_chain_run
           in
           let _ = input in
           let result = Chain_executor_eio.execute
-            ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec plan
+            ~sw ~clock ~timeout:node_timeout ~trace ~exec_fn ~tool_exec ?input plan
           in
           if Run_log_eio.enabled () then
             Run_log_eio.record_event
@@ -500,6 +508,7 @@ This chain will execute the goal using a stub model.|}
           model = "gemini-3-pro-preview";
           thinking_level = Types.High;
           yolo = false;
+          output_format = Types.Text;
           timeout = 120;
           stream = false;
         } in

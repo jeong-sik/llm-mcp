@@ -233,6 +233,7 @@ let test_build_gemini_cmd () =
     model = "gemini-2.5-flash";
     thinking_level = Low;
     yolo = false;
+    output_format = Text;
     timeout = 60;
     stream = false;
   } in
@@ -240,7 +241,8 @@ let test_build_gemini_cmd () =
   | Ok cmd_list ->
       check bool "cmd starts with gemini" true (List.hd cmd_list = "gemini");
       check bool "has model flag" true (List.mem "-m" cmd_list);
-      check bool "has model value" true (List.mem "gemini-2.5-flash" cmd_list)
+      check bool "has model value" true (List.mem "gemini-2.5-flash" cmd_list);
+      check bool "has prompt flag" true (List.mem "-p" cmd_list)
   | Error e -> fail ("build_gemini_cmd failed: " ^ e)
 
 let test_build_gemini_cmd_with_yolo () =
@@ -249,6 +251,7 @@ let test_build_gemini_cmd_with_yolo () =
     model = "gemini-3-pro-preview";
     thinking_level = High;
     yolo = true;
+    output_format = Text;
     timeout = 300;
     stream = false;
   } in

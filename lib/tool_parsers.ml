@@ -26,9 +26,13 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
     |> Option.value ~default:(if budget_mode then "low" else "high")
     |> thinking_level_of_string in
   let yolo = json |> member "yolo" |> to_bool_option |> Option.value ~default:false in
+  let output_format =
+    json |> member "output_format" |> to_string_option
+    |> Option.value ~default:"text"
+    |> output_format_of_string in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
-  Gemini { prompt; model; thinking_level; yolo; timeout; stream }
+  Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream }
 
 (** Parse JSON arguments for Claude tool *)
 let parse_claude_args (json : Yojson.Safe.t) : tool_args =
@@ -274,11 +278,16 @@ let thinking_prompt_prefix = function
 (** Build Gemini CLI command *)
 let build_gemini_cmd args =
   match args with
-  | Gemini { prompt; model; yolo; thinking_level; _ } ->
+  | Gemini { prompt; model; yolo; thinking_level; output_format; _ } ->
       let prefix = thinking_prompt_prefix thinking_level in
       let enhanced_prompt = if String.length prefix > 0 then prefix ^ prompt else prompt in
-      let cmd = ["gemini"; "-m"; model] in
+      let cmd = ["gemini"; "-m"; model; "-p"] in
       let cmd = if yolo then cmd @ ["--yolo"] else cmd in
+      let cmd = match output_format with
+        | Text -> cmd
+        | Json -> cmd @ ["--output-format"; "json"]
+        | StreamJson -> cmd @ ["--output-format"; "stream-json"]
+      in
       Ok (cmd @ [enhanced_prompt])
   | _ -> Error "Invalid args for Gemini"
 

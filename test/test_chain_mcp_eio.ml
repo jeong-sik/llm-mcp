@@ -181,10 +181,102 @@ flowchart TD
     check bool "mermaid chain.validate output"
       true (starts_with ~prefix:"Chain" (get_result_text validate_resp))
 
+let test_chain_run_input_and_dotpath () =
+  run_eio @@ fun env ->
+  let store = Server.create_session_store () in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let headers = [] in
+
+  Eio.Switch.run @@ fun sw ->
+    let init_req = {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}|} in
+    let (_session_opt, init_resp) =
+      Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers init_req
+    in
+    let session_id = get_session_id init_resp in
+
+    (* 1) chain.run input injection *)
+    let input_chain = `Assoc [
+      ("id", `String "input_chain");
+      ("nodes", `List [
+        `Assoc [
+          ("id", `String "echo");
+          ("type", `String "tool");
+          ("tool", `Assoc [
+            ("name", `String "echo");
+            ("args", `Assoc [("input", `String "{{input.word}}")]);
+          ]);
+        ];
+      ]);
+      ("output", `String "echo");
+    ] in
+    let run_params = `Assoc [
+      ("name", `String "chain.run");
+      ("arguments", `Assoc [
+        ("chain", input_chain);
+        ("input", `Assoc [("word", `String "HELLO")]);
+      ]);
+      ("sessionId", `String session_id);
+    ] in
+    let run_req = `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 20);
+      ("method", `String "tools/call");
+      ("params", run_params);
+    ] |> Yojson.Safe.to_string in
+    let (_session_opt, run_resp) =
+      Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers run_req
+    in
+    check bool "chain.run input isError=false" false (get_is_error run_resp);
+    check string "chain.run input output" "HELLO" (get_result_text run_resp);
+
+    (* 2) dot-path extraction + dependency detection (no explicit edges, reversed order) *)
+    let dotpath_chain = `Assoc [
+      ("id", `String "dotpath_chain");
+      ("nodes", `List [
+        `Assoc [
+          ("id", `String "b");
+          ("type", `String "tool");
+          ("tool", `Assoc [
+            ("name", `String "echo");
+            ("args", `Assoc [("input", `String "{{a.foo.bar}}")]);
+          ]);
+        ];
+        `Assoc [
+          ("id", `String "a");
+          ("type", `String "tool");
+          ("tool", `Assoc [
+            ("name", `String "echo");
+            ("args", `Assoc [("input", `String "{\"foo\":{\"bar\":\"baz\"}}")]);
+          ]);
+        ];
+      ]);
+      ("output", `String "b");
+    ] in
+    let run_params2 = `Assoc [
+      ("name", `String "chain.run");
+      ("arguments", `Assoc [
+        ("chain", dotpath_chain);
+      ]);
+      ("sessionId", `String session_id);
+    ] in
+    let run_req2 = `Assoc [
+      ("jsonrpc", `String "2.0");
+      ("id", `Int 21);
+      ("method", `String "tools/call");
+      ("params", run_params2);
+    ] |> Yojson.Safe.to_string in
+    let (_session_opt, run_resp2) =
+      Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers run_req2
+    in
+    check bool "chain.run dotpath isError=false" false (get_is_error run_resp2);
+    check string "chain.run dotpath output" "baz" (get_result_text run_resp2)
+
 let () =
   run "chain_mcp_eio" [
     ("chain", [
       test_case "chain.run/validate" `Quick test_chain_run_and_validate;
       test_case "mermaid execution (WYSIWYE)" `Quick test_mermaid_execution;
+      test_case "chain.run input + dotpath" `Quick test_chain_run_input_and_dotpath;
     ]);
   ]

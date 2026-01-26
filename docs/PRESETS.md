@@ -13,6 +13,7 @@
 | `incident-response` | 인시던트 대응 자동화 | Multi-LLM |
 | `code-migration` | 코드 마이그레이션 | Codex + Claude |
 | `figma-to-prototype` | Figma → 코드 변환 | Gemini + Claude |
+| `figma-to-component-spec` | Figma → 컴포넌트 스펙(JSON) | Claude + Gemini |
 
 ---
 
@@ -238,6 +239,22 @@ graph TD
     ios --> verify
     android --> verify
     web --> verify
+```
+
+---
+
+## 8. figma-to-component-spec
+
+**🎯 사용 시점**: Figma 요약 기반 컴포넌트 스펙(JSON) 생성
+
+```mermaid
+graph LR
+    figma["🎨 Figma Summary"]
+    spec["🧩 Spec JSON<br/>(Claude)"]
+    validate["✅ Schema Validate"]
+
+    figma --> spec
+    spec --> validate
 ```
 
 ---
