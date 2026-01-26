@@ -1,0 +1,184 @@
+{
+  "id": "rw-messaging-a11y-audit",
+  "name": "Messaging - A11y Audit",
+  "description": "Accessibility checklist + scan with remediation tasks for Messaging (conversation flows).",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "figma-parse",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": {
+          "url": "{{input.figma_url}}"
+        }
+      }
+    },
+    {
+      "id": "figma-summary",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "max_children": 80
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-bundle",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "depth": 4
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "a11y-checklist",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Create an accessibility checklist for the Messaging screen.\nUse the Figma bundle for context. Output a concise checklist.\nFigma bundle:\n{{figma-bundle}}"
+      },
+      "depends_on": [
+        "figma-bundle"
+      ]
+    },
+    {
+      "id": "a11y-scan",
+      "type": "tool",
+      "tool": {
+        "server": "web",
+        "name": "a11y_scan",
+        "args": {
+          "url": "{{input.base_url}}",
+          "feature": "messaging"
+        }
+      },
+      "depends_on": [
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "a11y-compare",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Compare checklist vs scan results for Messaging.\nChecklist:\n{{a11y-checklist}}\n\nScan:\n{{a11y-scan}}"
+      },
+      "depends_on": [
+        "a11y-checklist",
+        "a11y-scan"
+      ]
+    },
+    {
+      "id": "task-list",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Create remediation tasks for Messaging accessibility gaps.\nComparison:\n{{a11y-compare}}\n\nReturn ONLY JSON array of tasks with title/priority/description."
+      },
+      "depends_on": [
+        "a11y-compare"
+      ]
+    },
+    {
+      "id": "masc-batch-add",
+      "type": "tool",
+      "tool": {
+        "server": "masc",
+        "name": "masc_batch_add_tasks",
+        "args": {
+          "tasks": "{{task-list}}"
+        }
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    },
+    {
+      "id": "final-report",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Summarize the a11y audit for Messaging.\nInclude high-risk issues and required fixes."
+      },
+      "depends_on": [
+        "a11y-compare",
+        "task-list"
+      ]
+    }
+  ],
+  "output": "final-report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "Web URL for audits"
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo identifier (owner/name)"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main"
+      },
+      "locale": {
+        "type": "string",
+        "default": "en-US"
+      },
+      "feature_name": {
+        "type": "string",
+        "description": "Feature or screen label"
+      },
+      "incident_summary": {
+        "type": "string",
+        "description": "Incident summary text"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "Service identifier for metrics"
+      },
+      "time_window": {
+        "type": "string",
+        "default": "24h"
+      }
+    },
+    "required": [
+      "figma_url"
+    ]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": [
+      "realworld-200",
+      "masc",
+      "figma",
+      "llm",
+      "messaging",
+      "a11y-audit"
+    ],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.2
+  }
+}

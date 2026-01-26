@@ -1,0 +1,3005 @@
+{
+  "count": 200,
+  "chains": [
+    {
+      "id": "rw-onboarding-spec-to-tasks",
+      "name": "Onboarding - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-onboarding-design-to-code-verify",
+      "name": "Onboarding - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-onboarding-token-audit",
+      "name": "Onboarding - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-onboarding-a11y-audit",
+      "name": "Onboarding - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-onboarding-perf-budget",
+      "name": "Onboarding - Performance Budget",
+      "description": "Set and validate performance budgets for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-onboarding-localization-pack",
+      "name": "Onboarding - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-onboarding-release-readiness",
+      "name": "Onboarding - Release Readiness",
+      "description": "Coverage + CI status with release risks for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-onboarding-experiment-variant",
+      "name": "Onboarding - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-onboarding-incident-ui-regression",
+      "name": "Onboarding - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-onboarding-content-ops",
+      "name": "Onboarding - Content Ops",
+      "description": "Copy/SEO checks and content updates for Onboarding (new user activation).",
+      "domain": "onboarding",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "onboarding",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-checkout-spec-to-tasks",
+      "name": "Checkout - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-checkout-design-to-code-verify",
+      "name": "Checkout - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-checkout-token-audit",
+      "name": "Checkout - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-checkout-a11y-audit",
+      "name": "Checkout - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-checkout-perf-budget",
+      "name": "Checkout - Performance Budget",
+      "description": "Set and validate performance budgets for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-checkout-localization-pack",
+      "name": "Checkout - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-checkout-release-readiness",
+      "name": "Checkout - Release Readiness",
+      "description": "Coverage + CI status with release risks for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-checkout-experiment-variant",
+      "name": "Checkout - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-checkout-incident-ui-regression",
+      "name": "Checkout - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-checkout-content-ops",
+      "name": "Checkout - Content Ops",
+      "description": "Copy/SEO checks and content updates for Checkout (purchase completion).",
+      "domain": "checkout",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "checkout",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-dashboard-spec-to-tasks",
+      "name": "Dashboard - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-dashboard-design-to-code-verify",
+      "name": "Dashboard - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-dashboard-token-audit",
+      "name": "Dashboard - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-dashboard-a11y-audit",
+      "name": "Dashboard - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-dashboard-perf-budget",
+      "name": "Dashboard - Performance Budget",
+      "description": "Set and validate performance budgets for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-dashboard-localization-pack",
+      "name": "Dashboard - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-dashboard-release-readiness",
+      "name": "Dashboard - Release Readiness",
+      "description": "Coverage + CI status with release risks for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-dashboard-experiment-variant",
+      "name": "Dashboard - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-dashboard-incident-ui-regression",
+      "name": "Dashboard - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-dashboard-content-ops",
+      "name": "Dashboard - Content Ops",
+      "description": "Copy/SEO checks and content updates for Dashboard (overview metrics).",
+      "domain": "dashboard",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "dashboard",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-settings-spec-to-tasks",
+      "name": "Settings - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-settings-design-to-code-verify",
+      "name": "Settings - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-settings-token-audit",
+      "name": "Settings - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-settings-a11y-audit",
+      "name": "Settings - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-settings-perf-budget",
+      "name": "Settings - Performance Budget",
+      "description": "Set and validate performance budgets for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-settings-localization-pack",
+      "name": "Settings - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-settings-release-readiness",
+      "name": "Settings - Release Readiness",
+      "description": "Coverage + CI status with release risks for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-settings-experiment-variant",
+      "name": "Settings - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-settings-incident-ui-regression",
+      "name": "Settings - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-settings-content-ops",
+      "name": "Settings - Content Ops",
+      "description": "Copy/SEO checks and content updates for Settings (account preferences).",
+      "domain": "settings",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "settings",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-notifications-spec-to-tasks",
+      "name": "Notifications - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-notifications-design-to-code-verify",
+      "name": "Notifications - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-notifications-token-audit",
+      "name": "Notifications - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-notifications-a11y-audit",
+      "name": "Notifications - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-notifications-perf-budget",
+      "name": "Notifications - Performance Budget",
+      "description": "Set and validate performance budgets for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-notifications-localization-pack",
+      "name": "Notifications - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-notifications-release-readiness",
+      "name": "Notifications - Release Readiness",
+      "description": "Coverage + CI status with release risks for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-notifications-experiment-variant",
+      "name": "Notifications - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-notifications-incident-ui-regression",
+      "name": "Notifications - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-notifications-content-ops",
+      "name": "Notifications - Content Ops",
+      "description": "Copy/SEO checks and content updates for Notifications (delivery and inbox).",
+      "domain": "notifications",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "notifications",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-profile-spec-to-tasks",
+      "name": "Profile - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-profile-design-to-code-verify",
+      "name": "Profile - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-profile-token-audit",
+      "name": "Profile - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-profile-a11y-audit",
+      "name": "Profile - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-profile-perf-budget",
+      "name": "Profile - Performance Budget",
+      "description": "Set and validate performance budgets for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-profile-localization-pack",
+      "name": "Profile - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-profile-release-readiness",
+      "name": "Profile - Release Readiness",
+      "description": "Coverage + CI status with release risks for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-profile-experiment-variant",
+      "name": "Profile - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-profile-incident-ui-regression",
+      "name": "Profile - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-profile-content-ops",
+      "name": "Profile - Content Ops",
+      "description": "Copy/SEO checks and content updates for Profile (user identity and privacy).",
+      "domain": "profile",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "profile",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-search-spec-to-tasks",
+      "name": "Search - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Search (query and results UX).",
+      "domain": "search",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-search-design-to-code-verify",
+      "name": "Search - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Search (query and results UX).",
+      "domain": "search",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-search-token-audit",
+      "name": "Search - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Search (query and results UX).",
+      "domain": "search",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-search-a11y-audit",
+      "name": "Search - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Search (query and results UX).",
+      "domain": "search",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-search-perf-budget",
+      "name": "Search - Performance Budget",
+      "description": "Set and validate performance budgets for Search (query and results UX).",
+      "domain": "search",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-search-localization-pack",
+      "name": "Search - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Search (query and results UX).",
+      "domain": "search",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-search-release-readiness",
+      "name": "Search - Release Readiness",
+      "description": "Coverage + CI status with release risks for Search (query and results UX).",
+      "domain": "search",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-search-experiment-variant",
+      "name": "Search - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Search (query and results UX).",
+      "domain": "search",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-search-incident-ui-regression",
+      "name": "Search - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Search (query and results UX).",
+      "domain": "search",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-search-content-ops",
+      "name": "Search - Content Ops",
+      "description": "Copy/SEO checks and content updates for Search (query and results UX).",
+      "domain": "search",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "search",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-analytics-spec-to-tasks",
+      "name": "Analytics - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-analytics-design-to-code-verify",
+      "name": "Analytics - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-analytics-token-audit",
+      "name": "Analytics - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-analytics-a11y-audit",
+      "name": "Analytics - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-analytics-perf-budget",
+      "name": "Analytics - Performance Budget",
+      "description": "Set and validate performance budgets for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-analytics-localization-pack",
+      "name": "Analytics - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-analytics-release-readiness",
+      "name": "Analytics - Release Readiness",
+      "description": "Coverage + CI status with release risks for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-analytics-experiment-variant",
+      "name": "Analytics - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-analytics-incident-ui-regression",
+      "name": "Analytics - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-analytics-content-ops",
+      "name": "Analytics - Content Ops",
+      "description": "Copy/SEO checks and content updates for Analytics (reporting and insights).",
+      "domain": "analytics",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "analytics",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-messaging-spec-to-tasks",
+      "name": "Messaging - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-messaging-design-to-code-verify",
+      "name": "Messaging - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-messaging-token-audit",
+      "name": "Messaging - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-messaging-a11y-audit",
+      "name": "Messaging - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-messaging-perf-budget",
+      "name": "Messaging - Performance Budget",
+      "description": "Set and validate performance budgets for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-messaging-localization-pack",
+      "name": "Messaging - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-messaging-release-readiness",
+      "name": "Messaging - Release Readiness",
+      "description": "Coverage + CI status with release risks for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-messaging-experiment-variant",
+      "name": "Messaging - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-messaging-incident-ui-regression",
+      "name": "Messaging - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-messaging-content-ops",
+      "name": "Messaging - Content Ops",
+      "description": "Copy/SEO checks and content updates for Messaging (conversation flows).",
+      "domain": "messaging",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "messaging",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-scheduling-spec-to-tasks",
+      "name": "Scheduling - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-scheduling-design-to-code-verify",
+      "name": "Scheduling - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-scheduling-token-audit",
+      "name": "Scheduling - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-scheduling-a11y-audit",
+      "name": "Scheduling - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-scheduling-perf-budget",
+      "name": "Scheduling - Performance Budget",
+      "description": "Set and validate performance budgets for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-scheduling-localization-pack",
+      "name": "Scheduling - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-scheduling-release-readiness",
+      "name": "Scheduling - Release Readiness",
+      "description": "Coverage + CI status with release risks for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-scheduling-experiment-variant",
+      "name": "Scheduling - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-scheduling-incident-ui-regression",
+      "name": "Scheduling - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-scheduling-content-ops",
+      "name": "Scheduling - Content Ops",
+      "description": "Copy/SEO checks and content updates for Scheduling (calendar and availability).",
+      "domain": "scheduling",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "scheduling",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-reporting-spec-to-tasks",
+      "name": "Reporting - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-reporting-design-to-code-verify",
+      "name": "Reporting - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-reporting-token-audit",
+      "name": "Reporting - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-reporting-a11y-audit",
+      "name": "Reporting - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-reporting-perf-budget",
+      "name": "Reporting - Performance Budget",
+      "description": "Set and validate performance budgets for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-reporting-localization-pack",
+      "name": "Reporting - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-reporting-release-readiness",
+      "name": "Reporting - Release Readiness",
+      "description": "Coverage + CI status with release risks for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-reporting-experiment-variant",
+      "name": "Reporting - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-reporting-incident-ui-regression",
+      "name": "Reporting - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-reporting-content-ops",
+      "name": "Reporting - Content Ops",
+      "description": "Copy/SEO checks and content updates for Reporting (exports and summaries).",
+      "domain": "reporting",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "reporting",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-accessibility-spec-to-tasks",
+      "name": "Accessibility - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-accessibility-design-to-code-verify",
+      "name": "Accessibility - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-accessibility-token-audit",
+      "name": "Accessibility - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-accessibility-a11y-audit",
+      "name": "Accessibility - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-accessibility-perf-budget",
+      "name": "Accessibility - Performance Budget",
+      "description": "Set and validate performance budgets for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-accessibility-localization-pack",
+      "name": "Accessibility - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-accessibility-release-readiness",
+      "name": "Accessibility - Release Readiness",
+      "description": "Coverage + CI status with release risks for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-accessibility-experiment-variant",
+      "name": "Accessibility - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-accessibility-incident-ui-regression",
+      "name": "Accessibility - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-accessibility-content-ops",
+      "name": "Accessibility - Content Ops",
+      "description": "Copy/SEO checks and content updates for Accessibility (inclusive design).",
+      "domain": "accessibility",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "accessibility",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-performance-spec-to-tasks",
+      "name": "Performance - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-performance-design-to-code-verify",
+      "name": "Performance - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-performance-token-audit",
+      "name": "Performance - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-performance-a11y-audit",
+      "name": "Performance - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-performance-perf-budget",
+      "name": "Performance - Performance Budget",
+      "description": "Set and validate performance budgets for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-performance-localization-pack",
+      "name": "Performance - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-performance-release-readiness",
+      "name": "Performance - Release Readiness",
+      "description": "Coverage + CI status with release risks for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-performance-experiment-variant",
+      "name": "Performance - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-performance-incident-ui-regression",
+      "name": "Performance - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-performance-content-ops",
+      "name": "Performance - Content Ops",
+      "description": "Copy/SEO checks and content updates for Performance (speed and latency).",
+      "domain": "performance",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "performance",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-localization-spec-to-tasks",
+      "name": "Localization - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-localization-design-to-code-verify",
+      "name": "Localization - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-localization-token-audit",
+      "name": "Localization - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-localization-a11y-audit",
+      "name": "Localization - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-localization-perf-budget",
+      "name": "Localization - Performance Budget",
+      "description": "Set and validate performance budgets for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-localization-localization-pack",
+      "name": "Localization - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-localization-release-readiness",
+      "name": "Localization - Release Readiness",
+      "description": "Coverage + CI status with release risks for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-localization-experiment-variant",
+      "name": "Localization - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-localization-incident-ui-regression",
+      "name": "Localization - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-localization-content-ops",
+      "name": "Localization - Content Ops",
+      "description": "Copy/SEO checks and content updates for Localization (multi-locale support).",
+      "domain": "localization",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "localization",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-incident-spec-to-tasks",
+      "name": "Incident - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-incident-design-to-code-verify",
+      "name": "Incident - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-incident-token-audit",
+      "name": "Incident - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-incident-a11y-audit",
+      "name": "Incident - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-incident-perf-budget",
+      "name": "Incident - Performance Budget",
+      "description": "Set and validate performance budgets for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-incident-localization-pack",
+      "name": "Incident - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-incident-release-readiness",
+      "name": "Incident - Release Readiness",
+      "description": "Coverage + CI status with release risks for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-incident-experiment-variant",
+      "name": "Incident - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-incident-incident-ui-regression",
+      "name": "Incident - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-incident-content-ops",
+      "name": "Incident - Content Ops",
+      "description": "Copy/SEO checks and content updates for Incident (production recovery).",
+      "domain": "incident",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "incident",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-marketing-spec-to-tasks",
+      "name": "Marketing - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-marketing-design-to-code-verify",
+      "name": "Marketing - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-marketing-token-audit",
+      "name": "Marketing - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-marketing-a11y-audit",
+      "name": "Marketing - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-marketing-perf-budget",
+      "name": "Marketing - Performance Budget",
+      "description": "Set and validate performance budgets for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-marketing-localization-pack",
+      "name": "Marketing - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-marketing-release-readiness",
+      "name": "Marketing - Release Readiness",
+      "description": "Coverage + CI status with release risks for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-marketing-experiment-variant",
+      "name": "Marketing - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-marketing-incident-ui-regression",
+      "name": "Marketing - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-marketing-content-ops",
+      "name": "Marketing - Content Ops",
+      "description": "Copy/SEO checks and content updates for Marketing (landing page impact).",
+      "domain": "marketing",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "marketing",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-growth-spec-to-tasks",
+      "name": "Growth - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-growth-design-to-code-verify",
+      "name": "Growth - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-growth-token-audit",
+      "name": "Growth - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-growth-a11y-audit",
+      "name": "Growth - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-growth-perf-budget",
+      "name": "Growth - Performance Budget",
+      "description": "Set and validate performance budgets for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-growth-localization-pack",
+      "name": "Growth - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-growth-release-readiness",
+      "name": "Growth - Release Readiness",
+      "description": "Coverage + CI status with release risks for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-growth-experiment-variant",
+      "name": "Growth - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-growth-incident-ui-regression",
+      "name": "Growth - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-growth-content-ops",
+      "name": "Growth - Content Ops",
+      "description": "Copy/SEO checks and content updates for Growth (experiment iteration).",
+      "domain": "growth",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "growth",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-billing-spec-to-tasks",
+      "name": "Billing - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-billing-design-to-code-verify",
+      "name": "Billing - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-billing-token-audit",
+      "name": "Billing - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-billing-a11y-audit",
+      "name": "Billing - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-billing-perf-budget",
+      "name": "Billing - Performance Budget",
+      "description": "Set and validate performance budgets for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-billing-localization-pack",
+      "name": "Billing - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-billing-release-readiness",
+      "name": "Billing - Release Readiness",
+      "description": "Coverage + CI status with release risks for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-billing-experiment-variant",
+      "name": "Billing - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-billing-incident-ui-regression",
+      "name": "Billing - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-billing-content-ops",
+      "name": "Billing - Content Ops",
+      "description": "Copy/SEO checks and content updates for Billing (invoices and payments).",
+      "domain": "billing",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "billing",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-admin-spec-to-tasks",
+      "name": "Admin - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-admin-design-to-code-verify",
+      "name": "Admin - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-admin-token-audit",
+      "name": "Admin - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-admin-a11y-audit",
+      "name": "Admin - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-admin-perf-budget",
+      "name": "Admin - Performance Budget",
+      "description": "Set and validate performance budgets for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-admin-localization-pack",
+      "name": "Admin - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-admin-release-readiness",
+      "name": "Admin - Release Readiness",
+      "description": "Coverage + CI status with release risks for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-admin-experiment-variant",
+      "name": "Admin - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-admin-incident-ui-regression",
+      "name": "Admin - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-admin-content-ops",
+      "name": "Admin - Content Ops",
+      "description": "Copy/SEO checks and content updates for Admin (internal tooling).",
+      "domain": "admin",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "admin",
+        "content-ops"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-spec-to-tasks",
+      "name": "Mobile Release - Spec to Tasks",
+      "description": "Translate Figma spec into actionable MASC tasks for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "spec-to-tasks",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "spec-to-tasks"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-design-to-code-verify",
+      "name": "Mobile Release - Design to Code Verify",
+      "description": "Generate HTML/CSS and verify visually (SSIM) for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "design-to-code-verify",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "design-to-code-verify"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-token-audit",
+      "name": "Mobile Release - Token Audit",
+      "description": "Audit design tokens and variables for consistency for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "token-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "token-audit"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-a11y-audit",
+      "name": "Mobile Release - A11y Audit",
+      "description": "Accessibility checklist + scan with remediation tasks for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "a11y-audit",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "a11y-audit"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-perf-budget",
+      "name": "Mobile Release - Performance Budget",
+      "description": "Set and validate performance budgets for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "perf-budget",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "perf-budget"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-localization-pack",
+      "name": "Mobile Release - Localization Pack",
+      "description": "Extract strings and prepare localization tasks for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "localization-pack",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "localization-pack"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-release-readiness",
+      "name": "Mobile Release - Release Readiness",
+      "description": "Coverage + CI status with release risks for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "release-readiness",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "release-readiness"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-experiment-variant",
+      "name": "Mobile Release - Experiment Variant",
+      "description": "Propose variants and validate visual drift for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "experiment-variant",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "experiment-variant"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-incident-ui-regression",
+      "name": "Mobile Release - Incident UI Regression",
+      "description": "Map incident context to UI fixes for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "incident-ui-regression",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "incident-ui-regression"
+      ]
+    },
+    {
+      "id": "rw-mobile-release-content-ops",
+      "name": "Mobile Release - Content Ops",
+      "description": "Copy/SEO checks and content updates for Mobile Release (store readiness).",
+      "domain": "mobile-release",
+      "flow": "content-ops",
+      "tags": [
+        "realworld-200",
+        "masc",
+        "figma",
+        "llm",
+        "mobile-release",
+        "content-ops"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,189 @@
+{
+  "id": "rw-analytics-token-audit",
+  "name": "Analytics - Token Audit",
+  "description": "Audit design tokens and variables for consistency for Analytics (reporting and insights).",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "figma-parse",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": {
+          "url": "{{input.figma_url}}"
+        }
+      }
+    },
+    {
+      "id": "figma-summary",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "max_children": 80
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-bundle",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "depth": 4
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-tokens",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_export_tokens",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "format": "css"
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-variables",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_variables",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "format": "summary"
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "token-audit",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Audit design tokens for Analytics.\nCheck naming, duplication, missing tokens, and inconsistencies.\nTokens:\n{{figma-tokens}}\n\nVariables:\n{{figma-variables}}"
+      },
+      "depends_on": [
+        "figma-tokens",
+        "figma-variables",
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "task-list",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Create token cleanup tasks for Analytics.\nAudit findings:\n{{token-audit}}\n\nReturn ONLY JSON array of tasks with title/priority/description."
+      },
+      "depends_on": [
+        "token-audit"
+      ]
+    },
+    {
+      "id": "masc-batch-add",
+      "type": "tool",
+      "tool": {
+        "server": "masc",
+        "name": "masc_batch_add_tasks",
+        "args": {
+          "tasks": "{{task-list}}"
+        }
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    },
+    {
+      "id": "final-report",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Summarize the token audit for Analytics.\nHighlight critical token gaps and migration steps."
+      },
+      "depends_on": [
+        "token-audit",
+        "task-list"
+      ]
+    }
+  ],
+  "output": "final-report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "Web URL for audits"
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo identifier (owner/name)"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main"
+      },
+      "locale": {
+        "type": "string",
+        "default": "en-US"
+      },
+      "feature_name": {
+        "type": "string",
+        "description": "Feature or screen label"
+      },
+      "incident_summary": {
+        "type": "string",
+        "description": "Incident summary text"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "Service identifier for metrics"
+      },
+      "time_window": {
+        "type": "string",
+        "default": "24h"
+      }
+    },
+    "required": [
+      "figma_url"
+    ]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": [
+      "realworld-200",
+      "masc",
+      "figma",
+      "llm",
+      "analytics",
+      "token-audit"
+    ],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.2
+  }
+}

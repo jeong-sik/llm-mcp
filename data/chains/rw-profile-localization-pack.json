@@ -1,0 +1,172 @@
+{
+  "id": "rw-profile-localization-pack",
+  "name": "Profile - Localization Pack",
+  "description": "Extract strings and prepare localization tasks for Profile (user identity and privacy).",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "figma-parse",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": {
+          "url": "{{input.figma_url}}"
+        }
+      }
+    },
+    {
+      "id": "figma-summary",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "max_children": 80
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-bundle",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "depth": 4
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "extract-strings",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Extract user-facing strings for Profile.\nReturn JSON with keys: strings[], warnings[].\nFigma bundle:\n{{figma-bundle}}"
+      },
+      "depends_on": [
+        "figma-bundle"
+      ]
+    },
+    {
+      "id": "i18n-check",
+      "type": "tool",
+      "tool": {
+        "server": "web",
+        "name": "i18n_check",
+        "args": {
+          "url": "{{input.base_url}}",
+          "locale": "{{input.locale}}"
+        }
+      },
+      "depends_on": [
+        "extract-strings"
+      ]
+    },
+    {
+      "id": "task-list",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Create localization tasks for Profile.\nStrings:\n{{extract-strings}}\n\nCheck:\n{{i18n-check}}\n\nReturn ONLY JSON array of tasks with title/priority/description."
+      },
+      "depends_on": [
+        "extract-strings",
+        "i18n-check"
+      ]
+    },
+    {
+      "id": "masc-batch-add",
+      "type": "tool",
+      "tool": {
+        "server": "masc",
+        "name": "masc_batch_add_tasks",
+        "args": {
+          "tasks": "{{task-list}}"
+        }
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    },
+    {
+      "id": "final-report",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Summarize localization readiness for Profile.\nHighlight missing strings and formatting risks."
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    }
+  ],
+  "output": "final-report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "Web URL for audits"
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo identifier (owner/name)"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main"
+      },
+      "locale": {
+        "type": "string",
+        "default": "en-US"
+      },
+      "feature_name": {
+        "type": "string",
+        "description": "Feature or screen label"
+      },
+      "incident_summary": {
+        "type": "string",
+        "description": "Incident summary text"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "Service identifier for metrics"
+      },
+      "time_window": {
+        "type": "string",
+        "default": "24h"
+      }
+    },
+    "required": [
+      "figma_url"
+    ]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": [
+      "realworld-200",
+      "masc",
+      "figma",
+      "llm",
+      "profile",
+      "localization-pack"
+    ],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.2
+  }
+}

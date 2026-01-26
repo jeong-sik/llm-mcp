@@ -1,0 +1,158 @@
+{
+  "id": "rw-accessibility-spec-to-tasks",
+  "name": "Accessibility - Spec to Tasks",
+  "description": "Translate Figma spec into actionable MASC tasks for Accessibility (inclusive design).",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "figma-parse",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": {
+          "url": "{{input.figma_url}}"
+        }
+      }
+    },
+    {
+      "id": "figma-summary",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "max_children": 80
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-bundle",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "depth": 4
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "scope-analysis",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Analyze the Accessibility UI spec for inclusive design.\nUse the Figma summary and bundle.\nOutput JSON with keys: scope, risks, dependencies, assumptions."
+      },
+      "depends_on": [
+        "figma-summary",
+        "figma-bundle"
+      ]
+    },
+    {
+      "id": "task-list",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Create execution tasks for Accessibility (inclusive design).\nUse this analysis:\n{{scope-analysis}}\n\nReturn ONLY a JSON array of tasks.\nEach task: {\"title\": string, \"priority\": 1-5, \"description\": string}.\nInclude verification tasks for SSIM/coverage/a11y when relevant."
+      },
+      "depends_on": [
+        "scope-analysis"
+      ]
+    },
+    {
+      "id": "masc-batch-add",
+      "type": "tool",
+      "tool": {
+        "server": "masc",
+        "name": "masc_batch_add_tasks",
+        "args": {
+          "tasks": "{{task-list}}"
+        }
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    },
+    {
+      "id": "final-report",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Summarize the Accessibility plan.\nInclude scope, risks, and verification gates.\nTasks JSON:\n{{task-list}}"
+      },
+      "depends_on": [
+        "task-list",
+        "scope-analysis"
+      ]
+    }
+  ],
+  "output": "final-report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "Web URL for audits"
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo identifier (owner/name)"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main"
+      },
+      "locale": {
+        "type": "string",
+        "default": "en-US"
+      },
+      "feature_name": {
+        "type": "string",
+        "description": "Feature or screen label"
+      },
+      "incident_summary": {
+        "type": "string",
+        "description": "Incident summary text"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "Service identifier for metrics"
+      },
+      "time_window": {
+        "type": "string",
+        "default": "24h"
+      }
+    },
+    "required": [
+      "figma_url"
+    ]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": [
+      "realworld-200",
+      "masc",
+      "figma",
+      "llm",
+      "accessibility",
+      "spec-to-tasks"
+    ],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.2
+  }
+}

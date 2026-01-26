@@ -16,6 +16,15 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 
 ---
 
+## Realworld-200 Pack
+
+200 chain presets combining MASC + LLM + Figma (prefix: `rw-`).
+
+- Index: `data/chains/realworld-200/index.json`
+- Usage notes: `data/chains/realworld-200/README.md`
+
+---
+
 ## MAGI Code Review
 
 3-LLM consensus code review using MELCHIOR (Codex), BALTHASAR (Claude), CASPER (Gemini).

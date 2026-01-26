@@ -1,0 +1,184 @@
+{
+  "id": "rw-settings-perf-budget",
+  "name": "Settings - Performance Budget",
+  "description": "Set and validate performance budgets for Settings (account preferences).",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "figma-parse",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": {
+          "url": "{{input.figma_url}}"
+        }
+      }
+    },
+    {
+      "id": "figma-summary",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "max_children": 80
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-bundle",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "depth": 4
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "perf-budget",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Define performance budgets for Settings (account preferences).\nOutput JSON with metrics: LCP, CLS, TBT, FCP thresholds."
+      },
+      "depends_on": [
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "lighthouse-audit",
+      "type": "tool",
+      "tool": {
+        "server": "web",
+        "name": "lighthouse_audit",
+        "args": {
+          "url": "{{input.base_url}}",
+          "profile": "mobile"
+        }
+      },
+      "depends_on": [
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "perf-compare",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Compare Lighthouse results vs budget for Settings.\nBudget:\n{{perf-budget}}\n\nAudit:\n{{lighthouse-audit}}"
+      },
+      "depends_on": [
+        "perf-budget",
+        "lighthouse-audit"
+      ]
+    },
+    {
+      "id": "task-list",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Create optimization tasks for Settings performance gaps.\nComparison:\n{{perf-compare}}\n\nReturn ONLY JSON array of tasks with title/priority/description."
+      },
+      "depends_on": [
+        "perf-compare"
+      ]
+    },
+    {
+      "id": "masc-batch-add",
+      "type": "tool",
+      "tool": {
+        "server": "masc",
+        "name": "masc_batch_add_tasks",
+        "args": {
+          "tasks": "{{task-list}}"
+        }
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    },
+    {
+      "id": "final-report",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Summarize performance budget status for Settings.\nInclude key bottlenecks and next actions."
+      },
+      "depends_on": [
+        "perf-compare",
+        "task-list"
+      ]
+    }
+  ],
+  "output": "final-report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "Web URL for audits"
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo identifier (owner/name)"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main"
+      },
+      "locale": {
+        "type": "string",
+        "default": "en-US"
+      },
+      "feature_name": {
+        "type": "string",
+        "description": "Feature or screen label"
+      },
+      "incident_summary": {
+        "type": "string",
+        "description": "Incident summary text"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "Service identifier for metrics"
+      },
+      "time_window": {
+        "type": "string",
+        "default": "24h"
+      }
+    },
+    "required": [
+      "figma_url"
+    ]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": [
+      "realworld-200",
+      "masc",
+      "figma",
+      "llm",
+      "settings",
+      "perf-budget"
+    ],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.2
+  }
+}

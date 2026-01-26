@@ -1,0 +1,190 @@
+{
+  "id": "rw-localization-release-readiness",
+  "name": "Localization - Release Readiness",
+  "description": "Coverage + CI status with release risks for Localization (multi-locale support).",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "figma-parse",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": {
+          "url": "{{input.figma_url}}"
+        }
+      }
+    },
+    {
+      "id": "figma-summary",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_summary",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "max_children": 80
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "figma-bundle",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_get_node_bundle",
+        "args": {
+          "file_key": "{{figma-parse.file_key}}",
+          "node_id": "{{figma-parse.node_id}}",
+          "depth": 4
+        }
+      },
+      "depends_on": [
+        "figma-parse"
+      ]
+    },
+    {
+      "id": "coverage-check",
+      "type": "tool",
+      "tool": {
+        "server": "web",
+        "name": "coverage_check",
+        "args": {
+          "repo": "{{input.repo}}",
+          "branch": "{{input.branch}}",
+          "threshold": 0.8
+        }
+      },
+      "depends_on": [
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "ci-status",
+      "type": "tool",
+      "tool": {
+        "server": "web",
+        "name": "ci_status",
+        "args": {
+          "repo": "{{input.repo}}",
+          "branch": "{{input.branch}}"
+        }
+      },
+      "depends_on": [
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "risk-report",
+      "type": "llm",
+      "llm": {
+        "model": "claude-cli",
+        "prompt": "Assess release readiness for Localization.\nUse coverage + CI + UI context.\n\nCoverage:\n{{coverage-check}}\n\nCI:\n{{ci-status}}\n\nUI:\n{{figma-summary}}"
+      },
+      "depends_on": [
+        "coverage-check",
+        "ci-status",
+        "figma-summary"
+      ]
+    },
+    {
+      "id": "task-list",
+      "type": "llm",
+      "llm": {
+        "model": "codex",
+        "prompt": "Create release-blocking tasks for Localization.\nRisk report:\n{{risk-report}}\n\nReturn ONLY JSON array of tasks with title/priority/description."
+      },
+      "depends_on": [
+        "risk-report"
+      ]
+    },
+    {
+      "id": "masc-batch-add",
+      "type": "tool",
+      "tool": {
+        "server": "masc",
+        "name": "masc_batch_add_tasks",
+        "args": {
+          "tasks": "{{task-list}}"
+        }
+      },
+      "depends_on": [
+        "task-list"
+      ]
+    },
+    {
+      "id": "final-report",
+      "type": "llm",
+      "llm": {
+        "model": "gemini",
+        "prompt": "Summarize release readiness for Localization.\nInclude blockers and sign-off criteria."
+      },
+      "depends_on": [
+        "risk-report",
+        "task-list"
+      ]
+    }
+  ],
+  "output": "final-report",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma frame/component URL"
+      },
+      "base_url": {
+        "type": "string",
+        "description": "Web URL for audits"
+      },
+      "repo": {
+        "type": "string",
+        "description": "Repo identifier (owner/name)"
+      },
+      "branch": {
+        "type": "string",
+        "default": "main"
+      },
+      "locale": {
+        "type": "string",
+        "default": "en-US"
+      },
+      "feature_name": {
+        "type": "string",
+        "description": "Feature or screen label"
+      },
+      "incident_summary": {
+        "type": "string",
+        "description": "Incident summary text"
+      },
+      "service_name": {
+        "type": "string",
+        "description": "Service identifier for metrics"
+      },
+      "time_window": {
+        "type": "string",
+        "default": "24h"
+      }
+    },
+    "required": [
+      "figma_url"
+    ]
+  },
+  "metadata": {
+    "author": "Chain Engine",
+    "tags": [
+      "realworld-200",
+      "masc",
+      "figma",
+      "llm",
+      "localization",
+      "release-readiness"
+    ],
+    "estimated_duration_sec": 180,
+    "estimated_cost_usd": 0.2
+  }
+}
