@@ -350,3 +350,8 @@
 (test
  (name test_chain_batch)
  (libraries llm_mcp.common llm_mcp.eio alcotest eio eio_main))
+
+; Chain_types tests (direction, defaults, node_type_name, make_* helpers)
+(test
+ (name test_chain_types)
+ (libraries llm_mcp.common alcotest))

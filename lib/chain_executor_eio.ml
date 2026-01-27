@@ -468,7 +468,7 @@ let resolve_single_input ctx (ref_str : string) : string =
          if path = [] then value
          else (match try_extract_json_path value path with
                | Ok v -> v
-               | Error _ -> value)
+               | Error _ -> ref_str)
      | None -> ref_str)  (* Return original if not found *)
   else
     (* Direct node_id reference or literal, with optional dot-path *)
@@ -482,7 +482,7 @@ let resolve_single_input ctx (ref_str : string) : string =
         if path = [] then value
         else (match try_extract_json_path value path with
               | Ok v -> v
-              | Error _ -> value)
+              | Error _ -> trimmed)
     | None -> ref_str  (* Return as literal *)
 
 (** Resolve input mappings to actual values *)
@@ -530,13 +530,20 @@ let substitute_prompt prompt (inputs : (string * string) list) : string =
 
 (** Substitute placeholders inside JSON values *)
 let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
+  (* Tool args should not carry unresolved {{...}} placeholders, because
+     external MCP servers may treat them as literal invalid values. *)
+  let strip_unresolved_placeholders (s : string) : string =
+    try Str.global_replace (Str.regexp "{{[^}]+}}") "" s
+    with _ -> s
+  in
   let rec map = function
     | `String s ->
         let mappings = Chain_parser.extract_input_mappings s in
         if mappings = [] then `String s
         else
           let inputs = resolve_inputs ctx mappings in
-          `String (substitute_prompt s inputs)
+          let substituted = substitute_prompt s inputs in
+          `String (strip_unresolved_placeholders substituted)
     | `Assoc fields ->
         `Assoc (List.map (fun (k, v) -> (k, map v)) fields)
     | `List items ->
@@ -1114,15 +1121,25 @@ let apply_adapter_transform = Chain_adapter_eio.apply_adapter_transform
 let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string, string) result =
   record_start ctx node.id ~node_type:"adapter";
   let start = Unix.gettimeofday () in
+  let finalize ~success ~duration_ms output =
+    record_complete ctx node.id ~duration_ms ~success ~node_type:"adapter";
+    Hashtbl.replace ctx.outputs node.id output;
+    output
+  in
   (* Resolve input reference *)
   let input_value = resolve_single_input ctx input_ref in
   if input_value = "" then begin
     let msg = Printf.sprintf "Adapter: empty input from '%s'" input_ref in
+    let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
     record_error ctx node.id ~node_type:"adapter" msg;
     match on_error with
-    | `Fail -> Error msg
-    | `Passthrough -> Ok ""
-    | `Default d -> Ok d
+    | `Fail ->
+        record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
+        Error msg
+    | `Passthrough ->
+        Ok (finalize ~success:true ~duration_ms "")
+    | `Default d ->
+        Ok (finalize ~success:true ~duration_ms d)
   end
   else
     (* Apply transformation *)
@@ -1130,16 +1147,17 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
     let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
     match result with
     | Ok output ->
-        record_complete ctx node.id ~duration_ms ~success:true ~node_type:"adapter";
-        Hashtbl.add ctx.outputs node.id output;
-        Ok output
+        Ok (finalize ~success:true ~duration_ms output)
     | Error msg ->
-        record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
         record_error ctx node.id ~node_type:"adapter" msg;
         (match on_error with
-         | `Fail -> Error msg
-         | `Passthrough -> Ok input_value  (* Return original on error *)
-         | `Default d -> Ok d)
+         | `Fail ->
+             record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
+             Error msg
+         | `Passthrough ->
+             Ok (finalize ~success:true ~duration_ms input_value)
+         | `Default d ->
+             Ok (finalize ~success:true ~duration_ms d))
 
 (** {1 Recursive Execution} *)
 
