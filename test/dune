@@ -285,3 +285,8 @@
  (name test_chain_run_store)
  (libraries llm_mcp.eio llm_mcp.common alcotest))
 
+; Prompt Registry tests (variable extraction, rendering, JSON)
+(test
+ (name test_prompt_registry)
+ (libraries llm_mcp.eio llm_mcp.common alcotest str unix))
+
