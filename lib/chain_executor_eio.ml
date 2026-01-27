@@ -230,6 +230,15 @@ let restore_from_checkpoint ctx ~chain_id:_ =
 let node_completed_in_checkpoint ctx node_id =
   Hashtbl.mem ctx.outputs node_id
 
+(** Store node output under node.id and optional output_key alias *)
+let store_node_output ctx (node : node) (output : string) =
+  Hashtbl.replace ctx.outputs node.id output;
+  match node.output_key with
+  | Some key ->
+      let key = String.trim key in
+      if key <> "" && key <> node.id then Hashtbl.replace ctx.outputs key output
+  | None -> ()
+
 (** {1 Trace Helpers} *)
 
 let add_trace ctx node_id event =
@@ -450,6 +459,22 @@ let resolve_single_input ctx (ref_str : string) : string =
       walk json path_parts
     with _ -> Error "JSON parse error"
   in
+  (* Support tools that return bullet lists instead of JSON.
+     Example:
+       - file_key: UID...
+       - node_id: 123:456 *)
+  let try_extract_bullet_value raw key =
+    let prefix = "- " ^ key ^ ":" in
+    raw
+    |> String.split_on_char '\n'
+    |> List.find_map (fun line ->
+           let line = String.trim line in
+           if starts_with ~prefix line then
+             let start = String.length prefix in
+             let len = String.length line - start in
+             Some (String.trim (String.sub line start len))
+           else None)
+  in
   (* Check if it's a {{variable}} reference *)
   let trimmed = String.trim ref_str in
   let is_placeholder =
@@ -468,7 +493,13 @@ let resolve_single_input ctx (ref_str : string) : string =
          if path = [] then value
          else (match try_extract_json_path value path with
                | Ok v -> v
-               | Error _ -> ref_str)
+               | Error _ ->
+                   (match path with
+                    | [key] ->
+                        (match try_extract_bullet_value value key with
+                         | Some v -> v
+                         | None -> ref_str)
+                    | _ -> ref_str))
      | None -> ref_str)  (* Return original if not found *)
   else
     (* Direct node_id reference or literal, with optional dot-path *)
@@ -482,7 +513,13 @@ let resolve_single_input ctx (ref_str : string) : string =
         if path = [] then value
         else (match try_extract_json_path value path with
               | Ok v -> v
-              | Error _ -> trimmed)
+              | Error _ ->
+                  (match path with
+                   | [key] ->
+                       (match try_extract_bullet_value value key with
+                        | Some v -> v
+                        | None -> trimmed)
+                   | _ -> trimmed))
     | None -> ref_str  (* Return as literal *)
 
 (** Resolve input mappings to actual values *)
@@ -892,11 +929,11 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
              | None -> ());
 
             (match conv_opt with
-             | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
+            | Some conv -> add_message conv ~role:"assistant" ~content:output ~iteration ~model
              | None -> ());
 
             record_complete ctx node.id ~duration_ms ~success:true ~node_type:"llm";
-            Hashtbl.add ctx.outputs node.id output;
+            store_node_output ctx node output;
             Ok output
         | Error msg ->
             (* Pass through LLM errors as before *)
@@ -967,7 +1004,7 @@ let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention 
   match result with
   | Ok output ->
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_broadcast";
-      Hashtbl.replace ctx.outputs node.id output;
+      store_node_output ctx node output;
       Ok output
   | Error msg ->
       record_error ctx node.id msg;
@@ -1050,7 +1087,7 @@ let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec
   match result with
   | Ok output ->
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_listen";
-      Hashtbl.replace ctx.outputs node.id output;
+      store_node_output ctx node output;
       Ok output
   | Error msg ->
       record_error ctx node.id msg;
@@ -1083,7 +1120,7 @@ let execute_masc_claim ctx ~tool_exec (node : node) ~task_id ~room : (string, st
   match result with
   | Ok output ->
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_claim";
-      Hashtbl.replace ctx.outputs node.id output;
+      store_node_output ctx node output;
       Ok output
   | Error msg ->
       record_error ctx node.id msg;
@@ -1105,7 +1142,7 @@ let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string
       (match result with
       | Ok output ->
           record_complete ctx node.id ~duration_ms ~success:true ~node_type:"tool";
-          Hashtbl.add ctx.outputs node.id output;
+          store_node_output ctx node output;
           Ok output
       | Error msg ->
           record_complete ctx node.id ~duration_ms ~success:false ~node_type:"tool";
@@ -1123,7 +1160,7 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
   let start = Unix.gettimeofday () in
   let finalize ~success ~duration_ms output =
     record_complete ctx node.id ~duration_ms ~success ~node_type:"adapter";
-    Hashtbl.replace ctx.outputs node.id output;
+    store_node_output ctx node output;
     output
   in
   (* Resolve input reference *)
@@ -1523,7 +1560,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
         ("total_iterations", `Int root.visits);
         ("best_output", `String !best_output);
       ]) in
-      Hashtbl.replace ctx.outputs parent.id result_json;
+      store_node_output ctx parent result_json;
       record_complete ctx parent.id ~duration_ms ~success:true;
       Ok result_json
 
@@ -1569,7 +1606,7 @@ and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
   let success = Result.is_ok result in
   record_complete ctx node.id ~duration_ms ~success;
   (match result with
-  | Ok output -> Hashtbl.add ctx.outputs node.id output
+  | Ok output -> store_node_output ctx node output
   | Error msg -> record_error ctx node.id msg);
   result
 
@@ -1658,7 +1695,7 @@ and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       let success = Result.is_ok final_result in
       record_complete ctx node.id ~duration_ms ~success;
       (match final_result with
-      | Ok output -> Hashtbl.add ctx.outputs node.id output
+      | Ok output -> store_node_output ctx node output
       | Error msg -> record_error ctx node.id msg);
       final_result
 
@@ -1710,8 +1747,8 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
   (* Copy result back to parent context (for downstream nodes) *)
   (match result with
   | Ok output ->
-      Hashtbl.add ctx.outputs inner.id output;
-      Hashtbl.add ctx.outputs node.id output
+      store_node_output ctx inner output;
+      store_node_output ctx node output
   | Error _ -> ());
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
@@ -1793,7 +1830,7 @@ and execute_chain_exec ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
                             (* Get final output *)
                             (match Hashtbl.find_opt new_ctx.outputs generated_chain.Chain_types.output with
                             | Some output ->
-                                Hashtbl.replace ctx.outputs node.id output;
+                                store_node_output ctx node output;
                                 Ok output
                             | None ->
                                 Error (Printf.sprintf "ChainExec: output node '%s' not found" generated_chain.Chain_types.output))
@@ -1827,7 +1864,7 @@ and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes :
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
   (match result with
    | Ok output ->
-       Hashtbl.add ctx.outputs parent.id output;
+       store_node_output ctx parent output;
        record_complete ctx parent.id ~duration_ms ~success:true
    | Error msg ->
        record_complete ctx parent.id ~duration_ms ~success:false;
@@ -1862,7 +1899,7 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
     let combined = String.concat "\n---\n"
       (List.map (fun (id, o) -> Printf.sprintf "[%s]: %s" id o) outputs) in
     record_complete ctx parent.id ~duration_ms ~success:true;
-    Hashtbl.add ctx.outputs parent.id combined;
+    store_node_output ctx parent combined;
     Ok combined
   end else begin
     let errors = List.filter_map (fun (id, r) ->
@@ -1913,7 +1950,7 @@ and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~required 
     let combined = String.concat "\n---\n"
       (List.map (fun (id, o) -> Printf.sprintf "[%s]: %s" id o) (List.rev !successes)) in
     record_complete ctx parent.id ~duration_ms ~success:true;
-    Hashtbl.add ctx.outputs parent.id combined;
+    store_node_output ctx parent combined;
     Ok combined
   end else begin
     let msg = Printf.sprintf "Quorum not met: needed %d, got %d successes"
@@ -1953,7 +1990,7 @@ and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~
   (match result with
   | Ok output ->
       record_complete ctx parent.id ~duration_ms ~success:true;
-      Hashtbl.add ctx.outputs parent.id output;
+      store_node_output ctx parent output;
       Ok output
   | Error msg ->
       record_complete ctx parent.id ~duration_ms ~success:false;
@@ -2048,7 +2085,7 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
         | Some o -> o
         | None -> ""
       in
-      Hashtbl.add ctx.outputs parent.id final;
+      store_node_output ctx parent final;
       Ok final
   | Error msg -> Error msg)
 
@@ -2070,7 +2107,7 @@ and execute_map ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func (inner 
         | "identity" | _ -> output
       in
       record_complete ctx parent.id ~duration_ms ~success:true;
-      Hashtbl.add ctx.outputs parent.id transformed;
+      store_node_output ctx parent transformed;
       Ok transformed
   | Error msg ->
       record_complete ctx parent.id ~duration_ms ~success:false;
@@ -2090,7 +2127,7 @@ and execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func:_ (inn
   (match result with
   | Ok output ->
       record_complete ctx parent.id ~duration_ms ~success:true;
-      Hashtbl.add ctx.outputs parent.id output;
+      store_node_output ctx parent output;
       Ok output
   | Error msg ->
       record_complete ctx parent.id ~duration_ms ~success:false;
@@ -2150,7 +2187,7 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
             (String.concat "\n---\n" (List.map snd outputs))
     in
     record_complete ctx parent.id ~duration_ms ~success:true;
-    Hashtbl.add ctx.outputs parent.id merged;
+    store_node_output ctx parent merged;
     Ok merged
 
 (** Execute threshold node - conditional branching based on metric value *)
@@ -2204,7 +2241,7 @@ and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
            (match branch_result with
             | Ok output ->
                 record_complete ctx parent.id ~duration_ms ~success:true;
-                Hashtbl.add ctx.outputs parent.id output;
+                store_node_output ctx parent output;
                 Ok output
             | Error msg ->
                 record_complete ctx parent.id ~duration_ms ~success:false;
@@ -2347,7 +2384,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                  ctx.conversation <- None;   (* Clear conversation context on completion *)
                  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
                  record_complete ctx parent.id ~duration_ms ~success:true;
-                 Hashtbl.add ctx.outputs parent.id output;
+                 store_node_output ctx parent output;
                  Ok output
                end else
                  iterate (iteration + 1) v)
@@ -2578,7 +2615,7 @@ Reply with ONLY a number between 0.0 and 1.0:|}
           Error "Selection strategy returned no result"
       | Some (_, output, _) ->
           record_complete ctx parent.id ~duration_ms ~success:true;
-          Hashtbl.add ctx.outputs parent.id output;
+          store_node_output ctx parent output;
           Ok output
     end
   end
@@ -2699,7 +2736,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             (* Success: score meets threshold *)
             let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
             record_complete ctx parent.id ~duration_ms ~success:true;
-            Hashtbl.add ctx.outputs parent.id output;
+            store_node_output ctx parent output;
             Ok output
           end else begin
             (* Generate feedback and prepare for next iteration *)
@@ -2771,7 +2808,7 @@ and execute_retry ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       | Ok output ->
           let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
           record_complete ctx parent.id ~duration_ms ~success:true;
-          Hashtbl.add ctx.outputs parent.id output;
+          store_node_output ctx parent output;
           Ok output
       | Error msg ->
           if should_retry retry_on msg then attempt (n + 1) msg
@@ -2803,7 +2840,7 @@ and execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
         | Ok output ->
             let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
             record_complete ctx parent.id ~duration_ms ~success:true;
-            Hashtbl.add ctx.outputs parent.id output;
+            store_node_output ctx parent output;
             Ok output
         | Error msg ->
             try_nodes rest ((node.id ^ ": " ^ msg) :: errors)
@@ -2836,7 +2873,7 @@ and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   match !winner with
   | Some (winner_id, output) ->
       record_complete ctx parent.id ~duration_ms ~success:true;
-      Hashtbl.add ctx.outputs parent.id (Printf.sprintf "[winner: %s] %s" winner_id output);
+      store_node_output ctx parent (Printf.sprintf "[winner: %s] %s" winner_id output);
       Ok output
   | None ->
       let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
@@ -2934,7 +2971,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   match result with
   | Ok output ->
       record_complete ctx parent.id ~duration_ms ~success:true;
-      Hashtbl.add ctx.outputs parent.id output;
+      store_node_output ctx parent output;
       Ok output
   | Error msg ->
       record_complete ctx parent.id ~duration_ms ~success:false;
