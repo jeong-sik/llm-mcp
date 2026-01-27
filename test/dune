@@ -260,3 +260,8 @@
  (name test_chain_compiler)
  (libraries llm_mcp.common alcotest))
 
+; Chain Category tests (category theory abstractions, monoids, profunctors)
+(test
+ (name test_chain_category)
+ (libraries llm_mcp.common alcotest))
+
