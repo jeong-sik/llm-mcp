@@ -6,14 +6,9 @@
 
 open Chain_types
 
-let int_env name ~default =
-  match Sys.getenv_opt name with
-  | Some v -> (try int_of_string v with _ -> default)
-  | None -> default
-
-let max_history () = int_env "LLM_MCP_CHAIN_RUN_HISTORY" ~default:50
-let max_output_chars () = int_env "LLM_MCP_CHAIN_OUTPUT_MAX_CHARS" ~default:4000
-let max_preview_chars () = int_env "LLM_MCP_CHAIN_OUTPUT_PREVIEW_CHARS" ~default:240
+let max_history () = Safe_parse.env_int ~var:"LLM_MCP_CHAIN_RUN_HISTORY" ~default:50
+let max_output_chars () = Safe_parse.env_int ~var:"LLM_MCP_CHAIN_OUTPUT_MAX_CHARS" ~default:4000
+let max_preview_chars () = Safe_parse.env_int ~var:"LLM_MCP_CHAIN_OUTPUT_PREVIEW_CHARS" ~default:240
 
 let truncate s max_chars =
   let len = String.length s in

@@ -81,8 +81,7 @@ let call_mcp_server t ~url ~method_name ~params =
             let result = json |> member "result" in
             let error = json |> member "error" in
             if error <> `Null then
-              let msg = try error |> member "message" |> to_string
-                        with _ -> "Unknown error" in
+              let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
               Result.Error msg
             else
               Result.Ok result
