@@ -255,3 +255,8 @@
  (name test_checkpoint_store)
  (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main))
 
+; Chain Compiler tests (topological sort, dependency analysis)
+(test
+ (name test_chain_compiler)
+ (libraries llm_mcp.common alcotest))
+
