@@ -701,11 +701,19 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 (* The connection stays open - httpun manages the lifecycle *)
                 (* Unregister when connection closes (on_eof from client) *)
                 Eio.Fiber.fork ~sw (fun () ->
-                  Eio.Time.sleep clock 3600.0;  (* 1h max connection time *)
-                  Http.unregister_sse_client client_id;
-                  Notification_sse.unregister_if_current session_id notif_client_id;
-                  try Httpun.Body.Writer.close body with exn ->
-                    Printf.eprintf "[MCP] Body close error for session %s: %s\n%!"
+                  try
+                    Eio.Time.sleep clock 3600.0;  (* 1h max connection time *)
+                    (try Http.unregister_sse_client client_id with exn ->
+                       Printf.eprintf "[MCP] SSE unregister error for session %s: %s\n%!"
+                         session_id (Printexc.to_string exn));
+                    (try Notification_sse.unregister_if_current session_id notif_client_id with exn ->
+                       Printf.eprintf "[MCP] Notification unregister error for session %s: %s\n%!"
+                         session_id (Printexc.to_string exn));
+                    (try Httpun.Body.Writer.close body with exn ->
+                       Printf.eprintf "[MCP] Body close error for session %s: %s\n%!"
+                         session_id (Printexc.to_string exn))
+                  with exn ->
+                    Printf.eprintf "[MCP] SSE cleanup fiber error for session %s: %s\n%!"
                       session_id (Printexc.to_string exn)
                 )
               )
