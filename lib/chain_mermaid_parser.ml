@@ -1612,7 +1612,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                               | Some (id :: _) -> id
                               | _ -> "_placeholder"
                         in
-                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = []; output_key = None; depends_on = None } in
+                        (* Use _ref suffix to avoid duplicate node ID *)
+                        let action_node = { id = action_node_id ^ "_ref"; node_type = ChainRef action_node_id; input_mapping = []; output_key = None; depends_on = None } in
                         GoalDriven {
                           gd with
                           action_node;
@@ -1627,7 +1628,8 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                           | Some (id :: _) -> id
                           | _ -> "_placeholder"
                         in
-                        let action_node = { id = action_node_id; node_type = ChainRef action_node_id; input_mapping = []; output_key = None; depends_on = None } in
+                        (* Use _ref suffix to avoid duplicate node ID *)
+                        let action_node = { id = action_node_id ^ "_ref"; node_type = ChainRef action_node_id; input_mapping = []; output_key = None; depends_on = None } in
                         GoalDriven { gd with action_node })
                 | other -> other
               in
@@ -1664,12 +1666,14 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                    (* Keep original if not found (will error at runtime) *)
                    node)
           | Mcts mcts ->
-              (* Fill strategies from incoming edges *)
+              (* Fill strategies from incoming edges - use ChainRef with _ref suffix *)
               let input_ids = match Hashtbl.find_opt deps node.id with
                 | Some ids -> ids
                 | None -> []
               in
-              let strategies = List.filter_map (fun id -> Hashtbl.find_opt node_map id) input_ids in
+              let strategies = List.map (fun id ->
+                { id = id ^ "_ref"; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
+              ) input_ids in
               { node with node_type = Mcts { mcts with strategies } }
           | Gate gate ->
               (* Resolve then_node and else_node from outgoing edges with labels *)
