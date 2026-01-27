@@ -192,18 +192,9 @@ let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
     | `String s -> Some s
     | other -> Some (Yojson.Safe.to_string other)  (* Serialize objects to JSON string *)
   in
-  let trace =
-    try json |> member "trace" |> to_bool
-    with _ -> false
-  in
-  let checkpoint_enabled =
-    try json |> member "checkpoint_enabled" |> to_bool
-    with _ -> false
-  in
-  let timeout =
-    try Some (json |> member "timeout" |> to_int)
-    with _ -> None
-  in
+  let trace = Safe_parse.json_bool ~context:"chain.run" ~default:false json "trace" in
+  let checkpoint_enabled = Safe_parse.json_bool ~context:"chain.run" ~default:false json "checkpoint_enabled" in
+  let timeout = Safe_parse.json_int_opt json "timeout" in
   ChainRun { chain; mermaid; input; trace; checkpoint_enabled; timeout }
 
 (** Parse JSON arguments for chain.validate tool *)
@@ -215,7 +206,7 @@ let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args
     | c -> Some c
   in
   let mermaid = json |> member "mermaid" |> to_string_option in
-  let strict = try json |> member "strict" |> to_bool with _ -> true in
+  let strict = Safe_parse.json_bool ~context:"chain.validate" ~default:true json "strict" in
   ChainValidate { chain; mermaid; strict }
 
 (** Parse JSON arguments for chain.to_mermaid tool *)
@@ -236,7 +227,7 @@ let parse_chain_convert_args (json : Yojson.Safe.t) : tool_args =
   let from_format = json |> member "from" |> to_string in
   let to_format = json |> member "to" |> to_string in
   let input = json |> member "input" in
-  let pretty = try json |> member "pretty" |> to_bool with _ -> true in
+  let pretty = Safe_parse.json_bool ~context:"chain.convert" ~default:true json "pretty" in
   ChainConvert { from_format; to_format; input; pretty }
 
 (** Parse JSON arguments for chain.orchestrate tool *)
@@ -254,22 +245,10 @@ let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_a
     | t -> Some t
   in
   let chain_id = json |> member "chain_id" |> to_string_option in
-  let max_replans =
-    try json |> member "max_replans" |> to_int
-    with _ -> 3
-  in
-  let timeout =
-    try json |> member "timeout" |> to_int
-    with _ -> 600
-  in
-  let trace =
-    try json |> member "trace" |> to_bool
-    with _ -> false
-  in
-  let verify_on_complete =
-    try json |> member "verify_on_complete" |> to_bool
-    with _ -> true
-  in
+  let max_replans = Safe_parse.json_int ~context:"chain.orchestrate" ~default:3 json "max_replans" in
+  let timeout = Safe_parse.json_int ~context:"chain.orchestrate" ~default:600 json "timeout" in
+  let trace = Safe_parse.json_bool ~context:"chain.orchestrate" ~default:false json "trace" in
+  let verify_on_complete = Safe_parse.json_bool ~context:"chain.orchestrate" ~default:true json "verify_on_complete" in
   let orchestrator_model =
     json |> member "orchestrator_model" |> to_string_option
     |> Option.value ~default:"gemini"
