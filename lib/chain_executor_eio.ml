@@ -1376,7 +1376,9 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                   | None -> Printf.sprintf "Rate this output from 0.0 to 1.0:\n%s" sim_output
                 in
                 (match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
-                 | Ok s -> (try Float.min 1.0 (Float.max 0.0 (float_of_string (String.trim s))) with _ -> 0.5)
+                 | Ok s ->
+                     let raw = Safe_parse.float ~context:"llm_judge" ~default:0.5 (String.trim s) in
+                     Float.min 1.0 (Float.max 0.0 raw)
                  | Error _ -> 0.5)
             | "exec_test" ->
                 (* Parse test results: look for pass rate or coverage *)
@@ -1417,13 +1419,13 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                     sim_output
                   in
                   match exec_fn ~model:"gemini" ?system:None ~prompt ?tools:None () with
-                  | Ok s -> (try float_of_string (String.trim s) with _ -> 0.5)
+                  | Ok s -> Safe_parse.float ~context:"anti_fake:llm" ~default:0.5 (String.trim s)
                   | Error _ -> 0.5
                 in
                 (heuristic_score +. llm_score) /. 2.0
             | _ ->
                 (* Default: try to parse as float or return 0.5 *)
-                (try float_of_string (String.trim sim_output) with _ -> 0.5)
+                Safe_parse.float ~context:"score:default" ~default:0.5 (String.trim sim_output)
             in
             score
   in
