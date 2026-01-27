@@ -62,7 +62,11 @@ and record_complete ?(node_type = "unknown") ctx node_id ~duration_ms ~success =
   set_node_status ctx node_id (if success then Completed else Failed);
   add_trace ctx node_id (NodeComplete { duration_ms; success; node_type; attempt })
 
-and execute_llm_node ctx exec_fn node (llm : node_type) =
+and record_error ?(node_type = "unknown") ctx node_id msg =
+  let attempt = match Hashtbl.find_opt ctx.node_attempts node_id with Some n -> n | None -> 1 in
+  add_trace ctx node_id (NodeError { message = msg; error_class = None; node_type; attempt })
+
+and execute_llm_node ctx (exec_fn : exec_fn) node (llm : node_type) =
   match llm with
   | Llm { model; system = _; prompt; _ } ->
       let inputs = resolve_inputs ctx node.input_mapping in
@@ -136,37 +140,37 @@ and execute_threshold ctx sw clock exec_fn tool_exec parent _metric _op _val inp
   | Ok _ -> (match on_pass with Some n -> execute_node ctx sw clock exec_fn tool_exec n | None -> Ok "passed")
   | Error m -> Error m
 
-and execute_goal_driven ctx sw clock (exec_fn : exec_fn) tool_exec parent _metric _op _val action_node _measure _max _hints _conv _models =
+and execute_goal_driven ctx sw clock exec_fn tool_exec parent _metric _op _val action_node _measure _max _hints _conv _models =
   record_start ctx parent.id;
   execute_node ctx sw clock exec_fn tool_exec action_node
 
-and execute_subgraph ctx sw clock (exec_fn : exec_fn) tool_exec parent (chain : Chain_types.chain) =
+and execute_subgraph ctx sw clock exec_fn tool_exec parent (chain : Chain_types.chain) =
   record_start ctx parent.id;
   execute_sequential ctx sw clock exec_fn tool_exec chain.nodes
 
-and execute_parallel_group ctx sw clock (exec_fn : exec_fn) tool_exec group node_map =
+and execute_parallel_group ctx sw clock exec_fn tool_exec group node_map =
   Eio.Fiber.all (List.map (fun nid -> fun () -> match Hashtbl.find_opt node_map nid with Some n -> ignore (execute_node ctx sw clock exec_fn tool_exec n) | None -> ()) group);
   Ok "group_done"
 
-and execute_map ctx sw clock (exec_fn : exec_fn) tool_exec parent _func inner =
+and execute_map ctx sw clock exec_fn tool_exec parent _func inner =
   record_start ctx parent.id;
   execute_node ctx sw clock exec_fn tool_exec inner
 
-and execute_bind ctx sw clock (exec_fn : exec_fn) tool_exec parent _func inner =
+and execute_bind ctx sw clock exec_fn tool_exec parent _func inner =
   record_start ctx parent.id;
   execute_node ctx sw clock exec_fn tool_exec inner
 
-and execute_evaluator ctx _sw _clock (_exec_fn : exec_fn) _tool_exec parent _c _s _sp _ss _m = record_start ctx parent.id; Ok "eval"
-and execute_retry ctx sw clock (exec_fn : exec_fn) tool_exec parent node _m _b _r = record_start ctx parent.id; execute_node ctx sw clock exec_fn tool_exec node
-and execute_fallback ctx sw clock (exec_fn : exec_fn) tool_exec parent primary _f = record_start ctx parent.id; execute_node ctx sw clock exec_fn tool_exec primary
-and execute_race ctx sw clock (exec_fn : exec_fn) tool_exec parent nodes _t = record_start ctx parent.id; (match nodes with h :: _ -> execute_node ctx sw clock exec_fn tool_exec h | [] -> Error "empty")
-and execute_chain_exec ctx _sw _clock (_exec_fn : exec_fn) _tool_exec parent _cs _v _md _s _ci _po = record_start ctx parent.id; Ok "exec"
-and execute_cache ctx sw clock (exec_fn : exec_fn) tool_exec node _k _t inner = record_start ctx node.id; execute_node ctx sw clock exec_fn tool_exec inner
-and execute_batch ctx sw clock (exec_fn : exec_fn) tool_exec node _bs _p _cs inner = record_start ctx node.id; execute_node ctx sw clock exec_fn tool_exec inner
-and execute_spawn ctx sw clock (exec_fn : exec_fn) tool_exec node clean _pv _ic inner = record_start ctx node.id; let spawn_ctx = make_context ~start_time:ctx.start_time ~trace_enabled:ctx.trace_enabled ~timeout:ctx.timeout ~chain_id:ctx.chain_id () in execute_node (if clean then spawn_ctx else ctx) sw clock (exec_fn : exec_fn) tool_exec inner
-and execute_mcts ctx _sw _clock (_exec_fn : exec_fn) _tool_exec parent _s _sim _e _ep _p _mi _md _et _es _ps = record_start ctx parent.id; Ok "mcts"
-and execute_stream_merge ctx _sw _clock (_exec_fn : exec_fn) _tool_exec node _n _r _i _mr _t = record_start ctx node.id; Ok "stream"
-and execute_feedback_loop ctx _sw _clock (_exec_fn : exec_fn) _tool_exec node _g _ec _ip _mi _st _so _c _rm = record_start ctx node.id; Ok "feedback"
+and execute_evaluator ctx _sw _clock _exec_fn _tool_exec parent _c _s _sp _ss _m = record_start ctx parent.id; Ok "eval"
+and execute_retry ctx sw clock _exec_fn tool_exec parent node _m _b _r = record_start ctx parent.id; execute_node ctx sw clock _exec_fn tool_exec node
+and execute_fallback ctx sw clock _exec_fn tool_exec parent primary _f = record_start ctx parent.id; execute_node ctx sw clock _exec_fn tool_exec primary
+and execute_race ctx sw clock _exec_fn tool_exec parent nodes _t = record_start ctx parent.id; (match nodes with h :: _ -> execute_node ctx sw clock _exec_fn tool_exec h | [] -> Error "empty")
+and execute_chain_exec ctx _sw _clock _exec_fn _tool_exec parent _cs _v _md _s _ci _po = record_start ctx parent.id; Ok "exec"
+and execute_cache ctx sw clock _exec_fn tool_exec node _k _t inner = record_start ctx node.id; execute_node ctx sw clock _exec_fn tool_exec inner
+and execute_batch ctx sw clock _exec_fn tool_exec node _bs _p _cs inner = record_start ctx node.id; execute_node ctx sw clock _exec_fn tool_exec inner
+and execute_spawn ctx sw clock _exec_fn tool_exec node clean _pv _ic inner = record_start ctx node.id; let spawn_ctx = make_context ~start_time:ctx.start_time ~trace_enabled:ctx.trace_enabled ~timeout:ctx.timeout ~chain_id:ctx.chain_id () in execute_node (if clean then spawn_ctx else ctx) sw clock _exec_fn tool_exec inner
+and execute_mcts ctx _sw _clock _exec_fn _tool_exec parent _s _sim _e _ep _p _mi _md _et _es _ps = record_start ctx parent.id; Ok "mcts"
+and execute_stream_merge ctx _sw _clock _exec_fn _tool_exec node _n _r _i _mr _t = record_start ctx node.id; Ok "stream"
+and execute_feedback_loop ctx _sw _clock _exec_fn _tool_exec node _g _ec _ip _mi _st _so _c _rm = record_start ctx node.id; Ok "feedback"
 and execute_masc_broadcast ctx _te node _m _r _men = record_start ctx node.id; Ok "broadcast"
 and execute_masc_listen ctx _c _te node _f _t _r = record_start ctx node.id; Ok "listen"
 and execute_masc_claim ctx _te node _tid _r = record_start ctx node.id; Ok "claim"
