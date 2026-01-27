@@ -183,16 +183,22 @@ let parse_threshold_op = function
 (** Parse selection strategy from string/JSON *)
 let parse_select_strategy json =
   match json with
-  | `String "best" -> Ok Best
-  | `String "worst" -> Ok Worst
-  | `String "weighted_random" -> Ok WeightedRandom
+  | `String s ->
+      (match String.lowercase_ascii s with
+       | "best" -> Ok Best
+       | "worst" -> Ok Worst
+       | "weighted_random" | "weightedrandom" -> Ok WeightedRandom
+       | s when String.length s > 16 && String.sub s 0 16 = "above_threshold:" ->
+           (try
+             let threshold = float_of_string (String.sub s 16 (String.length s - 16)) in
+             Ok (AboveThreshold threshold)
+           with Failure _ -> Error (Printf.sprintf "Invalid threshold value in: %s" s))
+       | "abovethreshold" -> Ok (AboveThreshold 0.5) (* default threshold *)
+       | _ -> Error (Printf.sprintf "Unknown select strategy: %s" s))
   | `Assoc [("above_threshold", `Float f)] -> Ok (AboveThreshold f)
   | `Assoc [("above_threshold", `Int i)] -> Ok (AboveThreshold (float_of_int i))
-  | `String s when String.length s > 16 && String.sub s 0 16 = "above_threshold:" ->
-      (try
-        let threshold = float_of_string (String.sub s 16 (String.length s - 16)) in
-        Ok (AboveThreshold threshold)
-      with Failure _ -> Error (Printf.sprintf "Invalid threshold value in: %s" s))
+  | `Assoc [("AboveThreshold", `Float f)] -> Ok (AboveThreshold f)
+  | `Assoc [("AboveThreshold", `Int i)] -> Ok (AboveThreshold (float_of_int i))
   | other -> Error (Printf.sprintf "Unknown select strategy: %s" (Yojson.Safe.to_string other))
 
 (** Extract input mappings from prompt template *)
@@ -632,22 +638,51 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       })
 
   | "evaluator" ->
-      let candidates_json = match json |> member "candidates" with
+      (* Support both top-level fields AND nested evaluator_config for consistency with feedback_loop *)
+      let config = match json |> member "evaluator_config" with
+        | `Null -> json  (* fallback to top-level fields *)
+        | cfg -> cfg
+      in
+      (* Candidates can be either:
+         - String array: ["node_id1", "node_id2"] -> ChainRef nodes
+         - Node object array: [{...}, {...}] -> parse as nodes *)
+      let candidates_json = match config |> member "candidates" with
         | `List l -> l | `Null -> [] | _ -> []
       in
-      let* candidates = parse_nodes candidates_json in
-      let* scoring_func = require_string json "scoring_func" in
-      let scoring_prompt = match json |> member "scoring_prompt" with
+      let* candidates =
+        let is_string_list = List.for_all (function `String _ -> true | _ -> false) candidates_json in
+        if is_string_list then
+          (* Convert string IDs to ChainRef nodes *)
+          Ok (List.filter_map (function
+            | `String id -> Some { id = id ^ "_ref"; node_type = ChainRef id;
+                                   input_mapping = []; output_key = None; depends_on = None }
+            | _ -> None
+          ) candidates_json)
+        else
+          parse_nodes candidates_json
+      in
+      let* scoring_func = require_string config "scoring_func" in
+      let scoring_prompt = match config |> member "scoring_prompt" with
         | `String s -> Some s | _ -> None
       in
-      let select_strategy_json = match json |> member "select_strategy" with
+      let select_strategy_json = match config |> member "select_strategy" with
         | `Null -> `String "best" | v -> v
       in
       let* select_strategy = parse_select_strategy select_strategy_json in
-      let min_score = match json |> member "min_score" with
+      let min_score = match config |> member "min_score" with
         | `Float f -> Some f
         | `Int i -> Some (float_of_int i)
-        | _ -> None
+        | `String "threshold" -> (* support min_threshold alias *)
+            (match config |> member "min_threshold" with
+             | `Float f -> Some f
+             | `Int i -> Some (float_of_int i)
+             | _ -> None)
+        | _ ->
+            (* Also check min_threshold as alias *)
+            (match config |> member "min_threshold" with
+             | `Float f -> Some f
+             | `Int i -> Some (float_of_int i)
+             | _ -> None)
       in
       Ok (Evaluator { candidates; scoring_func; scoring_prompt; select_strategy; min_score })
 
