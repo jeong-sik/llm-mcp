@@ -75,6 +75,16 @@
  (name test_chain_engine)
  (libraries llm_mcp.common llm_mcp.eio alcotest eio eio_main str))
 
+; Chain Coverage tests (empty_response, checkpoint, adapter, ucb1)
+(test
+ (name test_chain_coverage)
+ (libraries llm_mcp.common llm_mcp.eio alcotest str unix))
+
+; Chain Executor Coverage tests (execute_* functions comprehensive coverage)
+(test
+ (name test_chain_executor_coverage)
+ (libraries llm_mcp.common llm_mcp.eio alcotest str unix eio eio_main))
+
 ; Chain Parser Safety tests (error handling, placeholder validation)
 (test
  (name test_chain_parser_safety)
@@ -84,6 +94,11 @@
 (test
  (name test_mermaid_parser)
  (libraries llm_mcp.common alcotest))
+
+; Mermaid Parser Coverage tests (comprehensive node/edge/roundtrip tests)
+(test
+ (name test_mermaid_coverage)
+ (libraries llm_mcp.common alcotest str))
 
 ; Adapter Transform tests (Conditional, JsonPath, etc.)
 ; Uses llm_mcp.eio for Chain_adapter_eio.apply_adapter_transform
@@ -189,3 +204,26 @@
 (test
  (name test_mcp_resilience)
  (libraries llm_mcp.eio alcotest eio eio_main))
+
+; Chain Compiler and Evaluator Coverage tests
+; Targets: compile, build_dependency_graph, topological_sort, calculate_depth,
+;          metrics collection, scoring heuristics (anti_fake, json_schema, regex_match)
+(test
+ (name test_compiler_evaluator_coverage)
+ (libraries llm_mcp.common llm_mcp.eio alcotest str unix))
+
+; Chain Parser Coverage tests (all 22+ node types, validation, serialization)
+; Targets: parse_chain, parse_node, parse_node_type, parse_config,
+;          validate_chain, validate_chain_strict, chain_to_json, node_to_json,
+;          parse_merge_strategy, parse_threshold_op, parse_select_strategy,
+;          parse_backoff_strategy, parse_adapter_transform,
+;          extract_input_mappings, extract_json_mappings
+(test
+ (name test_chain_parser_coverage)
+ (libraries llm_mcp.common alcotest))
+
+; Chain Modules Coverage tests (Types, Adapter, Category, Composer, Orchestrator, Batch)
+; Comprehensive tests for chain engine modules
+(test
+ (name test_chain_modules_coverage)
+ (libraries llm_mcp.common llm_mcp.eio alcotest str unix eio eio_main))
