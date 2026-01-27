@@ -757,11 +757,16 @@ let run ~sw ~env ?(config = Http.default_config) () =
   Eio.Fiber.fork ~sw (fun () ->
     let rec cleanup_loop () =
       Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
-      cleanup_stale_sessions store;
-      Mcp_session.cleanup_expired ();  (* Also clean global session store *)
+      (* Cleanup must never crash the server switch. *)
+      (try
+         cleanup_stale_sessions store;
+         Mcp_session.cleanup_expired ()  (* Also clean global session store *)
+       with exn ->
+         eprintf "[cleanup] loop error: %s\n%!" (Printexc.to_string exn));
       cleanup_loop ()
     in
-    cleanup_loop ()
+    try cleanup_loop () with exn ->
+      eprintf "[cleanup] fatal loop error: %s\n%!" (Printexc.to_string exn)
   );
 
   (* request_handler: sockaddr -> Gluten.Reqd.t -> unit *)
@@ -770,20 +775,35 @@ let run ~sw ~env ?(config = Http.default_config) () =
     handle_http ~sw ~proc_mgr ~clock ~store reqd
   in
 
+  let initial_backoff_s = 0.05 in
+  let max_backoff_s = 1.0 in
+  let backoff_s = ref initial_backoff_s in
+  let reset_backoff () = backoff_s := initial_backoff_s in
+  let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
   let rec accept_loop () =
-    let client_socket, client_addr = Eio.Net.accept ~sw socket in
+    (try
+       let client_socket, client_addr = Eio.Net.accept ~sw socket in
+       reset_backoff ();
+       Eio.Fiber.fork ~sw (fun () ->
+         try
+           Httpun_eio.Server.create_connection_handler
+             ~sw
+             ~request_handler
+             ~error_handler:Http.error_handler
+             client_addr
+             client_socket
+         with exn ->
+           eprintf "[accept] connection handler error: %s\n%!"
+             (Printexc.to_string exn));
 
-    Eio.Fiber.fork ~sw (fun () ->
-      Httpun_eio.Server.create_connection_handler
-        ~sw
-        ~request_handler
-        ~error_handler:Http.error_handler
-        client_addr
-        client_socket
-    );
-
-    (* Small yield to allow other fibers *)
-    Eio.Time.sleep clock 0.0;
+       (* Small yield to allow other fibers *)
+       Eio.Time.sleep clock 0.0
+     with exn ->
+       let delay = !backoff_s in
+       eprintf "[accept] error: %s (backoff %.2fs)\n%!"
+         (Printexc.to_string exn) delay;
+       Eio.Time.sleep clock delay;
+       bump_backoff ());
     accept_loop ()
   in
 
