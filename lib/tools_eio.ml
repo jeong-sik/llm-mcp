@@ -328,7 +328,8 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token ?stream_id args =
   let total_chars = ref 0 in
   let broadcast_delta json =
     if delta_enabled then
-      try Notification_sse.broadcast json with _ -> ()
+      try Notification_sse.broadcast json with exn ->
+        Printf.eprintf "[LLM] Delta broadcast failed: %s\n%!" (Printexc.to_string exn)
     else
       ()
   in

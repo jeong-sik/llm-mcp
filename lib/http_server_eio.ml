@@ -176,12 +176,14 @@ let broadcast_sse_shutdown reason =
     reason
   in
   let msg = sprintf "event: notification\ndata: %s\n\n" data in
-  Hashtbl.iter (fun _ client ->
+  Hashtbl.iter (fun client_id client ->
     if client.connected then
       try
         Httpun.Body.Writer.write_string client.body msg;
         Httpun.Body.Writer.flush client.body ignore
-      with _ -> ()
+      with exn ->
+        Printf.eprintf "[HTTP] SSE write failed to client %d: %s\n%!"
+          client_id (Printexc.to_string exn)
   ) sse_clients
 
 (** Send SSE event and flush immediately *)

@@ -94,7 +94,9 @@ let persist_event event_id event_str =
          List.iter (fun l -> output_string oc_trunc (l ^ "\n")) lines;
          close_out_noerr oc_trunc
        end
-     with _ -> ())
+     with exn ->
+       (* Log truncation errors for debugging - non-critical *)
+       Printf.eprintf "[SSE] Event log truncation error: %s\n%!" (Printexc.to_string exn))
 
 let cleanup_acks () =
   let ttl = float_of_int (ack_ttl_sec ()) in
@@ -171,7 +173,11 @@ let load_events () =
               buffer_event i s;
               if i > !event_counter then event_counter := i
           | _ -> ()
-        with _ -> ()
+        with exn ->
+          (* Log parse errors but continue loading other events *)
+          Printf.eprintf "[SSE] Failed to parse event line: %s (error: %s)\n%!"
+            (String.sub line 0 (min 100 (String.length line)))
+            (Printexc.to_string exn)
     ) lines
 
 let () =
@@ -224,6 +230,10 @@ let update_last_event_id session_id event_id =
       persist_acks ()
   | None -> ()
 
+(** Track broadcast failures for monitoring *)
+let broadcast_failure_count = ref 0
+let broadcast_success_count = ref 0
+
 let broadcast json =
   let data = Yojson.Safe.to_string json in
   let current_event_id = !event_counter + 1 in
@@ -231,10 +241,18 @@ let broadcast json =
   buffer_event current_event_id event;
   persist_event current_event_id event;
   Hashtbl.iter
-    (fun _session_id client ->
+    (fun session_id client ->
       if current_event_id > client.last_acked_id then (
         try
           client.push event;
-          client.last_sent_id <- current_event_id
-        with _ -> ()))
+          client.last_sent_id <- current_event_id;
+          incr broadcast_success_count
+        with exn ->
+          (* CRITICAL: Log broadcast failures - messages may be lost *)
+          incr broadcast_failure_count;
+          Printf.eprintf "[SSE] ⚠️ Broadcast failed to session %s (client_id=%d): %s\n%!"
+            session_id client.id (Printexc.to_string exn)))
     clients
+
+let get_broadcast_stats () =
+  (!broadcast_success_count, !broadcast_failure_count)

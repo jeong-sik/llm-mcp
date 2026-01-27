@@ -134,7 +134,8 @@ let record_event
          | Some f -> append_jsonl_unlocked ~fs:f json
          | None -> append_jsonl_sys json;
          if stream_enabled () then
-           (try Notification_sse.broadcast json with _ -> ()))
+           (try Notification_sse.broadcast json with exn ->
+             Printf.eprintf "[RunLog] SSE broadcast failed: %s\n%!" (Printexc.to_string exn)))
      with exn ->
        Printf.eprintf "[run_log_eio] Write failed: %s\n%!" (Printexc.to_string exn))
 

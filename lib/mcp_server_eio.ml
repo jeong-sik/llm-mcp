@@ -667,7 +667,9 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                   try
                     Httpun.Body.Writer.write_string body ev;
                     Httpun.Body.Writer.flush body ignore
-                  with _ -> ()
+                  with exn ->
+                    Printf.eprintf "[MCP] SSE push failed to session %s: %s\n%!"
+                      session_id (Printexc.to_string exn)
                 in
                 let notif_client_id =
                   Notification_sse.register session_id ~push:push_event ~last_event_id
@@ -693,14 +695,18 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                 in
                 (* Run heartbeat in background fiber *)
                 Eio.Fiber.fork ~sw (fun () ->
-                  try heartbeat_loop 1 with _ -> ());
+                  try heartbeat_loop 1 with exn ->
+                    Printf.eprintf "[MCP] Heartbeat loop error for session %s: %s\n%!"
+                      session_id (Printexc.to_string exn));
                 (* The connection stays open - httpun manages the lifecycle *)
                 (* Unregister when connection closes (on_eof from client) *)
                 Eio.Fiber.fork ~sw (fun () ->
                   Eio.Time.sleep clock 3600.0;  (* 1h max connection time *)
                   Http.unregister_sse_client client_id;
                   Notification_sse.unregister_if_current session_id notif_client_id;
-                  try Httpun.Body.Writer.close body with _ -> ()
+                  try Httpun.Body.Writer.close body with exn ->
+                    Printf.eprintf "[MCP] Body close error for session %s: %s\n%!"
+                      session_id (Printexc.to_string exn)
                 )
               )
 

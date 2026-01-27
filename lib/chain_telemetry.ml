@@ -41,7 +41,9 @@ let append_history (json : Yojson.Safe.t) =
       output_char oc '\n';
       flush oc
     )
-  with _ -> () (* Silently ignore write errors *)
+  with exn ->
+    (* Log telemetry write errors for debugging - non-critical *)
+    Printf.eprintf "[Telemetry] Write error to %s: %s\n%!" history_file (Printexc.to_string exn)
 
 (** {1 Event Types} *)
 
