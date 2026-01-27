@@ -27,6 +27,14 @@ let budget_mode_value = Tool_config.budget_mode_value
     }
 *)
 
+(** {1 Default Constants} *)
+
+(** Default timeout for LLM tool calls (seconds) *)
+let default_timeout = 300
+
+(** Default stream setting for LLM tools *)
+let default_stream = true
+
 (** Get use_cli default from LLM_MCP_USE_CLI env var (default: true) *)
 let default_use_cli () =
   match Sys.getenv_opt "LLM_MCP_USE_CLI" with
@@ -64,8 +72,8 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
     json |> member "output_format" |> to_string_option
     |> Option.value ~default:"text"
     |> output_format_of_string in
-  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:default_timeout in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
   let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
   Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream; use_cli; fallback_to_api }
@@ -92,8 +100,8 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
   let working_directory =
     json |> member "working_directory" |> to_string_option
     |> Option.value ~default:(Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp") in
-  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:default_timeout in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
   let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
   Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream; use_cli; fallback_to_api }
@@ -113,8 +121,8 @@ let parse_codex_args (json : Yojson.Safe.t) : tool_args =
     |> Option.value ~default:"workspace-write"
     |> sandbox_policy_of_string in
   let working_directory = json |> member "working_directory" |> to_string_option in
-  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:default_timeout in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
   let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
   Codex { prompt; model; reasoning_effort; sandbox; working_directory; timeout; stream; use_cli; fallback_to_api }
@@ -128,8 +136,8 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
   let temperature =
     try json |> member "temperature" |> to_float
     with Type_error _ -> 0.7 in
-  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:default_timeout in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let tools = match json |> member "tools" with
     | `Null -> None
     | `List tool_list ->
@@ -160,8 +168,8 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let max_tokens =
     try Some (json |> member "max_tokens" |> to_int)
     with Type_error _ -> Some 131072 in  (* GLM-4.7: 200K context, 128K (131072) output max *)
-  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:300 in
-  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:true in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:default_timeout in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:false in
   let do_sample = json |> member "do_sample" |> to_bool_option |> Option.value ~default:true in
   let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:false in
