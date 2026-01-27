@@ -129,11 +129,35 @@ let call_tool t ~url ~tool_name ~arguments =
     ("name", `String tool_name);
     ("arguments", arguments);
   ] in
-  call_mcp_server t ~url ~method_name:"tools/call" ~params
+  let start = Unix.gettimeofday () in
+  let result = call_mcp_server t ~url ~method_name:"tools/call" ~params in
+  let duration_ms =
+    int_of_float ((Unix.gettimeofday () -. start) *. 1000.0)
+  in
+  let error = match result with Ok _ -> None | Error msg -> Some msg in
+  Telemetry_jsonl.log_tool_called
+    ~tool_name
+    ~url
+    ~duration_ms
+    ~success:(Result.is_ok result)
+    ~error;
+  result
 
 (** List available tools from MCP server *)
 let list_tools t ~url =
-  call_mcp_server t ~url ~method_name:"tools/list" ~params:`Null
+  let start = Unix.gettimeofday () in
+  let result = call_mcp_server t ~url ~method_name:"tools/list" ~params:`Null in
+  let duration_ms =
+    int_of_float ((Unix.gettimeofday () -. start) *. 1000.0)
+  in
+  let error = match result with Ok _ -> None | Error msg -> Some msg in
+  Telemetry_jsonl.log_tool_called
+    ~tool_name:"tools/list"
+    ~url
+    ~duration_ms
+    ~success:(Result.is_ok result)
+    ~error;
+  result
 
 (** {1 MASC-MCP Convenience Functions} *)
 
