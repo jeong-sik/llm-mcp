@@ -307,3 +307,16 @@ let list_runs_json () : Yojson.Safe.t =
 
 let get_run_json ~(run_id : string) : Yojson.Safe.t option =
   get_run ~run_id |> Option.map run_record_to_json
+
+let list_runs_by_chain (chain_id : string) : run_record list =
+  Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+    List.filter (fun r -> String.equal r.chain_id chain_id) !store
+  )
+
+let cleanup_old_runs ~(days : int) : unit =
+  let cutoff = Unix.gettimeofday () -. (float_of_int days *. 86400.0) in
+  Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+    store := List.filter (fun r -> r.started_at >= cutoff) !store
+  )
+
+let run_to_json = run_record_to_json

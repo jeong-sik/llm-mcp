@@ -85,6 +85,11 @@
    http_server_eio
    mcp_server_eio
    tools_eio
+   mcp_client
+   llm_clients
+   tool_exec
+   chain_context
+   chain_node_runner
    mcp_client_eio
    cli_runner_eio
    ; Chain Engine (Phase 3-4)
