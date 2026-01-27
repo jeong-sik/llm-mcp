@@ -257,7 +257,7 @@ let quorum_id_re = Str.regexp {|quorum_\([0-9]+\)|}
 let consensus_id_re = Str.regexp {|consensus_\([0-9]+\)|}
 
 (** Known LLM model names *)
-let llm_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"; "stub"]
+let llm_models = ["gemini"; "claude"; "codex"; "gpt"; "gpt4"; "gpt5"; "o1"; "o3"; "sonnet"; "opus"; "haiku"; "stub"; "simple-test"]
 
 (** Known tool names *)
 let known_tools = ["eslint"; "tsc"; "prettier"; "jest"; "vitest"; "cargo"; "dune"; "make"; "npm"; "yarn"; "pnpm"]

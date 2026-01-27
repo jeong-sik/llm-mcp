@@ -1144,12 +1144,18 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   match args with
   | Gemini { prompt; model; thinking_level; timeout; stream; use_cli; _ } ->
       let result =
-        if use_cli then
-          (* CLI mode: slower but MASC-enabled *)
-          execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args ()
-        else
-          (* Direct API mode: faster, no MASC *)
-          execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream
+        match String.lowercase_ascii model with
+        | "stub" | "mock" ->
+            { Types.model = "stub"; returncode = 0; response = sprintf "[stub]%s" prompt; extra = [] }
+        | "simple-test" ->
+            { Types.model = "simple-test"; returncode = 0; response = sprintf "[test]%s" prompt; extra = [] }
+        | _ ->
+            if use_cli then
+              (* CLI mode: slower but MASC-enabled *)
+              execute_gemini_with_retry ~sw ~proc_mgr ~clock ~model ~thinking_level ~timeout ~stream ~args ()
+            else
+              (* Direct API mode: faster, no MASC *)
+              execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -1786,11 +1792,11 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | _ -> None
                 in
                 let args = match String.lowercase_ascii model with
-                  | "stub" | "mock" ->
+                  | "stub" | "mock" | "simple-test" ->
                       (* Stub model for tests and local smoke runs *)
                       Types.Gemini {
                         prompt;
-                        model = "stub";
+                        model = (if String.lowercase_ascii model = "simple-test" then "simple-test" else "stub");
                         thinking_level = Types.Low;
                         yolo = false;
                         output_format = Types.Text;
@@ -1811,10 +1817,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         use_cli = true;  (* MASC integration enabled *)
                         fallback_to_api = true;
                       }
-                  | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
+                  | "claude" | "opus" | "opus-4" | "sonnet" | "claude-3-5-sonnet" | "haiku" | "haiku-4.5" ->
                       Types.Claude {
                         prompt;
-                        model;
+                        model = (if model = "sonnet" || model = "claude-3-5-sonnet" then "claude-3-5-sonnet-latest" else model);
                         long_context = true;
                         system_prompt = None;
                         output_format = Types.Text;
@@ -1889,6 +1895,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 match args with
                 | Types.Gemini { model = "stub"; _ } ->
                     Ok (Printf.sprintf "[stub]%s" prompt)
+                | Types.Gemini { model = "simple-test"; _ } ->
+                    Ok (Printf.sprintf "[test]%s" prompt)
                 | _ ->
                     let result = execute ~sw ~proc_mgr ~clock args in
                     if result.returncode = 0 then Ok result.response

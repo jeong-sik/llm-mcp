@@ -233,11 +233,14 @@ let orchestrate
         let lowered = String.lowercase_ascii model in
         match lowered with
         | "stub" | "mock" -> Ok (Printf.sprintf "[stub]%s" prompt)
+        | "simple-test" -> Ok (Printf.sprintf "[test]%s" prompt)
         | "codex" | "gpt-5.2" ->
             exec_via_tool ~name:"codex" ~args:(("model", `String "gpt-5.2") :: args)
         | m when starts_with ~prefix:"gpt-" m ->
             exec_via_tool ~name:"codex" ~args:(("model", `String model) :: args)
-        | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" | "haiku-4.5" ->
+        | "sonnet" | "claude-3-5-sonnet" ->
+            exec_via_tool ~name:"claude" ~args:(("model", `String "claude-3-5-sonnet-latest") :: args)
+        | "claude" | "claude-cli" | "opus" | "haiku" | "haiku-4.5" ->
             exec_via_tool ~name:"claude" ~args:(("model", `String model) :: args)
         | "ollama" ->
             exec_via_tool ~name:"ollama" ~args
