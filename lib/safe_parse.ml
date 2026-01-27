@@ -149,3 +149,22 @@ let json_of_string ~context ~default s =
     if warn_enabled () then
       Printf.eprintf "[Parse] JSON error: %s\n%!" msg;
     default
+
+(** {1 Exception-Safe Execution} *)
+
+(** Try operation, use fallback on any exception. Logs exception when warn enabled.
+    Use for encoding/compression where fallback is always safe. *)
+let try_or ~context ~fallback f =
+  try f ()
+  with exn ->
+    if warn_enabled () then
+      Printf.eprintf "[Safe] %s failed: %s, using fallback\n%!" context (Printexc.to_string exn);
+    fallback ()
+
+(** Try operation, return None on any exception. Logs when warn enabled. *)
+let try_opt ~context f =
+  try Some (f ())
+  with exn ->
+    if warn_enabled () then
+      Printf.eprintf "[Safe] %s failed: %s\n%!" context (Printexc.to_string exn);
+    None

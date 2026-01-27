@@ -515,59 +515,46 @@ let format_tool_result ~(format : response_format) (r : tool_result) : string =
   match format with
   | Verbose -> verbose_fallback ()
   | Compact ->
-      (try
-        encode_compact_response (Lazy.force compact_response)
-      with _ -> verbose_fallback ())
+      Safe_parse.try_or ~context:"encode:compact" ~fallback:verbose_fallback
+        (fun () -> encode_compact_response (Lazy.force compact_response))
   | Binary ->
-      (try
-        Printf.sprintf "M%s" (Base64.encode_string (Lazy.force msgpack_bytes))
-      with _ -> verbose_fallback ())
+      Safe_parse.try_or ~context:"encode:binary" ~fallback:verbose_fallback
+        (fun () -> Printf.sprintf "M%s" (Base64.encode_string (Lazy.force msgpack_bytes)))
   | Base85 ->
-      (try
-        Printf.sprintf "A%s" (encode_base85 (Lazy.force msgpack_bytes))
-      with _ -> verbose_fallback ())
+      Safe_parse.try_or ~context:"encode:base85" ~fallback:verbose_fallback
+        (fun () -> Printf.sprintf "A%s" (encode_base85 (Lazy.force msgpack_bytes)))
   | Compressed ->
-      (try
-        (* v1.3: Real Gzip compression using grpc-core codec *)
+      Safe_parse.try_or ~context:"encode:gzip" ~fallback:verbose_fallback (fun () ->
         let msgpack = Lazy.force msgpack_bytes in
         match Grpc_core.Codec.Gzip.encoder ~level:4 msgpack with
         | Ok compressed -> Printf.sprintf "Z%s" (encode_base85 compressed)
-        | Error _ -> verbose_fallback ()
-      with _ -> verbose_fallback ())
+        | Error _ -> verbose_fallback ())
   | ZstdDict ->
-      (try
-        (* Compact Protocol v4: Zstd with trained dictionary *)
+      Safe_parse.try_or ~context:"encode:zstd_dict" ~fallback:verbose_fallback (fun () ->
         let msgpack = Lazy.force msgpack_bytes in
         match Dictionary.load_default () with
         | Some dict ->
             let compressed = Dictionary.compress_with_dict dict msgpack in
             if String.length compressed < String.length msgpack then
-              Printf.sprintf "D%s" (encode_base85 compressed)  (* D = Dictionary-compressed *)
+              Printf.sprintf "D%s" (encode_base85 compressed)
             else
-              (* Dictionary didn't help, fall back to raw zstd *)
               Printf.sprintf "S%s" (encode_base85 (Zstd.compress ~level:3 msgpack))
         | None ->
-            (* No dictionary, use raw zstd *)
-            Printf.sprintf "S%s" (encode_base85 (Zstd.compress ~level:3 msgpack))
-      with _ -> verbose_fallback ())
+            Printf.sprintf "S%s" (encode_base85 (Zstd.compress ~level:3 msgpack)))
   | Auto ->
       (* v1.4 Adaptive Format Selection with Zstd (Compact Protocol v4) *)
       let result_len = String.length r.response in
       if result_len < auto_compact_threshold then
-        (* Short: readable Compact DSL *)
-        (try encode_compact_response (Lazy.force compact_response)
-         with _ -> verbose_fallback ())
+        Safe_parse.try_or ~context:"encode:auto_compact" ~fallback:verbose_fallback
+          (fun () -> encode_compact_response (Lazy.force compact_response))
       else if result_len < auto_base85_threshold then
-        (* Medium: efficient Base85 *)
-        (try Printf.sprintf "A%s" (encode_base85 (Lazy.force msgpack_bytes))
-         with _ -> verbose_fallback ())
+        Safe_parse.try_or ~context:"encode:auto_base85" ~fallback:verbose_fallback
+          (fun () -> Printf.sprintf "A%s" (encode_base85 (Lazy.force msgpack_bytes)))
       else
-        (* Large: Zstd compression (replaces Gzip for better ratio) *)
-        (try
+        Safe_parse.try_or ~context:"encode:auto_zstd" ~fallback:verbose_fallback (fun () ->
           let msgpack = Lazy.force msgpack_bytes in
           let compressed = Zstd.compress ~level:3 msgpack in
-          Printf.sprintf "S%s" (encode_base85 compressed)  (* S = Standard Zstd *)
-         with _ -> verbose_fallback ())
+          Printf.sprintf "S%s" (encode_base85 compressed))
 
 (** Decode formatted response back to compact_response.
     Compact Protocol v4: Supports all format prefixes.
