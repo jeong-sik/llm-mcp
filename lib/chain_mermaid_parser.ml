@@ -348,13 +348,39 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
             conversational = false;
             relay_models = [];
           })
+      else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "eval_" then
+        (* eval_ prefix: Evaluator node *)
+        Ok (Evaluator { candidates = []; scoring_func = "llm_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
       else
         (* Default diamond: try to parse old syntax or default to Quorum *)
-        (try
-          let n = Scanf.sscanf text "Quorum:%d" (fun n -> n) in
-          Ok (Quorum { required = n; nodes = [] })
-        with Scanf.Scan_failure _ | Failure _ | End_of_file ->
-          Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None }))
+        (* First try Evaluator: prefix in text *)
+        if String.length text > 10 && String.sub text 0 10 = "Evaluator:" then
+          let rest = String.sub text 10 (String.length text - 10) in
+          let parts = String.split_on_char ':' rest |> List.map trim in
+          match parts with
+          | [scoring_func; strategy_str; min_score_str] ->
+              let select_strategy = match String.lowercase_ascii strategy_str with
+                | "best" -> Best | "worst" -> Worst | "weighted" -> WeightedRandom
+                | _ -> Best
+              in
+              let min_score = try Some (float_of_string min_score_str) with _ -> None in
+              Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy; min_score })
+          | [scoring_func; strategy_str] ->
+              let select_strategy = match String.lowercase_ascii strategy_str with
+                | "best" -> Best | "worst" -> Worst | "weighted" -> WeightedRandom
+                | _ -> Best
+              in
+              Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy; min_score = None })
+          | [scoring_func] ->
+              Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy = Best; min_score = None })
+          | _ ->
+              Ok (Evaluator { candidates = []; scoring_func = "llm_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
+        else
+          (try
+            let n = Scanf.sscanf text "Quorum:%d" (fun n -> n) in
+            Ok (Quorum { required = n; nodes = [] })
+          with Scanf.Scan_failure _ | Failure _ | End_of_file ->
+            Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None }))
 
   | `Subroutine ->
       (* Subroutine nodes: Ref, Pipeline, Fanout, Map, Bind *)
@@ -854,8 +880,41 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
             })
         | _ ->
             Error (Printf.sprintf "Invalid MCTS format (expected policy:iterations or policy:param:iterations): %s" content))
+      else if String.length content > 10 && String.sub content 0 10 = "Evaluator:" then
+        (* {Evaluator:scoring_func:select_strategy:min_score} - e.g., {Evaluator:llm_judge:best:0.7} *)
+        let rest = String.sub content 10 (String.length content - 10) in
+        let parts = String.split_on_char ':' rest |> List.map trim in
+        (match parts with
+        | [scoring_func; strategy_str; min_score_str] ->
+            let select_strategy = match String.lowercase_ascii strategy_str with
+              | "best" -> Best
+              | "worst" -> Worst
+              | "weighted" -> WeightedRandom
+              | s when String.length s > 6 && String.sub s 0 6 = "above:" ->
+                  let threshold = try float_of_string (String.sub s 6 (String.length s - 6)) with _ -> 0.5 in
+                  AboveThreshold threshold
+              | _ -> Best
+            in
+            let min_score = try Some (float_of_string min_score_str) with _ -> None in
+            (* Candidates filled from edges in post-process *)
+            Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy; min_score })
+        | [scoring_func; strategy_str] ->
+            let select_strategy = match String.lowercase_ascii strategy_str with
+              | "best" -> Best
+              | "worst" -> Worst
+              | "weighted" -> WeightedRandom
+              | s when String.length s > 6 && String.sub s 0 6 = "above:" ->
+                  let threshold = try float_of_string (String.sub s 6 (String.length s - 6)) with _ -> 0.5 in
+                  AboveThreshold threshold
+              | _ -> Best
+            in
+            Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy; min_score = None })
+        | [scoring_func] ->
+            Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy = Best; min_score = None })
+        | _ ->
+            Error (Printf.sprintf "Invalid Evaluator format (expected func or func:strategy or func:strategy:min_score): %s" content))
       else
-        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, GoalDriven:..., or MCTS:..., got: %s" content)
+        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, GoalDriven:..., MCTS:..., or Evaluator:..., got: %s" content)
 
   | `Rect ->
       (* [LLM:model "prompt"] or [LLM:model "prompt" +tools] or [Tool:name] *)
@@ -1365,6 +1424,17 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                       (* No inputs - keep placeholder *)
                       let placeholder = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
                       Retry { max_attempts; backoff; retry_on; node = placeholder })
+              | Evaluator { scoring_func; scoring_prompt; select_strategy; min_score; candidates = _ } ->
+                  (* Candidates from incoming edges *)
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let candidates = List.map (fun input_id ->
+                    { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                  ) input_ids in
+                  Evaluator { scoring_func; scoring_prompt; select_strategy; min_score; candidates }
               | other -> other
             in
             let input_mapping =
@@ -1519,6 +1589,16 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                     | [] ->
                         let placeholder = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
                         Retry { max_attempts; backoff; retry_on; node = placeholder })
+                | Evaluator { scoring_func; scoring_prompt; select_strategy; min_score; candidates = _ } ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    let candidates = List.map (fun input_id ->
+                      { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                    ) input_ids in
+                    Evaluator { scoring_func; scoring_prompt; select_strategy; min_score; candidates }
                 | GoalDriven gd ->
                     (* Apply metadata if available *)
                     (match Hashtbl.find_opt meta.node_goaldriven_meta mnode.id with
