@@ -305,3 +305,8 @@
 (test
  (name test_error)
  (libraries llm_mcp.common alcotest))
+
+; Metrics module tests (Prometheus-compatible metrics collection)
+(test
+ (name test_metrics)
+ (libraries llm_mcp.common alcotest unix))
