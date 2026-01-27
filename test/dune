@@ -300,3 +300,8 @@
  (name test_langfuse)
  (libraries llm_mcp.common alcotest))
 
+
+; Error module tests (types, is_recoverable, to_string, severity, JSON roundtrip)
+(test
+ (name test_error)
+ (libraries llm_mcp.common alcotest))
