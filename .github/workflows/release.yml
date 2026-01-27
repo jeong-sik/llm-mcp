@@ -40,7 +40,7 @@ jobs:
           opam install . --deps-only -y
 
       - name: Build
-        run: opam exec -- dune build --release
+        run: opam exec -- dune build --release bin/main.exe
 
       - name: Package binary
         run: |
