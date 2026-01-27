@@ -231,3 +231,11 @@
 (executable
  (name test_all_node_types)
  (libraries llm_mcp.common))
+
+(executable
+ (name test_edge_cases)
+ (libraries llm_mcp.common))
+
+(executable
+ (name test_threshold_debug)
+ (libraries llm_mcp.common))
