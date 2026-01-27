@@ -315,3 +315,8 @@
 (test
  (name test_rate_limit)
  (libraries llm_mcp.common alcotest unix))
+
+; Ollama parser tests (streaming chunks, tool calls, chat responses)
+(test
+ (name test_ollama_parser)
+ (libraries llm_mcp.common alcotest))
