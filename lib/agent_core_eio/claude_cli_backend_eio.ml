@@ -190,6 +190,10 @@ let exec_command_with_output ~sw ~proc_mgr ~clock ~(config:config) ~(cmd:string 
       (fun () ->
          stderr_content := Eio.Buf_read.(of_flow ~max_size:(1024 * 1024) stderr_r |> take_all));
 
+    (* Close read ends after reading *)
+    Eio.Flow.close stdout_r;
+    Eio.Flow.close stderr_r;
+
     (* Wait for process *)
     let wait_for_process () =
       match Eio.Process.await proc with
@@ -271,6 +275,7 @@ let is_available ~sw ~proc_mgr () =
     in
     Eio.Flow.close stdout_w;
     let output = Eio.Buf_read.(of_flow ~max_size:4096 stdout_r |> take_all) in
+    Eio.Flow.close stdout_r;
     let _ = Eio.Process.await proc in
     String.length (String.trim output) > 0
   with _ ->
@@ -285,6 +290,7 @@ let version ~sw ~proc_mgr () =
     in
     Eio.Flow.close stdout_w;
     let output = Eio.Buf_read.(of_flow ~max_size:4096 stdout_r |> take_all) in
+    Eio.Flow.close stdout_r;
     let _ = Eio.Process.await proc in
     Result.Ok (String.trim output)
   with e ->
