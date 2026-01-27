@@ -265,3 +265,8 @@
  (name test_chain_category)
  (libraries llm_mcp.common alcotest))
 
+; Chain Evaluator tests (metrics, triggers, verification parsing)
+(test
+ (name test_chain_evaluator)
+ (libraries llm_mcp.common alcotest str unix))
+
