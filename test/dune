@@ -270,3 +270,8 @@
  (name test_chain_evaluator)
  (libraries llm_mcp.common alcotest str unix))
 
+; Chain Stats tests (percentiles, costs, formatting)
+(test
+ (name test_chain_stats)
+ (libraries llm_mcp.common alcotest))
+
