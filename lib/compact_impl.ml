@@ -238,7 +238,7 @@ let decode_compact_response s =
         version = 1;
         status = status_code_of_string status;
         model = model_code_of_string model;
-        tokens = (try int_of_string tokens with _ -> 0);
+        tokens = Safe_parse.int ~context:"compact:tokens" ~default:0 tokens;
         result = String.concat "|" rest;  (* Result may contain | *)
       }
   | _ -> None
@@ -253,7 +253,7 @@ let default_msgpack_version = ref 3
 let tool_result_to_compact ?(version = !default_msgpack_version) (r : tool_result) : compact_response =
   let tokens =
     match List.assoc_opt "tokens" r.extra with
-    | Some t -> (try int_of_string t with _ -> 0)
+    | Some t -> Safe_parse.int ~context:"tool_result:tokens" ~default:0 t
     | None -> 0
   in
   {
@@ -651,13 +651,14 @@ let decode_formatted_response (data : string) : (compact_response, string) resul
         (* JSON verbose - parse and convert *)
         (try
           let json = Yojson.Safe.from_string data in
-          let open Yojson.Safe.Util in
+          let status_str = Safe_parse.json_string ~context:"decode_compact" ~default:"OK" json "status" in
+          let model_str = Safe_parse.json_string ~context:"decode_compact" ~default:"unknown" json "model" in
           Ok {
             version = 1;
-            status = (try status_code_of_string (json |> member "status" |> to_string) with _ -> OK);
-            model = (try model_code_of_string (json |> member "model" |> to_string) with _ -> Unknown "");
-            tokens = (try json |> member "tokens" |> to_int with _ -> 0);
-            result = (try json |> member "response" |> to_string with _ -> "");
+            status = (try status_code_of_string status_str with Failure _ -> OK);
+            model = (try model_code_of_string model_str with Failure _ -> Unknown "");
+            tokens = Safe_parse.json_int ~context:"decode_compact" ~default:0 json "tokens";
+            result = Safe_parse.json_string ~context:"decode_compact" ~default:"" json "response";
           }
         with e -> Error (Printf.sprintf "JSON parse failed: %s" (Printexc.to_string e)))
     | _ ->
