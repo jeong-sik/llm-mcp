@@ -390,7 +390,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
                 | "best" -> Best | "worst" -> Worst | "weighted" -> WeightedRandom
                 | _ -> Best
               in
-              let min_score = try Some (float_of_string min_score_str) with _ -> None in
+              let min_score = Safe_parse.float_opt min_score_str in
               Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy; min_score })
           | [scoring_func; strategy_str] ->
               let select_strategy = match String.lowercase_ascii strategy_str with
@@ -486,7 +486,8 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       (* Stadium (rounded) nodes: Retry, Fallback, Race *)
       (* Format: ("Retry:N") or ("Fallback") or ("Race") *)
       if String.length text >= 6 && String.sub text 0 6 = "Retry:" then
-        let max_attempts = try int_of_string (String.sub text 6 (String.length text - 6)) with _ -> 3 in
+        let max_attempts = Safe_parse.int ~context:"Retry:N" ~default:3
+          (String.sub text 6 (String.length text - 6)) in
         (* Retry wraps an inner node - will be resolved from edges *)
         let placeholder_node = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
         Ok (Retry { max_attempts; backoff = Constant 1.0; retry_on = []; node = placeholder_node })
@@ -648,7 +649,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         in
         (match parts with
         | [key_expr; ttl_str; node_id] ->
-            let ttl_seconds = try int_of_string ttl_str with _ -> 0 in
+            let ttl_seconds = Safe_parse.int ~context:"Cache:ttl" ~default:0 ttl_str in
             Ok (Cache { key_expr; ttl_seconds; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | [key_expr; node_id] ->
             (* Default TTL = 0 (infinite) *)
@@ -663,11 +664,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         in
         (match parts with
         | [size_str; parallel_str; node_id] ->
-            let batch_size = try int_of_string size_str with _ -> 10 in
+            let batch_size = Safe_parse.int ~context:"Batch:size" ~default:10 size_str in
             let parallel = parallel_str = "true" || parallel_str = "parallel" in
             Ok (Batch { batch_size; parallel; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
         | [size_str; node_id] ->
-            let batch_size = try int_of_string size_str with _ -> 10 in
+            let batch_size = Safe_parse.int ~context:"Batch:size" ~default:10 size_str in
             Ok (Batch { batch_size; parallel = true; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
         | _ ->
             Error (Printf.sprintf "Batch requires size,parallel,node or size,node format, got: %s" content))
@@ -708,7 +709,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               timeout = None;
             })
         | [reducer_str; min_str] ->
-            let min_results = try Some (int_of_string min_str) with _ -> None in
+            let min_results = Safe_parse.int_opt min_str in
             Ok (StreamMerge {
               nodes = [];
               reducer = parse_reducer reducer_str;
@@ -717,8 +718,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               timeout = None;
             })
         | [reducer_str; min_str; timeout_str] ->
-            let min_results = try Some (int_of_string min_str) with _ -> None in
-            let timeout = try Some (float_of_string timeout_str) with _ -> None in
+            let min_results = Safe_parse.int_opt min_str in
+            let timeout = Safe_parse.float_opt timeout_str in
             Ok (StreamMerge {
               nodes = [];
               reducer = parse_reducer reducer_str;
@@ -739,24 +740,25 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         (* Parse threshold with operator: ">=0.95", "<0.3", "0.7" (default >=) *)
         let parse_threshold_value str =
           let s = trim str in
+          let parse_f sub = Safe_parse.float ~context:"FeedbackLoop:threshold" ~default:0.7 sub in
           if String.length s >= 2 && s.[0] = '>' && s.[1] = '=' then
-            (Gte, try float_of_string (String.sub s 2 (String.length s - 2)) with _ -> 0.7)
+            (Gte, parse_f (String.sub s 2 (String.length s - 2)))
           else if String.length s >= 2 && s.[0] = '<' && s.[1] = '=' then
-            (Lte, try float_of_string (String.sub s 2 (String.length s - 2)) with _ -> 0.7)
+            (Lte, parse_f (String.sub s 2 (String.length s - 2)))
           else if String.length s >= 2 && s.[0] = '!' && s.[1] = '=' then
-            (Neq, try float_of_string (String.sub s 2 (String.length s - 2)) with _ -> 0.7)
+            (Neq, parse_f (String.sub s 2 (String.length s - 2)))
           else if String.length s >= 1 && s.[0] = '>' then
-            (Gt, try float_of_string (String.sub s 1 (String.length s - 1)) with _ -> 0.7)
+            (Gt, parse_f (String.sub s 1 (String.length s - 1)))
           else if String.length s >= 1 && s.[0] = '<' then
-            (Lt, try float_of_string (String.sub s 1 (String.length s - 1)) with _ -> 0.7)
+            (Lt, parse_f (String.sub s 1 (String.length s - 1)))
           else if String.length s >= 1 && s.[0] = '=' then
-            (Eq, try float_of_string (String.sub s 1 (String.length s - 1)) with _ -> 0.7)
+            (Eq, parse_f (String.sub s 1 (String.length s - 1)))
           else
-            (Gte, try float_of_string s with _ -> 0.7)  (* default: >=value *)
+            (Gte, parse_f s)  (* default: >=value *)
         in
         (match parts with
         | [scoring_func; max_iter_str; threshold_str] ->
-            let max_iterations = try int_of_string max_iter_str with _ -> 3 in
+            let max_iterations = Safe_parse.int ~context:"FeedbackLoop:max_iter" ~default:3 max_iter_str in
             let (score_operator, score_threshold) = parse_threshold_value threshold_str in
             Ok (FeedbackLoop {
               generator = gen_placeholder;
@@ -773,7 +775,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               relay_models = [];
             })
         | [scoring_func; max_iter_str] ->
-            let max_iterations = try int_of_string max_iter_str with _ -> 3 in
+            let max_iterations = Safe_parse.int ~context:"FeedbackLoop:max_iter" ~default:3 max_iter_str in
             Ok (FeedbackLoop {
               generator = gen_placeholder;
               evaluator_config = {
@@ -868,7 +870,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         let parts = String.split_on_char ':' rest |> List.map trim in
         (match parts with
         | [policy_type; iter_str] when policy_type = "greedy" ->
-            let max_iterations = try int_of_string iter_str with _ -> 10 in
+            let max_iterations = Safe_parse.int ~context:"MCTS:iter" ~default:10 iter_str in
             (* Default simulation node - uses LLM to simulate outcomes *)
             let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
@@ -884,11 +886,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               parallel_sims = 1;
             })
         | [policy_type; param_str; iter_str] ->
-            let max_iterations = try int_of_string iter_str with _ -> 10 in
+            let max_iterations = Safe_parse.int ~context:"MCTS:iter" ~default:10 iter_str in
             let policy = match policy_type with
-              | "ucb1" -> UCB1 (try float_of_string param_str with _ -> 1.41)
-              | "eps" | "epsilon" -> EpsilonGreedy (try float_of_string param_str with _ -> 0.1)
-              | "softmax" -> Softmax (try float_of_string param_str with _ -> 1.0)
+              | "ucb1" -> UCB1 (Safe_parse.float ~context:"MCTS:ucb1_param" ~default:1.41 param_str)
+              | "eps" | "epsilon" -> EpsilonGreedy (Safe_parse.float ~context:"MCTS:epsilon" ~default:0.1 param_str)
+              | "softmax" -> Softmax (Safe_parse.float ~context:"MCTS:softmax_temp" ~default:1.0 param_str)
               | _ -> UCB1 1.41  (* default *)
             in
             (* Default simulation node - uses LLM to simulate outcomes *)
@@ -918,11 +920,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               | "worst" -> Worst
               | "weighted" -> WeightedRandom
               | s when String.length s > 6 && String.sub s 0 6 = "above:" ->
-                  let threshold = try float_of_string (String.sub s 6 (String.length s - 6)) with _ -> 0.5 in
+                  let threshold = Safe_parse.float ~context:"Evaluator:above" ~default:0.5
+                    (String.sub s 6 (String.length s - 6)) in
                   AboveThreshold threshold
               | _ -> Best
             in
-            let min_score = try Some (float_of_string min_score_str) with _ -> None in
+            let min_score = Safe_parse.float_opt min_score_str in
             (* Candidates filled from edges in post-process *)
             Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy; min_score })
         | [scoring_func; strategy_str] ->
@@ -931,7 +934,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               | "worst" -> Worst
               | "weighted" -> WeightedRandom
               | s when String.length s > 6 && String.sub s 0 6 = "above:" ->
-                  let threshold = try float_of_string (String.sub s 6 (String.length s - 6)) with _ -> 0.5 in
+                  let threshold = Safe_parse.float ~context:"Evaluator:above" ~default:0.5
+                    (String.sub s 6 (String.length s - 6)) in
                   AboveThreshold threshold
               | _ -> Best
             in
@@ -1055,7 +1059,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
   | `Stadium ->
       (* Stadium (rounded) nodes: Retry, Fallback, Race - same logic as infer_type_from_id *)
       if String.length content >= 6 && String.sub content 0 6 = "Retry:" then
-        let max_attempts = try int_of_string (String.sub content 6 (String.length content - 6)) with _ -> 3 in
+        let max_attempts = Safe_parse.int ~context:"Retry:N" ~default:3
+          (String.sub content 6 (String.length content - 6)) in
         let placeholder_node = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
         Ok (Retry { max_attempts; backoff = Constant 1.0; retry_on = []; node = placeholder_node })
       else if content = "Fallback" || (String.length content >= 9 && String.sub content 0 9 = "Fallback:") then
