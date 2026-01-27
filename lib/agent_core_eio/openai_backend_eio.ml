@@ -1,6 +1,6 @@
 (** OpenAI Backend Eio - Effect-based LLM_BACKEND implementation for OpenAI API
 
-    Direct-style version using Eio instead of Lwt.
+    Direct-style version using Eio .
     Wraps OpenAI's chat completion endpoint with tool/function calling support.
     Compatible with GPT-4, GPT-3.5-turbo, and other OpenAI-compatible APIs.
 

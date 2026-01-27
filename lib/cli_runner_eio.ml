@@ -3,7 +3,7 @@
     Pure Eio subprocess execution for llm-mcp.
     Replaces Lwt_process with Eio.Process.
 
-    Key differences from Lwt version:
+    Key differences from 
     - Direct-style (no monadic bind)
     - Structured concurrency with Eio.Switch
     - Fiber-based parallelism for stdout/stderr

@@ -3,7 +3,7 @@
     Pure Eio implementation for MCP 2025-11-25.
     Uses httpun-eio for HTTP, Tools_eio for direct-style tool execution.
 
-    Key differences from Lwt version:
+    Key differences from 
     - Direct-style (no monadic bind)
     - Structured concurrency with Eio.Switch
     - Fiber-based parallelism

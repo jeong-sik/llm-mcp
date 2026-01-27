@@ -1,6 +1,6 @@
 (** Ollama Backend Eio - Effect-based LLM_BACKEND implementation for Ollama API
 
-    Direct-style version using Eio instead of Lwt.
+    Direct-style version using Eio .
     Wraps Ollama's /api/chat endpoint with proper message formatting,
     tool calling support, and streaming capabilities.
 

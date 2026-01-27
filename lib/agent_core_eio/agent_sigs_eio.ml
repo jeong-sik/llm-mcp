@@ -11,7 +11,7 @@ open Agent_types
 (** {1 LLM Backend Interface - Eio Version}
 
     Abstracts the LLM provider (Ollama, Claude CLI, Codex, etc.)
-    Returns results directly instead of Lwt.t wrapped.
+    Returns results directly .t wrapped.
 *)
 module type LLM_BACKEND = sig
   (** Backend-specific configuration *)

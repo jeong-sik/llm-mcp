@@ -1,7 +1,7 @@
 (** Agent Core Eio - Effect-based Agent Loop Abstraction
 
     Pure Eio implementation of the Agent Loop pattern.
-    No Lwt dependency - direct style programming with effects.
+    direct style programming with effects.
 
     Usage:
     {[

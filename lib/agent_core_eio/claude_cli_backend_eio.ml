@@ -1,6 +1,6 @@
 (** Claude CLI Backend Eio - Effect-based LLM_BACKEND for Claude Code CLI
 
-    Direct-style version using Eio instead of Lwt.
+    Direct-style version using Eio .
     Wraps the `claude` CLI tool with JSON output mode for programmatic access.
     Note: Tool execution is handled internally by Claude CLI, so this backend
     only returns final responses (no tool_calls).
