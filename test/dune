@@ -330,3 +330,13 @@
 (test
  (name test_log)
  (libraries llm_mcp.common alcotest unix))
+
+; Tool_config tests (budget mode, MCP config parsing)
+(test
+ (name test_tool_config)
+ (libraries llm_mcp.common alcotest))
+
+; Version constant tests
+(test
+ (name test_version)
+ (libraries llm_mcp.common alcotest))
