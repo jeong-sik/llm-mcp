@@ -345,3 +345,8 @@
 (test
  (name test_chain_registry)
  (libraries llm_mcp.common alcotest unix))
+
+; Chain_batch tests (delay calculation, token estimation, chunking)
+(test
+ (name test_chain_batch)
+ (libraries llm_mcp.common llm_mcp.eio alcotest eio eio_main))
