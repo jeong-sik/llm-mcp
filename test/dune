@@ -250,3 +250,8 @@
  (name test_fewshot_injector)
  (libraries llm_mcp.common alcotest))
 
+; Checkpoint Store tests (JSON roundtrip, pure functions)
+(test
+ (name test_checkpoint_store)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main))
+
