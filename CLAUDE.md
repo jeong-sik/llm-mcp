@@ -54,17 +54,23 @@ graph LR
 | Gate | `{Gate:condition}` | `{diamond}` |
 | Merge | `{Merge:strategy}` | `{diamond}` |
 | Threshold | `{Threshold:>=0.8}` | `{diamond}` |
+| MCTS | `{MCTS:policy:iterations}` | `{diamond}` |
+| Evaluator | `{Evaluator:func:strategy:min_score}` | `{diamond}` |
 | Pipeline | `[["Pipeline"]]` | `[[double]]` |
 | Fanout | `[["Fanout"]]` | `[[double]]` |
 | ChainRef | `[["ChainRef:id"]]` | `[[double]]` |
+| Map | `[[Map:func,node_id]]` | `[[double]]` |
+| Bind | `[[Bind:func,node_id]]` | `[[double]]` |
+| Batch | `[[Batch:size,parallel,node_id]]` | `[[double]]` |
+| StreamMerge | `[[StreamMerge:reducer,min,timeout]]` | `[[double]]` |
 | Retry | `("Retry:3")` | `(rounded)` |
 | Fallback | `("Fallback")` | `(rounded)` |
 | Race | `("Race")` | `(rounded)` |
 | Adapter | `>/"Adapter:Extract .data"/` | `>/trap/` |
-| Cache | `[["Cache:60s"]]` | `[[double]]` |
-| GoalDriven | `{GoalDriven:evaluator}` | `{diamond}` |
+| Cache | `[["Cache:key_expr,ttl,node_id"]]` | `[[double]]` |
+| GoalDriven | `{GoalDriven:metric:op:value:max_iter}` | `{diamond}` |
 | Spawn | `[["Spawn:clean,node"]]` | `[[double]]` |
-| FeedbackLoop | `[[FeedbackLoop:eval_id,max_iter,min_score]]` | `[[double]]` |
+| FeedbackLoop | `[[FeedbackLoop:scoring_func,max_iter,>=threshold]]` | `[[double]]` |
 | Masc_broadcast | `((📢 MASC:broadcast))` | `((circle))` |
 | Masc_listen | `((👂 MASC:listen))` | `((circle))` |
 | Masc_claim | `((✋ MASC:claim))` | `((circle))` |
@@ -260,11 +266,11 @@ The FeedbackLoop node combines generation, evaluation, and improvement in an ite
 ```mermaid
 graph LR
     gen["LLM:gemini 'Generate code for {{input}}'"]
-    loop[["FeedbackLoop:code_quality,3,0.8"]]
+    loop[["FeedbackLoop:code_quality,3,>=0.8"]]
     gen --> loop
 ```
 
-Parameters: `FeedbackLoop:evaluator_id,max_iterations,min_score`
+Parameters: `FeedbackLoop:scoring_func,max_iterations,>=threshold`
 
 ### JSON Format
 
@@ -294,7 +300,7 @@ Parameters: `FeedbackLoop:evaluator_id,max_iterations,min_score`
 graph LR
     spec["LLM:gemini 'Parse requirements'"]
     gen["LLM:claude 'Generate TypeScript code'"]
-    loop[["FeedbackLoop:type_safety,5,0.9"]]
+    loop[["FeedbackLoop:type_safety,5,>=0.9"]]
     spec --> gen --> loop
 ```
 
@@ -304,6 +310,124 @@ This chain:
 3. Evaluator checks type safety
 4. If score < 0.9: improver refines code with feedback
 5. Repeats until score >= 0.9 or 5 iterations
+
+---
+
+## MCTS Node (Monte Carlo Tree Search)
+
+MCTS enables exploration-based decision making for complex search spaces.
+
+### Mermaid Syntax
+
+```
+{MCTS:policy:iterations}
+{MCTS:policy:param:iterations}
+```
+
+### Policy Types
+
+| Policy | Syntax | Description |
+|--------|--------|-------------|
+| Greedy | `{MCTS:greedy:10}` | Always select best-scoring child |
+| UCB1 | `{MCTS:ucb1:1.41:10}` | Upper Confidence Bound (param = exploration constant) |
+| Epsilon-Greedy | `{MCTS:eps:0.1:10}` | Random with probability epsilon |
+| Softmax | `{MCTS:softmax:1.0:10}` | Temperature-based probabilistic selection |
+
+### Example
+
+```mermaid
+graph LR
+    expand["LLM:gemini 'Generate candidates'"]
+    search{MCTS:ucb1:1.41:20}
+    expand --> search
+```
+
+---
+
+## Collection Nodes (Map, Bind, Batch, StreamMerge)
+
+These nodes handle collection-based operations for processing multiple items.
+
+### Map Node
+
+Applies a transformation function to each item in a collection.
+
+```
+[[Map:func,node_id]]
+```
+
+Example:
+```mermaid
+graph LR
+    fetch["Tool:fetch_items"]
+    map[[Map:format,formatter]]
+    fetch --> map
+```
+
+### Bind Node
+
+Monadic chaining - routes each item to a dynamically selected node.
+
+```
+[[Bind:func,node_id]]
+```
+
+Example:
+```mermaid
+graph LR
+    input["LLM:gemini 'Parse request'"]
+    bind[[Bind:route,handler]]
+    input --> bind
+```
+
+### Batch Node
+
+Processes items in batches with optional parallelism.
+
+```
+[[Batch:size,parallel,node_id]]
+[[Batch:size,node_id]]
+```
+
+Parameters:
+- `size`: Number of items per batch
+- `parallel`: `true` for concurrent processing, `false` for sequential (default: false)
+- `node_id`: Node to process each batch
+
+Example:
+```mermaid
+graph LR
+    data["Tool:load_dataset"]
+    batch[[Batch:10,true,processor]]
+    data --> batch
+```
+
+### StreamMerge Node
+
+Progressively merges results from multiple sources as they complete.
+
+```
+[[StreamMerge:reducer,min_results,timeout]]
+[[StreamMerge:reducer,min_results]]
+[[StreamMerge:reducer]]
+```
+
+Parameters:
+- `reducer`: Merge strategy (`first`, `last`, `concat`, `weighted_avg`, or custom)
+- `min_results`: Minimum results before returning (optional)
+- `timeout`: Timeout in seconds (optional)
+
+Example:
+```mermaid
+graph LR
+    fast["LLM:gemini 'Quick analysis'"]
+    slow["LLM:claude 'Deep analysis'"]
+    merge[[StreamMerge:concat,1,30]]
+    fast --> merge
+    slow --> merge
+```
+
+This returns as soon as 1 result is ready, up to 30 seconds max.
 
 ---
 

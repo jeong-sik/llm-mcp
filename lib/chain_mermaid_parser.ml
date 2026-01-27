@@ -913,8 +913,36 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
             Ok (Evaluator { candidates = []; scoring_func; scoring_prompt = None; select_strategy = Best; min_score = None })
         | _ ->
             Error (Printf.sprintf "Invalid Evaluator format (expected func or func:strategy or func:strategy:min_score): %s" content))
+      else if String.length content > 10 && String.sub content 0 10 = "Threshold:" then
+        (* {Threshold:>=0.8} or {Threshold:>0.5} or {Threshold:==1.0} etc. *)
+        let rest = String.sub content 10 (String.length content - 10) in
+        let parse_op_value s =
+          if String.length s >= 2 && String.sub s 0 2 = ">=" then
+            Some (Gte, String.sub s 2 (String.length s - 2))
+          else if String.length s >= 2 && String.sub s 0 2 = "<=" then
+            Some (Lte, String.sub s 2 (String.length s - 2))
+          else if String.length s >= 2 && String.sub s 0 2 = "==" then
+            Some (Eq, String.sub s 2 (String.length s - 2))
+          else if String.length s >= 2 && String.sub s 0 2 = "!=" then
+            Some (Neq, String.sub s 2 (String.length s - 2))
+          else if String.length s >= 1 && String.sub s 0 1 = ">" then
+            Some (Gt, String.sub s 1 (String.length s - 1))
+          else if String.length s >= 1 && String.sub s 0 1 = "<" then
+            Some (Lt, String.sub s 1 (String.length s - 1))
+          else None
+        in
+        (match parse_op_value rest with
+        | Some (operator, value_str) ->
+            (try
+              let value = float_of_string (trim value_str) in
+              let placeholder_ref = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None } in
+              Ok (Threshold { metric = "score"; operator; value; input_node = placeholder_ref; on_pass = None; on_fail = None })
+            with Failure _ ->
+              Error (Printf.sprintf "Invalid Threshold value: %s" value_str))
+        | None ->
+            Error (Printf.sprintf "Invalid Threshold operator (expected >=, >, <=, <, ==, !=): %s" content))
       else
-        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, GoalDriven:..., MCTS:..., or Evaluator:..., got: %s" content)
+        Error (Printf.sprintf "Diamond node must be Quorum:N, Gate:condition, Merge:strategy, GoalDriven:..., MCTS:..., Evaluator:..., or Threshold:op+value, got: %s" content)
 
   | `Rect ->
       (* [LLM:model "prompt"] or [LLM:model "prompt" +tools] or [Tool:name] *)

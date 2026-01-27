@@ -227,3 +227,7 @@
 (test
  (name test_chain_modules_coverage)
  (libraries llm_mcp.common llm_mcp.eio alcotest str unix eio eio_main))
+
+(executable
+ (name test_all_node_types)
+ (libraries llm_mcp.common))

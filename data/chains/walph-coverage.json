@@ -30,8 +30,8 @@
         "select_strategy": "best"
       },
       "improver_prompt": "The test scored {{score}} with feedback:\n{{feedback}}\n\nImprove the test to address:\n- Missing edge cases\n- Weak assertions\n- Fake test patterns\n\nOutput improved test code only.",
-      "max_iterations": 5,
-      "score_threshold": 0.8,
+      "max_iterations": 10,
+      "score_threshold": 0.85,
       "score_operator": "gte",
       "conversational": true,
       "relay_models": ["claude-cli", "gemini"],
@@ -44,8 +44,8 @@
     "category": "quality",
     "estimated_duration_sec": 120,
     "stop_conditions": {
-      "goal": "coverage >= 80%",
-      "max_iterations": 5,
+      "goal": "coverage >= 90%",
+      "max_iterations": 10,
       "drain": false
     }
   }
