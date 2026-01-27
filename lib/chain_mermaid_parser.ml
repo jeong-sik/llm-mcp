@@ -576,8 +576,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
           |> List.map trim
           |> List.filter (fun s -> s <> "")
         in
-        let placeholder_nodes = List.map (fun id ->
-          { id; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
+        let placeholder_nodes = List.map (fun node_id ->
+          { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }
         ) node_ids in
         Ok (Pipeline placeholder_nodes)
       else if String.length content > 7 && String.sub content 0 7 = "Fanout:" then
@@ -587,8 +587,8 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
           |> List.map trim
           |> List.filter (fun s -> s <> "")
         in
-        let placeholder_nodes = List.map (fun id ->
-          { id; node_type = ChainRef id; input_mapping = []; output_key = None; depends_on = None }
+        let placeholder_nodes = List.map (fun node_id ->
+          { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }
         ) node_ids in
         Ok (Fanout placeholder_nodes)
       else if String.length content > 4 && String.sub content 0 4 = "Map:" then
@@ -599,7 +599,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         in
         (match parts with
         | [func; node_id] ->
-            Ok (Map { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
+            Ok (Map { func; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | _ ->
             Error (Printf.sprintf "Map requires func,node format, got: %s" content))
       else if String.length content > 5 && String.sub content 0 5 = "Bind:" then
@@ -610,7 +610,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         in
         (match parts with
         | [func; node_id] ->
-            Ok (Bind { func; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
+            Ok (Bind { func; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | _ ->
             Error (Printf.sprintf "Bind requires func,node format, got: %s" content))
       else if String.length content > 6 && String.sub content 0 6 = "Cache:" then
@@ -622,10 +622,10 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         (match parts with
         | [key_expr; ttl_str; node_id] ->
             let ttl_seconds = try int_of_string ttl_str with _ -> 0 in
-            Ok (Cache { key_expr; ttl_seconds; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
+            Ok (Cache { key_expr; ttl_seconds; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | [key_expr; node_id] ->
             (* Default TTL = 0 (infinite) *)
-            Ok (Cache { key_expr; ttl_seconds = 0; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
+            Ok (Cache { key_expr; ttl_seconds = 0; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None } })
         | _ ->
             Error (Printf.sprintf "Cache requires key,ttl,node or key,node format, got: %s" content))
       else if String.length content > 6 && String.sub content 0 6 = "Batch:" then
@@ -638,10 +638,10 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         | [size_str; parallel_str; node_id] ->
             let batch_size = try int_of_string size_str with _ -> 10 in
             let parallel = parallel_str = "true" || parallel_str = "parallel" in
-            Ok (Batch { batch_size; parallel; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
+            Ok (Batch { batch_size; parallel; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
         | [size_str; node_id] ->
             let batch_size = try int_of_string size_str with _ -> 10 in
-            Ok (Batch { batch_size; parallel = true; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
+            Ok (Batch { batch_size; parallel = true; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; collect_strategy = `List })
         | _ ->
             Error (Printf.sprintf "Batch requires size,parallel,node or size,node format, got: %s" content))
       else if String.length content > 6 && String.sub content 0 6 = "Spawn:" then
@@ -653,11 +653,11 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         (match parts with
         | [clean_str; node_id] ->
             let clean = clean_str = "true" || clean_str = "clean" in
-            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; pass_vars = []; inherit_cache = true })
+            Ok (Spawn { clean; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; pass_vars = []; inherit_cache = true })
         | [clean_str; pass_vars_str; node_id] ->
             let clean = clean_str = "true" || clean_str = "clean" in
             let pass_vars = String.split_on_char '|' pass_vars_str |> List.map trim in
-            Ok (Spawn { clean; inner = { id = node_id; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; pass_vars; inherit_cache = true })
+            Ok (Spawn { clean; inner = { id = node_id ^ "_ref"; node_type = ChainRef node_id; input_mapping = []; output_key = None; depends_on = None }; pass_vars; inherit_cache = true })
         | _ ->
             Error (Printf.sprintf "Spawn requires clean,node or clean,pass_vars,node format, got: %s" content))
       else if String.length content > 12 && String.sub content 0 12 = "StreamMerge:" then
