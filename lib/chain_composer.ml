@@ -383,6 +383,9 @@ let decide_next_action ~state ~metrics ~verification : composer_decision =
       Replan reason
     | Some _ ->
       Abort "Maximum replan attempts exceeded"
+    | None when metrics.nodes_failed > 0 && state.replan_count >= state.max_replans ->
+      (* Failures exist but max replans exceeded - abort *)
+      Abort "Maximum replan attempts exceeded with failures"
     | None when metrics.nodes_pending = 0 ->
       (* All nodes done, no replan needed - complete even with low confidence *)
       Complete metrics
