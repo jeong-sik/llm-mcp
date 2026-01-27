@@ -320,3 +320,8 @@
 (test
  (name test_ollama_parser)
  (libraries llm_mcp.common alcotest))
+
+; Telemetry JSONL tests (expand_tilde, ensure_dir, logging)
+(test
+ (name test_telemetry_jsonl)
+ (libraries llm_mcp.common alcotest unix))
