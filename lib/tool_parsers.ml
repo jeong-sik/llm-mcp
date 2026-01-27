@@ -196,7 +196,15 @@ let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
     try json |> member "trace" |> to_bool
     with _ -> false
   in
-  ChainRun { chain; mermaid; input; trace }
+  let checkpoint_enabled =
+    try json |> member "checkpoint_enabled" |> to_bool
+    with _ -> false
+  in
+  let timeout =
+    try Some (json |> member "timeout" |> to_int)
+    with _ -> None
+  in
+  ChainRun { chain; mermaid; input; trace; checkpoint_enabled; timeout }
 
 (** Parse JSON arguments for chain.validate tool *)
 let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =

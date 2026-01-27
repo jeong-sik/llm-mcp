@@ -1719,7 +1719,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Error: %s" msg;
             extra = [("local", "true")]; })
 
-  | ChainRun { chain; mermaid; input; trace } ->
+  | ChainRun { chain; mermaid; input; trace; checkpoint_enabled; timeout = user_timeout } ->
       (* Parse from either JSON or Mermaid (WYSIWYE) *)
       let parse_result = match (chain, mermaid) with
         | (Some c, _) -> Chain_parser.parse_chain c
@@ -1740,8 +1740,18 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 response = sprintf "Compile error: %s" msg;
                 extra = [("stage", "compile")]; }
           | Ok plan ->
-              (* Use chain's global timeout for all nodes *)
-              let node_timeout = parsed_chain.Chain_types.config.Chain_types.timeout in
+              (* Use user timeout if provided, else chain's global timeout *)
+              let chain_timeout = parsed_chain.Chain_types.config.Chain_types.timeout in
+              let timeout_int = match user_timeout with
+                | Some t -> t
+                | None -> chain_timeout
+              in
+              (* Create checkpoint config if enabled *)
+              let checkpoint_config = if checkpoint_enabled then
+                Some (Chain_executor_eio.make_checkpoint_config ~enabled:true ())
+              else
+                None
+              in
               let env_truthy name =
                 match Sys.getenv_opt name with
                 | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
@@ -1797,7 +1807,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         thinking_level = Types.Low;
                         yolo = false;
                         output_format = Types.Text;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         use_cli = false;  (* Stub uses direct API *)
                         fallback_to_api = false;
@@ -1809,7 +1819,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         thinking_level = Types.High;
                         yolo = false;
                         output_format = Types.Text;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         use_cli = true;  (* MASC integration enabled *)
                         fallback_to_api = true;
@@ -1823,7 +1833,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         allowed_tools = [];
                         working_directory = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp";
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         use_cli = true;
                         fallback_to_api = true;
@@ -1835,7 +1845,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         reasoning_effort = Types.RXhigh;
                         sandbox = Types.WorkspaceWrite;
                         working_directory = None;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         use_cli = true;
                         fallback_to_api = true;
@@ -1847,7 +1857,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         model = "qwen3:1.7b";
                         system_prompt = None;
                         temperature = 0.7;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
@@ -1858,7 +1868,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         model = ollama_model;
                         system_prompt = None;
                         temperature = 0.7;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
@@ -1869,7 +1879,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         system_prompt = None;
                         temperature = 0.7;
                         max_tokens = Some 4096;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         thinking = false;  (* Faster for chain execution *)
                         do_sample = true;
@@ -1883,7 +1893,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         thinking_level = Types.High;
                         yolo = false;
                         output_format = Types.Text;
-                        timeout = node_timeout;
+                        timeout = timeout_int;
                         stream = false;
                         use_cli = true;  (* MASC integration enabled *)
                         fallback_to_api = true;
@@ -1902,7 +1912,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 | Some (server_name, tool_name) ->
                     let output =
                       call_mcp ~sw ~proc_mgr ~clock
-                        ~server_name ~tool_name ~arguments:args ~timeout:node_timeout
+                        ~server_name ~tool_name ~arguments:args ~timeout:timeout_int
                     in
                     if starts_with ~prefix:"Error:" output then Error output else Ok output
                 | None ->
@@ -1943,7 +1953,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               let result =
                 with_masc_hook ~sw ~proc_mgr ~clock ~label:"chain.run" (fun () ->
                   Chain_executor_eio.execute
-                    ~sw ~clock ~timeout:node_timeout ~trace:trace_effective ~exec_fn ~tool_exec ?input plan)
+                    ~sw ~clock ~timeout:timeout_int ~trace:trace_effective ~exec_fn ~tool_exec ?input ?checkpoint:checkpoint_config plan)
               in
               let run_id = List.assoc_opt "run_id" result.Chain_types.metadata in
               { model = "chain.run";

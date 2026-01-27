@@ -111,6 +111,8 @@ type tool_args =
       mermaid : string option;       (* Mermaid flowchart text (WYSIWYE) *)
       input : string option;         (* Optional initial input *)
       trace : bool;                  (* Enable execution tracing *)
+      checkpoint_enabled : bool;     (* Save checkpoints after each node *)
+      timeout : int option;          (* Overall timeout in seconds *)
     }
   | ChainValidate of {
       chain : Yojson.Safe.t option;  (* Chain definition to validate *)
