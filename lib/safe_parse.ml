@@ -126,6 +126,14 @@ let json_bool ~context ~default json key =
       ~input:"<non-bool>" ~fallback:(string_of_bool default);
     default
 
+(** Get JSON member as list with default empty list. *)
+let json_list ~context json key =
+  try json |> member key |> to_list
+  with Type_error _ ->
+    warn ~context:(Printf.sprintf "%s.%s" context key)
+      ~input:"<non-list>" ~fallback:"[]";
+    []
+
 (** {1 JSON Parsing} *)
 
 (** Parse JSON string, return None on failure. *)

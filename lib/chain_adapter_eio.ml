@@ -477,25 +477,13 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
            (try
              let open Yojson.Safe.Util in
              let json = Yojson.Safe.from_string input in
-             let get_string key =
-               try json |> member key |> to_string with _ -> ""
-             in
-             let get_int key =
-               try json |> member key |> to_int with _ -> 0
-             in
-             let get_bool key =
-               try json |> member key |> to_bool with _ -> false
-             in
-             let get_string_opt key =
-               try json |> member key |> to_string_option |> Option.value ~default:""
-               with _ -> ""
-             in
+             let get_string key = Safe_parse.json_string ~context:"FigmaSummary" ~default:"" json key in
+             let get_int key = Safe_parse.json_int ~context:"FigmaSummary" ~default:0 json key in
+             let get_bool key = Safe_parse.json_bool ~context:"FigmaSummary" ~default:false json key in
+             let get_string_opt key = Safe_parse.json_string ~context:"FigmaSummary" ~default:"" json key in
              let name = get_string "name" in
              let typ = get_string "type" in
-             let children =
-               try json |> member "children" |> to_list
-               with _ -> []
-             in
+             let children = Safe_parse.json_list ~context:"FigmaSummary" json "children" in
              let child_entries =
                List.filter_map (fun child ->
                  try
