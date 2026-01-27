@@ -52,7 +52,7 @@ run_test_content() {
 
     if echo "$result" | grep -q '"isError":false'; then
         # Extract content (simplified extraction)
-        if echo "$result" | grep -q "$expected_content"; then
+        if echo "$result" | grep -F -q "$expected_content"; then
              log_pass "$name"
         else
              log_fail "$name" "Content match failure. Expected '$expected_content' in output."
