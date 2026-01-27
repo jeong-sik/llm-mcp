@@ -275,3 +275,13 @@
  (name test_chain_stats)
  (libraries llm_mcp.common alcotest))
 
+; Chain Telemetry tests (event type serialization)
+(test
+ (name test_chain_telemetry)
+ (libraries llm_mcp.common alcotest))
+
+; Chain Run Store tests (truncation, collection, JSON serialization)
+(test
+ (name test_chain_run_store)
+ (libraries llm_mcp.eio llm_mcp.common alcotest))
+
