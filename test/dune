@@ -1,7 +1,7 @@
 ; Pure tests - NO Lwt, NO Eio runtime (uses llm_mcp.common only)
 (tests
- (names test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse)
- (modules test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse)
+ (names test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
+ (modules test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
  (libraries llm_mcp.common alcotest str zstd))
 
 ; Ollama integration test (requires OLLAMA_TEST=1)
