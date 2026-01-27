@@ -295,3 +295,8 @@
  (name test_compact_impl)
  (libraries llm_mcp.common alcotest))
 
+; Langfuse Integration tests (ID generation, JSON serialization, timestamps)
+(test
+ (name test_langfuse)
+ (libraries llm_mcp.common alcotest))
+
