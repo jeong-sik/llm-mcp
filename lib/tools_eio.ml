@@ -78,8 +78,7 @@ let parse_mcp_http_response (body : string) : string option =
       let result = json |> member "result" in
       let error = json |> member "error" in
       if error <> `Null then
-        let msg = try error |> member "message" |> to_string
-                  with _ -> "Unknown error" in
+        let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
         Some (Printf.sprintf "Error: %s" msg)
       else
         let content = result |> member "content" in
@@ -179,8 +178,7 @@ let call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command ~args ~tool_name ~
           let result = json |> member "result" in
           let error = json |> member "error" in
           if error <> `Null then
-            let msg = try error |> member "message" |> to_string
-                      with _ -> "Unknown error" in
+            let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
             sprintf "Error: %s" msg
           else
             let content = result |> member "content" in
@@ -1616,12 +1614,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 let first_choice = List.hd choices in
                 let message = first_choice |> member "message" in
                 (* GLM-4.7 returns reasoning_content for thinking, content for final answer *)
-                let content =
-                  try message |> member "content" |> to_string
-                  with _ -> "" in
-                let reasoning =
-                  try message |> member "reasoning_content" |> to_string
-                  with _ -> "" in
+                let content = Safe_parse.json_string ~context:"glm:content" ~default:"" message "content" in
+                let reasoning = Safe_parse.json_string ~context:"glm:reasoning" ~default:"" message "reasoning_content" in
                 (* Use content if available, otherwise use reasoning_content *)
                 let final_response =
                   if String.length content > 0 then content
@@ -2854,8 +2848,7 @@ let execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url (tc : 
             let result = json |> member "result" in
             let error = json |> member "error" in
             if error <> `Null then
-              let msg = try error |> member "message" |> to_string
-                        with _ -> "Unknown error" in
+              let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
               (tc.name, sprintf "Error: %s" msg)
             else
               let content = result |> member "content" in
