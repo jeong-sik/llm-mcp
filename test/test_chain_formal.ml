@@ -20,11 +20,35 @@ module CT = Chain_types
    Part 1: Core Node Type Constructors
    ══════════════════════════════════════════════════════════════════════════ *)
 
+(** Extract template variables {{...}} from a string *)
+let extract_template_vars s =
+  let re = Str.regexp "{{\\([^}]+\\)}}" in
+  let rec find acc pos =
+    try
+      let _ = Str.search_forward re s pos in
+      let var = Str.matched_group 1 s in
+      (* Extract just the variable name (before any dot for field access) *)
+      let var_name = match String.index_opt var '.' with
+        | Some i -> String.sub var 0 i
+        | None -> var
+      in
+      find (var_name :: acc) (Str.match_end ())
+    with Not_found -> List.rev acc
+  in
+  find [] 0
+
 (** Create minimal LLM node
     NOTE: Use _dep_ prefix for explicit dependencies to survive JSON roundtrip.
-    Without _dep_, input_mapping is treated as runtime-only (inferred from {{...}} templates) *)
+    Template variables {{...}} are auto-extracted to match Chain_parser behavior. *)
 let make_llm id prompt deps =
-  let input_mapping = List.map (fun d -> ("_dep_" ^ d, d)) deps in
+  let explicit_deps = List.map (fun d -> ("_dep_" ^ d, d)) deps in
+  (* Also extract template variables to match parser behavior *)
+  let template_vars = extract_template_vars prompt in
+  let template_deps = List.filter_map (fun var ->
+    if List.exists (fun (_, v) -> v = var) explicit_deps then None
+    else Some (var, var)
+  ) template_vars in
+  let input_mapping = explicit_deps @ template_deps in
   { CT.id; node_type = CT.Llm { model = "gemini"; prompt; system = None;
     timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
     input_mapping; output_key = None; depends_on = None }
@@ -70,12 +94,12 @@ let get_real_ids chain =
 let get_edges chain =
   chain.CT.nodes
   |> List.concat_map (fun (n : CT.node) ->
-       List.filter_map (fun (key, src) ->
-         (* Only compare EXPLICIT dependencies (_dep_ prefix)
-            Template-inferred deps ({{...}}) are auto-added during parsing,
-            so comparing them would cause false negatives in roundtrip tests *)
-         let is_explicit_dep = String.length key > 5 && String.sub key 0 5 = "_dep_" in
-         if is_explicit_dep then Some (src, n.id) else None
+       List.filter_map (fun (_key, src) ->
+         (* Count ALL input_mapping entries as edges.
+            The _dep_ prefix convention is for JSON serialization hints,
+            but semantic equivalence should compare actual data flow.
+            After mermaid roundtrip, edges are preserved but without _dep_ prefix. *)
+         if src <> "" && src <> n.id then Some (src, n.id) else None
        ) n.input_mapping)
   |> List.sort_uniq compare
 

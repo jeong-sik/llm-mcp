@@ -1366,17 +1366,17 @@ let config_to_json (cfg : chain_config) : Yojson.Safe.t =
 (** Serialize node to JSON *)
 let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe.t =
   let base = [("id", `String n.id)] in
+  (* For lossless roundtrip, preserve ALL input_mapping entries including _dep_ prefixed ones.
+     Previously we filtered out _dep_ prefix entries, but this caused information loss
+     during JSON → Mermaid → JSON roundtrip. The _dep_ prefix is a semantic marker for
+     explicit dependencies (vs template-inferred), and must survive serialization. *)
   let filtered_mapping =
     match n.node_type with
     | Adapter { input_ref; _ } ->
-        List.filter (fun (k, _) ->
-          k <> input_ref &&
-          not (String.length k >= 5 && String.sub k 0 5 = "_dep_")
-        ) n.input_mapping
+        (* Only filter the implicit input_ref, not _dep_ entries *)
+        List.filter (fun (k, _) -> k <> input_ref) n.input_mapping
     | _ ->
-        List.filter (fun (k, _) ->
-          not (String.length k >= 5 && String.sub k 0 5 = "_dep_")
-        ) n.input_mapping
+        n.input_mapping  (* Preserve all, including _dep_ prefixed entries *)
   in
   let input_mapping =
     if filtered_mapping = [] then
