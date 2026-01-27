@@ -807,6 +807,39 @@ let test_execute_tool_node_with_substitution () =
       check bool "tool with args succeeds" true result.success;
       check string "tool computes correctly" "13" result.output
 
+let test_output_key_alias_resolution () =
+  Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run @@ fun sw ->
+      let json = Yojson.Safe.from_string {|
+        {
+          "id": "output_key_alias",
+          "nodes": [
+            {
+              "id": "t1",
+              "type": "tool",
+              "name": "echo",
+              "args": { "text": "hello" },
+              "output_key": "alias"
+            },
+            {
+              "id": "t2",
+              "type": "tool",
+              "name": "echo",
+              "args": { "text": "{{alias}}" },
+              "depends_on": ["t1"]
+            }
+          ],
+          "output": "t2"
+        }
+      |} in
+      let chain = parse_chain_exn json in
+      let plan = compile_exn chain in
+      let result = Chain_executor_eio.execute ~sw ~clock
+        ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan in
+      check bool "output_key alias works" true result.success;
+      check string "alias substitution" "hello" result.output
+
 (** {1 Test: execute_llm_node with empty response guard} *)
 
 let test_execute_llm_empty_response_retry () =
@@ -1103,6 +1136,7 @@ let tool_tests = [
   "tool node success", `Quick, test_execute_tool_node_success;
   "tool node failure", `Quick, test_execute_tool_node_failure;
   "tool node with substitution", `Quick, test_execute_tool_node_with_substitution;
+  "output_key alias resolution", `Quick, test_output_key_alias_resolution;
 ]
 
 let llm_tests = [

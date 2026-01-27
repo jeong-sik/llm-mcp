@@ -22,7 +22,8 @@
         "name": "figma_export_image",
         "args": {
           "file_key": "{{figma_meta.file_key}}",
-          "node_id": "{{figma_meta.node_id}}",
+          "node_ids": "{{figma_meta.node_id}}",
+          "token": "env:FIGMA_TOKEN",
           "scale": 2,
           "format": "png"
         }
@@ -38,7 +39,8 @@
         "name": "figma_get_node_summary",
         "args": {
           "file_key": "{{figma_meta.file_key}}",
-          "node_id": "{{figma_meta.node_id}}"
+          "node_id": "{{figma_meta.node_id}}",
+          "token": "env:FIGMA_TOKEN"
         }
       },
       "depends_on": ["parse-url"],
@@ -53,6 +55,7 @@
         "args": {
           "file_key": "{{figma_meta.file_key}}",
           "node_id": "{{figma_meta.node_id}}",
+          "token": "env:FIGMA_TOKEN",
           "depth": 4,
           "include_variables": true,
           "include_image_fills": true
@@ -101,6 +104,7 @@
         "args": {
           "file_key": "{{figma_meta.file_key}}",
           "node_id": "{{figma_meta.node_id}}",
+          "token": "env:FIGMA_TOKEN",
           "html": "{{react_code}}",
           "target_ssim": 0.95,
           "max_iterations": 5
@@ -126,7 +130,7 @@
         "model": "gemini",
         "prompt": "최종 결과를 정리하세요.\n\n## 컴포넌트 정보\n- 타입: {{gate_result.component_type}}\n- 이름: {{gate_result.suggested_name}}\n\n## 생성된 코드\n{{react_code}}\n\n## 검증 결과\n{{verification}}\n\n## 중요도 분석\n{{importance_result}}\n\n## 출력 형식 (Markdown)\n### {{gate_result.suggested_name}}\n\n**검증 결과:** SSIM {{importance_result.ssim_score}}, 텍스트 정확도 {{importance_result.text_accuracy}}\n\n**상태:** {{importance_result.recommendation}}\n\n**코드:**\n```tsx\n// 코드 삽입\n```\n\n**남은 차이점:**\n- (있으면 목록)\n\n**권장 조치:**\n- (있으면 목록)"
       },
-      "depends_on": ["generate-react-code", "verification", "importance-check", "component-gate"],
+      "depends_on": ["generate-react-code", "verify-visual", "importance-check", "component-gate"],
       "output_key": "final_report"
     }
   ],
