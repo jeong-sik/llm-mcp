@@ -149,8 +149,7 @@ let next_attempt ctx node_id =
 
 (** Maximum retries for empty LLM responses (configurable via CHAIN_EMPTY_RETRIES env) *)
 let max_empty_retries =
-  try int_of_string (Sys.getenv "CHAIN_EMPTY_RETRIES")
-  with _ -> 3
+  Safe_parse.env_int ~var:"CHAIN_EMPTY_RETRIES" ~default:3
 
 (** Check if response is empty or whitespace-only *)
 let is_empty_response output =

@@ -36,19 +36,13 @@ let acks_path () =
   Common.me_path ["logs"; "llm_mcp_sse_acks.json"]
 
 let event_max_bytes () =
-  match Sys.getenv_opt "LLM_MCP_SSE_EVENT_MAX_BYTES" with
-  | Some v -> (try int_of_string v with _ -> 1024 * 1024)
-  | None -> 1024 * 1024
+  Safe_parse.env_int ~var:"LLM_MCP_SSE_EVENT_MAX_BYTES" ~default:(1024 * 1024)
 
 let ack_ttl_sec () =
-  match Sys.getenv_opt "LLM_MCP_SSE_ACK_TTL_SEC" with
-  | Some v -> (try int_of_string v with _ -> 86400)
-  | None -> 86400
+  Safe_parse.env_int ~var:"LLM_MCP_SSE_ACK_TTL_SEC" ~default:86400
 
 let ack_persist_interval_sec () =
-  match Sys.getenv_opt "LLM_MCP_SSE_ACK_PERSIST_MIN_SEC" with
-  | Some v -> (try float_of_string v with _ -> 1.0)
-  | None -> 1.0
+  Safe_parse.env_float ~var:"LLM_MCP_SSE_ACK_PERSIST_MIN_SEC" ~default:1.0
 
 let last_ack_persist_ts = ref 0.0
 

@@ -286,14 +286,10 @@ let get_stream_delta () =
   stream_delta_enabled ()
 
 let stream_delta_max_events () =
-  match Sys.getenv_opt "LLM_MCP_STREAM_DELTA_MAX_EVENTS" with
-  | Some v -> (try int_of_string v with _ -> 2000)
-  | None -> 2000
+  Safe_parse.env_int ~var:"LLM_MCP_STREAM_DELTA_MAX_EVENTS" ~default:2000
 
 let stream_delta_max_chars () =
-  match Sys.getenv_opt "LLM_MCP_STREAM_DELTA_MAX_CHARS" with
-  | Some v -> (try int_of_string v with _ -> 200)
-  | None -> 200
+  Safe_parse.env_int ~var:"LLM_MCP_STREAM_DELTA_MAX_CHARS" ~default:200
 
 let generate_stream_id model_name =
   let ts = int_of_float (Unix.gettimeofday () *. 1000.) in

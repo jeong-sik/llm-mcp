@@ -20,6 +20,7 @@
    ; Rate limiting
    rate_limit
    ; Pure OCaml - shared between Eio and Lwt
+   safe_parse
    common
    types
    dictionary
