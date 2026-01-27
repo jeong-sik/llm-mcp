@@ -519,6 +519,8 @@ let substitute_prompt prompt (inputs : (string * string) list) : string =
             Buffer.add_string buf value;
             replace (i + String.length pattern)
           end else begin
+            (* Bug fix: add skipped characters from start to i-1 before adding acc.[i] *)
+            Buffer.add_substring buf acc start (i - start);
             Buffer.add_char buf acc.[i];
             replace (i + 1)
           end

@@ -158,11 +158,10 @@ let test_substitute_prompt_no_vars () =
   check string "no variables" "No variables here" result
 
 let test_substitute_prompt_adjacent_vars () =
-  (* NOTE: This test reveals a bug in substitute_prompt - adjacent variables
-     are not handled correctly. The function returns "{{3" instead of "1 2 3".
-     Bug filed - skipping test until fix is implemented. *)
-  (* TODO: Fix substitute_prompt bug with adjacent variables *)
-  Alcotest.skip ()
+  (* Bug fixed: adjacent variables now work correctly *)
+  let inputs = [("a", "1"); ("b", "2"); ("c", "3")] in
+  let result = Chain_executor_eio.substitute_prompt "{{a}} {{b}} {{c}}" inputs in
+  check string "adjacent vars" "1 2 3" result
 
 (** {1 Test: substitute_iteration_vars} *)
 
