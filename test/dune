@@ -325,3 +325,8 @@
 (test
  (name test_telemetry_jsonl)
  (libraries llm_mcp.common alcotest unix))
+
+; Log module tests (level conversion, timestamp, config)
+(test
+ (name test_log)
+ (libraries llm_mcp.common alcotest unix))
