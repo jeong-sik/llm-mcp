@@ -1108,7 +1108,14 @@ let parse_edge_line (line : string) : mermaid_edge list =
 
   let (from_part, to_part, label) = extract_label_and_split line in
 
-  if to_part = "" then
+  (* Check if to_part contains another --> (chained arrows like A --> B --> C) *)
+  let has_chained_arrows =
+    to_part <> "" &&
+    (try let _ = Str.search_forward (Str.regexp "-->") to_part 0 in true
+     with Not_found -> false)
+  in
+
+  if to_part = "" || has_chained_arrows then
     (* Fall back to original logic for complex multi-arrow lines *)
     let parts = Str.split arrow_re line in
     let rec build_edges acc = function

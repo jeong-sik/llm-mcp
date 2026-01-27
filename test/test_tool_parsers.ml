@@ -71,7 +71,7 @@ let test_parse_claude_defaults () =
   let json = `Assoc [("prompt", `String "Hello Claude")] in
   match Tool_parsers.parse_claude_args json with
   | Claude c ->
-      check string "default model" "opus" c.model;
+      check string "default model" "sonnet" c.model;  (* changed from opus - sonnet is cost-effective default *)
       check bool "default long_context" false c.long_context;  (* default: false to avoid API charges *)
       check int "default timeout" 300 c.timeout;
       check bool "default stream" true c.stream;  (* default is true *)
