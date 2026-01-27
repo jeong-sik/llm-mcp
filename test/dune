@@ -310,3 +310,8 @@
 (test
  (name test_metrics)
  (libraries llm_mcp.common alcotest unix))
+
+; Rate limit module tests (Token bucket algorithm, headers)
+(test
+ (name test_rate_limit)
+ (libraries llm_mcp.common alcotest unix))
