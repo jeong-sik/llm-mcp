@@ -13,6 +13,8 @@
    error
    ; Logging (structured, leveled)
    log
+   ; Telemetry (JSONL append-only)
+   telemetry_jsonl
    ; Metrics (Prometheus compatible)
    metrics
    ; Rate limiting
