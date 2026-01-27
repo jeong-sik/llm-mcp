@@ -340,3 +340,8 @@
 (test
  (name test_version)
  (libraries llm_mcp.common alcotest))
+
+; Chain_registry tests (storage, lookup, versioning)
+(test
+ (name test_chain_registry)
+ (libraries llm_mcp.common alcotest unix))
