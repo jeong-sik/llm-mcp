@@ -168,13 +168,8 @@ let read_events () =
   let path = log_path () in
   if not (Sys.file_exists path) then []
   else
-    let int_env name ~default =
-      match Sys.getenv_opt name with
-      | Some v -> (try int_of_string v with _ -> default)
-      | None -> default
-    in
-    let max_bytes = int_env "LLM_MCP_RUN_LOG_MAX_BYTES" ~default:(10 * 1024 * 1024) in
-    let max_lines = int_env "LLM_MCP_RUN_LOG_MAX_LINES" ~default:100_000 in
+    let max_bytes = Safe_parse.env_int ~var:"LLM_MCP_RUN_LOG_MAX_BYTES" ~default:(10 * 1024 * 1024) in
+    let max_lines = Safe_parse.env_int ~var:"LLM_MCP_RUN_LOG_MAX_LINES" ~default:100_000 in
     Common.read_lines_tail ~max_bytes ~max_lines path
     |> List.filter_map (fun line ->
       let line = String.trim line in
@@ -184,14 +179,10 @@ let read_events () =
         with _ -> None)
 
 let int_field json key ~default =
-  let open Yojson.Safe.Util in
-  try json |> member key |> to_int
-  with _ -> default
+  Safe_parse.json_int ~context:"run_log" ~default json key
 
 let string_field json key ~default =
-  let open Yojson.Safe.Util in
-  try json |> member key |> to_string
-  with _ -> default
+  Safe_parse.json_string ~context:"run_log" ~default json key
 
 let take_last n lst =
   if n <= 0 then []
