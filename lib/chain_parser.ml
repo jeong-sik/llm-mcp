@@ -3,9 +3,23 @@
     Parses JSON DSL into Chain_types structures.
     Handles:
     - Node type detection and parsing
-    - Input mapping with {{node.output}} syntax
+    - Input mapping with \{\{node.output\}\} syntax
     - Validation (cycle detection, depth limits)
     - Config defaults and overrides
+
+    {2 _dep_ Prefix Convention}
+
+    The [_dep_] prefix is used in [input_mapping] keys to mark explicit dependencies
+    that should be preserved during JSON ↔ Mermaid roundtrip conversion.
+
+    - Template variables [\{\{foo\}\}] are auto-extracted but may be lost on roundtrip
+    - Explicit dependencies from [depends_on] field use [_dep_] prefix: [("_dep_foo", "foo")]
+    - The prefix ensures these dependencies survive serialization to Mermaid and back
+
+    Example:
+    - JSON: [{...} "depends_on": ["step1", "step2"]]
+    - Parsed: [input_mapping = [("_dep_step1", "step1"); ("_dep_step2", "step2")]]
+    - Mermaid: [node_id --> step1] and [node_id --> step2] edges preserved
 *)
 
 open Chain_types
@@ -396,7 +410,10 @@ let rec parse_node (json : Yojson.Safe.t) : (node, string) result =
       | _ -> input_mapping
     in
 
-    (* Combine input_mapping with depends_on *)
+    (* Combine input_mapping with depends_on.
+       Note: _dep_ prefix ensures no key collision with template-inferred mappings.
+       E.g., template {{foo}} creates ("foo", "foo") while depends_on creates ("_dep_foo", "foo").
+       Both coexist intentionally - _dep_ marks explicit dependencies for roundtrip preservation. *)
     let final_input_mapping = input_mapping @ depends_on_mapping in
 
     Ok { id; node_type; input_mapping = final_input_mapping;

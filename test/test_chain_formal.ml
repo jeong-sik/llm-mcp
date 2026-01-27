@@ -20,34 +20,17 @@ module CT = Chain_types
    Part 1: Core Node Type Constructors
    ══════════════════════════════════════════════════════════════════════════ *)
 
-(** Extract template variables {{...}} from a string *)
-let extract_template_vars s =
-  let re = Str.regexp "{{\\([^}]+\\)}}" in
-  let rec find acc pos =
-    try
-      let _ = Str.search_forward re s pos in
-      let var = Str.matched_group 1 s in
-      (* Extract just the variable name (before any dot for field access) *)
-      let var_name = match String.index_opt var '.' with
-        | Some i -> String.sub var 0 i
-        | None -> var
-      in
-      find (var_name :: acc) (Str.match_end ())
-    with Not_found -> List.rev acc
-  in
-  find [] 0
-
 (** Create minimal LLM node
     NOTE: Use _dep_ prefix for explicit dependencies to survive JSON roundtrip.
     Template variables {{...}} are auto-extracted to match Chain_parser behavior. *)
 let make_llm id prompt deps =
   let explicit_deps = List.map (fun d -> ("_dep_" ^ d, d)) deps in
-  (* Also extract template variables to match parser behavior *)
-  let template_vars = extract_template_vars prompt in
-  let template_deps = List.filter_map (fun var ->
-    if List.exists (fun (_, v) -> v = var) explicit_deps then None
-    else Some (var, var)
-  ) template_vars in
+  (* Use Chain_parser to extract template variables for consistency *)
+  let template_mappings = CP.extract_input_mappings prompt in
+  let template_deps = List.filter_map (fun (_ref, node_id) ->
+    if List.exists (fun (_, v) -> v = node_id) explicit_deps then None
+    else Some (node_id, node_id)
+  ) template_mappings in
   let input_mapping = explicit_deps @ template_deps in
   { CT.id; node_type = CT.Llm { model = "gemini"; prompt; system = None;
     timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };

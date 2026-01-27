@@ -108,6 +108,33 @@ let strip_quotes s =
   else
     s
 
+(** Helper: check if content starts with explicit type prefix.
+    Used to determine parsing strategy: explicit prefix vs inferred type.
+
+    Recognized prefixes (22 total):
+    - LLM:, Tool:, Ref: (basic nodes)
+    - Quorum:, Gate:, Merge: (decision nodes)
+    - Pipeline:, Fanout:, Map:, Bind: (composition nodes)
+    - Cache:, Batch:, Spawn: (execution nodes)
+    - Threshold:, Evaluator:, GoalDriven:, MCTS: (advanced nodes)
+    - StreamMerge:, FeedbackLoop: (streaming nodes)
+
+    @param content The node content string to check
+    @return true if content starts with a recognized type prefix *)
+let has_explicit_type_prefix content =
+  let prefixes = [
+    "LLM:"; "Tool:"; "Ref:";
+    "Quorum:"; "Gate:"; "Merge:";
+    "Pipeline:"; "Fanout:"; "Map:"; "Bind:";
+    "Cache:"; "Batch:"; "Spawn:";
+    "Threshold:"; "Evaluator:"; "GoalDriven:"; "MCTS:";
+    "StreamMerge:"; "FeedbackLoop:"
+  ] in
+  List.exists (fun prefix ->
+    String.length content >= String.length prefix &&
+    String.sub content 0 (String.length prefix) = prefix
+  ) prefixes
+
 (** Create empty metadata *)
 let empty_meta () : mermaid_meta = {
   chain_id = None;
@@ -1355,31 +1382,10 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
     | Ok () ->
         (* Try new inference-based parsing first, fall back to old explicit syntax *)
         let parse_result =
-          (* Check if content uses old explicit syntax (LLM:, Tool:, Ref:, etc.) *)
+          (* Check if content uses explicit type prefix (LLM:, Tool:, etc.) *)
           (* Strip surrounding quotes that may be added by chain_to_mermaid *)
           let content = strip_quotes mnode.content in
-          let uses_old_syntax =
-            (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
-            (String.length content > 4 && String.sub content 0 4 = "Ref:") ||
-            (String.length content > 7 && String.sub content 0 7 = "Quorum:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Gate:") ||
-            (String.length content > 6 && String.sub content 0 6 = "Merge:") ||
-            (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
-            (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
-            (String.length content > 4 && String.sub content 0 4 = "Map:") ||
-            (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
-            (String.length content > 6 && String.sub content 0 6 = "Cache:") ||
-            (String.length content > 6 && String.sub content 0 6 = "Batch:") ||
-            (String.length content > 6 && String.sub content 0 6 = "Spawn:") ||
-            (String.length content > 10 && String.sub content 0 10 = "Threshold:") ||
-            (String.length content > 10 && String.sub content 0 10 = "Evaluator:") ||
-            (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
-            (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
-            (String.length content > 12 && String.sub content 0 12 = "StreamMerge:") ||
-            (String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:")
-          in
-          if uses_old_syntax then
+          if has_explicit_type_prefix content then
             parse_node_content mnode.shape content
           else
             infer_type_from_id mnode.id mnode.shape content
@@ -1534,28 +1540,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
           let parse_result =
             (* Strip surrounding quotes that may be added by chain_to_mermaid *)
             let content = strip_quotes mnode.content in
-            let uses_old_syntax =
-              (String.length content > 4 && String.sub content 0 4 = "LLM:") ||
-              (String.length content > 5 && String.sub content 0 5 = "Tool:") ||
-              (String.length content > 4 && String.sub content 0 4 = "Ref:") ||
-              (String.length content > 7 && String.sub content 0 7 = "Quorum:") ||
-              (String.length content > 5 && String.sub content 0 5 = "Gate:") ||
-              (String.length content > 6 && String.sub content 0 6 = "Merge:") ||
-              (String.length content > 9 && String.sub content 0 9 = "Pipeline:") ||
-              (String.length content > 7 && String.sub content 0 7 = "Fanout:") ||
-              (String.length content > 4 && String.sub content 0 4 = "Map:") ||
-              (String.length content > 5 && String.sub content 0 5 = "Bind:") ||
-              (String.length content > 6 && String.sub content 0 6 = "Cache:") ||
-              (String.length content > 6 && String.sub content 0 6 = "Batch:") ||
-              (String.length content > 6 && String.sub content 0 6 = "Spawn:") ||
-              (String.length content > 10 && String.sub content 0 10 = "Threshold:") ||
-              (String.length content > 10 && String.sub content 0 10 = "Evaluator:") ||
-              (String.length content > 11 && String.sub content 0 11 = "GoalDriven:") ||
-              (String.length content > 5 && String.sub content 0 5 = "MCTS:") ||
-              (String.length content > 12 && String.sub content 0 12 = "StreamMerge:") ||
-              (String.length content > 13 && String.sub content 0 13 = "FeedbackLoop:")
-            in
-            if uses_old_syntax then
+            if has_explicit_type_prefix content then
               parse_node_content mnode.shape content
             else
               infer_type_from_id mnode.id mnode.shape content
