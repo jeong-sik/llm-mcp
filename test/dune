@@ -245,3 +245,8 @@
  (name test_fewshot_judge)
  (libraries llm_mcp.common alcotest))
 
+; Fewshot Injector tests (pure function tests)
+(test
+ (name test_fewshot_injector)
+ (libraries llm_mcp.common alcotest))
+
