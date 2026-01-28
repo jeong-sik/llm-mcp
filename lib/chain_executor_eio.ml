@@ -236,7 +236,12 @@ let store_node_output ctx (node : node) (output : string) =
   match node.output_key with
   | Some key ->
       let key = String.trim key in
-      if key <> "" && key <> node.id then Hashtbl.replace ctx.outputs key output
+      if key <> "" && key <> node.id then begin
+        if Hashtbl.mem ctx.outputs key then
+          Printf.eprintf "Warning: output_key '%s' for node '%s' overwrites existing output\n%!"
+            key node.id;
+        Hashtbl.replace ctx.outputs key output
+      end
   | None -> ()
 
 (** {1 Trace Helpers} *)
@@ -498,8 +503,8 @@ let resolve_single_input ctx (ref_str : string) : string =
                     | [key] ->
                         (match try_extract_bullet_value value key with
                          | Some v -> v
-                         | None -> ref_str)
-                    | _ -> ref_str))
+                         | None -> value)
+                    | _ -> value))
      | None -> ref_str)  (* Return original if not found *)
   else
     (* Direct node_id reference or literal, with optional dot-path *)
@@ -518,8 +523,8 @@ let resolve_single_input ctx (ref_str : string) : string =
                    | [key] ->
                        (match try_extract_bullet_value value key with
                         | Some v -> v
-                        | None -> trimmed)
-                   | _ -> trimmed))
+                        | None -> value)
+                   | _ -> value))
     | None -> ref_str  (* Return as literal *)
 
 (** Resolve input mappings to actual values *)
@@ -1168,14 +1173,16 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
   if input_value = "" then begin
     let msg = Printf.sprintf "Adapter: empty input from '%s'" input_ref in
     let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-    record_error ctx node.id ~node_type:"adapter" msg;
     match on_error with
     | `Fail ->
+        record_error ctx node.id ~node_type:"adapter" msg;
         record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
         Error msg
     | `Passthrough ->
+        Printf.eprintf "Warning: %s (passthrough)\n%!" msg;
         Ok (finalize ~success:true ~duration_ms "")
     | `Default d ->
+        Printf.eprintf "Warning: %s (default)\n%!" msg;
         Ok (finalize ~success:true ~duration_ms d)
   end
   else
