@@ -1513,6 +1513,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           let content_buffer = Buffer.create 1024 in
           let reasoning_buffer = Buffer.create 1024 in
           let chunk_count = ref 0 in
+          (* Phase 2: Tool calls accumulator for streaming
+             Tool calls come in chunks: id/name first, then arguments in pieces *)
+          let tool_calls_acc : (string, (string * string * Buffer.t)) Hashtbl.t = Hashtbl.create 4 in
+          let tool_calls_complete = ref false in
           let on_line line =
             (* Parse SSE data lines: "data: {...}" or "data: [DONE]" *)
             if String.length line > 6 && String.sub line 0 6 = "data: " then begin
@@ -1523,7 +1527,14 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   let open Yojson.Safe.Util in
                   let choices = json |> member "choices" |> to_list in
                   if List.length choices > 0 then begin
-                    let delta = (List.hd choices) |> member "delta" in
+                    let first_choice = List.hd choices in
+                    let delta = first_choice |> member "delta" in
+                    let finish_reason = first_choice |> member "finish_reason" in
+                    (* Check for tool_calls finish reason *)
+                    (try
+                      if to_string finish_reason = "tool_calls" then
+                        tool_calls_complete := true
+                    with _ -> ());
                     (* Extract content chunk *)
                     (try
                       let content_chunk = delta |> member "content" |> to_string in
@@ -1560,18 +1571,89 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                           ]);
                         ])
                       end
+                    with _ -> ());
+                    (* Phase 2: Extract tool_calls chunks *)
+                    (try
+                      let tool_calls = delta |> member "tool_calls" |> to_list in
+                      List.iter (fun tc ->
+                        let index = tc |> member "index" |> to_int in
+                        let key = string_of_int index in
+                        (* Get or create accumulator for this tool call *)
+                        let (call_id, func_name, args_buf) =
+                          try Hashtbl.find tool_calls_acc key
+                          with Not_found ->
+                            let buf = Buffer.create 256 in
+                            Hashtbl.add tool_calls_acc key ("", "", buf);
+                            ("", "", buf)
+                        in
+                        (* Update call_id if present *)
+                        let call_id = try
+                          let id = tc |> member "id" |> to_string in
+                          if String.length id > 0 then id else call_id
+                        with _ -> call_id in
+                        (* Update function name if present *)
+                        let func_name = try
+                          let func = tc |> member "function" in
+                          let name = func |> member "name" |> to_string in
+                          if String.length name > 0 then name else func_name
+                        with _ -> func_name in
+                        (* Accumulate arguments *)
+                        (try
+                          let func = tc |> member "function" in
+                          let args_chunk = func |> member "arguments" |> to_string in
+                          if String.length args_chunk > 0 then begin
+                            Buffer.add_string args_buf args_chunk;
+                            (* Broadcast tool call chunk *)
+                            Notification_sse.broadcast (`Assoc [
+                              ("jsonrpc", `String "2.0");
+                              ("method", `String "notifications/glm/tool_call_chunk");
+                              ("params", `Assoc [
+                                ("model", `String model);
+                                ("index", `Int index);
+                                ("call_id", `String call_id);
+                                ("function_name", `String func_name);
+                                ("arguments_chunk", `String args_chunk);
+                                ("streaming", `Bool true);
+                              ]);
+                            ])
+                          end
+                        with _ -> ());
+                        (* Update accumulator *)
+                        Hashtbl.replace tool_calls_acc key (call_id, func_name, args_buf)
+                      ) tool_calls
                     with _ -> ())
                   end
                 with _ -> ()
               end else begin
-                (* [DONE] - broadcast completion *)
+                (* [DONE] - broadcast completion with tool calls if any *)
+                let tool_calls_json =
+                  if Hashtbl.length tool_calls_acc > 0 then
+                    let calls = Hashtbl.fold (fun _ (call_id, func_name, args_buf) acc ->
+                      let args = Buffer.contents args_buf in
+                      `Assoc [
+                        ("id", `String call_id);
+                        ("type", `String "function");
+                        ("function", `Assoc [
+                          ("name", `String func_name);
+                          ("arguments", `String args);
+                        ]);
+                      ] :: acc
+                    ) tool_calls_acc [] in
+                    Some (`List calls)
+                  else None
+                in
+                let params = [
+                  ("model", `String model);
+                  ("total_chunks", `Int !chunk_count);
+                ] in
+                let params = match tool_calls_json with
+                  | Some tc -> params @ [("tool_calls", tc); ("has_tool_calls", `Bool true)]
+                  | None -> params
+                in
                 Notification_sse.broadcast (`Assoc [
                   ("jsonrpc", `String "2.0");
                   ("method", `String "notifications/glm/done");
-                  ("params", `Assoc [
-                    ("model", `String model);
-                    ("total_chunks", `Int !chunk_count);
-                  ]);
+                  ("params", `Assoc params);
                 ])
               end
             end
@@ -1581,12 +1663,34 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           | Ok _ ->
               let content = Buffer.contents content_buffer in
               let reasoning = Buffer.contents reasoning_buffer in
+              (* Phase 2: Collect accumulated tool calls *)
+              let tool_calls_list =
+                if Hashtbl.length tool_calls_acc > 0 then
+                  Hashtbl.fold (fun _ (call_id, func_name, args_buf) acc ->
+                    let args = Buffer.contents args_buf in
+                    `Assoc [
+                      ("id", `String call_id);
+                      ("type", `String "function");
+                      ("function", `Assoc [
+                        ("name", `String func_name);
+                        ("arguments", `String args);
+                      ]);
+                    ] :: acc
+                  ) tool_calls_acc []
+                else []
+              in
               let final_response =
                 if String.length content > 0 then content
                 else if String.length reasoning > 0 then sprintf "[Thinking]\n%s" reasoning
+                else if List.length tool_calls_list > 0 then
+                  (* If only tool calls, return them as JSON *)
+                  Yojson.Safe.to_string (`Assoc [("tool_calls", `List tool_calls_list)])
                 else "Empty response" in
               let extra = [("temperature", sprintf "%.1f" temperature); ("cloud", "zai"); ("streamed", "true")] in
               let extra = if String.length reasoning > 0 then extra @ [("has_reasoning", "true")] else extra in
+              let extra = if List.length tool_calls_list > 0 then
+                extra @ [("has_tool_calls", "true"); ("tool_calls_count", string_of_int (List.length tool_calls_list))]
+              else extra in
               { model = sprintf "glm (%s)" model;
                 returncode = 0;
                 response = final_response;
