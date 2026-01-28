@@ -38,3 +38,4 @@ mz_chain_output*.log
 .worktrees/
 .worktree/
 data/chain_history.jsonl
+data/telemetry.jsonl
