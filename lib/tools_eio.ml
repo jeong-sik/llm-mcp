@@ -255,7 +255,11 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
           let _ =
             Eio.Fiber.fork ~sw:hb_sw (fun () ->
               let rec loop () =
-                ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args);
+                (* Heartbeat must never crash the main request flow. *)
+                (try
+                   ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args)
+                 with exn ->
+                   eprintf "[masc] heartbeat error: %s\n%!" (Printexc.to_string exn));
                 Eio.Time.sleep clock interval;
                 loop ()
               in

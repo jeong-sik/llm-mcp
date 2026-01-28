@@ -5,6 +5,11 @@
 
 set -e
 
+# Try to raise the file descriptor limit to avoid EMFILE accept crashes.
+# This must never be fatal under launchd.
+ULIMIT_NOFILE="${LLM_ULIMIT_NOFILE:-65536}"
+ulimit -n "$ULIMIT_NOFILE" >/dev/null 2>&1 || true
+
 # Load API keys from user environment
 if [ -f "$HOME/.zshenv" ]; then
     source "$HOME/.zshenv" 2>/dev/null || true
