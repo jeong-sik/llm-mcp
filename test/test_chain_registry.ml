@@ -10,6 +10,8 @@
 *)
 
 open Alcotest
+
+let () = Random.init 42
 open Chain_types
 open Chain_registry
 
@@ -211,7 +213,7 @@ let stats_tests = [
 ]
 
 let () =
-  Random.init (int_of_float (Unix.gettimeofday () *. 1000.0));
+  Random.init 42;
   run "chain_registry" [
     ("register_lookup", register_lookup_tests);
     ("exists", exists_tests);

@@ -9,6 +9,8 @@
 open Agent_core_eio.Validator
 open Agent_core_eio.Validation_stack
 
+let () = Random.init 42
+
 (** Simulated task state *)
 type task_state = {
   score: float;

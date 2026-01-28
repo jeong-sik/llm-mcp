@@ -9,6 +9,8 @@
 *)
 
 open Alcotest
+
+let () = Random.init 42
 module TJ = Telemetry_jsonl
 
 (** {1 Test Helpers} *)
@@ -154,7 +156,7 @@ let config_tests = [
 ]
 
 let () =
-  Random.init (int_of_float (Unix.gettimeofday () *. 1000.0));
+  Random.init 42;
   run "telemetry_jsonl" [
     ("expand_tilde", expand_tilde_tests);
     ("ensure_dir", ensure_dir_tests);
