@@ -334,6 +334,7 @@ let orchestrate
         ~trace:config.trace_enabled
         ~exec_fn
         ~tool_exec:tool_exec_fn
+        ~input:goal
         plan)
   in
 

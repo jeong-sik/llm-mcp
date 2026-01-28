@@ -92,6 +92,10 @@ let run_command ~sw ~proc_mgr ~clock ?cwd ?(safe_tmpdir = false) ~timeout cmd ar
         (fun () -> stdout_content := read_all stdout_r)
         (fun () -> stderr_content := read_all stderr_r);
 
+      (* Close read ends after reading *)
+      Eio.Flow.close stdout_r;
+      Eio.Flow.close stderr_r;
+
       (* Wait for process to complete *)
       let status = Eio.Process.await proc in
       let exit_code = match status with
@@ -135,6 +139,9 @@ let run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd args =
         | exception End_of_file -> ()
       in
       read_lines ();
+
+      (* Close read end after reading *)
+      Eio.Flow.close stdout_r;
 
       let status = Eio.Process.await proc in
       let exit_code = match status with
@@ -189,6 +196,10 @@ let run_command_with_stdin ~sw ~proc_mgr ~clock ~timeout ~stdin_data cmd args =
       Eio.Fiber.both
         (fun () -> stdout_content := read_all stdout_r)
         (fun () -> stderr_content := read_all stderr_r);
+
+      (* Close read ends after reading *)
+      Eio.Flow.close stdout_r;
+      Eio.Flow.close stderr_r;
 
       let status = Eio.Process.await proc in
       let exit_code = match status with

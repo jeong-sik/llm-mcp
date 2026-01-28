@@ -14,7 +14,7 @@ open Chain_compiler
 (** {1 Test Helpers} *)
 
 (** Create a simple LLM node *)
-let llm_node ~id ?(deps=[]) prompt =
+let llm_node ~id ?(deps=[]) ?(depends_on=[]) prompt =
   {
     id;
     node_type = Llm {
@@ -28,7 +28,7 @@ let llm_node ~id ?(deps=[]) prompt =
     };
     input_mapping = List.map (fun d -> (d, d)) deps;
     output_key = None;
-    depends_on = None;
+    depends_on = (if depends_on = [] then None else Some depends_on);
   }
 
 (** Create a simple chain from nodes *)
@@ -113,6 +113,12 @@ let test_get_dependencies_with_mapping () =
   check bool "has a" true (List.mem "a" deps);
   check bool "has x" true (List.mem "x" deps)
 
+let test_get_dependencies_depends_on () =
+  let node = llm_node ~id:"b" ~depends_on:["a"; "x"] "test" in
+  let deps = get_dependencies node in
+  check bool "has a via depends_on" true (List.mem "a" deps);
+  check bool "has x via depends_on" true (List.mem "x" deps)
+
 (** {1 is_ready Tests} *)
 
 let test_is_ready_no_deps () =
@@ -158,6 +164,22 @@ let test_compile_diamond () =
       check string "last is d" "d" (List.hd (List.rev plan.execution_order))
   | Error e -> fail e
 
+let test_compile_depends_on_chain () =
+  let nodes = [
+    llm_node ~id:"a" "step1";
+    llm_node ~id:"b" ~depends_on:["a"] "step2";
+  ] in
+  let chain = make_chain ~id:"depends_on" nodes "b" in
+  match compile chain with
+  | Ok plan ->
+      let idx_of x =
+        List.mapi (fun i v -> (i, v)) plan.execution_order
+        |> List.find (fun (_, v) -> v = x)
+        |> fst
+      in
+      check bool "a before b via depends_on" true (idx_of "a" < idx_of "b")
+  | Error e -> fail e
+
 (** {1 pp_plan Tests} *)
 
 let test_pp_plan () =
@@ -182,6 +204,7 @@ let topo_tests = [
 let deps_tests = [
   test_case "no dependencies" `Quick test_get_dependencies_none;
   test_case "with mapping" `Quick test_get_dependencies_with_mapping;
+  test_case "with depends_on" `Quick test_get_dependencies_depends_on;
 ]
 
 let ready_tests = [
@@ -193,6 +216,7 @@ let ready_tests = [
 let compile_tests = [
   test_case "simple chain" `Quick test_compile_simple_chain;
   test_case "diamond pattern" `Quick test_compile_diamond;
+  test_case "depends_on chain" `Quick test_compile_depends_on_chain;
 ]
 
 let pp_tests = [

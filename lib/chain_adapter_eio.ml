@@ -473,6 +473,80 @@ let rec apply_adapter_transform (transform : adapter_transform) (input : string)
            (match find_start 0 with
             | None -> Error "No JSON object/array found in input"
             | Some start -> extract_from start)
+       | "extract_html" ->
+           (* Robust HTML extraction for LLM outputs that append metadata.
+              Strategy:
+              - Find the first <!doctype html ...> or <html ...>
+              - Find the next </html>
+              - Return that slice if both are present
+           *)
+           let lower = String.lowercase_ascii input in
+           let find_from start needle =
+             try Some (Str.search_forward (Str.regexp_string needle) lower start)
+             with Not_found -> None
+           in
+           let start_candidates =
+             [ "<!doctype html"; "<html" ]
+             |> List.filter_map (find_from 0)
+             |> List.sort compare
+           in
+           (match start_candidates with
+            | [] -> Ok input
+            | start_pos :: _ -> (
+                match find_from start_pos "</html>" with
+                | None -> Ok input
+                | Some end_pos ->
+                    let end_pos = end_pos + String.length "</html>" in
+                    if end_pos <= start_pos then Ok input
+                    else Ok (String.sub input start_pos (end_pos - start_pos))))
+       | "extract_html_field" ->
+           (* First try to parse a JSON object with an "html" field.
+              If that fails, try extracting the first JSON object/array,
+              then fall back to raw HTML extraction. *)
+           let parse_html_field s =
+             try
+               match Yojson.Safe.from_string s with
+               | `Assoc fields -> (
+                   match List.assoc_opt "html" fields with
+                   | Some (`String h) when String.length (String.trim h) > 0 -> Some h
+                   | _ -> None)
+               | _ -> None
+             with _ -> None
+           in
+           let parse_from_extracted_json () =
+             match apply_adapter_transform (Custom "extract_json") input with
+             | Ok json_str -> parse_html_field json_str
+             | Error _ -> None
+           in
+           (match parse_html_field input with
+            | Some h -> Ok h
+            | None -> (
+                match parse_from_extracted_json () with
+                | Some h -> Ok h
+                | None -> apply_adapter_transform (Custom "extract_html") input))
+       | "unescape_json_string" ->
+           (* Safely unescape common JSON string escape sequences without regex. *)
+           let len = String.length input in
+           let buf = Buffer.create len in
+           let rec loop i =
+             if i >= len then ()
+             else
+               let c = input.[i] in
+               if c = '\\' && i + 1 < len then
+                 match input.[i + 1] with
+                 | 'n' -> Buffer.add_char buf '\n'; loop (i + 2)
+                 | 't' -> Buffer.add_char buf '\t'; loop (i + 2)
+                 | '"' -> Buffer.add_char buf '"'; loop (i + 2)
+                 | '\\' -> Buffer.add_char buf '\\'; loop (i + 2)
+                 | _ ->
+                     Buffer.add_char buf c;
+                     loop (i + 1)
+               else (
+                 Buffer.add_char buf c;
+                 loop (i + 1))
+           in
+           loop 0;
+           Ok (Buffer.contents buf)
        | "figma_summary_to_spec" ->
            (try
              let open Yojson.Safe.Util in

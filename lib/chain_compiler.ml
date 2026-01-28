@@ -14,7 +14,10 @@ let ( let* ) = Result.bind
 
 (** Recursively collect all input_mapping dependencies from nested nodes *)
 let rec collect_nested_dependencies (node : Chain_types.node) : string list =
-  let direct_deps = List.map snd node.input_mapping in
+  let mapping_deps = List.map snd node.input_mapping in
+  (* depends_on is the primary dependency mechanism in JSON chains *)
+  let explicit_deps = Option.value node.depends_on ~default:[] in
+  let direct_deps = mapping_deps @ explicit_deps in
   let nested_deps = match node.node_type with
     | Chain_types.Pipeline nodes
     | Chain_types.Fanout nodes ->
@@ -283,7 +286,9 @@ let get_node (c : Chain_types.chain) (node_id : string) : Chain_types.node optio
 
 (** Get all dependencies of a node *)
 let get_dependencies (node : Chain_types.node) : string list =
-  List.map snd node.Chain_types.input_mapping
+  let mapping_deps = List.map snd node.Chain_types.input_mapping in
+  let explicit_deps = Option.value node.Chain_types.depends_on ~default:[] in
+  mapping_deps @ explicit_deps
   |> List.sort_uniq String.compare
 
 (** Check if node is ready to execute (all deps satisfied) *)

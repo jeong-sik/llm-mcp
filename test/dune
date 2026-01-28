@@ -260,3 +260,98 @@
  (name test_chain_compiler)
  (libraries llm_mcp.common alcotest))
 
+; Chain Category tests (category theory abstractions, monoids, profunctors)
+(test
+ (name test_chain_category)
+ (libraries llm_mcp.common alcotest))
+
+; Chain Evaluator tests (metrics, triggers, verification parsing)
+(test
+ (name test_chain_evaluator)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Chain Stats tests (percentiles, costs, formatting)
+(test
+ (name test_chain_stats)
+ (libraries llm_mcp.common alcotest))
+
+; Chain Telemetry tests (event type serialization)
+(test
+ (name test_chain_telemetry)
+ (libraries llm_mcp.common alcotest))
+
+; Chain Run Store tests (truncation, collection, JSON serialization)
+(test
+ (name test_chain_run_store)
+ (libraries llm_mcp.eio llm_mcp.common alcotest))
+
+; Prompt Registry tests (variable extraction, rendering, JSON)
+(test
+ (name test_prompt_registry)
+ (libraries llm_mcp.eio llm_mcp.common alcotest str unix))
+
+; Compact Implementation tests (caching, delta, base85, msgpack)
+(test
+ (name test_compact_impl)
+ (libraries llm_mcp.common alcotest))
+
+; Langfuse Integration tests (ID generation, JSON serialization, timestamps)
+(test
+ (name test_langfuse)
+ (libraries llm_mcp.common alcotest))
+
+
+; Error module tests (types, is_recoverable, to_string, severity, JSON roundtrip)
+(test
+ (name test_error)
+ (libraries llm_mcp.common alcotest))
+
+; Metrics module tests (Prometheus-compatible metrics collection)
+(test
+ (name test_metrics)
+ (libraries llm_mcp.common alcotest unix))
+
+; Rate limit module tests (Token bucket algorithm, headers)
+(test
+ (name test_rate_limit)
+ (libraries llm_mcp.common alcotest unix))
+
+; Ollama parser tests (streaming chunks, tool calls, chat responses)
+(test
+ (name test_ollama_parser)
+ (libraries llm_mcp.common alcotest))
+
+; Telemetry JSONL tests (expand_tilde, ensure_dir, logging)
+(test
+ (name test_telemetry_jsonl)
+ (libraries llm_mcp.common alcotest unix))
+
+; Log module tests (level conversion, timestamp, config)
+(test
+ (name test_log)
+ (libraries llm_mcp.common alcotest unix))
+
+; Tool_config tests (budget mode, MCP config parsing)
+(test
+ (name test_tool_config)
+ (libraries llm_mcp.common alcotest))
+
+; Version constant tests
+(test
+ (name test_version)
+ (libraries llm_mcp.common alcotest))
+
+; Chain_registry tests (storage, lookup, versioning)
+(test
+ (name test_chain_registry)
+ (libraries llm_mcp.common alcotest unix))
+
+; Chain_batch tests (delay calculation, token estimation, chunking)
+(test
+ (name test_chain_batch)
+ (libraries llm_mcp.common llm_mcp.eio alcotest eio eio_main))
+
+; Chain_types tests (direction, defaults, node_type_name, make_* helpers)
+(test
+ (name test_chain_types)
+ (libraries llm_mcp.common alcotest))
