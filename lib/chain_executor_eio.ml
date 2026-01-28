@@ -236,12 +236,16 @@ let store_node_output ctx (node : node) (output : string) =
   match node.output_key with
   | Some key ->
       let key = String.trim key in
-      if key <> "" && key <> node.id then begin
-        if Hashtbl.mem ctx.outputs key then
-          Printf.eprintf "Warning: output_key '%s' for node '%s' overwrites existing output\n%!"
-            key node.id;
-        Hashtbl.replace ctx.outputs key output
-      end
+      if key <> "" && key <> node.id then
+        (match Hashtbl.find_opt ctx.outputs key with
+         | Some existing ->
+             if existing <> output then
+               Printf.eprintf
+                 "Warning: output_key '%s' for node '%s' ignored (already set)\n%!"
+                 key
+                 node.id
+         | None ->
+             Hashtbl.replace ctx.outputs key output)
   | None -> ()
 
 (** {1 Trace Helpers} *)
@@ -575,8 +579,20 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
   (* Tool args should not carry unresolved {{...}} placeholders, because
      external MCP servers may treat them as literal invalid values. *)
   let strip_unresolved_placeholders (s : string) : string =
-    try Str.global_replace (Str.regexp "{{[^}]+}}") "" s
-    with _ -> s
+    let re = Str.regexp "{{[^}]+}}" in
+    try
+      ignore (Str.search_forward re s 0);
+      let preview =
+        if String.length s > 160 then String.sub s 0 160 ^ "..."
+        else s
+      in
+      Printf.eprintf
+        "[chain] unresolved placeholder stripped in tool args: %s\n%!"
+        preview;
+      Str.global_replace re "" s
+    with
+    | Not_found -> s
+    | _ -> s
   in
   let rec map = function
     | `String s ->
