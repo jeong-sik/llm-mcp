@@ -761,20 +761,31 @@ let run ~sw ~env ?(config = Http.default_config) () =
   (* Create session store for multi-tenancy *)
   let store = create_session_store () in
 
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
+
   (* Periodic cleanup fiber for stale sessions - prevents memory leaks *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec cleanup_loop () =
-      Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
-      (* Cleanup must never crash the server switch. *)
+      (try
+         Eio.Time.sleep clock 60.0 (* Clean up every 1 minute *)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         eprintf "[cleanup] sleep error: %s\n%!" (Printexc.to_string exn));
       (try
          cleanup_stale_sessions store;
          Mcp_session.cleanup_expired ()  (* Also clean global session store *)
        with exn ->
+         if is_cancelled exn then raise exn;
          eprintf "[cleanup] loop error: %s\n%!" (Printexc.to_string exn));
       cleanup_loop ()
     in
     try cleanup_loop () with exn ->
-      eprintf "[cleanup] fatal loop error: %s\n%!" (Printexc.to_string exn)
+      if is_cancelled exn then ()
+      else eprintf "[cleanup] fatal loop error: %s\n%!" (Printexc.to_string exn)
   );
 
   (* request_handler: sockaddr -> Gluten.Reqd.t -> unit *)
@@ -789,30 +800,47 @@ let run ~sw ~env ?(config = Http.default_config) () =
   let reset_backoff () = backoff_s := initial_backoff_s in
   let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
   let rec accept_loop () =
-    (try
-       let client_socket, client_addr = Eio.Net.accept ~sw socket in
-       reset_backoff ();
-       Eio.Fiber.fork ~sw (fun () ->
-         try
-           Httpun_eio.Server.create_connection_handler
-             ~sw
-             ~request_handler
-             ~error_handler:Http.error_handler
-             client_addr
-             client_socket
-         with exn ->
-           eprintf "[accept] connection handler error: %s\n%!"
-             (Printexc.to_string exn));
+    try
+      (try
+         let client_socket, client_addr = Eio.Net.accept ~sw socket in
+         reset_backoff ();
 
-       (* Small yield to allow other fibers *)
-       Eio.Time.sleep clock 0.0
-     with exn ->
-       let delay = !backoff_s in
-       eprintf "[accept] error: %s (backoff %.2fs)\n%!"
-         (Printexc.to_string exn) delay;
-       Eio.Time.sleep clock delay;
-       bump_backoff ());
-    accept_loop ()
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Httpun_eio.Server.create_connection_handler
+               ~sw
+               ~request_handler
+               ~error_handler:Http.error_handler
+               client_addr
+               client_socket
+           with exn ->
+             eprintf "[accept] connection handler error: %s\n%!"
+               (Printexc.to_string exn)
+         );
+
+         (* Small yield to allow other fibers *)
+         (try
+            Eio.Time.sleep clock 0.0
+          with exn ->
+            if is_cancelled exn then raise exn;
+            eprintf "[accept] yield error: %s\n%!" (Printexc.to_string exn))
+       with exn ->
+         if is_cancelled exn then raise exn;
+         let delay = !backoff_s in
+         eprintf "[accept] error: %s (backoff %.2fs)\n%!"
+           (Printexc.to_string exn) delay;
+         Eio.Time.sleep clock delay;
+         bump_backoff ());
+      accept_loop ()
+    with exn ->
+      if is_cancelled exn then ()
+      else
+        let delay = !backoff_s in
+        eprintf "[accept] loop error: %s (backoff %.2fs)\n%!"
+          (Printexc.to_string exn) delay;
+        Eio.Time.sleep clock delay;
+        bump_backoff ();
+        accept_loop ()
   in
 
   accept_loop ()

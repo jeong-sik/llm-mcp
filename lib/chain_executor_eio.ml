@@ -2895,6 +2895,19 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
   (* Producer: Execute nodes in parallel, push results to stream as they complete *)
   Eio.Fiber.fork ~sw (fun () ->
+    let is_cancelled exn =
+      match exn with
+      | Eio.Cancel.Cancelled _ -> true
+      | _ -> false
+    in
+    let safe_stream_add value =
+      try
+        Eio.Stream.add stream value
+      with exn ->
+        if is_cancelled exn then raise exn;
+        Printf.eprintf "[StreamMerge] stream add error: %s\n%!"
+          (Printexc.to_string exn)
+    in
     (try
        Eio.Fiber.all (List.map (fun (node : node) ->
          fun () ->
@@ -2905,22 +2918,28 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                    incr completed_count;
                    Printf.eprintf "[StreamMerge] %s completed (%d/%d)\n%!"
                      node.id !completed_count total_count);
-                 Eio.Stream.add stream (Some (node.id, Ok output))
+                 safe_stream_add (Some (node.id, Ok output))
              | Error msg ->
                  Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                    incr completed_count);
-                 Eio.Stream.add stream (Some (node.id, Error msg))
+                 safe_stream_add (Some (node.id, Error msg))
            with exn ->
              let err = Printexc.to_string exn in
              Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                incr completed_count);
-             Eio.Stream.add stream (Some (node.id, Error err))
+             safe_stream_add (Some (node.id, Error err))
        ) nodes)
      with exn ->
+       if is_cancelled exn then raise exn;
        Printf.eprintf "[StreamMerge] producer crashed: %s\n%!"
          (Printexc.to_string exn));
     (* Signal completion after all producers done *)
-    Eio.Stream.add stream None
+    (try
+       safe_stream_add None
+     with exn ->
+       if is_cancelled exn then raise exn;
+       Printf.eprintf "[StreamMerge] completion signal error: %s\n%!"
+         (Printexc.to_string exn))
   );
 
   (* Consumer: Process results progressively using reducer *)
