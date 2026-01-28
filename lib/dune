@@ -48,7 +48,9 @@
    mcp_session
    ; SSE Notifications (Pure OCaml - moved from llm_mcp)
    notification_sse
-   sse)
+   sse
+   ; Compact Protocol (Phase 5 - token efficiency)
+   compact_impl)
  (libraries
    yojson
    str
