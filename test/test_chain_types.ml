@@ -59,7 +59,7 @@ let test_default_retry_config () =
 
 let test_node_type_name_llm () =
   let node_type = Llm { model = "test"; system = None; prompt = "hi"; timeout = None;
-                        tools = None; prompt_ref = None; prompt_vars = [] } in
+                        tools = None; prompt_ref = None; prompt_vars = []; thinking = false } in
   check string "llm" "llm" (node_type_name node_type)
 
 let test_node_type_name_tool () =
@@ -146,7 +146,7 @@ let test_make_llm_node_minimal () =
   let node = make_llm_node ~id:"test" ~model:"gemini" ~prompt:"hello" () in
   check string "id" "test" node.id;
   match node.node_type with
-  | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars } ->
+  | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; _ } ->
       check string "model" "gemini" model;
       check (option string) "system" None system;
       check string "prompt" "hello" prompt;

@@ -12,8 +12,8 @@ let compile_exn chain =
   | Ok plan -> plan
   | Error msg -> failwith ("compile failed: " ^ msg)
 
-let exec_fn ~model ?system ~prompt ?tools () =
-  ignore (system, tools);  (* system and tools fields for extended API *)
+let exec_fn ~model ?system ~prompt ?tools ?thinking () =
+  ignore (system, tools, thinking);  (* system, tools, thinking fields for extended API *)
   if String.contains prompt '!' then Error "forced failure"
   else Ok (Printf.sprintf "[%s]%s" model prompt)
 
@@ -126,6 +126,7 @@ let test_tool_node_substitution ~sw ~clock () =
   let plan = compile_exn chain in
   let result = Chain_executor_eio.execute ~sw ~clock
     ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan in
+  Printf.printf "DEBUG: result.output = %S\n%!" result.output;
   assert (result.output = "[gemini]hello");
   Printf.printf "[OK] tool args substitution works\n%!"
 

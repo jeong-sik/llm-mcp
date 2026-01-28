@@ -70,8 +70,8 @@ let ollama_available () : bool =
    ============================================================================ *)
 
 (** Mock exec_fn that routes to Ollama *)
-let make_ollama_exec_fn () : (model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result) =
-  fun ~model ?system:_ ~prompt ?tools:_ () ->
+let make_ollama_exec_fn () : (model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> ?thinking:bool -> unit -> (string, string) result) =
+  fun ~model ?system:_ ~prompt ?tools:_ ?thinking:_ () ->
     (* Extract actual model name: "ollama:qwen3:1.7b" -> "qwen3:1.7b" *)
     let actual_model =
       if String.length model > 7 && String.sub model 0 7 = "ollama:" then
@@ -112,7 +112,7 @@ let test_goaldriven_parse_float () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -178,7 +178,7 @@ let test_goaldriven_exec_test () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -243,7 +243,7 @@ let test_goaldriven_llm_judge () =
         timeout = Some 45;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -309,7 +309,7 @@ let test_goaldriven_strategy_hints () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -379,7 +379,7 @@ let test_goaldriven_mermaid_roundtrip_execute () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in

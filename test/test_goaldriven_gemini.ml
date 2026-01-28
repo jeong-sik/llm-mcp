@@ -64,8 +64,8 @@ let mock_tool_exec ~name:_ ~args:_ = Error "No tools"
    ============================================================================ *)
 
 (** Exec_fn that routes to Gemini *)
-let make_gemini_exec_fn () : (model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result) =
-  fun ~model ?system:_ ~prompt ?tools:_ () ->
+let make_gemini_exec_fn () : (model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> ?thinking:bool -> unit -> (string, string) result) =
+  fun ~model ?system:_ ~prompt ?tools:_ ?thinking:_ () ->
     Printf.printf "  [exec] model=%s prompt=%s...\n%!"
       model (truncate 50 prompt);
     call_gemini ~prompt ()
@@ -92,7 +92,7 @@ No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = []; output_key = None; depends_on = None;
   } in
@@ -153,7 +153,7 @@ No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = []; output_key = None; depends_on = None;
   } in
@@ -215,7 +215,7 @@ No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = []; output_key = None; depends_on = None;
   } in
@@ -281,7 +281,7 @@ No explanation, no markdown, just the raw JSON object.|};
       timeout = Some 30;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = []; output_key = None; depends_on = None;
   } in

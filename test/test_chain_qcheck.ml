@@ -32,7 +32,7 @@ let gen_llm_node_type : CT.node_type QCheck.Gen.t =
     let* model = oneof_array models in
     let* prompt = oneof_array prompts in
     return (CT.Llm { model; prompt; system = None; timeout = None;
-                     tools = None; prompt_ref = None; prompt_vars = [] })
+                     tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
   )
 
 (** Generate Tool node type *)

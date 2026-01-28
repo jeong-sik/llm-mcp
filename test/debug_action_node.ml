@@ -10,7 +10,7 @@ let () =
       timeout = Some 30;
       tools = None;
       prompt_ref = None;
-      prompt_vars = []
+      prompt_vars = []; thinking = false
     };
     input_mapping = []; output_key = None; depends_on = None
   } in

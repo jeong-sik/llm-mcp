@@ -438,7 +438,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         let (prompt_clean, has_tools) = extract_tools_flag raw_prompt in
         let prompt = if prompt_clean = "" then "{{input}}" else prompt_clean in
         let tools = make_tools_value has_tools in
-        Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+        Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
       else if Str.string_match tool_content_re text 0 then
         (* Explicit Tool syntax in content: tool:name\nargs *)
         let name = Str.matched_group 1 text in
@@ -466,7 +466,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then "{{input}}" else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+          Ok (Llm { model; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else if List.mem id_lower known_tools then
           Ok (Tool { name = id; args = `Null })
         else
@@ -475,7 +475,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
           let (text_clean, has_tools) = extract_tools_flag text in
           let prompt = if text_clean = "" then id else text_clean in
           let tools = make_tools_value has_tools in
-          Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+          Ok (Llm { model = "gemini"; system = None; prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Trap ->
       (* Trapezoid nodes: Adapter - parse "Adapt[input_ref → transform_type]" or similar *)
@@ -500,7 +500,7 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         Ok (Race { nodes = []; timeout = None })
       else
         (* Unknown stadium text - treat as LLM with default model *)
-        Ok (Llm { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] })
+        Ok (Llm { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Circle ->
       (* Circle nodes: MASC coordination (broadcast, listen, claim) *)
@@ -872,7 +872,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         | [policy_type; iter_str] when policy_type = "greedy" ->
             let max_iterations = Safe_parse.int ~context:"MCTS:iter" ~default:10 iter_str in
             (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = []; output_key = None; depends_on = None } in
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
@@ -894,7 +894,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
               | _ -> UCB1 1.41  (* default *)
             in
             (* Default simulation node - uses LLM to simulate outcomes *)
-            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }; input_mapping = []; output_key = None; depends_on = None } in
+            let default_sim = { id = "_mcts_sim"; node_type = Llm { model = "gemini"; system = None; prompt = "Simulate and evaluate: {{input}}"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }; input_mapping = []; output_key = None; depends_on = None } in
             Ok (Mcts {
               strategies = [];  (* filled from edges in post-process *)
               simulation = default_sim;
@@ -986,14 +986,14 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         if Str.string_match quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else if Str.string_match single_quote_re rest 0 then
           let model = Str.matched_group 1 rest in
           let prompt = Str.matched_group 2 rest in
-          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+          Ok (Llm { model = trim model; system = None; prompt = trim prompt; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else if Str.string_match simple_model_re rest 0 then
           let model = Str.matched_group 1 rest in
-          Ok (Llm { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+          Ok (Llm { model = trim model; system = None; prompt = "{{input}}"; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
         else
           Error (Printf.sprintf "Invalid LLM format: %s" content)
       else if String.length content_clean > 5 && String.sub content_clean 0 5 = "Tool:" then
@@ -1044,7 +1044,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
                  Error (Printf.sprintf "Invalid Tool format: %s" content))
       else
         (* Default: treat as LLM with content as prompt, model = gemini *)
-        Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = [] })
+        Ok (Llm { model = "gemini"; system = None; prompt = content_clean; timeout = None; tools; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Trap ->
       (* Trapezoid: Adapter nodes, content format: "Adapt[input → template]" or similar *)
@@ -1069,7 +1069,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       else if content = "Race" || (String.length content >= 5 && String.sub content 0 5 = "Race:") then
         Ok (Race { nodes = []; timeout = None })
       else
-        Ok (Llm { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] })
+        Ok (Llm { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
 
   | `Circle ->
       (* Circle nodes: MASC coordination - same logic as infer_type_from_id *)

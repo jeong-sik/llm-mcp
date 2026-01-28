@@ -31,7 +31,7 @@ let make_test_chain id =
       timeout = None;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = [];
     output_key = None;

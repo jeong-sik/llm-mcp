@@ -912,7 +912,7 @@ let test_validate_chain_missing_output_node () =
     nodes = [
       { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "Hi";
                                      timeout = None; tools = None; prompt_ref = None;
-                                     prompt_vars = [] };
+                                     prompt_vars = []; thinking = false };
         input_mapping = []; output_key = None; depends_on = None }
     ];
     output = "nonexistent";
@@ -928,11 +928,11 @@ let test_validate_chain_duplicate_ids () =
     nodes = [
       { id = "dup"; node_type = Llm { model = "g"; system = None; prompt = "1";
                                        timeout = None; tools = None; prompt_ref = None;
-                                       prompt_vars = [] };
+                                       prompt_vars = []; thinking = false };
         input_mapping = []; output_key = None; depends_on = None };
       { id = "dup"; node_type = Llm { model = "c"; system = None; prompt = "2";
                                        timeout = None; tools = None; prompt_ref = None;
-                                       prompt_vars = [] };
+                                       prompt_vars = []; thinking = false };
         input_mapping = []; output_key = None; depends_on = None }
     ];
     output = "dup";
@@ -948,11 +948,11 @@ let test_validate_chain_valid () =
     nodes = [
       { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "Step 1";
                                      timeout = None; tools = None; prompt_ref = None;
-                                     prompt_vars = [] };
+                                     prompt_vars = []; thinking = false };
         input_mapping = []; output_key = None; depends_on = None };
       { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "Step 2";
                                      timeout = None; tools = None; prompt_ref = None;
-                                     prompt_vars = [] };
+                                     prompt_vars = []; thinking = false };
         input_mapping = []; output_key = None; depends_on = None }
     ];
     output = "b";
@@ -991,7 +991,7 @@ let test_node_to_json_llm () =
       timeout = Some 30;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = [("question", "prev")];
     output_key = Some "answer";
@@ -1088,7 +1088,7 @@ let test_has_placeholder_node () =
     id = "normal";
     node_type = Llm { model = "g"; system = None; prompt = "x";
                        timeout = None; tools = None; prompt_ref = None;
-                       prompt_vars = [] };
+                       prompt_vars = []; thinking = false };
     input_mapping = [];
     output_key = None;
     depends_on = None;

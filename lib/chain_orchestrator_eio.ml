@@ -249,6 +249,7 @@ let orchestrate
                 tools = None;
                 prompt_ref = None;
                 prompt_vars = [];
+                thinking = false;
               };
               input_mapping = [];
               output_key = None;
@@ -289,7 +290,7 @@ let orchestrate
         | `String s -> Ok s
         | _ -> Ok (Yojson.Safe.to_string json)
       in
-      let exec_fn ~model ?system ~prompt ?tools () =
+      let exec_fn ~model ?system ~prompt ?tools ?thinking () =
         let base_args = [
           ("prompt", `String prompt);
           ("timeout", `Int timeout_sec);
@@ -301,6 +302,10 @@ let orchestrate
         let args = match tools with
           | Some t -> ("tools", t) :: args
           | None -> args
+        in
+        let args = match thinking with
+          | Some true -> ("thinking", `Bool true) :: args
+          | _ -> args
         in
         let lowered = String.lowercase_ascii model in
         match lowered with
