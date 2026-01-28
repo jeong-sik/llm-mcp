@@ -2895,20 +2895,30 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
   (* Producer: Execute nodes in parallel, push results to stream as they complete *)
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Fiber.all (List.map (fun (node : node) ->
-      fun () ->
-        match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
-        | Ok output ->
-            Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
-              incr completed_count;
-              Printf.eprintf "[StreamMerge] %s completed (%d/%d)\n%!"
-                node.id !completed_count total_count);
-            Eio.Stream.add stream (Some (node.id, Ok output))
-        | Error msg ->
-            Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
-              incr completed_count);
-            Eio.Stream.add stream (Some (node.id, Error msg))
-    ) nodes);
+    (try
+       Eio.Fiber.all (List.map (fun (node : node) ->
+         fun () ->
+           try
+             match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
+             | Ok output ->
+                 Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
+                   incr completed_count;
+                   Printf.eprintf "[StreamMerge] %s completed (%d/%d)\n%!"
+                     node.id !completed_count total_count);
+                 Eio.Stream.add stream (Some (node.id, Ok output))
+             | Error msg ->
+                 Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
+                   incr completed_count);
+                 Eio.Stream.add stream (Some (node.id, Error msg))
+           with exn ->
+             let err = Printexc.to_string exn in
+             Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
+               incr completed_count);
+             Eio.Stream.add stream (Some (node.id, Error err))
+       ) nodes)
+     with exn ->
+       Printf.eprintf "[StreamMerge] producer crashed: %s\n%!"
+         (Printexc.to_string exn));
     (* Signal completion after all producers done *)
     Eio.Stream.add stream None
   );

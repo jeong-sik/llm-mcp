@@ -5,7 +5,7 @@ OCaml로 만든 개인용 MCP 서버입니다.
 
 안정성·보안·호환성은 개인 환경 기준이며, 공개 서비스 용도로는 권장하지 않습니다.
 
-## Quickstart
+## 빠른 시작
 
 ```bash
 opam pin add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git -y
