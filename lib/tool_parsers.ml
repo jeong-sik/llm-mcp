@@ -157,6 +157,48 @@ let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
   OllamaList
 
 (** Parse JSON arguments for GLM (Z.ai) tool *)
+(** Parse a single GLM tool from JSON *)
+let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
+  let open Yojson.Safe.Util in
+  let tool_type_str = json |> member "type" |> to_string in
+  let tool_type = Types.glm_tool_type_of_string tool_type_str in
+  match tool_type with
+  | Types.GlmWebSearch ->
+      let web_search_obj = json |> member "web_search" in
+      let enable = (try web_search_obj |> member "enable" |> to_bool with _ -> true) in
+      let search_result = (try web_search_obj |> member "search_result" |> to_bool with _ -> true) in
+      { Types.tool_type = Types.GlmWebSearch;
+        function_schema = None;
+        web_search_config = Some (enable, search_result);
+        code_interpreter_config = None }
+  | Types.GlmFunction ->
+      let func = json |> member "function" in
+      let func_name = func |> member "name" |> to_string in
+      let func_description =
+        (try func |> member "description" |> to_string with _ -> "") in
+      (* Parse parameters - simplified, just stores the raw JSON for now *)
+      let func_parameters = [] in  (* TODO: Full parameter parsing if needed *)
+      let schema = { Types.func_name; func_description; func_parameters } in
+      { Types.tool_type = Types.GlmFunction;
+        function_schema = Some schema;
+        web_search_config = None;
+        code_interpreter_config = None }
+  | Types.GlmCodeInterpreter ->
+      let ci_obj = json |> member "code_interpreter" in
+      let sandbox = (try ci_obj |> member "sandbox" |> to_string with _ -> "auto") in
+      { Types.tool_type = Types.GlmCodeInterpreter;
+        function_schema = None;
+        web_search_config = None;
+        code_interpreter_config = Some sandbox }
+
+(** Parse tools array from JSON *)
+let parse_glm_tools (json : Yojson.Safe.t) : Types.glm_tool list =
+  let open Yojson.Safe.Util in
+  match json |> member "tools" with
+  | `Null -> []
+  | `List tools -> List.map parse_glm_tool tools
+  | _ -> []
+
 let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
@@ -172,8 +214,23 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let thinking = json |> member "thinking" |> to_bool_option |> Option.value ~default:false in
   let do_sample = json |> member "do_sample" |> to_bool_option |> Option.value ~default:true in
+  (* DEPRECATED: web_search bool, use tools instead *)
   let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:false in
-  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search }
+  (* New: Parse tools array *)
+  let tools = parse_glm_tools json in
+  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools }
+
+(** Parse JSON arguments for glm.translate tool *)
+let parse_glm_translate_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let text = json |> member "text" |> to_string in
+  let source_lang = json |> member "source_lang" |> to_string in
+  let target_lang = json |> member "target_lang" |> to_string in
+  let strategy_str = json |> member "strategy" |> to_string_option |> Option.value ~default:"general" in
+  let strategy = Types.translation_strategy_of_string strategy_str in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7" in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
+  GlmTranslate { text; source_lang; target_lang; strategy; model; timeout }
 
 (** Parse JSON arguments for set_stream_delta tool *)
 let parse_set_stream_delta_args (json : Yojson.Safe.t) : tool_args =

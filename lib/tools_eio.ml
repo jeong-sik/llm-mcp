@@ -23,6 +23,7 @@ let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
 let parse_glm_args = Tool_parsers.parse_glm_args
+let parse_glm_translate_args = Tool_parsers.parse_glm_translate_args
 let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
 let parse_chain_to_mermaid_args = Tool_parsers.parse_chain_to_mermaid_args
@@ -1030,6 +1031,7 @@ let get_model_name_for_tracing = function
   | Ollama { model; _ } -> sprintf "ollama:%s" model
   | OllamaList -> "ollama:list"
   | Glm { model; _ } -> sprintf "glm:%s" model
+  | GlmTranslate { model; _ } -> sprintf "glm.translate:%s" model
   | ChainRun _ -> "chain:run"
   | ChainValidate _ -> "chain:validate"
   | ChainList -> "chain:list"
@@ -1055,6 +1057,7 @@ let get_input_for_tracing = function
   | Ollama { prompt; _ } -> prompt
   | OllamaList -> "(list models)"
   | Glm { prompt; _ } -> prompt
+  | GlmTranslate { text; _ } -> sprintf "(translate: %s)" (String.sub text 0 (min 50 (String.length text)))
   | ChainRun { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
   | ChainValidate { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
   | ChainOrchestrate { chain; _ } ->
@@ -1439,8 +1442,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search } ->
-      (* Z.ai GLM Cloud API - OpenAI-compatible *)
+  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools } ->
+      (* Z.ai GLM Cloud API - OpenAI-compatible with Function Calling *)
       let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
         | Some k -> k
         | None -> ""
@@ -1477,20 +1480,23 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           | Some n -> body_fields @ [("max_tokens", `Int n)]
           | None -> body_fields
         in
-        (* Add web_search tool if enabled *)
-        let body_fields = if web_search then
-          body_fields @ [
-            ("tools", `List [
-              `Assoc [
-                ("type", `String "web_search");
-                ("web_search", `Assoc [
-                  ("enable", `Bool true);
-                  ("search_result", `Bool true);
-                ])
-              ]
-            ])
-          ]
-        else body_fields in
+        (* Build tools list: combine explicit tools with web_search backward compat *)
+        let all_tools =
+          if List.length tools > 0 then
+            (* Use new tools array *)
+            tools
+          else if web_search then
+            (* DEPRECATED: fallback to web_search bool for backward compat *)
+            [Types.glm_web_search_tool ()]
+          else
+            []
+        in
+        let body_fields =
+          if List.length all_tools > 0 then
+            body_fields @ [("tools", Types.glm_tools_to_json all_tools)]
+          else
+            body_fields
+        in
         let body = Yojson.Safe.to_string (`Assoc body_fields) in
         let cmd = "curl" in
 
@@ -1879,6 +1885,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         thinking = false;  (* Faster for chain execution *)
                         do_sample = true;
                         web_search = false;
+                        tools = [];  (* No tools for chain execution by default *)
                       }
                   | _ ->
                       (* Default to Gemini for unknown models *)
@@ -2648,6 +2655,130 @@ This chain will execute the goal using a stub model.|}
              response = sprintf "Prompt '%s'%s not found"
                id (match version with Some v -> " v" ^ v | None -> "");
              extra = []; })
+
+  | GlmTranslate { text; source_lang; target_lang; strategy; model; timeout } ->
+      (* GLM Translation Agent - 6 strategies *)
+      let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
+        | Some k -> k
+        | None -> ""
+      in
+      if String.length api_key = 0 then
+        { model = sprintf "glm.translate (%s)" model;
+          returncode = -1;
+          response = "Error: ZAI_API_KEY environment variable not set";
+          extra = [("error", "missing_api_key")]; }
+      else begin
+        (* Build translation prompt based on strategy *)
+        let strategy_name = Types.string_of_translation_strategy strategy in
+        let prompt = match strategy with
+          | Types.TransGeneral ->
+              sprintf "Translate the following text from %s to %s:\n\n%s" source_lang target_lang text
+          | Types.TransParaphrased ->
+              sprintf "Translate the following text from %s to %s. Focus on natural, fluent expression rather than literal translation:\n\n%s" source_lang target_lang text
+          | Types.TransTwoStep ->
+              sprintf {|Translate the following text from %s to %s using two steps:
+
+Step 1: Provide a literal translation
+Step 2: Refine into a natural, fluent translation
+
+Text: %s
+
+Provide both translations, then give the final refined version.|} source_lang target_lang text
+          | Types.TransThreeStage ->
+              sprintf {|Translate the following text from %s to %s using three stages:
+
+Stage 1: Literal translation
+Stage 2: Natural/paraphrased translation
+Stage 3: Expert review and final polish
+
+Text: %s
+
+Show each stage and provide the final polished translation.|} source_lang target_lang text
+          | Types.TransReflective ->
+              sprintf {|Translate the following text from %s to %s using reflective translation:
+
+1. Draft Translation: Provide your initial translation
+2. Self-Critique: What could be improved? Consider accuracy, fluency, cultural appropriateness
+3. Revised Translation: Apply improvements based on your critique
+
+Text: %s
+
+Show all three steps and provide the final revised translation.|} source_lang target_lang text
+          | Types.TransChainOfThought ->
+              sprintf {|Translate the following text from %s to %s step by step:
+
+1. Identify key concepts and terminology
+2. Consider cultural and contextual nuances
+3. Choose appropriate register and tone
+4. Translate with detailed reasoning
+
+Text: %s
+
+Show your reasoning process and provide the final translation.|} source_lang target_lang text
+        in
+        let messages = `List [
+          `Assoc [("role", `String "system"); ("content", `String (sprintf "You are an expert translator specializing in %s to %s translation. Use the %s translation strategy." source_lang target_lang strategy_name))];
+          `Assoc [("role", `String "user"); ("content", `String prompt)]
+        ] in
+        let thinking_enabled = match strategy with
+          | Types.TransReflective | Types.TransChainOfThought -> true
+          | _ -> false
+        in
+        let thinking_obj = `Assoc [("type", `String (if thinking_enabled then "enabled" else "disabled"))] in
+        let body_fields = [
+          ("model", `String model);
+          ("messages", messages);
+          ("temperature", `Float 0.3);  (* Lower temp for translation accuracy *)
+          ("do_sample", `Bool true);
+          ("thinking", thinking_obj);
+          ("stream", `Bool false);
+        ] in
+        let body = Yojson.Safe.to_string (`Assoc body_fields) in
+        let cmd = "curl" in
+        let cmd_args = [
+          "-s"; "-X"; "POST";
+          "https://api.z.ai/api/coding/paas/v4/chat/completions";
+          "-H"; "Content-Type: application/json";
+          "-H"; sprintf "Authorization: Bearer %s" api_key;
+          "-d"; body;
+          "--max-time"; string_of_int timeout;
+        ] in
+        let result = run_command ~sw ~proc_mgr ~clock cmd cmd_args ~timeout:(timeout * 1000) in
+        match result with
+        | Error e ->
+            { model = sprintf "glm.translate:%s:error" model;
+              returncode = (match e with Timeout _ -> 124 | ProcessError _ -> 1);
+              response = sprintf "Translation error: %s" (match e with
+                | Timeout rc -> sprintf "Request timed out (code %d)" rc
+                | ProcessError msg -> msg);
+              extra = [
+                ("strategy", strategy_name);
+                ("source_lang", source_lang);
+                ("target_lang", target_lang);
+                ("error", "true");
+              ]; }
+        | Ok r ->
+            (* Parse response from stdout *)
+            let translation =
+              try
+                let json = Yojson.Safe.from_string r.stdout in
+                let open Yojson.Safe.Util in
+                let choices = json |> member "choices" |> to_list in
+                if List.length choices > 0 then
+                  (List.hd choices) |> member "message" |> member "content" |> to_string
+                else
+                  r.stdout
+              with _ -> r.stdout
+            in
+            { model = sprintf "glm.translate:%s:%s" model strategy_name;
+              returncode = r.exit_code;
+              response = translation;
+              extra = [
+                ("strategy", strategy_name);
+                ("source_lang", source_lang);
+                ("target_lang", target_lang);
+              ]; }
+      end
 
   | SetStreamDelta { enabled } ->
       let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
