@@ -259,74 +259,81 @@ let handle_list_tools id =
 (** Handle tools/call request - direct Eio execution *)
 let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let open Yojson.Safe.Util in
-  let name = params |> member "name" |> to_string in
+  let name_opt = params |> member "name" |> to_string_option in
   let arguments = params |> member "arguments" in
 
   (* Parse arguments based on tool *)
-  let args : Types.tool_args = match name with
-    | "gemini" -> Tools_eio.parse_gemini_args arguments
-    | "claude-cli" -> Tools_eio.parse_claude_args arguments
-    | "codex" -> Tools_eio.parse_codex_args arguments
-    | "ollama" -> Tools_eio.parse_ollama_args arguments
-    | "ollama_list" -> Tools_eio.parse_ollama_list_args arguments
-    | "glm" -> Tools_eio.parse_glm_args arguments
-    | "chain.run" -> Tools_eio.parse_chain_run_args arguments
-    | "chain.validate" -> Tools_eio.parse_chain_validate_args arguments
-    | "chain.list" -> Types.ChainList
-    | "chain.to_mermaid" -> Tools_eio.parse_chain_to_mermaid_args arguments
-    | "chain.visualize" -> Tools_eio.parse_chain_visualize_args arguments
-    | "chain.convert" -> Tools_eio.parse_chain_convert_args arguments
-    | "chain.orchestrate" -> Tools_eio.parse_chain_orchestrate_args arguments
-    | "chain.checkpoints" -> Tools_eio.parse_chain_checkpoints_args arguments
-    | "chain.resume" -> Tools_eio.parse_chain_resume_args arguments
-    | "prompt.register" -> Tools_eio.parse_prompt_register_args arguments
-    | "prompt.list" -> Types.PromptList
-    | "prompt.get" -> Tools_eio.parse_prompt_get_args arguments
-    | "gh_pr_diff" -> Tools_eio.parse_gh_pr_diff_args arguments
-    | "slack_post" -> Tools_eio.parse_slack_post_args arguments
-    | "set_stream_delta" -> Tools_eio.parse_set_stream_delta_args arguments
-    | "get_stream_delta" -> Tools_eio.parse_get_stream_delta_args arguments
-    | _ -> failwith (sprintf "Unknown tool: %s" name)
+  let parse_args name : (Types.tool_args, string) result =
+    match name with
+    | "gemini" -> Ok (Tools_eio.parse_gemini_args arguments)
+    | "claude-cli" -> Ok (Tools_eio.parse_claude_args arguments)
+    | "codex" -> Ok (Tools_eio.parse_codex_args arguments)
+    | "ollama" -> Ok (Tools_eio.parse_ollama_args arguments)
+    | "ollama_list" -> Ok (Tools_eio.parse_ollama_list_args arguments)
+    | "glm" -> Ok (Tools_eio.parse_glm_args arguments)
+    | "chain.run" -> Ok (Tools_eio.parse_chain_run_args arguments)
+    | "chain.validate" -> Ok (Tools_eio.parse_chain_validate_args arguments)
+    | "chain.list" -> Ok Types.ChainList
+    | "chain.to_mermaid" -> Ok (Tools_eio.parse_chain_to_mermaid_args arguments)
+    | "chain.visualize" -> Ok (Tools_eio.parse_chain_visualize_args arguments)
+    | "chain.convert" -> Ok (Tools_eio.parse_chain_convert_args arguments)
+    | "chain.orchestrate" -> Ok (Tools_eio.parse_chain_orchestrate_args arguments)
+    | "chain.checkpoints" -> Ok (Tools_eio.parse_chain_checkpoints_args arguments)
+    | "chain.resume" -> Ok (Tools_eio.parse_chain_resume_args arguments)
+    | "prompt.register" -> Ok (Tools_eio.parse_prompt_register_args arguments)
+    | "prompt.list" -> Ok Types.PromptList
+    | "prompt.get" -> Ok (Tools_eio.parse_prompt_get_args arguments)
+    | "gh_pr_diff" -> Ok (Tools_eio.parse_gh_pr_diff_args arguments)
+    | "slack_post" -> Ok (Tools_eio.parse_slack_post_args arguments)
+    | "set_stream_delta" -> Ok (Tools_eio.parse_set_stream_delta_args arguments)
+    | "get_stream_delta" -> Ok (Tools_eio.parse_get_stream_delta_args arguments)
+    | other -> Error (sprintf "Unknown tool: %s" other)
   in
 
-  (* Execute via direct Eio call with Langfuse tracing *)
-  let result =
-    try
-      Tools_eio.execute_with_tracing ~sw ~proc_mgr ~clock args
-    with exn ->
-      let bt = Printexc.get_backtrace () in
-      { Types.model = "error";
-        returncode = 1;
-        response = Printf.sprintf "%s\nBacktrace:\n%s" (Printexc.to_string exn) bt;
-        extra = [];
-      }
-  in
+  match name_opt with
+  | None -> make_error ~id (-32602) "Missing or invalid tool name"
+  | Some name ->
+      (match parse_args name with
+       | Error msg -> make_error ~id (-32601) msg
+       | Ok args ->
+           (* Execute via direct Eio call with Langfuse tracing *)
+           let result =
+             try
+               Tools_eio.execute_with_tracing ~sw ~proc_mgr ~clock args
+             with exn ->
+               let bt = Printexc.get_backtrace () in
+               { Types.model = "error";
+                 returncode = 1;
+                 response = Printf.sprintf "%s\nBacktrace:\n%s" (Printexc.to_string exn) bt;
+                 extra = [];
+               }
+           in
 
-  (* Format response - returncode 0 = success *)
-  let is_error = result.Types.returncode <> 0 in
+           (* Format response - returncode 0 = success *)
+           let is_error = result.Types.returncode <> 0 in
 
-  (* Build response text - include extra fields like tool_calls, thinking *)
-  let response_text =
-    let extra_json = match result.Types.extra with
-      | [] -> ""
-      | extras ->
-          let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
-          if result.response = "" then json_str
-          else "\n\n[Extra]\n" ^ json_str
-    in
-    result.response ^ extra_json
-  in
+           (* Build response text - include extra fields like tool_calls, thinking *)
+           let response_text =
+             let extra_json = match result.Types.extra with
+               | [] -> ""
+               | extras ->
+                   let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
+                   if result.response = "" then json_str
+                   else "\n\n[Extra]\n" ^ json_str
+             in
+             result.response ^ extra_json
+           in
 
-  let content =
-    `Assoc [
-      ("type", `String "text");
-      ("text", `String response_text);
-    ]
-  in
-  make_response ~id (`Assoc [
-    ("content", `List [content]);
-    ("isError", `Bool is_error);
-  ])
+           let content =
+             `Assoc [
+               ("type", `String "text");
+               ("text", `String response_text);
+             ]
+           in
+           make_response ~id (`Assoc [
+             ("content", `List [content]);
+             ("isError", `Bool is_error);
+           ]))
 
 (** Resources (static for now) *)
 let resources : P.resource list = [
