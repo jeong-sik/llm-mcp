@@ -23,7 +23,7 @@ let make_test_chain id prompt_len =
       timeout = None;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = [];
     output_key = None;

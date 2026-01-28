@@ -50,8 +50,8 @@ let compile_exn chain =
     - Returns specific values for numeric prompts
 *)
 let make_exec_fn ?(empty_count=ref 0) ?(max_empty=1) () =
-  fun ~model ?system ~prompt ?tools () ->
-    ignore (system, tools);
+  fun ~model ?system ~prompt ?tools ?thinking () ->
+    ignore (system, tools, thinking);
     if String.sub prompt 0 (min 14 (String.length prompt)) = "empty_response" then begin
       incr empty_count;
       if !empty_count > max_empty then

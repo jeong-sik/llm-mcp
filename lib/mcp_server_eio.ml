@@ -262,6 +262,15 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let name_opt = params |> member "name" |> to_string_option in
   let arguments = params |> member "arguments" in
 
+  (* Phase 5: Parse response_format from arguments for Compact Protocol
+     Supports: verbose (default), compact (64% token savings), binary, base85, compressed, auto *)
+  let response_format =
+    try
+      let format_str = arguments |> member "response_format" |> to_string in
+      Types.response_format_of_string format_str
+    with _ -> Types.Verbose  (* Default to verbose for backward compatibility *)
+  in
+
   (* Parse arguments based on tool *)
   let parse_args name : (Types.tool_args, string) result =
     match name with
@@ -271,6 +280,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "ollama" -> Ok (Tools_eio.parse_ollama_args arguments)
     | "ollama_list" -> Ok (Tools_eio.parse_ollama_list_args arguments)
     | "glm" -> Ok (Tools_eio.parse_glm_args arguments)
+    | "glm.translate" -> Ok (Tools_eio.parse_glm_translate_args arguments)
     | "chain.run" -> Ok (Tools_eio.parse_chain_run_args arguments)
     | "chain.validate" -> Ok (Tools_eio.parse_chain_validate_args arguments)
     | "chain.list" -> Ok Types.ChainList
@@ -312,16 +322,24 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
            (* Format response - returncode 0 = success *)
            let is_error = result.Types.returncode <> 0 in
 
-           (* Build response text - include extra fields like tool_calls, thinking *)
-           let response_text =
-             let extra_json = match result.Types.extra with
-               | [] -> ""
-               | extras ->
-                   let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
-                   if result.response = "" then json_str
-                   else "\n\n[Extra]\n" ^ json_str
-             in
-             result.response ^ extra_json
+           (* Phase 5: Apply Compact Protocol based on response_format
+              - Verbose: Full JSON (default, backward compatible)
+              - Compact: DSL format ~64% token savings
+              - Binary/Base85/Compressed: Various encoding options *)
+           let response_text = match response_format with
+             | Types.Verbose ->
+                 (* Original verbose format with extra fields *)
+                 let extra_json = match result.Types.extra with
+                   | [] -> ""
+                   | extras ->
+                       let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
+                       if result.response = "" then json_str
+                       else "\n\n[Extra]\n" ^ json_str
+                 in
+                 result.response ^ extra_json
+             | _ ->
+                 (* Compact Protocol: use format_tool_result for encoding *)
+                 Compact_impl.format_tool_result ~format:response_format result
            in
 
            let content =

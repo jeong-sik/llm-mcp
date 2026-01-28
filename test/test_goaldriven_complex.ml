@@ -68,7 +68,7 @@ let ollama_available () : bool =
   Sys.command cmd = 0
 
 let make_ollama_exec_fn () =
-  fun ~model ?system:_ ~prompt ?tools:_ () ->
+  fun ~model ?system:_ ~prompt ?tools:_ ?thinking:_ () ->
     let actual_model =
       if String.length model > 7 && String.sub model 0 7 = "ollama:" then
         String.sub model 7 (String.length model - 7)
@@ -113,7 +113,7 @@ let test_multi_stage_pipeline () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -128,7 +128,7 @@ let test_multi_stage_pipeline () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = [("input", "initial_gen")];
       output_key = None; depends_on = None
@@ -164,7 +164,7 @@ let test_multi_stage_pipeline () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = [("input", "quality_gate")];
       output_key = None; depends_on = None
@@ -230,7 +230,7 @@ Strategy: {{strategy}}|};
         timeout = Some 45;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -310,7 +310,7 @@ let test_mermaid_complex_execution () =
         timeout = Some 30;
         tools = None;
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in

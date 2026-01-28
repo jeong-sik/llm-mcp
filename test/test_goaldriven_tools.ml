@@ -148,7 +148,7 @@ let calculator_tool_exec ~name ~args =
    ============================================================================ *)
 
 let make_llm_exec_fn_with_tools () =
-  fun ~model ?system:_ ~prompt ?tools () ->
+  fun ~model ?system:_ ~prompt ?tools ?thinking:_ () ->
     let actual_model =
       if String.length model > 7 && String.sub model 0 7 = "ollama:" then
         String.sub model 7 (String.length model - 7)
@@ -311,7 +311,7 @@ let test_llm_calling_tool () =
         timeout = Some 60;
         tools = Some (`List [calculator_tool_def]);
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in
@@ -379,7 +379,7 @@ let test_goaldriven_llm_with_tool () =
         timeout = Some 60;
         tools = Some (`List [calculator_tool_def]);
         prompt_ref = None;
-        prompt_vars = []
+        prompt_vars = []; thinking = false
       };
       input_mapping = []; output_key = None; depends_on = None
     } in

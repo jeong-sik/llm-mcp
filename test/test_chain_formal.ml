@@ -33,7 +33,7 @@ let make_llm id prompt deps =
   ) template_mappings in
   let input_mapping = explicit_deps @ template_deps in
   { CT.id; node_type = CT.Llm { model = "gemini"; prompt; system = None;
-    timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
     input_mapping; output_key = None; depends_on = None }
 
 (** Create minimal Tool node *)

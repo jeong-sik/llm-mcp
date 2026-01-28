@@ -59,6 +59,228 @@ type tool_schema = {
   input_schema : Yojson.Safe.t;
 }
 
+(* ============================================================================
+   GLM Function Calling Types (Phase 1.1)
+
+   GLM 4.7 supports three tool types:
+   - web_search: Real-time web search
+   - function: Custom function calling (OpenAI-compatible)
+   - code_interpreter: Execute Python code in sandbox
+   ============================================================================ *)
+
+(** GLM Tool type - discriminated union for tool kinds *)
+type glm_tool_type =
+  | GlmWebSearch      (** Web search for real-time information *)
+  | GlmFunction       (** Custom function calling *)
+  | GlmCodeInterpreter  (** Python code execution sandbox *)
+[@@deriving yojson]
+
+let string_of_glm_tool_type = function
+  | GlmWebSearch -> "web_search"
+  | GlmFunction -> "function"
+  | GlmCodeInterpreter -> "code_interpreter"
+
+let glm_tool_type_of_string = function
+  | "web_search" -> GlmWebSearch
+  | "function" -> GlmFunction
+  | "code_interpreter" -> GlmCodeInterpreter
+  | s -> failwith (Printf.sprintf "Unknown GLM tool type: %s" s)
+
+(** JSON Schema for function parameters *)
+type json_schema_type =
+  | SchemaString
+  | SchemaNumber
+  | SchemaInteger
+  | SchemaBoolean
+  | SchemaArray of json_schema_type
+  | SchemaObject
+  | SchemaNull
+[@@deriving yojson]
+
+let string_of_json_schema_type = function
+  | SchemaString -> "string"
+  | SchemaNumber -> "number"
+  | SchemaInteger -> "integer"
+  | SchemaBoolean -> "boolean"
+  | SchemaArray _ -> "array"
+  | SchemaObject -> "object"
+  | SchemaNull -> "null"
+
+(** Function parameter definition *)
+type function_parameter = {
+  param_name : string;
+  param_type : json_schema_type;
+  param_description : string option;
+  param_required : bool;
+  param_enum : string list option;  (** Allowed values for enum types *)
+}
+
+(** Function schema for GLM Function Calling *)
+type glm_function_schema = {
+  func_name : string;
+  func_description : string;
+  func_parameters : function_parameter list;
+}
+
+(** Convert function_parameter to JSON Schema *)
+let function_parameter_to_json param =
+  let type_str = string_of_json_schema_type param.param_type in
+  let base = [("type", `String type_str)] in
+  let with_desc = match param.param_description with
+    | Some d -> base @ [("description", `String d)]
+    | None -> base
+  in
+  let with_enum = match param.param_enum with
+    | Some values -> with_desc @ [("enum", `List (List.map (fun v -> `String v) values))]
+    | None -> with_desc
+  in
+  `Assoc with_enum
+
+(** Convert glm_function_schema to GLM API format *)
+let glm_function_schema_to_json schema =
+  let properties = List.map (fun p ->
+    (p.param_name, function_parameter_to_json p)
+  ) schema.func_parameters in
+  let required = List.filter_map (fun p ->
+    if p.param_required then Some (`String p.param_name) else None
+  ) schema.func_parameters in
+  `Assoc [
+    ("type", `String "function");
+    ("function", `Assoc [
+      ("name", `String schema.func_name);
+      ("description", `String schema.func_description);
+      ("parameters", `Assoc [
+        ("type", `String "object");
+        ("properties", `Assoc properties);
+        ("required", `List required);
+      ]);
+    ])
+  ]
+
+(** GLM Tool definition - generic wrapper for all tool types *)
+type glm_tool = {
+  tool_type : glm_tool_type;
+  function_schema : glm_function_schema option;  (** Only for GlmFunction *)
+  web_search_config : (bool * bool) option;  (** (enable, search_result) for GlmWebSearch *)
+  code_interpreter_config : string option;  (** sandbox mode for GlmCodeInterpreter *)
+}
+
+(** Create web_search tool *)
+let glm_web_search_tool ?(search_result=true) () = {
+  tool_type = GlmWebSearch;
+  function_schema = None;
+  web_search_config = Some (true, search_result);
+  code_interpreter_config = None;
+}
+
+(** Create function tool *)
+let glm_function_tool schema = {
+  tool_type = GlmFunction;
+  function_schema = Some schema;
+  web_search_config = None;
+  code_interpreter_config = None;
+}
+
+(** Create code_interpreter tool *)
+let glm_code_interpreter_tool ?(sandbox="auto") () = {
+  tool_type = GlmCodeInterpreter;
+  function_schema = None;
+  web_search_config = None;
+  code_interpreter_config = Some sandbox;
+}
+
+(** Convert glm_tool to GLM API JSON format *)
+let glm_tool_to_json tool =
+  match tool.tool_type with
+  | GlmWebSearch ->
+      let enable, search_result = match tool.web_search_config with
+        | Some (e, r) -> (e, r)
+        | None -> (true, true)
+      in
+      `Assoc [
+        ("type", `String "web_search");
+        ("web_search", `Assoc [
+          ("enable", `Bool enable);
+          ("search_result", `Bool search_result);
+        ])
+      ]
+  | GlmFunction ->
+      (match tool.function_schema with
+       | Some schema -> glm_function_schema_to_json schema
+       | None -> failwith "GlmFunction requires function_schema")
+  | GlmCodeInterpreter ->
+      let sandbox = match tool.code_interpreter_config with
+        | Some s -> s
+        | None -> "auto"
+      in
+      `Assoc [
+        ("type", `String "code_interpreter");
+        ("code_interpreter", `Assoc [
+          ("sandbox", `String sandbox);
+        ])
+      ]
+
+(** Convert list of glm_tools to JSON *)
+let glm_tools_to_json tools =
+  `List (List.map glm_tool_to_json tools)
+
+(** Tool call result from GLM response *)
+type glm_tool_call = {
+  call_id : string;
+  call_type : string;  (** "function" *)
+  function_name : string;
+  function_arguments : string;  (** JSON string *)
+}
+
+(** Parse tool_calls from GLM response JSON *)
+let parse_glm_tool_calls json =
+  let open Yojson.Safe.Util in
+  try
+    let choices = json |> member "choices" |> to_list in
+    if List.length choices = 0 then []
+    else
+      let message = (List.hd choices) |> member "message" in
+      let tool_calls = message |> member "tool_calls" in
+      if tool_calls = `Null then []
+      else
+        tool_calls |> to_list |> List.map (fun tc ->
+          let func = tc |> member "function" in
+          {
+            call_id = tc |> member "id" |> to_string;
+            call_type = tc |> member "type" |> to_string;
+            function_name = func |> member "name" |> to_string;
+            function_arguments = func |> member "arguments" |> to_string;
+          }
+        )
+  with _ -> []
+
+(** GLM Translation Strategy (Phase 3) *)
+type glm_translation_strategy =
+  | TransGeneral           (** Direct translation *)
+  | TransParaphrased       (** Free/paraphrased translation *)
+  | TransTwoStep           (** Literal → Free *)
+  | TransThreeStage        (** Literal → Free → Review *)
+  | TransReflective        (** Draft → Critique → Revise *)
+  | TransChainOfThought    (** Step-by-step reasoning translation *)
+[@@deriving yojson]
+
+let string_of_translation_strategy = function
+  | TransGeneral -> "general"
+  | TransParaphrased -> "paraphrased"
+  | TransTwoStep -> "two_step"
+  | TransThreeStage -> "three_stage"
+  | TransReflective -> "reflective"
+  | TransChainOfThought -> "chain_of_thought"
+
+let translation_strategy_of_string = function
+  | "general" -> TransGeneral
+  | "paraphrased" -> TransParaphrased
+  | "two_step" -> TransTwoStep
+  | "three_stage" -> TransThreeStage
+  | "reflective" -> TransReflective
+  | "chain_of_thought" -> TransChainOfThought
+  | s -> failwith (Printf.sprintf "Unknown translation strategy: %s" s)
+
 (** Tool arguments - strongly typed! *)
 type tool_args =
   | Gemini of {
@@ -181,7 +403,16 @@ type tool_args =
       stream : bool;
       thinking : bool;  (* Enable/disable chain-of-thought reasoning *)
       do_sample : bool;  (* true=diverse sampling, false=greedy deterministic *)
-      web_search : bool;  (* Enable web search tool for current information *)
+      web_search : bool;  (* DEPRECATED: Use tools instead. Kept for backward compat *)
+      tools : glm_tool list;  (* Generic tool list: web_search, function, code_interpreter *)
+    }
+  | GlmTranslate of {
+      text : string;
+      source_lang : string;
+      target_lang : string;
+      strategy : glm_translation_strategy;
+      model : string;
+      timeout : int;
     }
   | SetStreamDelta of { enabled : bool }  (* Runtime toggle for SSE stream delta *)
   | GetStreamDelta  (* Get current stream delta status *)
@@ -632,18 +863,18 @@ Use this to discover which models are available before calling the ollama tool.|
 
 let glm_schema : tool_schema = {
   name = "glm";
-  description = {|Run glm-4.7 via Z.ai Cloud API (OpenAI-compatible).
+  description = {|Run glm-4.7 via Z.ai Cloud API (OpenAI-compatible) with Function Calling support.
 
 glm-4.7 is a 355B parameter MoE model (32B active) with:
 - State-of-the-art reasoning, coding, and agent capabilities
 - 200K context window, 128K output
 - 55+ tokens per second
+- **Function Calling**: Define custom tools for GLM to invoke
 
-Use cases:
-- Complex reasoning and multi-step problem solving
-- Code generation with long context (200K)
-- Agent workflows requiring fast responses
-- MAGI Trinity: Use as cloud alternative to local Ollama
+Tool Types:
+- web_search: Real-time web search for current information
+- function: Custom function calling (OpenAI-compatible schema)
+- code_interpreter: Execute Python code in sandbox
 
 Models (lowercase required by Z.ai API):
 - glm-4.7 (default): Best performance, MoE 355B/32B active
@@ -660,8 +891,19 @@ Parameters:
 - timeout: Timeout in seconds (default: 300)
 - stream: Enable SSE streaming (default: false, MCP-friendly)
 - thinking: Enable chain-of-thought reasoning (default: false, MCP-friendly)
-- web_search: Enable web search (default: false, MCP-friendly)
 - do_sample: true=diverse sampling, false=greedy deterministic (default: true)
+- web_search: (DEPRECATED) Use tools instead. Enable web search
+- tools: Array of tool definitions (web_search, function, code_interpreter)
+
+Tools Example:
+```json
+{
+  "tools": [
+    {"type": "web_search"},
+    {"type": "function", "function": {"name": "get_weather", "parameters": {...}}}
+  ]
+}
+```
 
 NOTE: Defaults are optimized for MCP tool calls (synchronous, immediate response).
 For SSE streaming or CoT reasoning, explicitly set stream=true or thinking=true.
@@ -716,12 +958,110 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("web_search", `Assoc [
         ("type", `String "boolean");
-        ("description", `String "Enable web search for current info (false recommended for MCP tool calls)");
+        ("description", `String "DEPRECATED: Use tools instead. Enable web search for backward compatibility");
         ("default", `Bool false);
+      ]);
+      ("tools", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Array of tool definitions. Each tool: {type: 'web_search'|'function'|'code_interpreter', function?: {...}}");
+        ("items", `Assoc [
+          ("type", `String "object");
+          ("properties", `Assoc [
+            ("type", `Assoc [
+              ("type", `String "string");
+              ("enum", `List [`String "web_search"; `String "function"; `String "code_interpreter"]);
+            ]);
+            ("function", `Assoc [
+              ("type", `String "object");
+              ("description", `String "Function definition for function type tools");
+              ("properties", `Assoc [
+                ("name", `Assoc [("type", `String "string")]);
+                ("description", `Assoc [("type", `String "string")]);
+                ("parameters", `Assoc [("type", `String "object")]);
+              ]);
+            ]);
+            ("web_search", `Assoc [
+              ("type", `String "object");
+              ("properties", `Assoc [
+                ("enable", `Assoc [("type", `String "boolean")]);
+                ("search_result", `Assoc [("type", `String "boolean")]);
+              ]);
+            ]);
+            ("code_interpreter", `Assoc [
+              ("type", `String "object");
+              ("properties", `Assoc [
+                ("sandbox", `Assoc [
+                  ("type", `String "string");
+                  ("enum", `List [`String "auto"; `String "none"]);
+                ]);
+              ]);
+            ]);
+          ]);
+        ]);
+        ("default", `List []);
       ]);
       response_format_schema;
     ]);
     ("required", `List [`String "prompt"]);
+  ];
+}
+
+(** GLM Translation Tool Schema *)
+let glm_translate_schema : tool_schema = {
+  name = "glm.translate";
+  description = {|Translation Agent using GLM 4.7 with 6 different strategies.
+
+Strategies:
+- general: Direct translation (fastest)
+- paraphrased: Free/natural translation prioritizing readability
+- two_step: Literal translation → Paraphrased refinement
+- three_stage: Literal → Paraphrased → Expert review
+- reflective: Draft → Self-critique → Revised translation (highest quality)
+- chain_of_thought: Step-by-step reasoning translation
+
+Use 'general' for speed, 'reflective' for quality, 'chain_of_thought' for complex text.
+
+Requires ZAI_API_KEY environment variable.|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("text", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Text to translate");
+      ]);
+      ("source_lang", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Source language (e.g., 'en', 'ko', 'zh', 'ja')");
+      ]);
+      ("target_lang", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Target language (e.g., 'ko', 'en', 'zh', 'ja')");
+      ]);
+      ("strategy", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Translation strategy");
+        ("enum", `List [
+          `String "general";
+          `String "paraphrased";
+          `String "two_step";
+          `String "three_stage";
+          `String "reflective";
+          `String "chain_of_thought";
+        ]);
+        ("default", `String "general");
+      ]);
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Model name (default: glm-4.7)");
+        ("default", `String "glm-4.7");
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 120);
+      ]);
+    ]);
+    ("required", `List [`String "text"; `String "source_lang"; `String "target_lang"]);
   ];
 }
 
@@ -1172,6 +1512,7 @@ let all_schemas = [
   ollama_schema;
   ollama_list_schema;
   glm_schema;
+  glm_translate_schema;
   set_stream_delta_schema;
   get_stream_delta_schema;
   chain_run_schema;
