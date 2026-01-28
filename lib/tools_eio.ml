@@ -1603,7 +1603,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 extra = [("error", "process_error")]; }
         end
         else begin
-          (* Non-streaming mode: wait for complete response *)
+          (* Non-streaming mode: wait for complete response with retry *)
           let cmd_args = [
             "-s"; "-X"; "POST";
             "https://api.z.ai/api/coding/paas/v4/chat/completions";
@@ -1612,7 +1612,20 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             "-d"; body;
             "--max-time"; string_of_int timeout;
           ] in
-          let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+          (* Wrap with retry logic for rate limits and transient errors *)
+          let glm_call () =
+            match run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args with
+            | Ok r ->
+                (* Check for API errors that should trigger retry *)
+                if Retry.is_rate_limit_error r.stdout || Retry.is_temporary_error r.stdout then
+                  Error r.stdout
+                else
+                  Ok r
+            | Error (Timeout t) -> Error (sprintf "Timeout after %ds" t)
+            | Error (ProcessError msg) -> Error msg
+          in
+          let retry_result = Retry.with_rate_limit_retry ~clock glm_call in
+          let result = Retry.to_result retry_result in
         match result with
         | Ok r ->
             (* Parse OpenAI-compatible response with GLM-4.7 thinking support *)
@@ -1658,16 +1671,18 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   returncode = -1;
                   response = sprintf "Error parsing response: %s. Raw: %s" (Printexc.to_string e) r.stdout;
                   extra = [("error", "parse_error")]; }))
-        | Error (Timeout t) ->
+        | Error err_msg ->
+            (* Error after all retries exhausted *)
+            let error_type =
+              if Retry.is_rate_limit_error err_msg then "rate_limit"
+              else if Retry.is_temporary_error err_msg then "temporary_error"
+              else if Retry.is_connection_error err_msg then "connection_error"
+              else "error"
+            in
             { model = sprintf "glm (%s)" model;
               returncode = -1;
-              response = sprintf "Timeout after %ds" t;
-              extra = [("error", "timeout")]; }
-        | Error (ProcessError msg) ->
-            { model = sprintf "glm (%s)" model;
-              returncode = -1;
-              response = sprintf "Error: %s" msg;
-              extra = [("error", "process_error")]; }
+              response = sprintf "Error after retries: %s" err_msg;
+              extra = [("error", error_type); ("retried", "true")]; }
         end  (* close else begin for non-streaming *)
       end  (* close else begin for api_key check *)
 
@@ -2743,19 +2758,30 @@ Show your reasoning process and provide the final translation.|} source_lang tar
           "-d"; body;
           "--max-time"; string_of_int timeout;
         ] in
-        let result = run_command ~sw ~proc_mgr ~clock cmd cmd_args ~timeout:(timeout * 1000) in
+        (* Wrap with retry logic *)
+        let translate_call () =
+          match run_command ~sw ~proc_mgr ~clock cmd cmd_args ~timeout:(timeout * 1000) with
+          | Ok r ->
+              if Retry.is_rate_limit_error r.stdout || Retry.is_temporary_error r.stdout then
+                Error r.stdout
+              else
+                Ok r
+          | Error (Timeout rc) -> Error (sprintf "Timeout (code %d)" rc)
+          | Error (ProcessError msg) -> Error msg
+        in
+        let retry_result = Retry.with_rate_limit_retry ~clock translate_call in
+        let result = Retry.to_result retry_result in
         match result with
-        | Error e ->
+        | Error err_msg ->
             { model = sprintf "glm.translate:%s:error" model;
-              returncode = (match e with Timeout _ -> 124 | ProcessError _ -> 1);
-              response = sprintf "Translation error: %s" (match e with
-                | Timeout rc -> sprintf "Request timed out (code %d)" rc
-                | ProcessError msg -> msg);
+              returncode = 1;
+              response = sprintf "Translation error after retries: %s" err_msg;
               extra = [
                 ("strategy", strategy_name);
                 ("source_lang", source_lang);
                 ("target_lang", target_lang);
                 ("error", "true");
+                ("retried", "true");
               ]; }
         | Ok r ->
             (* Parse response from stdout *)

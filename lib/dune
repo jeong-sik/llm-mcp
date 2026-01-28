@@ -71,8 +71,8 @@
  (name llm_mcp_resilience)
  (public_name llm_mcp.resilience)
  (wrapped false)
- (modules mcp_resilience)
- (libraries eio unix))
+ (modules mcp_resilience retry)
+ (libraries eio unix yojson str))
  ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support
 
 ; =============================================================================
