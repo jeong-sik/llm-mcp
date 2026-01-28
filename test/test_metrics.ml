@@ -9,6 +9,8 @@
 *)
 
 open Alcotest
+
+let () = Random.init 42
 open Metrics
 
 (** {1 Test Helpers} *)
@@ -205,7 +207,7 @@ let builtin_tests = [
 ]
 
 let () =
-  Random.init (int_of_float (Unix.gettimeofday () *. 1000.0));
+  Random.init 42;
   run "metrics" [
     ("type_to_string", type_tests);
     ("labels_to_string", labels_tests);
