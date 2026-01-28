@@ -1762,22 +1762,28 @@ let run ~sw ~net ~clock ~proc_mgr ~store config =
   eprintf "         POST /mcp -> JSON-RPC requests\n";
   eprintf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
-  let rec accept_loop () =
-    let flow, client_addr = Eio.Net.accept ~sw socket in
-    Eio.Fiber.fork ~sw (fun () ->
-      try
-        Httpun_eio.Server.create_connection_handler
-          ~sw
-          ~request_handler
-          ~error_handler
-          client_addr
-          flow
-      with exn ->
-        eprintf "[llm-mcp] Connection error: %s\n%!" (Printexc.to_string exn)
-    );
-    accept_loop ()
+  let rec accept_loop backoff_s =
+    try
+      let flow, client_addr = Eio.Net.accept ~sw socket in
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          Httpun_eio.Server.create_connection_handler
+            ~sw
+            ~request_handler
+            ~error_handler
+            client_addr
+            flow
+        with exn ->
+          eprintf "[llm-mcp] Connection error: %s\n%!" (Printexc.to_string exn)
+      );
+      accept_loop 0.05
+    with exn ->
+      eprintf "[llm-mcp] Accept error: %s\n%!" (Printexc.to_string exn);
+      (try Eio.Time.sleep clock backoff_s with _ -> ());
+      let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+      accept_loop next_backoff
   in
-  accept_loop ()
+  accept_loop 0.05
 
 (** ============== Entry Point ============== *)
 
