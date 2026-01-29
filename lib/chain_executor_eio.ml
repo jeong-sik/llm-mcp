@@ -504,18 +504,9 @@ let maybe_summarize_and_rotate = Chain_conversation.maybe_summarize_and_rotate
 (** Type of execution function callback *)
 type exec_fn = Chain_conversation.exec_fn
 
-(** Detect if a prompt is complex enough to benefit from thinking mode.
-    Heuristics: length > 500 chars, contains code blocks, multi-step instructions *)
-let is_complex_prompt prompt =
-  let len = String.length prompt in
-  let has_code = String.contains prompt '`' || Str.string_match (Str.regexp ".*```.*") prompt 0 in
-  let has_steps = Str.string_match (Str.regexp ".*\\(step\\|1\\.\\|2\\.\\|3\\.\\|first\\|then\\|finally\\).*") (String.lowercase_ascii prompt) 0 in
-  len > 500 || has_code || has_steps
-
-(** Check if model is GLM variant *)
-let is_glm_model model =
-  let m = String.lowercase_ascii model in
-  m = "glm" || String.length m >= 3 && String.sub m 0 3 = "glm"
+(** Prompt/model helpers - from Chain_utils *)
+let is_complex_prompt = Chain_utils.is_complex_prompt
+let is_glm_model = Chain_utils.is_glm_model
 
 (** Type of tool execution callback *)
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
@@ -996,12 +987,8 @@ let ucb1_value ~c (parent_visits : int) (node : mcts_tree_node) : float =
     let exploration = c *. sqrt (log (float_of_int parent_visits) /. float_of_int node.visits) in
     exploitation +. exploration
 
-(** Helper: Check if string contains substring *)
-let string_contains ~substring str =
-  try
-    let _ = Str.search_forward (Str.regexp_string substring) str 0 in
-    true
-  with Not_found -> false
+(** String helper - from Chain_utils *)
+let string_contains = Chain_utils.string_contains
 
 (** Forward declaration for recursive execution *)
 let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =
