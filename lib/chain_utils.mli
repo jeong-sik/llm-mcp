@@ -50,3 +50,14 @@ val is_empty_response : string -> bool
 
 val empty_retry_suffix : string
 (** Enhancement prompt added on retry for empty responses *)
+
+(** {1 Prompt Analysis Helpers} *)
+
+val is_complex_prompt : string -> bool
+(** Detect if a prompt is complex enough to benefit from thinking mode *)
+
+val is_glm_model : string -> bool
+(** Check if model is GLM variant *)
+
+val string_contains : substring:string -> string -> bool
+(** Check if string contains substring *)

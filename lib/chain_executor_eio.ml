@@ -26,29 +26,22 @@ type token_usage = Chain_types.token_usage
 type merge_strategy = Chain_types.merge_strategy
 type adapter_transform = Chain_types.adapter_transform
 
-(** {1 Local Trace Types} *)
-
-(** Trace event types for execution logging *)
-type trace_event =
+(** {1 Trace Types} - From Chain_trace_types module *)
+type trace_event = Chain_trace_types.trace_event =
   | NodeStart of { node_type : string; attempt : int }
   | NodeComplete of { duration_ms : int; success : bool; node_type : string; attempt : int }
   | NodeError of { message : string; error_class : string option; node_type : string; attempt : int }
   | ChainStart of { chain_id : string; mermaid_dsl : string option }
   | ChainComplete of { chain_id : string; success : bool }
 
-(** Internal trace entry for execution *)
-type internal_trace = {
+type internal_trace = Chain_trace_types.internal_trace = {
   timestamp : float;
   node_id : string;
   event : trace_event;
 }
 
-type exec_phase =
-  | Planned
-  | Running
-  | Completed
-  | Failed
-  | Skipped
+type exec_phase = Chain_trace_types.exec_phase =
+  | Planned | Running | Completed | Failed | Skipped
 
 (** {1 Execution Context} *)
 
@@ -305,78 +298,9 @@ let record_error ?(node_type = "unknown") ctx node_id msg =
     ();
   add_trace ctx node_id (NodeError { message = msg; error_class = None; node_type; attempt })
 
-(** Convert internal_trace to Chain_types.trace_entry *)
-let trace_to_entry (t : internal_trace) (node_type_name : string) : Chain_types.trace_entry =
-  let node_type_from_event = match t.event with
-    | NodeStart { node_type; _ }
-    | NodeComplete { node_type; _ }
-    | NodeError { node_type; _ } -> Some node_type
-    | _ -> None
-  in
-  let node_type_name = match node_type_from_event with
-    | Some nt -> nt
-    | None -> node_type_name
-  in
-  let status, error = match t.event with
-    | NodeStart _ -> (`Success, None)  (* Will be updated by NodeComplete *)
-    | NodeComplete { success; _ } ->
-        if success then (`Success, None) else (`Failure, None)
-    | NodeError { message; _ } -> (`Failure, Some message)
-    | ChainStart _ | ChainComplete _ -> (`Success, None)
-  in
-  {
-    Chain_types.node_id = t.node_id;
-    node_type_name;
-    start_time = t.timestamp;
-    end_time = t.timestamp;  (* Will be updated by pairing with NodeComplete *)
-    status;
-    output_preview = None;
-    error;
-  }
-
-(** Convert internal traces to trace_entry list, pairing start/complete events *)
-let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry list =
-  (* Group traces by node_id and build proper entries *)
-  let node_traces = Hashtbl.create 16 in
-  List.iter (fun (t : internal_trace) ->
-    let existing = try Hashtbl.find node_traces t.node_id with Not_found -> [] in
-    Hashtbl.replace node_traces t.node_id (t :: existing)
-  ) traces;
-
-  Hashtbl.fold (fun node_id events acc ->
-    let node_type_name =
-      List.find_map (fun t ->
-        match t.event with
-        | NodeStart { node_type; _ }
-        | NodeComplete { node_type; _ }
-        | NodeError { node_type; _ } -> Some node_type
-        | _ -> None
-      ) events
-      |> Option.value ~default:"unknown"
-    in
-    (* Find start and complete events *)
-    let start_time = List.fold_left (fun acc t ->
-      match t.event with NodeStart _ -> min acc t.timestamp | _ -> acc
-    ) max_float events in
-    let end_time, status, error = List.fold_left (fun (et, st, err) t ->
-      match t.event with
-      | NodeComplete { duration_ms = _; success; _ } ->
-          (t.timestamp, (if success then `Success else `Failure), err)
-      | NodeError { message; _ } -> (et, `Failure, Some message)
-      | _ -> (et, st, err)
-    ) (start_time, `Success, None) events in
-
-    let entry : Chain_types.trace_entry = {
-      node_id;
-      node_type_name;
-      start_time;
-      end_time;
-      status;
-      output_preview = None;
-      error;
-    } in
-    entry :: acc
-  ) node_traces []
+(** Trace conversion functions - from Chain_trace_types *)
+let trace_to_entry = Chain_trace_types.trace_to_entry
+let traces_to_entries = Chain_trace_types.traces_to_entries
 
 (** {1 Input Resolution} *)
 
@@ -570,6 +494,8 @@ let substitute_iteration_vars = Chain_iteration.substitute_vars
 let estimate_tokens = Chain_conversation.estimate_tokens
 let make_conversation_ctx = Chain_conversation.make
 let add_message = Chain_conversation.add_message
+let rotate_model = Chain_conversation.rotate_model
+let needs_summarization = Chain_conversation.needs_summarization
 let build_context_prompt = Chain_conversation.build_context_prompt
 let maybe_summarize_and_rotate = Chain_conversation.maybe_summarize_and_rotate
 
@@ -578,18 +504,9 @@ let maybe_summarize_and_rotate = Chain_conversation.maybe_summarize_and_rotate
 (** Type of execution function callback *)
 type exec_fn = Chain_conversation.exec_fn
 
-(** Detect if a prompt is complex enough to benefit from thinking mode.
-    Heuristics: length > 500 chars, contains code blocks, multi-step instructions *)
-let is_complex_prompt prompt =
-  let len = String.length prompt in
-  let has_code = String.contains prompt '`' || Str.string_match (Str.regexp ".*```.*") prompt 0 in
-  let has_steps = Str.string_match (Str.regexp ".*\\(step\\|1\\.\\|2\\.\\|3\\.\\|first\\|then\\|finally\\).*") (String.lowercase_ascii prompt) 0 in
-  len > 500 || has_code || has_steps
-
-(** Check if model is GLM variant *)
-let is_glm_model model =
-  let m = String.lowercase_ascii model in
-  m = "glm" || String.length m >= 3 && String.sub m 0 3 = "glm"
+(** Prompt/model helpers - from Chain_utils *)
+let is_complex_prompt = Chain_utils.is_complex_prompt
+let is_glm_model = Chain_utils.is_glm_model
 
 (** Type of tool execution callback *)
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
@@ -1070,12 +987,8 @@ let ucb1_value ~c (parent_visits : int) (node : mcts_tree_node) : float =
     let exploration = c *. sqrt (log (float_of_int parent_visits) /. float_of_int node.visits) in
     exploitation +. exploration
 
-(** Helper: Check if string contains substring *)
-let string_contains ~substring str =
-  try
-    let _ = Str.search_forward (Str.regexp_string substring) str 0 in
-    true
-  with Not_found -> false
+(** String helper - from Chain_utils *)
+let string_contains = Chain_utils.string_contains
 
 (** Forward declaration for recursive execution *)
 let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =

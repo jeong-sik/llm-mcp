@@ -48,6 +48,8 @@
    chain_conversation
    ; Chain Iteration (GoalDriven variables)
    chain_iteration
+   ; Chain Trace Types (pure type definitions)
+   chain_trace_types
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)

@@ -199,7 +199,7 @@ let test_iteration_vars () =
   Printf.printf "[OK] iteration vars - no context\n%!";
 
   (* Test with context *)
-  let ctx = {
+  let ctx = Chain_iteration.{
     iteration = 3;
     max_iterations = 10;
     progress = 0.45;

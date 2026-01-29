@@ -86,3 +86,25 @@ let is_empty_response output =
 (** Enhancement prompt added on retry for empty responses *)
 let empty_retry_suffix =
   "\n\n[IMPORTANT: You must provide a non-empty response. Do not return blank or empty output.]"
+
+(** {1 Prompt Analysis Helpers} *)
+
+(** Detect if a prompt is complex enough to benefit from thinking mode.
+    Heuristics: length > 500 chars, contains code blocks, multi-step instructions *)
+let is_complex_prompt prompt =
+  let len = String.length prompt in
+  let has_code = String.contains prompt '`' || Str.string_match (Str.regexp ".*```.*") prompt 0 in
+  let has_steps = Str.string_match (Str.regexp ".*\\(step\\|1\\.\\|2\\.\\|3\\.\\|first\\|then\\|finally\\).*") (String.lowercase_ascii prompt) 0 in
+  len > 500 || has_code || has_steps
+
+(** Check if model is GLM variant *)
+let is_glm_model model =
+  let m = String.lowercase_ascii model in
+  m = "glm" || String.length m >= 3 && String.sub m 0 3 = "glm"
+
+(** Check if string contains substring - safe version using Str module *)
+let string_contains ~substring str =
+  try
+    let _ = Str.search_forward (Str.regexp_string substring) str 0 in
+    true
+  with Not_found -> false
