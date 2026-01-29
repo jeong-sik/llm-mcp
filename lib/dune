@@ -44,6 +44,10 @@
    chain_telemetry
    ; Chain Utils (safe helpers)
    chain_utils
+   ; Chain Conversation (multi-turn context)
+   chain_conversation
+   ; Chain Iteration (GoalDriven variables)
+   chain_iteration
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
