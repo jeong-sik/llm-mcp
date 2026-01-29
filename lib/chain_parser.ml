@@ -460,6 +460,8 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
               match v with `String s -> Some (k, s) | _ -> None) pairs
         | _ -> []
       in
+      (* Phase 6: Parse thinking field for GLM reasoning mode *)
+      let thinking = parse_bool_with_default llm_json "thinking" false in
       (* If prompt_ref is set, load from registry; otherwise require prompt field *)
       let* prompt =
         match prompt_ref with
@@ -484,7 +486,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | None ->
             require_string llm_json "prompt"
       in
-      Ok (Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars })
+      Ok (Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking })
 
   | "tool" ->
       (* Support both flat and nested format:
@@ -1437,7 +1439,7 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
       [("inputs", `Assoc (List.map (fun (k, v) -> (k, `String v)) filtered_mapping))]
   in
   let type_fields = match n.node_type with
-    | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars } ->
+    | Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking } ->
         let fields = [
           ("type", `String "llm");
           ("model", `String model);
@@ -1461,6 +1463,11 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
         in
         let fields = if prompt_vars <> [] then
           fields @ [("prompt_vars", `Assoc (List.map (fun (k, v) -> (k, `String v)) prompt_vars))]
+        else fields
+        in
+        (* Phase 6: Serialize thinking field for GLM reasoning mode *)
+        let fields = if thinking then
+          fields @ [("thinking", `Bool true)]
         else fields
         in
         fields

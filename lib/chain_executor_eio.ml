@@ -270,7 +270,16 @@ let store_node_output ctx (node : node) (output : string) =
   match node.output_key with
   | Some key ->
       let key = String.trim key in
-      if key <> "" && key <> node.id then Hashtbl.replace ctx.outputs key output
+      if key <> "" && key <> node.id then
+        (match Hashtbl.find_opt ctx.outputs key with
+         | Some existing ->
+             if existing <> output then
+               Printf.eprintf
+                 "Warning: output_key '%s' for node '%s' ignored (already set)\n%!"
+                 key
+                 node.id
+         | None ->
+             Hashtbl.replace ctx.outputs key output)
   | None -> ()
 
 (** {1 Trace Helpers} *)
@@ -532,8 +541,8 @@ let resolve_single_input ctx (ref_str : string) : string =
                     | [key] ->
                         (match try_extract_bullet_value value key with
                          | Some v -> v
-                         | None -> ref_str)
-                    | _ -> ref_str))
+                         | None -> value)
+                    | _ -> value))
      | None -> ref_str)  (* Return original if not found *)
   else
     (* Direct node_id reference or literal, with optional dot-path *)
@@ -552,8 +561,8 @@ let resolve_single_input ctx (ref_str : string) : string =
                    | [key] ->
                        (match try_extract_bullet_value value key with
                         | Some v -> v
-                        | None -> trimmed)
-                   | _ -> trimmed))
+                        | None -> value)
+                   | _ -> value))
     | None -> ref_str  (* Return as literal *)
 
 (** Resolve input mappings to actual values *)
@@ -604,8 +613,20 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
   (* Tool args should not carry unresolved {{...}} placeholders, because
      external MCP servers may treat them as literal invalid values. *)
   let strip_unresolved_placeholders (s : string) : string =
-    try Str.global_replace (Str.regexp "{{[^}]+}}") "" s
-    with _ -> s
+    let re = Str.regexp "{{[^}]+}}" in
+    try
+      ignore (Str.search_forward re s 0);
+      let preview =
+        if String.length s > 160 then String.sub s 0 160 ^ "..."
+        else s
+      in
+      Printf.eprintf
+        "[chain] unresolved placeholder stripped in tool args: %s\n%!"
+        preview;
+      Str.global_replace re "" s
+    with
+    | Not_found -> s
+    | _ -> s
   in
   let rec map = function
     | `String s ->
@@ -779,7 +800,7 @@ let summarize_history ~exec_fn (conv : conversation_ctx) : string =
     history_text
   in
   (* Use current model for summarization *)
-  let summary = match exec_fn ~model:conv.current_model ?system:None ~prompt:summary_prompt ?tools:None () with
+  let summary = match exec_fn ~model:conv.current_model ?system:None ~prompt:summary_prompt ?tools:None ?thinking:None () with
     | Ok s -> s
     | Error _ -> "Previous context (summarization failed)"
   in
@@ -799,15 +820,28 @@ let maybe_summarize_and_rotate ~exec_fn (conv : conversation_ctx) : unit =
 (** {1 Node Execution} *)
 
 (** Type of execution function callback *)
-type exec_fn = model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> unit -> (string, string) result
+type exec_fn = model:string -> ?system:string -> prompt:string -> ?tools:Yojson.Safe.t -> ?thinking:bool -> unit -> (string, string) result
+
+(** Detect if a prompt is complex enough to benefit from thinking mode.
+    Heuristics: length > 500 chars, contains code blocks, multi-step instructions *)
+let is_complex_prompt prompt =
+  let len = String.length prompt in
+  let has_code = String.contains prompt '`' || Str.string_match (Str.regexp ".*```.*") prompt 0 in
+  let has_steps = Str.string_match (Str.regexp ".*\\(step\\|1\\.\\|2\\.\\|3\\.\\|first\\|then\\|finally\\).*") (String.lowercase_ascii prompt) 0 in
+  len > 500 || has_code || has_steps
+
+(** Check if model is GLM variant *)
+let is_glm_model model =
+  let m = String.lowercase_ascii model in
+  m = "glm" || String.length m >= 3 && String.sub m 0 3 = "glm"
 
 (** Type of tool execution callback *)
 type tool_exec = name:string -> args:Yojson.Safe.t -> (string, string) result
 
 (** Execute a single LLM node *)
-let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, string) result =
+let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) : (string, string) result =
   match llm with
-  | Llm { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _ } ->
+  | Llm { model; system; prompt; timeout = _; tools; prompt_ref; prompt_vars = _; thinking } ->
       let inputs = resolve_inputs ctx node.input_mapping in
       let resolved_prompt = substitute_prompt prompt inputs in
       (* Apply iteration variable substitution if in GoalDriven context *)
@@ -888,9 +922,32 @@ let execute_llm_node ctx ~exec_fn ~(node : node) (llm : node_type) : (string, st
         | None -> None
       in
 
+      (* Phase 6: GLM thinking auto-activation
+         Enable thinking for GLM models when:
+         - Node explicitly requests thinking=true, OR
+         - Model is GLM variant AND prompt is complex (length>500, code blocks, multi-step) *)
+      let effective_thinking =
+        if thinking then true  (* Explicitly requested *)
+        else if is_glm_model effective_model && is_complex_prompt prompt_with_context then
+          (if Run_log_eio.enabled () then
+            Run_log_eio.record_event
+              ~event:"glm_thinking_auto"
+              ~run_id:ctx.checkpoint.run_id
+              ~chain_id:ctx.chain_id
+              ~node_id:node.id
+              ~node_type:"llm"
+              ~model:effective_model
+              ~success:true
+              ~extra:[("reason", "complex_prompt_detected")]
+              ();
+           true)
+        else false
+      in
+      let thinking_arg = if effective_thinking then Some true else None in
+
       (* Empty response guard: retry with enhanced prompt on empty output *)
       let rec try_with_empty_guard ~attempt ~prompt_to_use =
-        let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_to_use ?tools:tools_arg () in
+        let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_to_use ?tools:tools_arg ?thinking:thinking_arg () in
         let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
         match result with
         | Ok output when is_empty_response output && attempt < max_empty_retries ->
@@ -1206,14 +1263,16 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
   if input_value = "" then begin
     let msg = Printf.sprintf "Adapter: empty input from '%s'" input_ref in
     let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-    record_error ctx node.id ~node_type:"adapter" msg;
     match on_error with
     | `Fail ->
+        record_error ctx node.id ~node_type:"adapter" msg;
         record_complete ctx node.id ~duration_ms ~success:false ~node_type:"adapter";
         Error msg
     | `Passthrough ->
+        Printf.eprintf "Warning: %s (passthrough)\n%!" msg;
         Ok (finalize ~success:true ~duration_ms "")
     | `Default d ->
+        Printf.eprintf "Warning: %s (default)\n%!" msg;
         Ok (finalize ~success:true ~duration_ms d)
   end
   else
@@ -2975,6 +3034,19 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
   (* Producer: Execute nodes in parallel, push results to stream as they complete *)
   Eio.Fiber.fork ~sw (fun () ->
+    let is_cancelled exn =
+      match exn with
+      | Eio.Cancel.Cancelled _ -> true
+      | _ -> false
+    in
+    let safe_stream_add value =
+      try
+        Eio.Stream.add stream value
+      with exn ->
+        if is_cancelled exn then raise exn;
+        Printf.eprintf "[StreamMerge] stream add error: %s\n%!"
+          (Printexc.to_string exn)
+    in
     (try
        Eio.Fiber.all (List.map (fun (node : node) ->
          fun () ->
@@ -2985,22 +3057,28 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                    incr completed_count;
                    Printf.eprintf "[StreamMerge] %s completed (%d/%d)\n%!"
                      node.id !completed_count total_count);
-                 Eio.Stream.add stream (Some (node.id, Ok output))
+                 safe_stream_add (Some (node.id, Ok output))
              | Error msg ->
                  Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                    incr completed_count);
-                 Eio.Stream.add stream (Some (node.id, Error msg))
+                 safe_stream_add (Some (node.id, Error msg))
            with exn ->
              let err = Printexc.to_string exn in
              Eio.Mutex.use_rw count_mutex ~protect:true (fun () ->
                incr completed_count);
-             Eio.Stream.add stream (Some (node.id, Error err))
+             safe_stream_add (Some (node.id, Error err))
        ) nodes)
      with exn ->
+       if is_cancelled exn then raise exn;
        Printf.eprintf "[StreamMerge] producer crashed: %s\n%!"
          (Printexc.to_string exn));
     (* Signal completion after all producers done *)
-    Eio.Stream.add stream None
+    (try
+       safe_stream_add None
+     with exn ->
+       if is_cancelled exn then raise exn;
+       Printf.eprintf "[StreamMerge] completion signal error: %s\n%!"
+         (Printexc.to_string exn))
   );
 
   (* Consumer: Process results progressively using reducer *)

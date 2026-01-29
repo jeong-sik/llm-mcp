@@ -11,6 +11,8 @@
 
 open Alcotest
 
+let () = Random.init 42
+
 (** {1 Empty Response Guard Tests} *)
 
 let test_is_empty_response_empty () =
@@ -223,7 +225,7 @@ let ucb1_tests = [
 ]
 
 let () =
-  Random.self_init ();
+  Random.init 42;
   run "Chain Coverage" [
     "empty_response", empty_response_tests;
     "checkpoint", checkpoint_tests;

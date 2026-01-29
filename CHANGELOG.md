@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.15] - 2026-01-28
+
+### Fixed
+- tools/call: unknown tool 요청을 명확한 JSON-RPC 오류로 반환
+- chain.orchestrate: 내부 예외를 ExecutionFailed로 변환해 크래시 방지
+
+## [0.2.14] - 2026-01-28
+
+### Fixed
+- chain: guard output_key collision with warning log
+- chain: preserve original value when dot-path extraction fails
+- adapter: empty input handling records error only on Fail (Passthrough/Default warn)
+
 ## [0.2.1] - 2026-01-21
 
 ### Changed

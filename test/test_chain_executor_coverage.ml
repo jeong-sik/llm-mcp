@@ -50,8 +50,8 @@ let compile_exn chain =
     - Returns specific values for numeric prompts
 *)
 let make_exec_fn ?(empty_count=ref 0) ?(max_empty=1) () =
-  fun ~model ?system ~prompt ?tools () ->
-    ignore (system, tools);
+  fun ~model ?system ~prompt ?tools ?thinking () ->
+    ignore (system, tools, thinking);
     if String.sub prompt 0 (min 14 (String.length prompt)) = "empty_response" then begin
       incr empty_count;
       if !empty_count > max_empty then
@@ -210,6 +210,41 @@ let test_substitute_iteration_vars_step () =
   let prompt = "Mode: {{step:fast,balanced,slow}}" in
   let result = Chain_executor_eio.substitute_iteration_vars prompt (Some ctx) in
   check string "step function" "Mode: balanced" result
+
+(** {1 Test: resolve_single_input + substitute_json} *)
+
+let make_test_context () =
+  Chain_executor_eio.make_context
+    ~start_time:0.0
+    ~trace_enabled:false
+    ~timeout:1
+    ~chain_id:"test"
+    ()
+
+let test_resolve_single_input_json_path_fallback () =
+  let ctx = make_test_context () in
+  Hashtbl.replace ctx.outputs "n1" {|{"foo": 1}|};
+  let result = Chain_executor_eio.resolve_single_input ctx "{{n1.missing}}" in
+  check string "fallback to raw output" {|{"foo": 1}|} result
+
+let test_resolve_single_input_bullet_extract () =
+  let ctx = make_test_context () in
+  Hashtbl.replace ctx.outputs "n1" "- file_key: ABC123\n- node_id: 123:456";
+  let result = Chain_executor_eio.resolve_single_input ctx "{{n1.file_key}}" in
+  check string "bullet extraction" "ABC123" result
+
+let test_substitute_json_strips_unresolved () =
+  let ctx = make_test_context () in
+  let json = Yojson.Safe.from_string {|{"a":"{{missing}}","b":"ok"}|} in
+  let result = Chain_executor_eio.substitute_json ctx json in
+  match result with
+  | `Assoc fields ->
+      let open Yojson.Safe.Util in
+      let a = `Assoc fields |> member "a" |> to_string in
+      let b = `Assoc fields |> member "b" |> to_string in
+      check string "placeholder stripped" "" a;
+      check string "other field unchanged" "ok" b
+  | _ -> fail "expected Assoc"
 
 (** {1 Test: execute_pipeline} *)
 
@@ -840,6 +875,40 @@ let test_output_key_alias_resolution () =
       check bool "output_key alias works" true result.success;
       check string "alias substitution" "hello" result.output
 
+let test_output_key_alias_collision_keeps_first () =
+  Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run @@ fun sw ->
+      let json = Yojson.Safe.from_string {|
+        {
+          "id": "output_key_collision",
+          "nodes": [
+            {
+              "id": "t1",
+              "type": "tool",
+              "name": "echo",
+              "args": { "text": "one" },
+              "output_key": "alias"
+            },
+            {
+              "id": "t2",
+              "type": "tool",
+              "name": "echo",
+              "args": { "text": "two" },
+              "output_key": "alias",
+              "depends_on": ["t1"]
+            }
+          ],
+          "output": "alias"
+        }
+      |} in
+      let chain = parse_chain_exn json in
+      let plan = compile_exn chain in
+      let result = Chain_executor_eio.execute ~sw ~clock
+        ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan in
+      check bool "collision keeps first" true result.success;
+      check string "alias preserved" "one" result.output
+
 (** {1 Test: execute_llm_node with empty response guard} *)
 
 let test_execute_llm_empty_response_retry () =
@@ -1080,6 +1149,12 @@ let iteration_vars_tests = [
   "iteration vars step", `Quick, test_substitute_iteration_vars_step;
 ]
 
+let input_resolution_tests = [
+  "resolve_single_input json path fallback", `Quick, test_resolve_single_input_json_path_fallback;
+  "resolve_single_input bullet extract", `Quick, test_resolve_single_input_bullet_extract;
+  "substitute_json strips unresolved", `Quick, test_substitute_json_strips_unresolved;
+]
+
 let pipeline_tests = [
   "pipeline simple", `Quick, test_execute_pipeline_simple;
   "pipeline failure propagation", `Quick, test_execute_pipeline_failure_propagation;
@@ -1137,6 +1212,7 @@ let tool_tests = [
   "tool node failure", `Quick, test_execute_tool_node_failure;
   "tool node with substitution", `Quick, test_execute_tool_node_with_substitution;
   "output_key alias resolution", `Quick, test_output_key_alias_resolution;
+  "output_key alias collision keeps first", `Quick, test_output_key_alias_collision_keeps_first;
 ]
 
 let llm_tests = [
@@ -1165,6 +1241,7 @@ let () =
     "empty_response", empty_response_tests;
     "substitute_prompt", substitute_prompt_tests;
     "iteration_vars", iteration_vars_tests;
+    "input_resolution", input_resolution_tests;
     "pipeline", pipeline_tests;
     "fanout", fanout_tests;
     "quorum", quorum_tests;

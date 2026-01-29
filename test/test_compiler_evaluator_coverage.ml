@@ -36,7 +36,7 @@ let make_test_llm_node ~id ~prompt () =
       timeout = None;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = [];
     output_key = None;
@@ -53,7 +53,7 @@ let make_test_llm_node_with_deps ~id ~prompt ~deps () =
       timeout = None;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = List.map (fun d -> (d, d)) deps;
     output_key = None;

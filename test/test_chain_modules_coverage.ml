@@ -151,7 +151,7 @@ let test_make_chain_with_metadata () =
 
 let test_node_type_name () =
   let cases = [
-    (Llm { model="g"; system=None; prompt="p"; timeout=None; tools=None; prompt_ref=None; prompt_vars=[] }, "llm");
+    (Llm { model="g"; system=None; prompt="p"; timeout=None; tools=None; prompt_ref=None; prompt_vars=[]; thinking=false }, "llm");
     (Tool { name="t"; args=`Null }, "tool");
     (Pipeline [], "pipeline");
     (Fanout [], "fanout");

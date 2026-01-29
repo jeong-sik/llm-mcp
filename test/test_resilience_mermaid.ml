@@ -4,7 +4,7 @@ open Chain_mermaid_parser
 
 let make_llm id model prompt = {
   id;
-  node_type = Llm { model; system = None; prompt; timeout = Some 30; tools = None; prompt_ref = None; prompt_vars = [] };
+  node_type = Llm { model; system = None; prompt; timeout = Some 30; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
   input_mapping = []; output_key = None; depends_on = None;
 }
 

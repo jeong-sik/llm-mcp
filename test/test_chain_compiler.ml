@@ -24,7 +24,7 @@ let llm_node ~id ?(deps=[]) ?(depends_on=[]) prompt =
       timeout = None;
       tools = None;
       prompt_ref = None;
-      prompt_vars = [];
+      prompt_vars = []; thinking = false;
     };
     input_mapping = List.map (fun d -> (d, d)) deps;
     output_key = None;

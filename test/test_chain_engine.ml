@@ -418,7 +418,7 @@ let test_default_config () =
 
 let test_node_type_name () =
   Alcotest.(check string) "llm" "llm"
-    (node_type_name (Llm { model = "test"; system = None; prompt = "test"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] }));
+    (node_type_name (Llm { model = "test"; system = None; prompt = "test"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false }));
   Alcotest.(check string) "tool" "tool"
     (node_type_name (Tool { name = "test"; args = `Null }));
   Alcotest.(check string) "pipeline" "pipeline"
@@ -1048,11 +1048,11 @@ let test_compile_pipeline_topological_order () =
   let chain = {
     id = "topo_test";
     nodes = [
-      { id = "c"; node_type = Llm { model = "gemini"; system = None; prompt = "c"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
+      { id = "c"; node_type = Llm { model = "gemini"; system = None; prompt = "c"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
         input_mapping = [("input", "{{b.output}}")]; output_key = None; depends_on = None };
-      { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "a"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
+      { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "a"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
         input_mapping = []; output_key = None; depends_on = None };
-      { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "b"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
+      { id = "b"; node_type = Llm { model = "claude"; system = None; prompt = "b"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
         input_mapping = [("input", "{{a.output}}")]; output_key = None; depends_on = None };
     ];
     output = "c";

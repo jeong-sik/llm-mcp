@@ -355,3 +355,8 @@
 (test
  (name test_chain_types)
  (libraries llm_mcp.common alcotest))
+
+; Retry module tests (exponential backoff, error detection, rate limiting)
+(test
+ (name test_retry)
+ (libraries llm_mcp.resilience alcotest str))

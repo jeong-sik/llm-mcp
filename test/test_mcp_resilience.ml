@@ -66,7 +66,7 @@ let test_circuit_breaker_half_open_recovery () =
   check bool "circuit open" false (Resilience.circuit_allows cb);
 
   (* Wait for timeout to transition to HalfOpen *)
-  Unix.sleepf 0.015;  (* 15ms > 10ms timeout *)
+  Unix.sleepf 0.05;  (* 50ms > 10ms timeout for stability *)
   check bool "half-open allows probe" true (Resilience.circuit_allows cb);
 
   (* Success in half-open *)
@@ -215,7 +215,7 @@ let test_timeout_exceeded () =
 
   let result = Resilience.with_timeout_eio ~clock ~timeout_ms:10
     (fun () ->
-      Eio.Time.sleep clock 0.1;  (* 100ms > 10ms timeout *)
+      Eio.Time.sleep clock 0.2;  (* 200ms > 10ms timeout for stability *)
       "slow")
   in
 

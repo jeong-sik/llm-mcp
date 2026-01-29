@@ -57,13 +57,14 @@ let test_tool_result_to_yojson () =
 
 (** Test all_schemas contains expected tools *)
 let test_all_schemas () =
-  check int "should have 22 schemas" 22 (List.length all_schemas);  (* gemini, claude, codex, ollama, ollama_list, glm, set/get_stream_delta, chain_{run,validate,convert,list,checkpoints,resume,to_mermaid,visualize,orchestrate}, prompt_{register,list,get}, gh_pr_diff, slack_post *)
+  check int "should have 23 schemas" 23 (List.length all_schemas);  (* gemini, claude, codex, ollama, ollama_list, glm, glm.translate, set/get_stream_delta, chain_{run,validate,convert,list,checkpoints,resume,to_mermaid,visualize,orchestrate}, prompt_{register,list,get}, gh_pr_diff, slack_post *)
   let names = List.map (fun (s : tool_schema) -> s.name) all_schemas in
   check bool "gemini exists" true (List.mem "gemini" names);
   check bool "claude-cli exists" true (List.mem "claude-cli" names);
   check bool "codex exists" true (List.mem "codex" names);
   check bool "ollama exists" true (List.mem "ollama" names);
-  check bool "ollama_list exists" true (List.mem "ollama_list" names)
+  check bool "ollama_list exists" true (List.mem "ollama_list" names);
+  check bool "glm.translate exists" true (List.mem "glm.translate" names)
 
 (** Test gemini_schema structure *)
 let test_gemini_schema () =

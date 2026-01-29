@@ -136,13 +136,14 @@ type mcts_policy =
 (** The 22 supported node types (including 3 resilience + Adapter + Cache + Batch + MCTS) *)
 type node_type =
   | Llm of {
-      model : string;     (** Model name: gemini, claude, codex, ollama:* *)
+      model : string;     (** Model name: gemini, claude, codex, ollama:*, glm *)
       system : string option;  (** System instruction for role definition *)
       prompt : string;    (** Prompt template with {{var}} placeholders *)
       timeout : int option;
-      tools : Yojson.Safe.t option;  (** MCP tools for function calling (Ollama) *)
+      tools : Yojson.Safe.t option;  (** MCP tools for function calling (Ollama, GLM) *)
       prompt_ref : string option;  (** Reference to prompt registry entry (id or id@version) *)
       prompt_vars : (string * string) list;  (** Variable substitutions for prompt_ref *)
+      thinking : bool;    (** Enable thinking/reasoning mode (GLM 4.7) - auto-enabled for complex prompts *)
     }
   | Tool of {
       name : string;      (** MCP tool name *)
@@ -411,8 +412,8 @@ let node_type_name = function
   | Masc_claim _ -> "masc_claim"
 
 (** Helper: Create a simple LLM node *)
-let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) () =
-  { id; node_type = Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars };
+let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) ?(thinking=false) () =
+  { id; node_type = Llm { model; system; prompt; timeout; tools; prompt_ref; prompt_vars; thinking };
     input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create an adapter node for inter-node data transformation *)

@@ -592,8 +592,14 @@ This chain will execute the goal using a stub model.|}
   let tasks = if tasks_from_input <> [] then tasks_from_input else tasks_from_chain in
 
   (* Run orchestration *)
-  match Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks with
-  | Ok result ->
+  let orchestrate_result =
+    try Ok (Chain_orchestrator_eio.orchestrate ~sw ~clock ~config ~llm_call ~tool_exec ~goal ~tasks)
+    with exn ->
+      let msg = Printexc.to_string exn in
+      Error (Chain_orchestrator_eio.ExecutionFailed msg)
+  in
+  match orchestrate_result with
+  | Ok (Ok result) ->
       let metrics_json = match result.final_metrics with
         | Some m -> Chain_evaluator.chain_metrics_to_yojson m |> Yojson.Safe.to_string
         | None -> "null"
@@ -611,7 +617,7 @@ This chain will execute the goal using a stub model.|}
           ("metrics", metrics_json);
           ("verification", verification_json);
         ]; }
-  | Error err ->
+  | Ok (Error err) | Error err ->
       let error_msg = match err with
         | Chain_orchestrator_eio.DesignFailed msg -> Printf.sprintf "Design failed: %s" msg
         | Chain_orchestrator_eio.CompileFailed msg -> Printf.sprintf "Compile failed: %s" msg

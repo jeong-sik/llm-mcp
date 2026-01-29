@@ -333,7 +333,7 @@ let test_goaldriven_mermaid_parsing () =
 let test_goaldriven_strict_roundtrip () =
   let action_node = {
     id = "action";
-    node_type = Llm { model = "gemini"; system = None; prompt = "Improve code"; timeout = None; tools = None; prompt_ref = None; prompt_vars = [] };
+    node_type = Llm { model = "gemini"; system = None; prompt = "Improve code"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
     input_mapping = []; output_key = None; depends_on = None
   } in
   let goal_node = {
@@ -528,7 +528,7 @@ let test_complex_lossless_roundtrip () =
         model; system = Some "system";
         prompt; timeout = Some 42; tools = None;
         prompt_ref = None;
-        prompt_vars = [];
+        prompt_vars = []; thinking = false;
       };
       input_mapping = []; output_key = None; depends_on = None;
     }

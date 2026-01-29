@@ -259,74 +259,99 @@ let handle_list_tools id =
 (** Handle tools/call request - direct Eio execution *)
 let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let open Yojson.Safe.Util in
-  let name = params |> member "name" |> to_string in
+  let name_opt = params |> member "name" |> to_string_option in
   let arguments = params |> member "arguments" in
 
-  (* Parse arguments based on tool *)
-  let args : Types.tool_args = match name with
-    | "gemini" -> Tools_eio.parse_gemini_args arguments
-    | "claude-cli" -> Tools_eio.parse_claude_args arguments
-    | "codex" -> Tools_eio.parse_codex_args arguments
-    | "ollama" -> Tools_eio.parse_ollama_args arguments
-    | "ollama_list" -> Tools_eio.parse_ollama_list_args arguments
-    | "glm" -> Tools_eio.parse_glm_args arguments
-    | "chain.run" -> Tools_eio.parse_chain_run_args arguments
-    | "chain.validate" -> Tools_eio.parse_chain_validate_args arguments
-    | "chain.list" -> Types.ChainList
-    | "chain.to_mermaid" -> Tools_eio.parse_chain_to_mermaid_args arguments
-    | "chain.visualize" -> Tools_eio.parse_chain_visualize_args arguments
-    | "chain.convert" -> Tools_eio.parse_chain_convert_args arguments
-    | "chain.orchestrate" -> Tools_eio.parse_chain_orchestrate_args arguments
-    | "chain.checkpoints" -> Tools_eio.parse_chain_checkpoints_args arguments
-    | "chain.resume" -> Tools_eio.parse_chain_resume_args arguments
-    | "prompt.register" -> Tools_eio.parse_prompt_register_args arguments
-    | "prompt.list" -> Types.PromptList
-    | "prompt.get" -> Tools_eio.parse_prompt_get_args arguments
-    | "gh_pr_diff" -> Tools_eio.parse_gh_pr_diff_args arguments
-    | "slack_post" -> Tools_eio.parse_slack_post_args arguments
-    | "set_stream_delta" -> Tools_eio.parse_set_stream_delta_args arguments
-    | "get_stream_delta" -> Tools_eio.parse_get_stream_delta_args arguments
-    | _ -> failwith (sprintf "Unknown tool: %s" name)
-  in
-
-  (* Execute via direct Eio call with Langfuse tracing *)
-  let result =
+  (* Phase 5: Parse response_format from arguments for Compact Protocol
+     Supports: verbose (default), compact (64% token savings), binary, base85, compressed, auto *)
+  let response_format =
     try
-      Tools_eio.execute_with_tracing ~sw ~proc_mgr ~clock args
-    with exn ->
-      let bt = Printexc.get_backtrace () in
-      { Types.model = "error";
-        returncode = 1;
-        response = Printf.sprintf "%s\nBacktrace:\n%s" (Printexc.to_string exn) bt;
-        extra = [];
-      }
+      let format_str = arguments |> member "response_format" |> to_string in
+      Types.response_format_of_string format_str
+    with _ -> Types.Verbose  (* Default to verbose for backward compatibility *)
   in
 
-  (* Format response - returncode 0 = success *)
-  let is_error = result.Types.returncode <> 0 in
-
-  (* Build response text - include extra fields like tool_calls, thinking *)
-  let response_text =
-    let extra_json = match result.Types.extra with
-      | [] -> ""
-      | extras ->
-          let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
-          if result.response = "" then json_str
-          else "\n\n[Extra]\n" ^ json_str
-    in
-    result.response ^ extra_json
+  (* Parse arguments based on tool *)
+  let parse_args name : (Types.tool_args, string) result =
+    match name with
+    | "gemini" -> Ok (Tools_eio.parse_gemini_args arguments)
+    | "claude-cli" -> Ok (Tools_eio.parse_claude_args arguments)
+    | "codex" -> Ok (Tools_eio.parse_codex_args arguments)
+    | "ollama" -> Ok (Tools_eio.parse_ollama_args arguments)
+    | "ollama_list" -> Ok (Tools_eio.parse_ollama_list_args arguments)
+    | "glm" -> Ok (Tools_eio.parse_glm_args arguments)
+    | "glm.translate" -> Ok (Tools_eio.parse_glm_translate_args arguments)
+    | "chain.run" -> Ok (Tools_eio.parse_chain_run_args arguments)
+    | "chain.validate" -> Ok (Tools_eio.parse_chain_validate_args arguments)
+    | "chain.list" -> Ok Types.ChainList
+    | "chain.to_mermaid" -> Ok (Tools_eio.parse_chain_to_mermaid_args arguments)
+    | "chain.visualize" -> Ok (Tools_eio.parse_chain_visualize_args arguments)
+    | "chain.convert" -> Ok (Tools_eio.parse_chain_convert_args arguments)
+    | "chain.orchestrate" -> Ok (Tools_eio.parse_chain_orchestrate_args arguments)
+    | "chain.checkpoints" -> Ok (Tools_eio.parse_chain_checkpoints_args arguments)
+    | "chain.resume" -> Ok (Tools_eio.parse_chain_resume_args arguments)
+    | "prompt.register" -> Ok (Tools_eio.parse_prompt_register_args arguments)
+    | "prompt.list" -> Ok Types.PromptList
+    | "prompt.get" -> Ok (Tools_eio.parse_prompt_get_args arguments)
+    | "gh_pr_diff" -> Ok (Tools_eio.parse_gh_pr_diff_args arguments)
+    | "slack_post" -> Ok (Tools_eio.parse_slack_post_args arguments)
+    | "set_stream_delta" -> Ok (Tools_eio.parse_set_stream_delta_args arguments)
+    | "get_stream_delta" -> Ok (Tools_eio.parse_get_stream_delta_args arguments)
+    | other -> Error (sprintf "Unknown tool: %s" other)
   in
 
-  let content =
-    `Assoc [
-      ("type", `String "text");
-      ("text", `String response_text);
-    ]
-  in
-  make_response ~id (`Assoc [
-    ("content", `List [content]);
-    ("isError", `Bool is_error);
-  ])
+  match name_opt with
+  | None -> make_error ~id (-32602) "Missing or invalid tool name"
+  | Some name ->
+      (match parse_args name with
+       | Error msg -> make_error ~id (-32601) msg
+       | Ok args ->
+           (* Execute via direct Eio call with Langfuse tracing *)
+           let result =
+             try
+               Tools_eio.execute_with_tracing ~sw ~proc_mgr ~clock args
+             with exn ->
+               let bt = Printexc.get_backtrace () in
+               { Types.model = "error";
+                 returncode = 1;
+                 response = Printf.sprintf "%s\nBacktrace:\n%s" (Printexc.to_string exn) bt;
+                 extra = [];
+               }
+           in
+
+           (* Format response - returncode 0 = success *)
+           let is_error = result.Types.returncode <> 0 in
+
+           (* Phase 5: Apply Compact Protocol based on response_format
+              - Verbose: Full JSON (default, backward compatible)
+              - Compact: DSL format ~64% token savings
+              - Binary/Base85/Compressed: Various encoding options *)
+           let response_text = match response_format with
+             | Types.Verbose ->
+                 (* Original verbose format with extra fields *)
+                 let extra_json = match result.Types.extra with
+                   | [] -> ""
+                   | extras ->
+                       let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
+                       if result.response = "" then json_str
+                       else "\n\n[Extra]\n" ^ json_str
+                 in
+                 result.response ^ extra_json
+             | _ ->
+                 (* Compact Protocol: use format_tool_result for encoding *)
+                 Compact_impl.format_tool_result ~format:response_format result
+           in
+
+           let content =
+             `Assoc [
+               ("type", `String "text");
+               ("text", `String response_text);
+             ]
+           in
+           make_response ~id (`Assoc [
+             ("content", `List [content]);
+             ("isError", `Bool is_error);
+           ]))
 
 (** Resources (static for now) *)
 let resources : P.resource list = [
@@ -761,20 +786,31 @@ let run ~sw ~env ?(config = Http.default_config) () =
   (* Create session store for multi-tenancy *)
   let store = create_session_store () in
 
+  let is_cancelled exn =
+    match exn with
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
+
   (* Periodic cleanup fiber for stale sessions - prevents memory leaks *)
   Eio.Fiber.fork ~sw (fun () ->
     let rec cleanup_loop () =
-      Eio.Time.sleep clock 60.0; (* Clean up every 1 minute *)
-      (* Cleanup must never crash the server switch. *)
+      (try
+         Eio.Time.sleep clock 60.0 (* Clean up every 1 minute *)
+       with exn ->
+         if is_cancelled exn then raise exn;
+         eprintf "[cleanup] sleep error: %s\n%!" (Printexc.to_string exn));
       (try
          cleanup_stale_sessions store;
          Mcp_session.cleanup_expired ()  (* Also clean global session store *)
        with exn ->
+         if is_cancelled exn then raise exn;
          eprintf "[cleanup] loop error: %s\n%!" (Printexc.to_string exn));
       cleanup_loop ()
     in
     try cleanup_loop () with exn ->
-      eprintf "[cleanup] fatal loop error: %s\n%!" (Printexc.to_string exn)
+      if is_cancelled exn then ()
+      else eprintf "[cleanup] fatal loop error: %s\n%!" (Printexc.to_string exn)
   );
 
   (* request_handler: sockaddr -> Gluten.Reqd.t -> unit *)
@@ -789,30 +825,47 @@ let run ~sw ~env ?(config = Http.default_config) () =
   let reset_backoff () = backoff_s := initial_backoff_s in
   let bump_backoff () = backoff_s := min max_backoff_s (!backoff_s *. 2.0) in
   let rec accept_loop () =
-    (try
-       let client_socket, client_addr = Eio.Net.accept ~sw socket in
-       reset_backoff ();
-       Eio.Fiber.fork ~sw (fun () ->
-         try
-           Httpun_eio.Server.create_connection_handler
-             ~sw
-             ~request_handler
-             ~error_handler:Http.error_handler
-             client_addr
-             client_socket
-         with exn ->
-           eprintf "[accept] connection handler error: %s\n%!"
-             (Printexc.to_string exn));
+    try
+      (try
+         let client_socket, client_addr = Eio.Net.accept ~sw socket in
+         reset_backoff ();
 
-       (* Small yield to allow other fibers *)
-       Eio.Time.sleep clock 0.0
-     with exn ->
-       let delay = !backoff_s in
-       eprintf "[accept] error: %s (backoff %.2fs)\n%!"
-         (Printexc.to_string exn) delay;
-       Eio.Time.sleep clock delay;
-       bump_backoff ());
-    accept_loop ()
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Httpun_eio.Server.create_connection_handler
+               ~sw
+               ~request_handler
+               ~error_handler:Http.error_handler
+               client_addr
+               client_socket
+           with exn ->
+             eprintf "[accept] connection handler error: %s\n%!"
+               (Printexc.to_string exn)
+         );
+
+         (* Small yield to allow other fibers *)
+         (try
+            Eio.Time.sleep clock 0.0
+          with exn ->
+            if is_cancelled exn then raise exn;
+            eprintf "[accept] yield error: %s\n%!" (Printexc.to_string exn))
+       with exn ->
+         if is_cancelled exn then raise exn;
+         let delay = !backoff_s in
+         eprintf "[accept] error: %s (backoff %.2fs)\n%!"
+           (Printexc.to_string exn) delay;
+         Eio.Time.sleep clock delay;
+         bump_backoff ());
+      accept_loop ()
+    with exn ->
+      if is_cancelled exn then ()
+      else
+        let delay = !backoff_s in
+        eprintf "[accept] loop error: %s (backoff %.2fs)\n%!"
+          (Printexc.to_string exn) delay;
+        Eio.Time.sleep clock delay;
+        bump_backoff ();
+        accept_loop ()
   in
 
   accept_loop ()
