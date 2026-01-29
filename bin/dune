@@ -104,6 +104,14 @@
  (ocamlopt_flags (:standard -O3)))
 
 (executable
+ (name pg_health)
+ (public_name pg-health)
+ (package llm_mcp)
+ (modules pg_health)
+ (libraries eio eio_main caqti caqti-eio caqti-eio.unix caqti-driver-postgresql uri unix)
+ (ocamlopt_flags (:standard -O3)))
+
+(executable
  (name doctor)
  (public_name llm-mcp-doctor)
  (package llm_mcp)

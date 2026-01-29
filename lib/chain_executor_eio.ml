@@ -145,6 +145,40 @@ let next_attempt ctx node_id =
   Hashtbl.replace ctx.node_attempts node_id next;
   next
 
+(** {1 Safe List Helpers} *)
+
+(** Safe version of List.nth - returns Option instead of raising Not_found *)
+let list_nth_opt lst idx =
+  if idx < 0 then None
+  else
+    let rec aux i = function
+      | [] -> None
+      | x :: _ when i = 0 -> Some x
+      | _ :: xs -> aux (i - 1) xs
+    in
+    aux idx lst
+
+(** Safe version of List.hd - returns Option *)
+let list_hd_opt = function
+  | [] -> None
+  | x :: _ -> Some x
+
+(** Safe version of List.tl - returns empty list if input is empty *)
+let list_tl_safe = function
+  | [] -> []
+  | _ :: xs -> xs
+
+(** Safe head/tail split - returns None if list is empty *)
+let list_uncons = function
+  | [] -> None
+  | x :: xs -> Some (x, xs)
+
+(** Safe last element - O(n) but safe *)
+let list_last_opt lst =
+  match lst with
+  | [] -> None
+  | _ -> Some (List.hd (List.rev lst))
+
 (** {1 Empty Response Guard} *)
 
 (** Maximum retries for empty LLM responses (configurable via CHAIN_EMPTY_RETRIES env) *)
@@ -675,9 +709,11 @@ let substitute_iteration_vars (prompt : string) (iter_ctx : iteration_ctx option
         try
           let values_str = Str.matched_group 1 s in
           let values = String.split_on_char ',' values_str in
-          let idx = min (ctx.iteration - 1) (List.length values - 1) in
-          List.nth values (max 0 idx) |> String.trim
-        with Not_found | Failure _ | Invalid_argument _ -> Str.matched_string s
+          let idx = min (ctx.iteration - 1) (max 0 (List.length values - 1)) in
+          match list_nth_opt values (max 0 idx) with
+          | Some v -> String.trim v
+          | None -> Str.matched_string s
+        with Not_found | Failure _ -> Str.matched_string s
       ) result in
 
       result
@@ -716,7 +752,9 @@ let add_message (conv : conversation_ctx) ~role ~content ~iteration ~model : uni
 let rotate_model (conv : conversation_ctx) : unit =
   if List.length conv.models > 1 then begin
     conv.model_index <- (conv.model_index + 1) mod List.length conv.models;
-    conv.current_model <- List.nth conv.models conv.model_index
+    match list_nth_opt conv.models conv.model_index with
+    | Some m -> conv.current_model <- m
+    | None -> ()  (* Should never happen due to mod *)
   end
 
 (** Check if summarization is needed *)
@@ -1434,7 +1472,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             (* Sample from distribution *)
             let r = Random.float 1.0 in
             let rec sample acc = function
-              | [] -> List.nth node.children 0
+              | [] -> (match list_hd_opt node.children with Some c -> c | None -> failwith "MCTS: no children to sample")
               | (child, prob) :: rest ->
                   let acc' = acc +. prob in
                   if r < acc' then child else sample acc' rest
@@ -1467,7 +1505,10 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
   (* Simulation phase: execute strategy and simulation in clean context *)
   let simulate (node : mcts_tree_node) : float =
-    let strategy_node = List.nth strategies node.strategy_idx in
+    let strategy_node = match list_nth_opt strategies node.strategy_idx with
+      | Some n -> n
+      | None -> failwith (Printf.sprintf "MCTS: invalid strategy index %d" node.strategy_idx)
+    in
     (* Execute strategy in current context first *)
     let strategy_result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec strategy_node in
     match strategy_result with
@@ -1556,20 +1597,23 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   (* Main MCTS loop *)
   let best_output = ref "" in
   let best_score = ref Float.neg_infinity in
+  let tree_mutex = Eio.Mutex.create () in  (* Protect tree modifications *)
 
   let rec mcts_iteration iteration =
     if iteration >= max_iterations then ()
     else begin
       (* Run parallel simulations *)
       let sim_results = ref [] in
-      let mutex = Eio.Mutex.create () in
+      let results_mutex = Eio.Mutex.create () in
 
       Eio.Fiber.all (List.init parallel_sims (fun _ ->
         fun () ->
           let selected = select root in
-          let expanded = expand selected in
+          (* Protect expand with tree_mutex to prevent race on node.children *)
+          let expanded = Eio.Mutex.use_rw tree_mutex ~protect:true (fun () ->
+            expand selected) in
           let score = simulate expanded in
-          Eio.Mutex.use_rw mutex ~protect:true (fun () ->
+          Eio.Mutex.use_rw results_mutex ~protect:true (fun () ->
             sim_results := (expanded, score) :: !sim_results;
             (* Track best result *)
             if score > !best_score then begin
@@ -2060,7 +2104,7 @@ and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~
 and execute_parallel_group ctx ~sw ~clock ~exec_fn ~tool_exec (group : string list) (node_map : (string, node) Hashtbl.t) : (string, string) result =
   if List.length group = 1 then
     (* Single node - execute directly *)
-    let node_id = List.hd group in
+    let node_id = match list_hd_opt group with Some id -> id | None -> failwith "Empty group" in
     match Hashtbl.find_opt node_map node_id with
     | Some node -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node
     | None -> Error (Printf.sprintf "Node '%s' not found in subgraph" node_id)
@@ -2233,7 +2277,7 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
   | first :: _ ->
     let merged = match strategy with
       | First -> snd first
-      | Last -> snd (List.hd (List.rev outputs))  (* Safe: outputs is non-empty *)
+      | Last -> (match list_last_opt outputs with Some (_, o) -> o | None -> "")
       | Concat -> String.concat "\n" (List.map snd outputs)
       | WeightedAvg ->
           (* Weighted average - for now just concatenate with equal weights *)
@@ -2906,39 +2950,75 @@ and execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   in
   try_nodes (primary :: fallbacks) []
 
-(** Execute race node - run all in parallel, first result wins *)
+(** Execute race node - run all in parallel, first result wins (with timeout) *)
 and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~nodes ~timeout : (string, string) result =
-  ignore timeout;
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
   let winner = ref None in
   let winner_mutex = Eio.Mutex.create () in
+  let winner_cond = Eio.Condition.create () in
   let all_errors = ref [] in
-  Eio.Fiber.all (List.map (fun (node : node) ->
-    fun () ->
+  let finished_count = ref 0 in
+  let total_nodes = List.length nodes in
+
+  (* Fork all race nodes in parallel *)
+  List.iter (fun (node : node) ->
+    Eio.Fiber.fork ~sw (fun () ->
       let already_won = Eio.Mutex.use_rw winner_mutex ~protect:true (fun () -> Option.is_some !winner) in
       if not already_won then begin
         match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
         | Ok output ->
             Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
-              if Option.is_none !winner then winner := Some (node.id, output))
+              if Option.is_none !winner then begin
+                winner := Some (node.id, output);
+                Eio.Condition.broadcast winner_cond
+              end;
+              incr finished_count)
         | Error msg ->
             Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
-              all_errors := (node.id ^ ": " ^ msg) :: !all_errors)
-      end
-  ) nodes);
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-  match !winner with
-  | Some (winner_id, output) ->
-      record_complete ctx parent.id ~duration_ms ~success:true;
-      store_node_output ctx parent (Printf.sprintf "[winner: %s] %s" winner_id output);
-      Ok output
-  | None ->
-      let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
-      record_complete ctx parent.id ~duration_ms ~success:false;
+              all_errors := (node.id ^ ": " ^ msg) :: !all_errors;
+              incr finished_count;
+              (* Wake up waiter if all have failed *)
+              if !finished_count = total_nodes then
+                Eio.Condition.broadcast winner_cond)
+      end)
+  ) nodes;
+
+  (* Wait for winner with optional timeout *)
+  let timeout_sec = match timeout with Some t -> t | None -> 300.0 in (* Default 5 min *)
+  let wait_for_winner () =
+    Eio.Mutex.use_rw winner_mutex ~protect:true (fun () ->
+      while Option.is_none !winner && !finished_count < total_nodes do
+        Eio.Condition.await winner_cond winner_mutex
+      done;
+      !winner)
+  in
+
+  let duration_ms = ref 0 in
+  let result =
+    try
+      Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
+        let r = wait_for_winner () in
+        duration_ms := int_of_float ((Unix.gettimeofday () -. start) *. 1000.0);
+        match r with
+        | Some (winner_id, output) ->
+            record_complete ctx parent.id ~duration_ms:!duration_ms ~success:true;
+            store_node_output ctx parent (Printf.sprintf "[winner: %s] %s" winner_id output);
+            Ok output
+        | None ->
+            let msg = Printf.sprintf "All racers failed: %s" (String.concat "; " !all_errors) in
+            record_complete ctx parent.id ~duration_ms:!duration_ms ~success:false;
+            record_error ctx parent.id msg;
+            Error msg)
+    with Eio.Time.Timeout ->
+      duration_ms := int_of_float ((Unix.gettimeofday () -. start) *. 1000.0);
+      let msg = Printf.sprintf "Race timeout after %.1fs" timeout_sec in
+      record_complete ctx parent.id ~duration_ms:!duration_ms ~success:false;
       record_error ctx parent.id msg;
       Error msg
+  in
+  result
 
 (** Execute StreamMerge node - process results progressively as they arrive *)
 and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
