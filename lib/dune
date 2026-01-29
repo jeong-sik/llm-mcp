@@ -42,6 +42,8 @@
    chain_category
    chain_stats
    chain_telemetry
+   ; Chain Utils (safe helpers)
+   chain_utils
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)

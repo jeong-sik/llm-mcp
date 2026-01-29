@@ -145,53 +145,8 @@ let next_attempt ctx node_id =
   Hashtbl.replace ctx.node_attempts node_id next;
   next
 
-(** {1 Safe List Helpers} *)
-
-(** Safe version of List.nth - returns Option instead of raising Not_found *)
-let list_nth_opt lst idx =
-  if idx < 0 then None
-  else
-    let rec aux i = function
-      | [] -> None
-      | x :: _ when i = 0 -> Some x
-      | _ :: xs -> aux (i - 1) xs
-    in
-    aux idx lst
-
-(** Safe version of List.hd - returns Option *)
-let list_hd_opt = function
-  | [] -> None
-  | x :: _ -> Some x
-
-(** Safe version of List.tl - returns empty list if input is empty *)
-let list_tl_safe = function
-  | [] -> []
-  | _ :: xs -> xs
-
-(** Safe head/tail split - returns None if list is empty *)
-let list_uncons = function
-  | [] -> None
-  | x :: xs -> Some (x, xs)
-
-(** Safe last element - O(n) but safe *)
-let list_last_opt lst =
-  match lst with
-  | [] -> None
-  | _ -> Some (List.hd (List.rev lst))
-
-(** {1 Empty Response Guard} *)
-
-(** Maximum retries for empty LLM responses (configurable via CHAIN_EMPTY_RETRIES env) *)
-let max_empty_retries =
-  Safe_parse.env_int ~var:"CHAIN_EMPTY_RETRIES" ~default:3
-
-(** Check if response is empty or whitespace-only *)
-let is_empty_response output =
-  String.length (String.trim output) = 0
-
-(** Enhancement prompt added on retry for empty responses *)
-let empty_retry_suffix =
-  "\n\n[IMPORTANT: You must provide a non-empty response. Do not return blank or empty output.]"
+(** {1 Safe Helpers from Chain_utils} *)
+include Chain_utils
 
 (** Create checkpoint configuration for execution *)
 let make_checkpoint_config ?fs ?store ?(enabled = false) ?resume_from () =
@@ -459,15 +414,7 @@ let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry l
     - literal string - returns as-is
 *)
 let resolve_single_input ctx (ref_str : string) : string =
-  let starts_with ~prefix s =
-    let p = String.length prefix in
-    String.length s >= p && String.sub s 0 p = prefix
-  in
-  let ends_with ~suffix s =
-    let p = String.length suffix in
-    let len = String.length s in
-    len >= p && String.sub s (len - p) p = suffix
-  in
+  (* starts_with and ends_with are now module-level helpers *)
   let try_extract_json_path raw path_parts =
     let parse_index part =
       if String.length part >= 3 && part.[0] = '[' && part.[String.length part - 1] = ']' then
@@ -616,13 +563,9 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
     let re = Str.regexp "{{[^}]+}}" in
     try
       ignore (Str.search_forward re s 0);
-      let preview =
-        if String.length s > 160 then String.sub s 0 160 ^ "..."
-        else s
-      in
       Printf.eprintf
         "[chain] unresolved placeholder stripped in tool args: %s\n%!"
-        preview;
+        (truncate_with_ellipsis s);
       Str.global_replace re "" s
     with
     | Not_found -> s
