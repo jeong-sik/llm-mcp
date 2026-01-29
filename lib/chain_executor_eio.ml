@@ -179,6 +179,41 @@ let list_last_opt lst =
   | [] -> None
   | _ -> Some (List.hd (List.rev lst))
 
+(** {1 Safe String Helpers} *)
+
+(** Check if string starts with prefix - safe, no exceptions *)
+let starts_with ~prefix s =
+  let p = String.length prefix in
+  String.length s >= p && String.sub s 0 p = prefix
+
+(** Check if string ends with suffix - safe, no exceptions *)
+let ends_with ~suffix s =
+  let p = String.length suffix in
+  let len = String.length s in
+  len >= p && String.sub s (len - p) p = suffix
+
+(** Safe substring extraction - returns None if out of bounds *)
+let string_sub_opt s start len =
+  if start < 0 || len < 0 || start + len > String.length s then None
+  else Some (String.sub s start len)
+
+(** Safe string truncation with ellipsis *)
+let truncate_with_ellipsis ?(max_len=160) s =
+  if String.length s > max_len then String.sub s 0 max_len ^ "..."
+  else s
+
+(** Strip prefix if present, returns original string otherwise *)
+let strip_prefix ~prefix s =
+  if starts_with ~prefix s then
+    String.sub s (String.length prefix) (String.length s - String.length prefix)
+  else s
+
+(** Strip suffix if present, returns original string otherwise *)
+let strip_suffix ~suffix s =
+  if ends_with ~suffix s then
+    String.sub s 0 (String.length s - String.length suffix)
+  else s
+
 (** {1 Empty Response Guard} *)
 
 (** Maximum retries for empty LLM responses (configurable via CHAIN_EMPTY_RETRIES env) *)
@@ -459,15 +494,7 @@ let traces_to_entries (traces : internal_trace list) : Chain_types.trace_entry l
     - literal string - returns as-is
 *)
 let resolve_single_input ctx (ref_str : string) : string =
-  let starts_with ~prefix s =
-    let p = String.length prefix in
-    String.length s >= p && String.sub s 0 p = prefix
-  in
-  let ends_with ~suffix s =
-    let p = String.length suffix in
-    let len = String.length s in
-    len >= p && String.sub s (len - p) p = suffix
-  in
+  (* starts_with and ends_with are now module-level helpers *)
   let try_extract_json_path raw path_parts =
     let parse_index part =
       if String.length part >= 3 && part.[0] = '[' && part.[String.length part - 1] = ']' then
@@ -616,13 +643,9 @@ let substitute_json ctx (json : Yojson.Safe.t) : Yojson.Safe.t =
     let re = Str.regexp "{{[^}]+}}" in
     try
       ignore (Str.search_forward re s 0);
-      let preview =
-        if String.length s > 160 then String.sub s 0 160 ^ "..."
-        else s
-      in
       Printf.eprintf
         "[chain] unresolved placeholder stripped in tool args: %s\n%!"
-        preview;
+        (truncate_with_ellipsis s);
       Str.global_replace re "" s
     with
     | Not_found -> s
