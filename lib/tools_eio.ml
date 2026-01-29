@@ -361,14 +361,12 @@ let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token ?stream_id args =
       let response = Option.value err_msg ~default:err in
       emit_end ~success:false ~error:response ();
       { model = model_name; returncode = -1; response; extra = extra_base }
-  | Ok cmd_list ->
-      if cmd_list = [] then
-        let response = "Invalid args" in
-        emit_end ~success:false ~error:response ();
-        { model = model_name; returncode = -1; response; extra = extra_base }
-      else begin
-        let cmd = List.hd cmd_list in
-        let cmd_args = List.tl cmd_list in
+  | Ok [] ->
+      let response = "Invalid args" in
+      emit_end ~success:false ~error:response ();
+      { model = model_name; returncode = -1; response; extra = extra_base }
+  | Ok (cmd :: cmd_args) ->
+      begin
         let full_response = Buffer.create 1024 in
         let accumulated_tool_calls = ref [] in
         let truncated_notice_sent = ref false in
@@ -887,10 +885,12 @@ let execute_gemini_with_retry ~sw ~proc_mgr ~clock
         returncode = -1;
         response = err;
         extra = extra_base @ [("invalid_args", "true")]; }
-  | Ok cmd_list ->
-      let cmd = List.hd cmd_list in
-      let cmd_args = List.tl cmd_list in
-
+  | Ok [] ->
+      { model = model_name;
+        returncode = -1;
+        response = "Empty command list";
+        extra = extra_base @ [("invalid_args", "true")]; }
+  | Ok (cmd :: cmd_args) ->
       (* Use streaming mode if enabled *)
       if stream then
         execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args
@@ -1182,9 +1182,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               returncode = -1;
               response = err;
               extra = extra_base @ [("invalid_args", "true")]; }
-        | Ok cmd_list ->
-            let cmd = List.hd cmd_list in
-            let cmd_args = List.tl cmd_list in
+        | Ok [] ->
+            { model = model_name;
+              returncode = -1;
+              response = "Empty command list";
+              extra = extra_base @ [("invalid_args", "true")]; }
+        | Ok (cmd :: cmd_args) ->
             if stream then
               execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args
             else begin
@@ -1255,9 +1258,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               returncode = -1;
               response = err;
               extra = extra_base @ [("invalid_args", "true")]; }
-        | Ok cmd_list ->
-            let cmd = List.hd cmd_list in
-            let cmd_args = List.tl cmd_list in
+        | Ok [] ->
+            { model = model_name;
+              returncode = -1;
+              response = "Empty command list";
+              extra = extra_base @ [("invalid_args", "true")]; }
+        | Ok (cmd :: cmd_args) ->
             if stream then begin
               let stream_result = execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args in
               { stream_result with response = clean_codex_output stream_result.response }
@@ -1324,9 +1330,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               returncode = -1;
               response = err;
               extra = [("temperature", sprintf "%.1f" temperature); ("local", "true"); ("invalid_args", "true")]; }
-        | Ok cmd_list ->
-            let cmd = List.hd cmd_list in
-            let cmd_args = List.tl cmd_list in
+        | Ok [] ->
+            { model = sprintf "ollama (%s)" model;
+              returncode = -1;
+              response = "Empty command list";
+              extra = [("temperature", sprintf "%.1f" temperature); ("local", "true"); ("invalid_args", "true")]; }
+        | Ok (cmd :: cmd_args) ->
             let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
             match result with
             | Ok r ->
@@ -1516,8 +1525,9 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   let json = Yojson.Safe.from_string data in
                   let open Yojson.Safe.Util in
                   let choices = json |> member "choices" |> to_list in
-                  if List.length choices > 0 then begin
-                    let delta = (List.hd choices) |> member "delta" in
+                  (match choices with
+                  | first_choice :: _ ->
+                    let delta = first_choice |> member "delta" in
                     (* Extract content chunk *)
                     (try
                       let content_chunk = delta |> member "content" |> to_string in
@@ -1555,7 +1565,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         ])
                       end
                     with _ -> ())
-                  end
+                  | [] -> ())
                 with _ -> ()
               end else begin
                 (* [DONE] - broadcast completion *)
@@ -1614,8 +1624,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               let json = Yojson.Safe.from_string r.stdout in
               let open Yojson.Safe.Util in
               let choices = json |> member "choices" |> to_list in
-              if List.length choices > 0 then
-                let first_choice = List.hd choices in
+              (match choices with
+              | first_choice :: _ ->
                 let message = first_choice |> member "message" in
                 (* GLM-4.7 returns reasoning_content for thinking, content for final answer *)
                 let content = Safe_parse.json_string ~context:"glm:content" ~default:"" message "content" in
@@ -1632,11 +1642,11 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   returncode = 0;
                   response = final_response;
                   extra; }
-              else
+              | [] ->
                 { model = sprintf "glm (%s)" model;
                   returncode = -1;
                   response = "Error: No choices in response";
-                  extra = [("error", "no_choices")]; }
+                  extra = [("error", "no_choices")]; })
             with e ->
               (* Check if it's an API error *)
               (try

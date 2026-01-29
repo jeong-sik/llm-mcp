@@ -13,7 +13,7 @@ let compile_exn chain =
   | Error msg -> failwith ("compile failed: " ^ msg)
 
 let exec_fn ~model ?system ~prompt ?tools () =
-  ignore (system, tools);  (* system and tools fields for extended API *)
+  ignore (system, tools);  (* system, tools fields for extended API *)
   if String.contains prompt '!' then Error "forced failure"
   else Ok (Printf.sprintf "[%s]%s" model prompt)
 
