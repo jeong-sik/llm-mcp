@@ -22,11 +22,3 @@ type exec_phase =
   | Completed
   | Failed
   | Skipped
-
-(** {1 Trace Conversion Functions} *)
-
-(** Convert internal_trace to Chain_types.trace_entry *)
-val trace_to_entry : internal_trace -> string -> Chain_types.trace_entry
-
-(** Convert internal traces to trace_entry list, pairing start/complete events *)
-val traces_to_entries : internal_trace list -> Chain_types.trace_entry list
