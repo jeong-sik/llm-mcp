@@ -26,29 +26,22 @@ type token_usage = Chain_types.token_usage
 type merge_strategy = Chain_types.merge_strategy
 type adapter_transform = Chain_types.adapter_transform
 
-(** {1 Local Trace Types} *)
-
-(** Trace event types for execution logging *)
-type trace_event =
+(** {1 Trace Types} - From Chain_trace_types module *)
+type trace_event = Chain_trace_types.trace_event =
   | NodeStart of { node_type : string; attempt : int }
   | NodeComplete of { duration_ms : int; success : bool; node_type : string; attempt : int }
   | NodeError of { message : string; error_class : string option; node_type : string; attempt : int }
   | ChainStart of { chain_id : string; mermaid_dsl : string option }
   | ChainComplete of { chain_id : string; success : bool }
 
-(** Internal trace entry for execution *)
-type internal_trace = {
+type internal_trace = Chain_trace_types.internal_trace = {
   timestamp : float;
   node_id : string;
   event : trace_event;
 }
 
-type exec_phase =
-  | Planned
-  | Running
-  | Completed
-  | Failed
-  | Skipped
+type exec_phase = Chain_trace_types.exec_phase =
+  | Planned | Running | Completed | Failed | Skipped
 
 (** {1 Execution Context} *)
 
@@ -570,6 +563,8 @@ let substitute_iteration_vars = Chain_iteration.substitute_vars
 let estimate_tokens = Chain_conversation.estimate_tokens
 let make_conversation_ctx = Chain_conversation.make
 let add_message = Chain_conversation.add_message
+let rotate_model = Chain_conversation.rotate_model
+let needs_summarization = Chain_conversation.needs_summarization
 let build_context_prompt = Chain_conversation.build_context_prompt
 let maybe_summarize_and_rotate = Chain_conversation.maybe_summarize_and_rotate
 
