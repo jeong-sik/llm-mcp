@@ -43,6 +43,18 @@ let extract_sse_data_lines body =
     else None
   ) lines
 
+(** Build JSON-RPC tool call request *)
+let build_tool_call_request ~tool_name ~arguments : string =
+  `Assoc [
+    ("jsonrpc", `String "2.0");
+    ("id", `Int 1);
+    ("method", `String "tools/call");
+    ("params", `Assoc [
+      ("name", `String tool_name);
+      ("arguments", arguments);
+    ]);
+  ] |> Yojson.Safe.to_string
+
 (** Parse MCP HTTP response (streamable-http SSE or plain JSON-RPC) *)
 let parse_http_response (body : string) : string option =
   let data_lines = extract_sse_data_lines body in

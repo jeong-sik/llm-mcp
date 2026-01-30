@@ -78,16 +78,7 @@ let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~t
   match Tool_config.get_mcp_server_url server_name with
   | None -> sprintf "Error: MCP server '%s' not found or not HTTP type" server_name
   | Some url ->
-      let request_body = `Assoc [
-        ("jsonrpc", `String "2.0");
-        ("id", `Int 1);
-        ("method", `String "tools/call");
-        ("params", `Assoc [
-          ("name", `String tool_name);
-          ("arguments", arguments);
-        ]);
-      ] |> Yojson.Safe.to_string in
-
+      let request_body = Tools_mcp_parse.build_tool_call_request ~tool_name ~arguments in
       let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
         "-s"; "-X"; "POST"; url;
         "-H"; "Content-Type: application/json";
@@ -102,16 +93,7 @@ let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~t
 
 (** Call MCP via stdio subprocess - shell injection safe *)
 let call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command ~args ~tool_name ~arguments ~timeout =
-  let request_body = `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", `Int 1);
-    ("method", `String "tools/call");
-    ("params", `Assoc [
-      ("name", `String tool_name);
-      ("arguments", arguments);
-    ]);
-  ] |> Yojson.Safe.to_string in
-
+  let request_body = Tools_mcp_parse.build_tool_call_request ~tool_name ~arguments in
   let effective_timeout = min timeout 60 in
   let result = run_command_with_stdin ~sw ~proc_mgr ~clock
     ~timeout:effective_timeout
