@@ -261,6 +261,8 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let name_opt = params |> member "name" |> to_string_option in
   let arguments = params |> member "arguments" in
 
+  (* Phase 5: Response format - Compact DSL is deprecated, always use Verbose (JSON) *)
+  let response_format = Types.Verbose in
   (* Parse arguments based on tool *)
   let parse_args name : (Types.tool_args, string) result =
     match name with
