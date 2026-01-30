@@ -79,7 +79,6 @@
    unix
    zstd
    msgpck
-   compact-protocol
    grpc-direct-core
    mcp_protocol
    base64
@@ -155,7 +154,6 @@
    msgpck
    grpc-direct-core
    zstd
-   compact-protocol
    llm_mcp_resilience)
  (ocamlopt_flags (:standard -O3))
  ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support

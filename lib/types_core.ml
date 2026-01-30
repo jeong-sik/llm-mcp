@@ -54,15 +54,15 @@ let string_of_output_format = function
   | Json -> "json"
   | StreamJson -> "stream-json"
 
-(** Response format for tool output *)
+(** Response format for tool output - Standardized on Verbose (JSON) *)
 type response_format =
   | Verbose     (* Full JSON, human-readable *)
-  | Compact     (* DSL: OK|G3|150|result (Deprecated) *)
-  | Binary      (* msgpack, base64 encoded (Deprecated) *)
-  | Base85      (* msgpack, base85 encoded (Deprecated) *)
-  | Compressed  (* zlib + base85 (Deprecated) *)
-  | ZstdDict    (* zstd with trained dictionary (Deprecated) *)
-  | Auto        (* Adaptive: auto-select based on response size (Deprecated) *)
+  | Compact     (* DSL (Deprecated, maps to Verbose) *)
+  | Binary      (* msgpack (Deprecated, maps to Verbose) *)
+  | Base85      (* base85 (Deprecated, maps to Verbose) *)
+  | Compressed  (* zlib (Deprecated, maps to Verbose) *)
+  | ZstdDict    (* zstd+dict (Deprecated, maps to Verbose) *)
+  | Auto        (* Adaptive (Deprecated, maps to Verbose) *)
 
 let response_format_of_string = function
   | "compact" | "dsl" -> Compact

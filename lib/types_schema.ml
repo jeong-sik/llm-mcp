@@ -10,11 +10,10 @@ let response_format_schema =
   ("response_format", `Assoc [
     ("type", `String "string");
     ("enum", `List [
-      `String "verbose"; `String "compact"; `String "binary";
-      `String "base85"; `String "compressed"; `String "auto"
+      `String "verbose"
     ]);
     ("default", `String "verbose");
-    ("description", `String "Output format: verbose (JSON), compact (DSL ~50% smaller), binary (Base64), base85 (25% vs 33% overhead), compressed (Zlib+Base85), auto (adaptive based on size). v1.3: auto selects best format based on response length.");
+    ("description", `String "Output format: verbose (JSON). Standard OCaml MCP ecosystem format.");
   ])
 
 (** Generate tool schemas for MCP *)

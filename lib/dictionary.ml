@@ -1,6 +1,6 @@
 (** Dictionary.ml - Trained Dictionary Compression for LLM Responses
 
-    Compact Protocol v4: Trained zstd dictionaries for maximum compression
+    Trained zstd dictionaries for maximum compression
     of LLM-specific content (JSON, code, markdown, tool calls).
 
     Benefits:
@@ -21,7 +21,7 @@
     ]}
 
     @author Second Brain
-    @since Compact Protocol v4
+    @since Phase 5 (standardized compression)
 *)
 
 (** {1 Types} *)

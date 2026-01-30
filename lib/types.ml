@@ -5,11 +5,10 @@
     - Types.tool_args, Types.tool_result, etc.
 
     The actual implementations are split into:
-    - Types_core: Foundation types (thinking_level, tool_result, etc.)
+    - Types_core: Foundation types (thinking_level, tool_result, response_format, etc.)
     - Types_glm: GLM function calling types
     - Types_gemini: Gemini error classification
     - Types_llm: tool_args discriminated union
-    - Types_compact: Compact protocol (response_format, encoding)
     - Types_schema: MCP tool schemas *)
 
 (* Foundation types *)
