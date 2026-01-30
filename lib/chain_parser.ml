@@ -1,28 +1,54 @@
+[@@@warning "-32"]
 (** Chain Parser - JSON to Chain AST conversion
 
     Parses JSON DSL into Chain_types structures.
     Handles:
     - Node type detection and parsing
-    - Input mapping with \{\{node.output\}\} syntax
+    - Input mapping with template syntax
     - Validation (cycle detection, depth limits)
     - Config defaults and overrides
 
-    {2 _dep_ Prefix Convention}
+    Security Limits (P0.3):
+    To prevent DoS via malicious chain definitions:
+    - max_depth: 20 (prevents stack overflow in nested subgraphs)
+    - max_concurrency: 10 (prevents resource exhaustion)
+    - max_nodes: 100 (prevents memory exhaustion)
+    - max_fanout: 20 (prevents exponential explosion in parallel branches)
 
-    The [_dep_] prefix is used in [input_mapping] keys to mark explicit dependencies
-    that should be preserved during JSON ↔ Mermaid roundtrip conversion.
-
-    - Template variables [\{\{foo\}\}] are auto-extracted but may be lost on roundtrip
-    - Explicit dependencies from [depends_on] field use [_dep_] prefix: [("_dep_foo", "foo")]
-    - The prefix ensures these dependencies survive serialization to Mermaid and back
-
-    Example:
-    - JSON: [{...} "depends_on": ["step1", "step2"]]
-    - Parsed: [input_mapping = [("_dep_step1", "step1"); ("_dep_step2", "step2")]]
-    - Mermaid: [node_id --> step1] and [node_id --> step2] edges preserved
+    These limits can be configured via environment variables:
+    - LLM_MCP_CHAIN_MAX_DEPTH (default: 20)
+    - LLM_MCP_CHAIN_MAX_CONCURRENCY (default: 10)
+    - LLM_MCP_CHAIN_MAX_NODES (default: 100)
+    - LLM_MCP_CHAIN_MAX_FANOUT (default: 20)
 *)
 
 open Chain_types
+
+(** {1 Security Limits (P0.3)} *)
+
+(** Maximum allowed chain depth to prevent stack overflow *)
+let security_max_depth =
+  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_DEPTH" with
+  | Some s -> (try max 1 (int_of_string s) with _ -> 20)
+  | None -> 20
+
+(** Maximum allowed concurrency to prevent resource exhaustion *)
+let security_max_concurrency =
+  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_CONCURRENCY" with
+  | Some s -> (try max 1 (int_of_string s) with _ -> 10)
+  | None -> 10
+
+(** Maximum total nodes in a chain to prevent memory exhaustion *)
+let security_max_nodes =
+  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_NODES" with
+  | Some s -> (try max 1 (int_of_string s) with _ -> 100)
+  | None -> 100
+
+(** Maximum nodes in a single fanout/parallel to prevent exponential explosion *)
+let security_max_fanout =
+  match Sys.getenv_opt "LLM_MCP_CHAIN_MAX_FANOUT" with
+  | Some s -> (try max 1 (int_of_string s) with _ -> 20)
+  | None -> 20
 
 (** Helper: Result bind operator *)
 let ( let* ) = Result.bind
@@ -230,6 +256,7 @@ let rec extract_json_mappings (json : Yojson.Safe.t) : (string * string) list =
   | _ -> []
 
 (** Parse chain config from JSON *)
+(** Parse chain config from JSON with security limits (P0.3) *)
 let parse_config (json : Yojson.Safe.t) : chain_config =
   let open Yojson.Safe.Util in
   let get_int_opt key default =
@@ -245,9 +272,12 @@ let parse_config (json : Yojson.Safe.t) : chain_config =
     | `String s -> direction_of_string s
     | _ -> default
   in
+  (* P0.3: Enforce security limits on parsed values *)
+  let raw_depth = get_int_opt "max_depth" default_config.max_depth in
+  let raw_concurrency = get_int_opt "max_concurrency" default_config.max_concurrency in
   {
-    max_depth = get_int_opt "max_depth" default_config.max_depth;
-    max_concurrency = get_int_opt "max_concurrency" default_config.max_concurrency;
+    max_depth = min raw_depth security_max_depth;
+    max_concurrency = min raw_concurrency security_max_concurrency;
     timeout = get_int_opt "timeout" default_config.timeout;
     trace = get_bool_opt "trace" default_config.trace;
     direction = get_direction_opt "direction" default_config.direction;
@@ -533,7 +563,29 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       Ok (Fanout nodes)
 
   | "quorum" ->
-      let required = json |> member "required" |> to_int in
+      (* P1.3: Support consensus modes - "consensus" field or fallback to "required" *)
+      let consensus =
+        match json |> member "consensus" with
+        | `String s -> Chain_types.consensus_mode_of_string s
+        | `Null ->
+            (* Backward compat: use "required" as Count *)
+            let required = json |> member "required" |> to_int in
+            Chain_types.Count required
+        | _ ->
+            let required = json |> member "required" |> to_int in
+            Chain_types.Count required
+      in
+      let weights =
+        match json |> member "weights" with
+        | `Assoc pairs ->
+            List.filter_map (fun (k, v) ->
+              match v with
+              | `Float f -> Some (k, f)
+              | `Int i -> Some (k, float_of_int i)
+              | _ -> None
+            ) pairs
+        | _ -> []
+      in
       (* Try "nodes" first, fallback to "inputs" *)
       let nodes_json =
         match json |> member "nodes" with
@@ -541,7 +593,7 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | _ -> parse_list_with_default json "inputs"
       in
       let* nodes = parse_nodes nodes_json in
-      Ok (Quorum { required; nodes })
+      Ok (Quorum { consensus; nodes; weights })
 
   | "gate" ->
       let* condition = require_string json "condition" in
@@ -1137,6 +1189,20 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
   if c.Chain_types.config.timeout <= 0 then
     add_error "config.timeout must be > 0";
 
+  (* P0.3: Security limit checks *)
+  let total_nodes = List.length all_nodes in
+  if total_nodes > security_max_nodes then
+    addf "Chain exceeds maximum node limit: %d nodes (max: %d). Split into subchains or simplify."
+      total_nodes security_max_nodes;
+
+  if c.Chain_types.config.max_depth > security_max_depth then
+    addf "config.max_depth (%d) exceeds security limit (%d)"
+      c.Chain_types.config.max_depth security_max_depth;
+
+  if c.Chain_types.config.max_concurrency > security_max_concurrency then
+    addf "config.max_concurrency (%d) exceeds security limit (%d)"
+      c.Chain_types.config.max_concurrency security_max_concurrency;
+
   (* Duplicate IDs across all nodes (including nested/subgraphs) *)
   let seen = Hashtbl.create (List.length all_ids) in
   List.iter (fun id ->
@@ -1227,12 +1293,27 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         List.iter (fun n2 -> validate_node (path ^ "/pipeline") n2) nodes
     | Chain_types.Fanout nodes ->
         if nodes = [] then addf "%s: fanout has no nodes" path;
+        (* P0.3: Security limit on parallel branches *)
+        if List.length nodes > security_max_fanout then
+          addf "%s: fanout exceeds maximum branches: %d (max: %d)"
+            path (List.length nodes) security_max_fanout;
         List.iter (fun n2 -> validate_node (path ^ "/fanout") n2) nodes
-    | Chain_types.Quorum { required; nodes } ->
+    | Chain_types.Quorum { consensus; nodes; _ } ->
         if nodes = [] then addf "%s: quorum has no nodes" path;
-        if required <= 0 then addf "%s: quorum.required must be > 0" path;
-        if required > List.length nodes then
-          addf "%s: quorum.required (%d) exceeds node count (%d)" path required (List.length nodes);
+        (* P1.3: Validate based on consensus mode *)
+        (match consensus with
+         | Chain_types.Count n ->
+             if n <= 0 then addf "%s: quorum.count must be > 0" path;
+             if n > List.length nodes then
+               addf "%s: quorum.count (%d) exceeds node count (%d)" path n (List.length nodes)
+         | Chain_types.Weighted threshold ->
+             if threshold < 0.0 || threshold > 1.0 then
+               addf "%s: quorum.weighted threshold must be in [0.0, 1.0]" path
+         | Chain_types.Majority | Chain_types.Unanimous -> ());
+        (* P0.3: Security limit on parallel branches *)
+        if List.length nodes > security_max_fanout then
+          addf "%s: quorum exceeds maximum branches: %d (max: %d)"
+            path (List.length nodes) security_max_fanout;
         List.iter (fun n2 -> validate_node (path ^ "/quorum") n2) nodes
     | Chain_types.Gate { condition; then_node; else_node } ->
         if is_blank condition then addf "%s: gate.condition is empty" path;
@@ -1255,6 +1336,10 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         validate_node (path ^ "/bind") inner
     | Chain_types.Merge { nodes; _ } ->
         if List.length nodes < 2 then addf "%s: merge requires at least 2 nodes" path;
+        (* P0.3: Security limit on parallel branches *)
+        if List.length nodes > security_max_fanout then
+          addf "%s: merge exceeds maximum branches: %d (max: %d)"
+            path (List.length nodes) security_max_fanout;
         List.iter (fun n2 -> validate_node (path ^ "/merge") n2) nodes
     | Chain_types.Threshold { metric; input_node; on_pass; on_fail; _ } ->
         if is_blank metric then addf "%s: threshold.metric is empty" path;
@@ -1279,6 +1364,10 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
         List.iter (fun n2 -> validate_node (path ^ "/fallback") n2) fallbacks
     | Chain_types.Race { nodes; _ } ->
         if nodes = [] then addf "%s: race has no nodes" path;
+        (* P0.3: Security limit on parallel branches *)
+        if List.length nodes > security_max_fanout then
+          addf "%s: race exceeds maximum branches: %d (max: %d)"
+            path (List.length nodes) security_max_fanout;
         List.iter (fun n2 -> validate_node (path ^ "/race") n2) nodes
     | Chain_types.ChainExec { chain_source; max_depth; context_inject; _ } ->
         if is_blank chain_source then addf "%s: chain_exec.chain_source is empty" path;
@@ -1320,6 +1409,10 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
              addf "%s: stream_merge.min_results (%d) exceeds node count (%d)"
                path m (List.length nodes)
          | _ -> ());
+        (* P0.3: Security limit on parallel branches *)
+        if List.length nodes > security_max_fanout then
+          addf "%s: stream_merge exceeds maximum branches: %d (max: %d)"
+            path (List.length nodes) security_max_fanout;
         List.iter (fun n2 -> validate_node (path ^ "/stream_merge") n2) nodes
     | Chain_types.FeedbackLoop { generator; max_iterations; score_threshold; _ } ->
         if max_iterations <= 0 then addf "%s: feedback_loop.max_iterations must be > 0" path;
@@ -1497,12 +1590,19 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
     | Fanout nodes ->
         [("type", `String "fanout"); ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes))]
 
-    | Quorum { required; nodes } ->
-        [
-          ("type", `String "quorum");
-          ("required", `Int required);
-          ("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes));
-        ]
+    | Quorum { consensus; nodes; weights } ->
+        (* P1.3: Serialize consensus mode *)
+        let consensus_field = match consensus with
+          | Chain_types.Count n -> [("required", `Int n)]  (* backward compat *)
+          | _ -> [("consensus", `String (Chain_types.consensus_mode_to_string consensus))]
+        in
+        let weights_field = if weights = [] then []
+          else [("weights", `Assoc (List.map (fun (k, v) -> (k, `Float v)) weights))]
+        in
+        [("type", `String "quorum")]
+        @ consensus_field
+        @ weights_field
+        @ [("nodes", `List (List.map (node_to_json_with include_empty_inputs) nodes))]
 
     | Gate { condition; then_node; else_node } ->
         let fields = [

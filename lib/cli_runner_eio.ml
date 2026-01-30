@@ -8,6 +8,10 @@
     - Structured concurrency with Eio.Switch
     - Fiber-based parallelism for stdout/stderr
     - Timeout via Eio.Time with fiber cancellation
+
+    Security improvements (P0):
+    - Process group termination on timeout to prevent orphan processes
+    - Output buffer size limit to prevent memory exhaustion
 *)
 
 (** {1 Types} *)
@@ -22,11 +26,36 @@ type run_error =
   | Timeout of int
   | ProcessError of string
 
+(** {1 Configuration} *)
+
+(** Maximum output size in bytes (P0.2: prevent memory exhaustion)
+    Default: 10MB. Can be overridden via LLM_MCP_MAX_OUTPUT_SIZE env var. *)
+let max_output_size =
+  match Sys.getenv_opt "LLM_MCP_MAX_OUTPUT_SIZE" with
+  | Some s -> (try int_of_string s with _ -> 10 * 1024 * 1024)
+  | None -> 10 * 1024 * 1024  (* 10MB default *)
+
 (** {1 Helper Functions} *)
 
-(** Read all content from a flow *)
-let read_all flow =
-  Eio.Buf_read.(of_flow ~max_size:max_int flow |> take_all)
+(** Read all content from a flow with size limit (P0.2) *)
+let read_all ?(max_size = max_output_size) flow =
+  Eio.Buf_read.(of_flow ~max_size flow |> take_all)
+
+(** Terminate process and its group safely (P0.1)
+    Sends SIGTERM first, then SIGKILL if needed.
+    Uses process group to ensure all children are terminated. *)
+let terminate_process_safely proc =
+  try
+    let pid = Eio.Process.pid proc in
+    (* Send SIGTERM to process group (negative PID) *)
+    (try Unix.kill (-pid) Sys.sigterm with Unix.Unix_error _ -> ());
+    (* Give process time to cleanup, then force kill *)
+    Unix.sleepf 0.1;
+    (try Unix.kill (-pid) Sys.sigkill with Unix.Unix_error _ -> ());
+    (* Also signal the process directly in case it's not a group leader *)
+    (try Eio.Process.signal proc Sys.sigterm with _ -> ());
+    (try Eio.Process.signal proc Sys.sigkill with _ -> ())
+  with _ -> ()  (* Process may have already exited *)
 
 (** Get output preferring stdout, falling back to stderr *)
 let get_output result =
@@ -41,7 +70,10 @@ let get_output result =
     Uses structured concurrency:
     - Spawns process in switch scope
     - Reads stdout/stderr in parallel fibers
-    - Timeout via Eio.Time.with_timeout
+    - Timeout via Eio.Time with fiber cancellation
+
+    P0.1 Security: On timeout, terminates process group to prevent orphans.
+    P0.2 Security: Limits output buffer size to prevent memory exhaustion.
 *)
 let run_command ~sw ~proc_mgr ~clock ?cwd ?(safe_tmpdir = false) ~timeout cmd args =
   (* Build command list *)
@@ -64,6 +96,9 @@ let run_command ~sw ~proc_mgr ~clock ?cwd ?(safe_tmpdir = false) ~timeout cmd ar
   (* Run with timeout *)
   let timeout_duration = Float.of_int timeout in
 
+  (* P0.1: Store process reference for cleanup on timeout *)
+  let proc_ref = ref None in
+
   try
     let result = Eio.Time.with_timeout clock timeout_duration (fun () ->
       (* Create pipes for stdout/stderr *)
@@ -80,17 +115,25 @@ let run_command ~sw ~proc_mgr ~clock ?cwd ?(safe_tmpdir = false) ~timeout cmd ar
         cmd_list
       in
 
+      (* P0.1: Store process for cleanup *)
+      proc_ref := Some proc;
+
       (* Close write ends after spawn (parent doesn't write) *)
       Eio.Flow.close stdout_w;
       Eio.Flow.close stderr_w;
 
-      (* Read stdout and stderr in parallel *)
+      (* Read stdout and stderr in parallel with size limits (P0.2) *)
       let stdout_content = ref "" in
       let stderr_content = ref "" in
 
-      Eio.Fiber.both
-        (fun () -> stdout_content := read_all stdout_r)
-        (fun () -> stderr_content := read_all stderr_r);
+      (try
+        Eio.Fiber.both
+          (fun () -> stdout_content := read_all stdout_r)
+          (fun () -> stderr_content := read_all stderr_r)
+      with Eio.Buf_read.Buffer_limit_exceeded ->
+        (* P0.2: Output too large, terminate process and report *)
+        terminate_process_safely proc;
+        raise (Failure "Output exceeded maximum buffer size"));
 
       (* Close read ends after reading *)
       Eio.Flow.close stdout_r;
@@ -107,16 +150,34 @@ let run_command ~sw ~proc_mgr ~clock ?cwd ?(safe_tmpdir = false) ~timeout cmd ar
     ) in
     match result with
     | Ok r -> Ok r
-    | Error `Timeout -> Error (Timeout timeout)
-  with exn ->
-    Error (ProcessError (Printexc.to_string exn))
+    | Error `Timeout ->
+        (* P0.1: Terminate process group on timeout *)
+        (match !proc_ref with
+         | Some proc -> terminate_process_safely proc
+         | None -> ());
+        Error (Timeout timeout)
+  with
+  | Failure msg when String.length msg > 20 && String.sub msg 0 21 = "Output exceeded maxim" ->
+      Error (ProcessError (Printf.sprintf "Output exceeded maximum size (%d bytes)" max_output_size))
+  | exn ->
+      (* P0.1: Cleanup on any error *)
+      (match !proc_ref with
+       | Some proc -> terminate_process_safely proc
+       | None -> ());
+      Error (ProcessError (Printexc.to_string exn))
 
 (** Run a streaming command, calling on_line for each stdout line.
     Used for ollama streaming API responses.
+
+    P0.1 Security: On timeout, terminates process group.
+    P0.2 Security: Limits line buffer size.
 *)
 let run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd args =
   let cmd_list = cmd :: args in
   let timeout_duration = Float.of_int timeout in
+
+  (* P0.1: Store process reference for cleanup on timeout *)
+  let proc_ref = ref None in
 
   try
     let result = Eio.Time.with_timeout clock timeout_duration (fun () ->
@@ -127,10 +188,13 @@ let run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd args =
         cmd_list
       in
 
+      (* P0.1: Store process for cleanup *)
+      proc_ref := Some proc;
+
       Eio.Flow.close stdout_w;
 
-      (* Read lines and call callback *)
-      let reader = Eio.Buf_read.of_flow ~max_size:max_int stdout_r in
+      (* Read lines and call callback (P0.2: with size limit) *)
+      let reader = Eio.Buf_read.of_flow ~max_size:max_output_size stdout_r in
       let rec read_lines () =
         match Eio.Buf_read.line reader with
         | line ->
@@ -152,17 +216,32 @@ let run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd args =
     ) in
     match result with
     | Ok r -> Ok r
-    | Error `Timeout -> Error (Timeout timeout)
+    | Error `Timeout ->
+        (* P0.1: Terminate process group on timeout *)
+        (match !proc_ref with
+         | Some proc -> terminate_process_safely proc
+         | None -> ());
+        Error (Timeout timeout)
   with exn ->
+    (* P0.1: Cleanup on any error *)
+    (match !proc_ref with
+     | Some proc -> terminate_process_safely proc
+     | None -> ());
     Error (ProcessError (Printexc.to_string exn))
 
 (** Run a command with stdin input (shell injection-safe).
     Spawns process with argv array directly, writes to stdin, reads stdout/stderr.
     Used for MCP stdio servers that need JSON-RPC input.
+
+    P0.1 Security: On timeout, terminates process group.
+    P0.2 Security: Limits output buffer size.
 *)
 let run_command_with_stdin ~sw ~proc_mgr ~clock ~timeout ~stdin_data cmd args =
   let cmd_list = cmd :: args in
   let timeout_duration = Float.of_int timeout in
+
+  (* P0.1: Store process reference for cleanup on timeout *)
+  let proc_ref = ref None in
 
   try
     let result = Eio.Time.with_timeout clock timeout_duration (fun () ->
@@ -177,6 +256,9 @@ let run_command_with_stdin ~sw ~proc_mgr ~clock ~timeout ~stdin_data cmd args =
         cmd_list
       in
 
+      (* P0.1: Store process for cleanup *)
+      proc_ref := Some proc;
+
       (* Close parent ends *)
       Eio.Flow.close stdin_r;
       Eio.Flow.close stdout_w;
@@ -189,13 +271,18 @@ let run_command_with_stdin ~sw ~proc_mgr ~clock ~timeout ~stdin_data cmd args =
       with _ ->
         Eio.Flow.close stdin_w);
 
-      (* Read stdout and stderr in parallel *)
+      (* Read stdout and stderr in parallel with size limits (P0.2) *)
       let stdout_content = ref "" in
       let stderr_content = ref "" in
 
-      Eio.Fiber.both
-        (fun () -> stdout_content := read_all stdout_r)
-        (fun () -> stderr_content := read_all stderr_r);
+      (try
+        Eio.Fiber.both
+          (fun () -> stdout_content := read_all stdout_r)
+          (fun () -> stderr_content := read_all stderr_r)
+      with Eio.Buf_read.Buffer_limit_exceeded ->
+        (* P0.2: Output too large, terminate process and report *)
+        terminate_process_safely proc;
+        raise (Failure "Output exceeded maximum buffer size"));
 
       (* Close read ends after reading *)
       Eio.Flow.close stdout_r;
@@ -211,9 +298,21 @@ let run_command_with_stdin ~sw ~proc_mgr ~clock ~timeout ~stdin_data cmd args =
     ) in
     match result with
     | Ok r -> Ok r
-    | Error `Timeout -> Error (Timeout timeout)
-  with exn ->
-    Error (ProcessError (Printexc.to_string exn))
+    | Error `Timeout ->
+        (* P0.1: Terminate process group on timeout *)
+        (match !proc_ref with
+         | Some proc -> terminate_process_safely proc
+         | None -> ());
+        Error (Timeout timeout)
+  with
+  | Failure msg when String.length msg > 20 && String.sub msg 0 21 = "Output exceeded maxim" ->
+      Error (ProcessError (Printf.sprintf "Output exceeded maximum size (%d bytes)" max_output_size))
+  | exn ->
+      (* P0.1: Cleanup on any error *)
+      (match !proc_ref with
+       | Some proc -> terminate_process_safely proc
+       | None -> ());
+      Error (ProcessError (Printexc.to_string exn))
 
 (** {1 Convenience Wrappers}
 
