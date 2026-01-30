@@ -1021,64 +1021,11 @@ let execute_slack_post ~sw ~proc_mgr ~clock ~channel ~text ~thread_ts : tool_res
             response = sprintf "Error: %s" msg;
             extra = [("channel", channel); ("error", msg)]; }
 
-(** {1 Langfuse Tracing Helpers} *)
-
-(** Extract model name from tool_args for tracing *)
-let get_model_name_for_tracing = function
-  | Gemini { model; _ } -> sprintf "gemini:%s" model
-  | Claude { model; _ } -> sprintf "claude:%s" model
-  | Codex { model; _ } -> sprintf "codex:%s" model
-  | Ollama { model; _ } -> sprintf "ollama:%s" model
-  | OllamaList -> "ollama:list"
-  | Glm { model; _ } -> sprintf "glm:%s" model
-  | GlmTranslate { model; _ } -> sprintf "glm.translate:%s" model
-  | ChainRun _ -> "chain:run"
-  | ChainValidate _ -> "chain:validate"
-  | ChainList -> "chain:list"
-  | ChainToMermaid _ -> "chain:to_mermaid"
-  | ChainVisualize _ -> "chain:visualize"
-  | ChainConvert _ -> "chain:convert"
-  | ChainOrchestrate _ -> "chain:orchestrate"
-  | ChainCheckpoints _ -> "chain:checkpoints"
-  | ChainResume _ -> "chain:resume"
-  | PromptRegister _ -> "prompt:register"
-  | PromptList -> "prompt:list"
-  | PromptGet _ -> "prompt:get"
-  | GhPrDiff _ -> "tool:gh_pr_diff"
-  | SlackPost _ -> "tool:slack_post"
-  | SetStreamDelta _ -> "config:set_stream_delta"
-  | GetStreamDelta -> "config:get_stream_delta"
-
-(** Extract input/prompt from tool_args for tracing *)
-let get_input_for_tracing = function
-  | Gemini { prompt; _ } -> prompt
-  | Claude { prompt; _ } -> prompt
-  | Codex { prompt; _ } -> prompt
-  | Ollama { prompt; _ } -> prompt
-  | OllamaList -> "(list models)"
-  | Glm { prompt; _ } -> prompt
-  | GlmTranslate { text; _ } -> sprintf "(translate: %s)" (String.sub text 0 (min 50 (String.length text)))
-  | ChainRun { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
-  | ChainValidate { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
-  | ChainOrchestrate { chain; _ } ->
-      (match chain with
-       | Some j -> sprintf "(orchestrate: %s)" (Yojson.Safe.to_string j)
-       | None -> "(orchestrate: preset)")
-  | _ -> "(non-llm operation)"
-
-let classify_error_class (r : tool_result) : string option =
-  if r.returncode = 0 then None
-  else if String.length r.response >= 7 && String.sub r.response 0 7 = "Timeout" then
-    Some "timeout"
-  else if String.length r.response >= 6 && String.sub r.response 0 6 = "Error:" then
-    Some "tool_error"
-  else
-    Some "llm_error"
-
-let result_streamed (r : tool_result) : bool =
-  match List.assoc_opt "streamed" r.extra with
-  | Some "true" -> true
-  | _ -> false
+(** {1 Langfuse Tracing Helpers} - From Tools_tracer module *)
+let get_model_name_for_tracing = Tools_tracer.get_model_name
+let get_input_for_tracing = Tools_tracer.get_input
+let classify_error_class = Tools_tracer.classify_error
+let result_streamed = Tools_tracer.was_streamed
 
 (** {1 Main Execute Function} *)
 
