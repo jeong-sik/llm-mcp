@@ -1249,11 +1249,19 @@ module Request = struct
       | Some v -> parse_positive_int v
       | None -> None
     in
-    (match content_length with
-     | Some len when len > max_body_bytes ->
-         respond_too_large reqd max_body_bytes
-     | _ ->
     let body = Httpun.Reqd.request_body reqd in
+    let stopped = ref false in
+    let stop () =
+      if not !stopped then begin
+        stopped := true;
+        (try Httpun.Body.Reader.close body with _ -> ())
+      end
+    in
+    match content_length with
+    | Some len when len > max_body_bytes ->
+        stop ();
+        respond_too_large reqd max_body_bytes
+    | _ ->
     let initial_capacity =
       match content_length with
       | Some len when len > 0 && len < max_body_bytes -> len
@@ -1268,17 +1276,20 @@ module Request = struct
           try callback body_str with exn ->
             respond_internal_error reqd exn)
         ~on_read:(fun buffer ~off ~len ->
-          let next_bytes = !seen_bytes + len in
-          if next_bytes > max_body_bytes then begin
-            respond_too_large reqd max_body_bytes
-          end else begin
-            seen_bytes := next_bytes;
-            let chunk = Bigstringaf.substring buffer ~off ~len in
-            Buffer.add_string buf chunk;
-            read_loop ()
-          end)
+          if !stopped then ()
+          else
+            let next_bytes = !seen_bytes + len in
+            if next_bytes > max_body_bytes then begin
+              stop ();
+              respond_too_large reqd max_body_bytes
+            end else begin
+              seen_bytes := next_bytes;
+              let chunk = Bigstringaf.substring buffer ~off ~len in
+              Buffer.add_string buf chunk;
+              read_loop ()
+            end)
     in
-    read_loop ())
+    read_loop ()
 
   let path (request : Httpun.Request.t) =
     request.target |> String.split_on_char '?' |> List.hd
