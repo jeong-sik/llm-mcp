@@ -113,6 +113,11 @@ let execute_chain_run
           let exec_fn ~model ?system ~prompt ?tools () =
             let _ = system in  (* Unused for now *)
             let parsed_tools = parse_tools tools in
+            (* Category resolution: "reasoning" → "ollama:falcon-h1r" etc. *)
+            let model = match Model_registry.resolve model with
+              | Some resolved -> resolved
+              | None -> model
+            in
             let args = match String.lowercase_ascii model with
               | "stub" | "mock" ->
                   Types.Gemini {
