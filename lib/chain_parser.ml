@@ -981,9 +981,11 @@ and collect_placeholders_in_node acc (n : Chain_types.node) =
 
 (** Validate chain structure *)
 let validate_chain (c : Chain_types.chain) : (unit, string) result =
-  (* Check output node exists *)
+  (* Check output node exists - can be either a node ID or an output_key alias *)
   let node_ids = List.map (fun (n : Chain_types.node) -> n.id) c.Chain_types.nodes in
-  if not (List.mem c.Chain_types.output node_ids) then
+  let output_keys = List.filter_map (fun (n : Chain_types.node) -> n.output_key) c.Chain_types.nodes in
+  let valid_outputs = node_ids @ output_keys in
+  if not (List.mem c.Chain_types.output valid_outputs) then
     Error (Printf.sprintf "Output node '%s' not found in chain" c.Chain_types.output)
   (* Check for duplicate IDs *)
   else
@@ -1115,6 +1117,8 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
   let all_nodes = List.fold_left collect_all_nodes [] c.Chain_types.nodes in
   let all_ids = List.map (fun (n : Chain_types.node) -> n.id) all_nodes in
   let top_ids = List.map (fun (n : Chain_types.node) -> n.id) c.Chain_types.nodes in
+  let output_keys = List.filter_map (fun (n : Chain_types.node) -> n.output_key) c.Chain_types.nodes in
+  let valid_outputs = top_ids @ output_keys in
 
   if is_blank c.Chain_types.id then
     add_error "Chain id is empty";
@@ -1122,7 +1126,7 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
   if c.Chain_types.nodes = [] then
     add_error "Chain has no nodes";
 
-  if not (List.mem c.Chain_types.output top_ids) then
+  if not (List.mem c.Chain_types.output valid_outputs) then
     addf "Output node '%s' not found in chain nodes" c.Chain_types.output;
 
   (* Config sanity checks *)
