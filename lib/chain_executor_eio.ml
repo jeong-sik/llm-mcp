@@ -760,7 +760,7 @@ let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention 
   let args = `Assoc ([
     ("agent_name", `String (masc_agent_name ()));
     ("message", `String full_message);
-    ("format", `String "compact");
+    ("format", `String "verbose");
   ] @ (match room with Some r -> [("room", `String r)] | None -> []))
   in
   (* Call masc.masc_broadcast via tool_exec *)
@@ -997,7 +997,7 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Tool _ -> execute_tool_node ctx ~tool_exec ~node node.node_type
   | Pipeline nodes -> execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
   | Fanout nodes -> execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec node nodes
-  | Quorum { required; nodes } -> execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec node ~required nodes
+  | Quorum { consensus; nodes; weights } -> execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec node ~consensus ~weights nodes
   | Gate { condition; then_node; else_node } ->
       execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec node ~condition ~then_node ~else_node
   | Subgraph chain -> execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec node chain
@@ -1683,14 +1683,14 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
     Error msg
   end
 
-(** Execute N/K quorum (require N successes from K nodes)
+(** Execute quorum with consensus algorithm (P1.3)
 
-    In Mermaid DAG: J1 --> V{Quorum:2}, J2 --> V, J3 --> V
+    In Mermaid DAG: J1 --> V{Quorum:majority}, J2 --> V, J3 --> V
     - J1, J2, J3 execute BEFORE V (topological order)
     - V aggregates already-computed outputs from ctx.outputs
-    - If nodes are ChainRef placeholders, look up in ctx.outputs instead of executing
+    - Consensus modes: Count(n), Majority, Unanimous, Weighted(threshold)
 *)
-and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~required (nodes : node list) : (string, string) result =
+and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~consensus ~weights (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
   let start = Unix.gettimeofday () in
   let _ = (sw, clock, exec_fn, tool_exec) in  (* suppress unused warnings *)
@@ -1717,16 +1717,46 @@ and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~required 
   ) nodes;
 
   let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let total = List.length nodes in
+  let success_count = List.length !successes in
 
-  if List.length !successes >= required then begin
+  (* P1.3: Evaluate consensus based on mode *)
+  let consensus_met = match consensus with
+    | Chain_types.Count required ->
+        success_count >= required
+    | Chain_types.Majority ->
+        success_count > total / 2
+    | Chain_types.Unanimous ->
+        success_count = total
+    | Chain_types.Weighted threshold ->
+        (* Calculate weighted sum of successes *)
+        let get_weight node_id =
+          match List.assoc_opt node_id weights with
+          | Some w -> w
+          | None -> 1.0  (* default weight *)
+        in
+        let total_weight = List.fold_left (fun acc (n : node) ->
+          acc +. get_weight n.id
+        ) 0.0 nodes in
+        let success_weight = List.fold_left (fun acc (id, _) ->
+          acc +. get_weight id
+        ) 0.0 !successes in
+        if total_weight > 0.0 then
+          (success_weight /. total_weight) >= threshold
+        else
+          false
+  in
+
+  if consensus_met then begin
     let combined = String.concat "\n---\n"
       (List.map (fun (id, o) -> Printf.sprintf "[%s]: %s" id o) (List.rev !successes)) in
     record_complete ctx parent.id ~duration_ms ~success:true;
     store_node_output ctx parent combined;
     Ok combined
   end else begin
-    let msg = Printf.sprintf "Quorum not met: needed %d, got %d successes"
-      required (List.length !successes) in
+    let mode_str = Chain_types.consensus_mode_to_string consensus in
+    let msg = Printf.sprintf "Consensus not met (%s): got %d/%d successes"
+      mode_str success_count total in
     record_complete ctx parent.id ~duration_ms ~success:false;
     record_error ctx parent.id msg;
     Error msg

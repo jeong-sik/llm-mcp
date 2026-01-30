@@ -13,6 +13,8 @@
 open Chain_types
 open Chain_mermaid_parser
 
+[@@@warning "-32"]
+
 (* ============================================================================
    Test Helpers
    ============================================================================ *)
@@ -212,7 +214,7 @@ graph LR
   let chain = check_ok "quorum basic" (parse_chain mermaid) in
   let node = List.hd chain.nodes in
   match node.node_type with
-  | Quorum { required; _ } ->
+  | Quorum { consensus = Count required; _ } ->
       Alcotest.(check int) "required" 2 required
   | _ -> Alcotest.fail "expected Quorum node"
 
@@ -226,7 +228,7 @@ graph LR
     let chain = check_ok (Printf.sprintf "quorum %d" n) (parse_chain mermaid) in
     let node = List.hd chain.nodes in
     match node.node_type with
-    | Quorum { required; _ } ->
+    | Quorum { consensus = Count required; _ } ->
         Alcotest.(check int) (Printf.sprintf "quorum %d" n) n required
     | _ -> Alcotest.fail "expected Quorum node"
   ) values
@@ -236,7 +238,11 @@ let test_quorum_invalid () =
 graph LR
     A{Quorum:invalid}
   |} in
-  check_error "quorum invalid" (parse_chain mermaid)
+  let chain = check_ok "quorum invalid fallback" (parse_chain mermaid) in
+  let node = List.hd chain.nodes in
+  match node.node_type with
+  | Quorum { consensus = Count 1; _ } -> ()
+  | _ -> Alcotest.fail "should default to Count 1"
 
 (* ============================================================================
    4. Gate Node Parsing Tests

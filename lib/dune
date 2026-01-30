@@ -27,7 +27,6 @@
    types_glm       ; GLM function calling
    types_gemini    ; Gemini error classification
    types_llm       ; tool_args discriminated union
-   types_compact   ; Compact protocol
    types_schema    ; Tool schemas
    types           ; Re-export hub (backward compat)
    dictionary
@@ -73,16 +72,13 @@
    mcp_session
    ; SSE Notifications (Pure OCaml - moved from llm_mcp)
    notification_sse
-   sse
-   ; Compact Protocol (Phase 5 - token efficiency)
-   compact_impl)
+   sse)
  (libraries
    yojson
    str
    unix
    zstd
    msgpck
-   compact-protocol
    grpc-direct-core
    mcp_protocol
    base64
@@ -158,7 +154,6 @@
    msgpck
    grpc-direct-core
    zstd
-   compact-protocol
    llm_mcp_resilience)
  (ocamlopt_flags (:standard -O3))
  ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support

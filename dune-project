@@ -1,7 +1,7 @@
 (lang dune 3.13)
 
 (name llm_mcp)
-(version 0.2.26)
+(version 0.2.27)
 
 (generate_opam_files true)
 
@@ -27,7 +27,6 @@
   ; External dependencies (opam pin)
   (mcp_protocol (>= 0.1.0))
   (grpc-direct (>= 0.1.0))
-  (compact-protocol (>= 0.1.0))
   ; Standard dependencies
   (yojson (>= 2.0))
   (cmdliner (>= 1.1))

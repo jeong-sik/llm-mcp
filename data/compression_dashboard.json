@@ -1,14 +1,14 @@
 {
-  "timestamp": "2026-01-12T15:23:52Z",
+  "timestamp": "2026-01-30T15:39:40Z",
   "files_tested": 20,
-  "total_files": 1887,
-  "original_bytes": 780805886,
-  "zstd_standard_bytes": 113316325,
-  "zstd_dict_bytes": 114414805,
-  "compression_ratio_std": 85.49,
-  "compression_ratio_dict": 85.35,
-  "dict_advantage_pct": -0.14,
-  "estimated_total_bytes": 1689999639,
-  "estimated_savings_std": 1444734392,
-  "estimated_savings_dict": 1442356809
+  "total_files": 12113,
+  "original_bytes": 1144836980,
+  "zstd_standard_bytes": 144359056,
+  "zstd_dict_bytes": 151467335,
+  "compression_ratio_std": 87.39,
+  "compression_ratio_dict": 86.77,
+  "dict_advantage_pct": -0.62,
+  "estimated_total_bytes": 2177480488,
+  "estimated_savings_std": 1902909493,
+  "estimated_savings_dict": 1889389543
 }

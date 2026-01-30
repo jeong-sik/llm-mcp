@@ -29,6 +29,31 @@ let direction_of_string = function
   | "BT" -> BT
   | _ -> LR  (* default *)
 
+(** P1.3: Consensus mode for Quorum nodes *)
+type consensus_mode =
+  | Count of int            (** At least N successes required *)
+  | Majority                (** More than half must succeed (> n/2) *)
+  | Unanimous               (** All nodes must succeed *)
+  | Weighted of float       (** Weighted sum >= threshold (weights default to 1.0) *)
+[@@deriving yojson]
+
+let consensus_mode_to_string = function
+  | Count n -> Printf.sprintf "count:%d" n
+  | Majority -> "majority"
+  | Unanimous -> "unanimous"
+  | Weighted t -> Printf.sprintf "weighted:%.2f" t
+
+let consensus_mode_of_string s =
+  let s = String.lowercase_ascii (String.trim s) in
+  if s = "majority" then Majority
+  else if s = "unanimous" then Unanimous
+  else if String.length s > 9 && String.sub s 0 9 = "weighted:" then
+    let threshold = String.sub s 9 (String.length s - 9) in
+    Weighted (try float_of_string threshold with _ -> 0.5)
+  else
+    (* Default: parse as count *)
+    Count (try int_of_string s with _ -> 1)
+
 (** Configuration for chain execution *)
 type chain_config = {
   max_depth : int;        (** Maximum recursion depth for subgraphs *)
@@ -152,8 +177,9 @@ type node_type =
   | Pipeline of node list    (** Sequential execution: a >> b >> c *)
   | Fanout of node list      (** Parallel execution: a ||| b ||| c *)
   | Quorum of {
-      required : int;        (** Minimum successes needed *)
+      consensus : consensus_mode;  (** P1.3: Consensus algorithm *)
       nodes : node list;
+      weights : (string * float) list;  (** Optional weights per node id *)
     }
   | Gate of {
       condition : string;    (** Condition expression *)
@@ -436,9 +462,9 @@ let make_fanout ~id nodes =
   { id; node_type = Fanout nodes;
     input_mapping = []; output_key = None; depends_on = None }
 
-(** Helper: Create a quorum node *)
-let make_quorum ~id ~required nodes =
-  { id; node_type = Quorum { required; nodes };
+(** Helper: Create a quorum node (P1.3: supports consensus modes) *)
+let make_quorum ~id ?(consensus = Count 1) ?(weights = []) nodes =
+  { id; node_type = Quorum { consensus; nodes; weights };
     input_mapping = []; output_key = None; depends_on = None }
 
 (** Helper: Create a threshold node *)

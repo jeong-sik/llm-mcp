@@ -15,6 +15,8 @@ open Chain_registry
 open Chain_executor_eio
 open Prompt_registry
 
+module CT = Chain_types
+
 (* ============================================================================
    Test Fixtures
    ============================================================================ *)
@@ -426,7 +428,7 @@ let test_node_type_name () =
   Alcotest.(check string) "fanout" "fanout"
     (node_type_name (Fanout []));
   Alcotest.(check string) "quorum" "quorum"
-    (node_type_name (Quorum { required = 2; nodes = [] }));
+    (node_type_name (Quorum { consensus = Count 2; nodes = []; weights = [] }));
   Alcotest.(check string) "gate" "gate"
     (node_type_name (Gate { condition = ""; then_node = { id = ""; node_type = Pipeline []; input_mapping = []; output_key = None; depends_on = None }; else_node = None }));
   Alcotest.(check string) "subgraph" "subgraph"
@@ -468,9 +470,9 @@ let test_make_quorum () =
     make_llm_node ~id:"b" ~model:"claude" ~prompt:"b" ();
     make_llm_node ~id:"c" ~model:"codex" ~prompt:"c" ();
   ] in
-  let quorum = make_quorum ~id:"q" ~required:2 nodes in
+  let quorum = make_quorum ~id:"q" ~consensus:(CT.Count 2) nodes in
   match quorum.node_type with
-  | Quorum { required; nodes } ->
+  | Quorum { consensus = Count required; nodes; _ } ->
       Alcotest.(check int) "required" 2 required;
       Alcotest.(check int) "nodes" 3 (List.length nodes)
   | _ -> Alcotest.fail "Expected Quorum node"
@@ -874,7 +876,7 @@ let test_parse_quorum_chain () =
       Alcotest.(check string) "id" "magi_consensus" chain.id;
       let consensus_node = List.find (fun (n : node) -> n.id = "consensus") chain.nodes in
       (match consensus_node.node_type with
-       | Quorum { required; nodes } ->
+       | Quorum { consensus = Count required; nodes; _ } ->
            Alcotest.(check int) "required" 2 required;
            Alcotest.(check int) "quorum nodes" 3 (List.length nodes)
        | _ -> Alcotest.fail "Expected Quorum type")

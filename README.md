@@ -58,7 +58,7 @@ stdio 모드:
 - `docs/INSTALL-CHECKLIST.md`: 설치 후 확인
 - `docs/LOCAL_DEV_BEST_PRACTICE.md`: 로컬 테스트 가이드
 - `docs/MCP-TEMPLATE.md`: MCP 설정 템플릿
-- `docs/PROTOCOL.md`: 응답 포맷(절약 모드 포함)
+- `docs/PROTOCOL.md`: 응답 포맷 표준
 - `docs/PRESETS.md`: 체인/프리셋 관련 문서
 - `CLAUDE.md`: 운영 메모 및 상세 컨텍스트
 
