@@ -54,6 +54,8 @@
    tools_tracer
    ; Tools MCP Parse (pure MCP response parsing)
    tools_mcp_parse
+   ; Tools Stream Config (stream delta configuration)
+   tools_stream_config
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)

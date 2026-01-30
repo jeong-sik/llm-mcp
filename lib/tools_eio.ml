@@ -222,35 +222,13 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
           in
           f ()))
 
-(** {1 Streaming Execution} *)
-
-(** Runtime toggle for stream delta (can be changed without restart) *)
-let stream_delta_override : bool option ref = ref None
-
-let stream_delta_enabled () =
-  match !stream_delta_override with
-  | Some v -> v  (* Runtime override takes precedence *)
-  | None ->
-      match Sys.getenv_opt "LLM_MCP_STREAM_DELTA" with
-      | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
-      | _ -> false
-
-let set_stream_delta enabled =
-  stream_delta_override := Some enabled;
-  enabled
-
-let get_stream_delta () =
-  stream_delta_enabled ()
-
-let stream_delta_max_events () =
-  Safe_parse.env_int ~var:"LLM_MCP_STREAM_DELTA_MAX_EVENTS" ~default:2000
-
-let stream_delta_max_chars () =
-  Safe_parse.env_int ~var:"LLM_MCP_STREAM_DELTA_MAX_CHARS" ~default:200
-
-let generate_stream_id model_name =
-  let ts = int_of_float (Unix.gettimeofday () *. 1000.) in
-  Printf.sprintf "%s:%d:%d" model_name ts (Random.int 1000000)
+(** {1 Streaming Execution} - Config from Tools_stream_config *)
+let stream_delta_enabled = Tools_stream_config.enabled
+let set_stream_delta = Tools_stream_config.set
+let get_stream_delta = Tools_stream_config.get
+let stream_delta_max_events = Tools_stream_config.max_events
+let stream_delta_max_chars = Tools_stream_config.max_chars
+let generate_stream_id = Tools_stream_config.generate_id
 
 (** Execute Ollama with token streaming callback *)
 let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token ?stream_id args =
@@ -2834,10 +2812,7 @@ Show your reasoning process and provide the final translation.|} source_lang tar
   | GetStreamDelta ->
       let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
       let status = get_stream_delta () in
-      let source = match !stream_delta_override with
-        | Some _ -> "runtime"
-        | None -> "environment"
-      in
+      let source = Tools_stream_config.source () in
       { model = "get_stream_delta";
         returncode = 0;
         response = sprintf "SSE stream delta: %s (source: %s)"
