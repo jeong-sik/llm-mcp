@@ -430,3 +430,10 @@
  (package llm_mcp)
  (modules chain_dashboard_web)
  (libraries llm_mcp.common llm_mcp.eio eio eio_main yojson))
+
+(executable
+ (name transcript_search)
+ (public_name transcript-search)
+ (package llm_mcp)
+ (modules transcript_search)
+ (libraries yojson re cmdliner unix))
