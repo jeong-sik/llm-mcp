@@ -70,54 +70,8 @@ let string_of_gemini_error = Types.string_of_gemini_error
 
 (** {1 MCP Client Calls - Direct Style} *)
 
-(** Parse MCP HTTP response (streamable-http SSE or plain JSON-RPC) *)
-let parse_mcp_http_response (body : string) : string option =
-  let parse_json_result json_str =
-    try
-      let json = Yojson.Safe.from_string json_str in
-      let open Yojson.Safe.Util in
-      let result = json |> member "result" in
-      let error = json |> member "error" in
-      if error <> `Null then
-        let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
-        Some (Printf.sprintf "Error: %s" msg)
-      else
-        let content = result |> member "content" in
-        (match content with
-         | `List items ->
-             let texts = List.filter_map (fun item ->
-               match item |> member "type" |> to_string_option with
-               | Some "text" -> item |> member "text" |> to_string_option
-               | _ -> None
-             ) items in
-             Some (String.concat "\n" texts)
-         | _ ->
-             (match result with
-              | `Assoc _ | `List _ ->
-                  Some (Yojson.Safe.to_string result)
-              | _ ->
-                  let result_str = result |> to_string_option in
-                  Some (Option.value result_str ~default:json_str)))
-    with _ -> None
-  in
-  let lines = String.split_on_char '\n' body in
-  let data_lines =
-    List.filter_map (fun l ->
-      if String.length l > 5 && String.sub l 0 5 = "data:" then
-        Some (String.sub l 5 (String.length l - 5) |> String.trim)
-      else None
-    ) lines
-  in
-  let rec find_last_json = function
-    | [] -> None
-    | h :: t ->
-        (match parse_json_result h with
-         | Some v -> Some v
-         | None -> find_last_json t)
-  in
-  match find_last_json (List.rev data_lines) with
-  | Some v -> Some v
-  | None -> parse_json_result body
+(** Parse MCP HTTP response - from Tools_mcp_parse module *)
+let parse_mcp_http_response = Tools_mcp_parse.parse_http_response
 
 (** Call an external MCP tool via HTTP using curl subprocess *)
 let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout =

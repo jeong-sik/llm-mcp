@@ -52,6 +52,8 @@
    chain_trace_types
    ; Tools Tracer (tracing helpers for LLM tools)
    tools_tracer
+   ; Tools MCP Parse (pure MCP response parsing)
+   tools_mcp_parse
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
