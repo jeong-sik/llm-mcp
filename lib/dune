@@ -117,6 +117,11 @@
    tools_eio
    mcp_client_eio
    cli_runner_eio
+   ; Handler modules (Phase 2 extraction)
+   handler_gemini
+   handler_claude
+   handler_codex
+   handler_utils
    ; Chain Engine (Phase 3-4)
    chain_adapter_eio
    chain_executor_eio
