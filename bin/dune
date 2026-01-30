@@ -444,3 +444,24 @@
  (package llm_mcp)
  (modules vision_gate)
  (libraries yojson base64 re cmdliner unix))
+
+(executable
+ (name credits_fetcher)
+ (public_name credits-fetcher)
+ (package llm_mcp)
+ (modules credits_fetcher)
+ (libraries yojson cmdliner unix))
+
+(executable
+ (name jira_query)
+ (public_name jira-query)
+ (package llm_mcp)
+ (modules jira_query)
+ (libraries yojson cmdliner unix))
+
+(executable
+ (name auto_sharder)
+ (public_name auto-sharder)
+ (package llm_mcp)
+ (modules auto_sharder)
+ (libraries yojson cmdliner unix))
