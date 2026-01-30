@@ -81,7 +81,6 @@ let string_of_response_format = function
   | Compressed -> "compressed"
   | ZstdDict -> "zstd-dict"
   | Auto -> "auto"
-
 (** MCP Tool schema - defined early for use in tool_args *)
 type tool_schema = {
   name : string;
