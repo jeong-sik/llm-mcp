@@ -13,6 +13,7 @@ bug-reports: "https://github.com/jeong-sik/llm-mcp/issues"
 depends: [
   "ocaml" {>= "5.1.0"}
   "dune" {>= "3.13" & >= "3.13"}
+  "dune-build-info"
   "mcp_protocol" {>= "0.1.0"}
   "grpc-direct" {>= "0.1.0"}
   "compact-protocol" {>= "0.1.0"}
