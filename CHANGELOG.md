@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.27] - 2026-01-30
+
+### Changed
+- **Standardized on JSON Protocol**: Server now always returns "Verbose" (JSON) output, regardless of requested format.
+- **Protocol Consolidation**: Core protocol types migrated to `Types_core`.
+
+### Removed
+- **Compact DSL Protocol**: Removed `Types_compact`, `Compact_impl` modules and associated logic.
+- **Legacy Artifacts**: Deleted redundant compact protocol benchmarks and tests.
+
 ## [0.2.26] - 2026-01-30
 
 ### Added
