@@ -571,10 +571,7 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
             |> member "text"
             |> to_string
           in
-          { model = model_name;
-            returncode = 0;
-            response = text;
-            extra = extra_base; }
+          Tools_tracer.success_result ~model:model_name ~extra:extra_base text
         with _ ->
           (* Check for error response *)
           (try
@@ -654,10 +651,7 @@ let execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt
             |> member "text"
             |> to_string
           in
-          { model = model_name;
-            returncode = 0;
-            response = text;
-            extra = extra_base; }
+          Tools_tracer.success_result ~model:model_name ~extra:extra_base text
         with _ ->
           (try
             let json = Yojson.Safe.from_string raw_response in
@@ -736,10 +730,7 @@ let execute_codex_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~timeout ~strea
             |> member "content"
             |> to_string
           in
-          { model = model_name;
-            returncode = 0;
-            response = text;
-            extra = extra_base; }
+          Tools_tracer.success_result ~model:model_name ~extra:extra_base text
         with _ ->
           (try
             let json = Yojson.Safe.from_string raw_response in
@@ -2833,42 +2824,17 @@ let execute_verbose_with_env ~sw ~env args =
 let execute_compact_with_env ~sw ~env args =
   execute_formatted_with_env ~sw ~env ~format:Compact args
 
-(** {1 Ollama Agentic Execution} *)
+(** {1 Ollama Agentic Execution} - Re-exports from Tools_ollama_agentic *)
 
-(** Ollama API endpoint *)
-let ollama_base_url = "http://127.0.0.1:11434"
-
-(** Conversation message type for agentic loop *)
-type agent_message = {
+let ollama_base_url = Tools_ollama_agentic.base_url
+type agent_message = Tools_ollama_agentic.agent_message = {
   role : string;
   content : string;
   tool_calls : Ollama_parser.tool_call list option;
   name : string option;
 }
-
-(** Convert message to JSON for Ollama API *)
-let agent_message_to_json msg =
-  let base = [
-    ("role", `String msg.role);
-    ("content", `String msg.content);
-  ] in
-  let with_name = match msg.name with
-    | Some n -> base @ [("name", `String n)]
-    | None -> base
-  in
-  `Assoc with_name
-
-(** Build Ollama chat request *)
-let build_agentic_request ~model ~temperature ~tools messages =
-  `Assoc [
-    ("model", `String model);
-    ("messages", `List (List.map agent_message_to_json messages));
-    ("stream", `Bool false);
-    ("options", `Assoc [
-      ("temperature", `Float temperature);
-    ]);
-    ("tools", `List tools);
-  ]
+let agent_message_to_json = Tools_ollama_agentic.agent_message_to_json
+let build_agentic_request = Tools_ollama_agentic.build_chat_request
 
 (** Call Ollama chat API - Eio version using curl subprocess *)
 let call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_json =

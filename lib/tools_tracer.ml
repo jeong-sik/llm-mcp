@@ -86,6 +86,10 @@ let was_streamed (r : tool_result) : bool =
   | Some "true" -> true
   | _ -> false
 
+(** Create success result *)
+let success_result ~model ~extra response : tool_result =
+  { model; returncode = 0; response; extra }
+
 (** Create timeout error result *)
 let timeout_result ~model ~extra timeout_sec : tool_result =
   { model; returncode = -1; response = Printf.sprintf "Timeout after %ds" timeout_sec; extra }

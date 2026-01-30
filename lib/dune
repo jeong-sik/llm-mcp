@@ -56,6 +56,8 @@
    tools_mcp_parse
    ; Tools Stream Config (stream delta configuration)
    tools_stream_config
+   ; Tools Ollama Agentic (pure agentic helpers)
+   tools_ollama_agentic
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
