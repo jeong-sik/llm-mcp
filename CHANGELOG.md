@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.26] - 2026-01-30
+
+### Added
+- **Dynamic availability filtering** (Model_registry v2)
+  - `set_available_models()` / `clear_available_models()` / `is_available()`
+  - `execute_chain_run` calls `ollama list` once per process (cached)
+  - `resolve()` filters by availability, falls back through preference list if none match
+  - 3 new tests: filtering, fallback, non-ollama always available (13 total)
+
+### Changed
+- CLAUDE.md: document category aliases in LLM Node Format section
+
 ## [0.2.25] - 2026-01-30
 
 ### Added
