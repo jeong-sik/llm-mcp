@@ -23,6 +23,7 @@
  (depends
   (ocaml (>= 5.1.0))
   (dune (>= 3.13))
+  dune-build-info
   ; External dependencies (opam pin)
   (mcp_protocol (>= 0.1.0))
   (grpc-direct (>= 0.1.0))

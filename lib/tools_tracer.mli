@@ -15,6 +15,12 @@ val classify_error : Types.tool_result -> string option
 (** Check if result was streamed *)
 val was_streamed : Types.tool_result -> bool
 
+(** Get API key from environment, returns empty string if not set *)
+val get_api_key : string -> string
+
+(** Check if API key is set, returns Some error_result if missing *)
+val require_api_key : env_var:string -> model:string -> extra:(string * string) list -> Types.tool_result option
+
 (** Create success result *)
 val success_result : model:string -> extra:(string * string) list -> string -> Types.tool_result
 

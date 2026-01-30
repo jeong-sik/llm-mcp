@@ -86,6 +86,22 @@ let was_streamed (r : tool_result) : bool =
   | Some "true" -> true
   | _ -> false
 
+(** Get API key from environment, returns empty string if not set *)
+let get_api_key env_var =
+  match Sys.getenv_opt env_var with
+  | Some k -> k
+  | None -> ""
+
+(** Check if API key is set, returns Some error_result if missing *)
+let require_api_key ~env_var ~model ~extra : tool_result option =
+  let api_key = get_api_key env_var in
+  if String.length api_key = 0 then
+    Some { model; returncode = -1;
+           response = Printf.sprintf "Error: %s environment variable not set" env_var;
+           extra = extra @ [("error", "missing_api_key")] }
+  else
+    None
+
 (** Create success result *)
 let success_result ~model ~extra response : tool_result =
   { model; returncode = 0; response; extra }
