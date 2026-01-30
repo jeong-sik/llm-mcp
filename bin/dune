@@ -437,3 +437,10 @@
  (package llm_mcp)
  (modules transcript_search)
  (libraries yojson re cmdliner unix))
+
+(executable
+ (name vision_gate)
+ (public_name vision-gate)
+ (package llm_mcp)
+ (modules vision_gate)
+ (libraries yojson base64 re cmdliner unix))
