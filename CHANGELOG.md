@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.23] - 2026-01-30
+
+### Added
+- **Tools_ollama_agentic**: Pure helpers for Ollama agentic execution
+  - `base_url`, `agent_message` type, `build_chat_request`, `parse_chat_response`
+  - Message constructors: `make_assistant_message`, `make_tool_message`, `make_user_message`
+
+### Changed
+- Extracted 6 new modules from monolithic files
+- `tools_eio.ml`: 3,536 → 3,297 lines (-6.8%)
+- `chain_executor_eio.ml`: 3,343 → 2,989 lines (-10.6%)
+
+## [0.2.22] - 2026-01-30
+
+### Added
+- **Tools_mcp_parse**: `build_tool_call_request()` for symmetric MCP API
+  - Pairs with existing `parse_http_response()` (request ↔ response)
+
+## [0.2.21] - 2026-01-30
+
+### Added
+- **Tools_tracer**: Error result helpers
+  - `success_result()`, `timeout_result()`, `process_error_result()`
+  - Reduces 8-line error blocks to 1-line calls
+
+## [0.2.20] - 2026-01-30
+
+### Added
+- **Tools_tracer**: `get_tool_name()` for logging (dot-separated format)
+
+### Changed
+- Simplified `stream_id_opt` logic using existing `stream_flag` variable
+
+## [0.2.19] - 2026-01-30
+
+### Added
+- **Tools_stream_config**: Stream delta configuration module
+  - `enabled()`, `set()`, `get()`, `source()`, `max_events()`, `max_chars()`, `generate_id()`
+  - Encapsulates `stream_delta_override` ref behind clean API
+
+## [0.2.18] - 2026-01-30
+
+### Added
+- **Tools_mcp_parse**: Pure MCP response parsing module
+  - `parse_json_result()`, `extract_sse_data_lines()`, `parse_http_response()`
+
+## [0.2.17] - 2026-01-30
+
+### Fixed
+- **chain.run**: output_key alias collision now properly resolved
+  - Chains using `output_key` as final output now work correctly
+  - Added output_key to valid outputs list during validation
+
+### Added
+- **Chain_trace_types**: Pure trace type definitions extracted from chain_executor_eio
+  - `trace_to_entry()`, `traces_to_entries()` conversion functions
+
 ## [0.2.15] - 2026-01-28
 
 ### Fixed
