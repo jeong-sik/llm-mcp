@@ -231,7 +231,7 @@ let test_calculate_depth_quorum () =
   let node1 = make_test_llm_node ~id:"q1" ~prompt:"test1" () in
   let node2 = make_test_llm_node ~id:"q2" ~prompt:"test2" () in
   let quorum = { Chain_types.id = "quorum";
-    node_type = Chain_types.Quorum { required = 2; nodes = [node1; node2] };
+    node_type = Chain_types.Quorum { consensus = Count 2; nodes = [node1; node2]; weights = [] };
     input_mapping = [];
     output_key = None;
     depends_on = None;

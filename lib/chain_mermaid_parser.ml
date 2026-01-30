@@ -331,10 +331,10 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       (* Diamond nodes: Quorum, Gate, or Merge *)
       if Str.string_match quorum_id_re id_lower 0 then
         let n = int_of_string (Str.matched_group 1 id_lower) in
-        Ok (Quorum { required = n; nodes = [] })
+        Ok (Quorum { consensus = Count n; nodes = []; weights = [] })
       else if Str.string_match consensus_id_re id_lower 0 then
         let n = int_of_string (Str.matched_group 1 id_lower) in
-        Ok (Quorum { required = n; nodes = [] })
+        Ok (Quorum { consensus = Count n; nodes = []; weights = [] })
       else if String.length id_lower >= 5 && String.sub id_lower 0 5 = "gate_" then
         Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
       else if String.length id_lower >= 6 && String.sub id_lower 0 6 = "merge_" then
@@ -404,9 +404,14 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
               Ok (Evaluator { candidates = []; scoring_func = "llm_judge"; scoring_prompt = None; select_strategy = Best; min_score = None })
         else
           (try
-            let n = Scanf.sscanf text "Quorum:%d" (fun n -> n) in
-            Ok (Quorum { required = n; nodes = [] })
-          with Scanf.Scan_failure _ | Failure _ | End_of_file ->
+            (* P1.3: Extended Quorum syntax - Quorum:N, Quorum:majority, Quorum:unanimous, Quorum:weighted:T *)
+            if String.length text > 7 && String.sub text 0 7 = "Quorum:" then
+              let mode_str = String.sub text 7 (String.length text - 7) in
+              let consensus = Chain_types.consensus_mode_of_string mode_str in
+              Ok (Quorum { consensus; nodes = []; weights = [] })
+            else
+              Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None })
+          with _ ->
             Ok (Gate { condition = text; then_node = { id = "_placeholder"; node_type = ChainRef "_"; input_mapping = []; output_key = None; depends_on = None }; else_node = None }))
 
   | `Subroutine ->
@@ -811,15 +816,12 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         Error (Printf.sprintf "Subroutine node must be Ref/Pipeline/Fanout/Map/Bind/Cache/Batch/Spawn/StreamMerge/FeedbackLoop, got: %s" content)
 
   | `Diamond ->
-      (* {Quorum:N} or {Gate:condition} *)
+      (* P1.3: {Quorum:N}, {Quorum:majority}, {Quorum:unanimous}, {Quorum:weighted:T} or {Gate:condition} *)
       if String.length content > 7 && String.sub content 0 7 = "Quorum:" then
-        let n_str = trim (String.sub content 7 (String.length content - 7)) in
-        (try
-          let required = int_of_string n_str in
-          (* Quorum nodes need their inputs filled in later from edges *)
-          Ok (Quorum { required; nodes = [] })
-        with Failure _ ->
-          Error (Printf.sprintf "Invalid quorum count: %s" n_str))
+        let mode_str = trim (String.sub content 7 (String.length content - 7)) in
+        let consensus = Chain_types.consensus_mode_of_string mode_str in
+        (* Quorum nodes need their inputs filled in later from edges *)
+        Ok (Quorum { consensus; nodes = []; weights = [] })
       else if String.length content > 5 && String.sub content 0 5 = "Gate:" then
         let condition = trim (String.sub content 5 (String.length content - 5)) in
         (* Gate needs then/else filled in from edges *)
@@ -1401,7 +1403,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
             (* For Quorum, Merge, and StreamMerge nodes, we need to fill in the child nodes *)
             (* Use ChainRef with _ref suffix to avoid duplicate node ID issues *)
             let node_type = match node_type with
-              | Quorum { required; nodes = _ } ->
+              | Quorum { consensus; nodes = _; weights } ->
                   let input_ids =
                     match Hashtbl.find_opt deps mnode.id with
                     | Some ids -> ids
@@ -1411,7 +1413,7 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                   let input_nodes = List.map (fun input_id ->
                     { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                   ) input_ids in
-                  Quorum { required; nodes = input_nodes }
+                  Quorum { consensus; nodes = input_nodes; weights }
               | Merge { strategy; nodes = _ } ->
                   let input_ids =
                     match Hashtbl.find_opt deps mnode.id with
@@ -1555,7 +1557,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
           | Ok node_type ->
               (* Use ChainRef with _ref suffix to avoid duplicate node ID issues *)
               let node_type = match node_type with
-                | Quorum { required; nodes = _ } ->
+                | Quorum { consensus; nodes = _; weights } ->
                     let input_ids =
                       match Hashtbl.find_opt deps mnode.id with
                       | Some ids -> ids
@@ -1564,7 +1566,7 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                     let input_nodes = List.map (fun input_id ->
                       { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
                     ) input_ids in
-                    Quorum { required; nodes = input_nodes }
+                    Quorum { consensus; nodes = input_nodes; weights }
                 | Merge { strategy; nodes = _ } ->
                     let input_ids =
                       match Hashtbl.find_opt deps mnode.id with
@@ -1878,7 +1880,7 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   match nt with
   | Llm { model; _ } -> model
   | Tool { name; _ } -> name
-  | Quorum { required; _ } -> Printf.sprintf "quorum_%d" required
+  | Quorum { consensus; _ } -> Printf.sprintf "quorum_%s" (Chain_types.consensus_mode_to_string consensus)
   | Gate { condition; _ } ->
       let safe_cond = Str.global_replace (Str.regexp "[^a-zA-Z0-9_]") "_" condition in
       Printf.sprintf "gate_%s" (String.sub safe_cond 0 (min 10 (String.length safe_cond)))
@@ -1960,7 +1962,7 @@ let node_type_to_text (nt : node_type) : string =
            let json_str = Yojson.Safe.to_string json in
            let encoded = Base64.encode_string json_str in
            Printf.sprintf "Tool:%s %%{%s}" name encoded)
-  | Quorum { required; _ } -> Printf.sprintf "Quorum:%d" required
+  | Quorum { consensus; _ } -> Printf.sprintf "Quorum:%s" (Chain_types.consensus_mode_to_string consensus)
   | Gate { condition; _ } -> Printf.sprintf "Gate:%s" condition
   | Merge { strategy; _ } ->
       let s = match strategy with

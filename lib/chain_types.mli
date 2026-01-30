@@ -24,6 +24,18 @@ val direction_of_yojson : Yojson.Safe.t -> (direction, string) result
 val direction_to_string : direction -> string
 val direction_of_string : string -> direction
 
+(** P1.3: Consensus mode for Quorum nodes *)
+type consensus_mode =
+  | Count of int            (** At least N successes required *)
+  | Majority                (** More than half must succeed (> n/2) *)
+  | Unanimous               (** All nodes must succeed *)
+  | Weighted of float       (** Weighted sum >= threshold *)
+
+val consensus_mode_to_yojson : consensus_mode -> Yojson.Safe.t
+val consensus_mode_of_yojson : Yojson.Safe.t -> (consensus_mode, string) result
+val consensus_mode_to_string : consensus_mode -> string
+val consensus_mode_of_string : string -> consensus_mode
+
 (** {1 Configuration} *)
 
 (** Configuration for chain execution *)
@@ -165,7 +177,7 @@ type node_type =
   | Tool of { name : string; args : Yojson.Safe.t }
   | Pipeline of node list
   | Fanout of node list
-  | Quorum of { required : int; nodes : node list }
+  | Quorum of { consensus : consensus_mode; nodes : node list; weights : (string * float) list }
   | Gate of { condition : string; then_node : node; else_node : node option }
   | Subgraph of chain
   | ChainRef of string
@@ -381,7 +393,7 @@ val make_adapter : id:string -> input_ref:string -> transform:adapter_transform 
 val make_tool_node : id:string -> name:string -> args:Yojson.Safe.t -> node
 val make_pipeline : id:string -> node list -> node
 val make_fanout : id:string -> node list -> node
-val make_quorum : id:string -> required:int -> node list -> node
+val make_quorum : id:string -> ?consensus:consensus_mode -> ?weights:(string * float) list -> node list -> node
 val make_threshold : id:string -> metric:string -> operator:threshold_op -> value:float -> input_node:node -> ?on_pass:node -> ?on_fail:node -> unit -> node
 val make_goal_driven : id:string -> goal_metric:string -> goal_operator:threshold_op -> goal_value:float -> action_node:node -> measure_func:string -> max_iterations:int -> ?strategy_hints:(string * string) list -> ?conversational:bool -> ?relay_models:string list -> unit -> node
 val make_evaluator : id:string -> candidates:node list -> scoring_func:string -> ?scoring_prompt:string -> select_strategy:select_strategy -> ?min_score:float -> unit -> node
