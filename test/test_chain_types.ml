@@ -10,6 +10,8 @@
 open Alcotest
 open Chain_types
 
+module CT = Chain_types
+
 (** {1 Direction Tests} *)
 
 let test_direction_to_string () =
@@ -75,7 +77,7 @@ let test_node_type_name_fanout () =
   check string "fanout" "fanout" (node_type_name node_type)
 
 let test_node_type_name_quorum () =
-  let node_type = Quorum { required = 1; nodes = [] } in
+  let node_type = Quorum { consensus = Count 1; nodes = []; weights = [] } in
   check string "quorum" "quorum" (node_type_name node_type)
 
 let test_node_type_name_merge () =
@@ -206,9 +208,9 @@ let test_make_fanout () =
 
 let test_make_quorum () =
   let inner = make_llm_node ~id:"n1" ~model:"gemini" ~prompt:"hi" () in
-  let node = make_quorum ~id:"q" ~required:2 [inner; inner; inner] in
+  let node = make_quorum ~id:"q" ~consensus:(CT.Count 2) [inner; inner; inner] in
   match node.node_type with
-  | Quorum { required; nodes } ->
+  | Quorum { consensus = Count required; nodes; _ } ->
       check int "required" 2 required;
       check int "nodes" 3 (List.length nodes)
   | _ -> fail "expected Quorum"

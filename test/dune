@@ -1,7 +1,7 @@
 ; Pure tests - NO Lwt, NO Eio runtime (uses llm_mcp.common only)
 (tests
- (names test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
- (modules test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
+ (names test_types test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
+ (modules test_types test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
  (libraries llm_mcp.common alcotest str zstd))
 
 ; Model Registry tests (category resolution, passthrough)
@@ -294,11 +294,6 @@
 (test
  (name test_prompt_registry)
  (libraries llm_mcp.eio llm_mcp.common alcotest str unix))
-
-; Compact Implementation tests (caching, delta, base85, msgpack)
-(test
- (name test_compact_impl)
- (libraries llm_mcp.common alcotest))
 
 ; Langfuse Integration tests (ID generation, JSON serialization, timestamps)
 (test

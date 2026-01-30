@@ -95,74 +95,7 @@ let test_codex_schema () =
     (props |> member "reasoning_effort" |> to_option Fun.id <> None);
   check bool "has sandbox" true (props |> member "sandbox" |> to_option Fun.id <> None)
 
-(** Test common_prefix_length *)
-let test_common_prefix_length () =
-  check int "identical" 5 (common_prefix_length "hello" "hello");
-  check int "prefix match" 6 (common_prefix_length "hello world" "hello there");  (* "hello " = 6 chars *)
-  check int "no match" 0 (common_prefix_length "abc" "xyz");
-  check int "partial" 3 (common_prefix_length "abc123" "abc456");
-  check int "empty first" 0 (common_prefix_length "" "hello");
-  check int "empty second" 0 (common_prefix_length "hello" "");
-  check int "both empty" 0 (common_prefix_length "" "")
-
-(** Test compute_delta: Full case *)
-let test_compute_delta_full () =
-  (* Empty old content -> Full *)
-  let delta = compute_delta ~old_content:"" ~new_content:"hello" in
-  (match delta with
-   | Full s -> check string "full from empty" "hello" s
-   | _ -> fail "expected Full");
-  (* No common prefix -> Full *)
-  let delta2 = compute_delta ~old_content:"abc" ~new_content:"xyz" in
-  (match delta2 with
-   | Full s -> check string "full no prefix" "xyz" s
-   | _ -> fail "expected Full")
-
-(** Test compute_delta: Append case *)
-let test_compute_delta_append () =
-  let delta = compute_delta ~old_content:"hello" ~new_content:"hello world" in
-  (match delta with
-   | Append s -> check string "append suffix" " world" s
-   | _ -> fail "expected Append")
-
-(** Test compute_delta: Replace case *)
-let test_compute_delta_replace () =
-  (* Replace from middle - common prefix "hello " *)
-  let delta = compute_delta ~old_content:"hello world" ~new_content:"hello there" in
-  (match delta with
-   | Replace (pos, s) ->
-       check int "replace position" 6 pos;
-       check string "replace content" "there" s
-   | Full _ -> () (* Also acceptable if encoding is smaller *)
-   | _ -> fail "expected Replace or Full")
-
-(** Test compute_delta: Same content *)
-let test_compute_delta_same () =
-  let delta = compute_delta ~old_content:"same" ~new_content:"same" in
-  (match delta with
-   | Full s -> check string "same content" "same" s
-   | _ -> fail "expected Full for same content")
-
-(** Test delta encoding/decoding roundtrip *)
-let test_delta_roundtrip () =
-  let test_delta d =
-    let encoded = encode_delta d in
-    match decode_delta encoded with
-    | Some decoded ->
-        let re_encoded = encode_delta decoded in
-        check string "roundtrip" encoded re_encoded
-    | None -> fail "decode failed"
-  in
-  test_delta (Full "hello world");
-  test_delta (Append " suffix");
-  test_delta (Replace (10, "new content"))
-
-(** Test apply_delta *)
-let test_apply_delta () =
-  check string "Full" "new" (apply_delta "old" (Full "new"));
-  check string "Append" "hello world" (apply_delta "hello" (Append " world"));
-  check string "Replace" "hello there" (apply_delta "hello world" (Replace (6, "there")));
-  check string "Replace at end" "hello there" (apply_delta "hello" (Replace (100, " there")))
+(** {1 Direction Tests} *)
 
 (** Test str_contains helper function *)
 let test_str_contains () =
@@ -302,15 +235,6 @@ let () =
   run "Types" [
     "thinking_level", [
       test_case "of_string roundtrip" `Quick test_thinking_level_of_string;
-    ];
-    "delta", [
-      test_case "common_prefix_length" `Quick test_common_prefix_length;
-      test_case "compute_delta Full" `Quick test_compute_delta_full;
-      test_case "compute_delta Append" `Quick test_compute_delta_append;
-      test_case "compute_delta Replace" `Quick test_compute_delta_replace;
-      test_case "compute_delta Same" `Quick test_compute_delta_same;
-      test_case "encode/decode roundtrip" `Quick test_delta_roundtrip;
-      test_case "apply_delta" `Quick test_apply_delta;
     ];
     "output_format", [
       test_case "of_string roundtrip" `Quick test_output_format_of_string;

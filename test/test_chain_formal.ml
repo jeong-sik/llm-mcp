@@ -51,7 +51,8 @@ let make_ref id =
 let make_quorum id required dep_ids =
   let nodes = List.map make_ref dep_ids in
   let input_mapping = List.map (fun d -> (d, d)) dep_ids in
-  { CT.id; node_type = CT.Quorum { required; nodes };
+  let consensus = CT.Count required in
+  { CT.id; node_type = CT.Quorum { consensus; nodes; weights = [] };
     input_mapping; output_key = None; depends_on = None }
 
 (* NOTE: make_pipeline, make_fanout, make_gate removed
@@ -98,7 +99,7 @@ let node_type_equal (t1 : CT.node_type) (t2 : CT.node_type) : bool =
       t1.name = t2.name &&
       Yojson.Safe.equal t1.args t2.args
   | CT.Quorum q1, CT.Quorum q2 ->
-      q1.required = q2.required &&
+      q1.consensus = q2.consensus &&
       List.length q1.nodes = List.length q2.nodes
   | CT.ChainRef r1, CT.ChainRef r2 ->
       r1 = r2

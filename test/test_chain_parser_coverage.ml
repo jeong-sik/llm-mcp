@@ -287,7 +287,7 @@ let test_parse_quorum_node () =
   }|} in
   let node = expect_ok "quorum" (Chain_parser.parse_node json) in
   match node.node_type with
-  | Quorum { required; nodes } ->
+  | Quorum { consensus = Count required; nodes; _ } ->
       check int "required" 2 required;
       check int "nodes" 3 (List.length nodes)
   | _ -> fail "Expected Quorum node type"

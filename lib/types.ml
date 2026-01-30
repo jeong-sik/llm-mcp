@@ -24,8 +24,5 @@ include Types_gemini
 (* Tool arguments discriminated union *)
 include Types_llm
 
-(* Compact protocol *)
-include Types_compact
-
 (* Tool schemas *)
 include Types_schema

@@ -261,9 +261,6 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let name_opt = params |> member "name" |> to_string_option in
   let arguments = params |> member "arguments" in
 
-  (* Phase 5: Response format - Compact DSL is deprecated, always use Verbose (JSON) *)
-  let response_format = Types.Verbose in
-
   (* Parse arguments based on tool *)
   let parse_args name : (Types.tool_args, string) result =
     match name with
@@ -315,24 +312,16 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
            (* Format response - returncode 0 = success *)
            let is_error = result.Types.returncode <> 0 in
 
-           (* Phase 5: Apply Compact Protocol based on response_format
-              - Verbose: Full JSON (default, backward compatible)
-              - Compact: DSL format ~64% token savings
-              - Binary/Base85/Compressed: Various encoding options *)
-           let response_text = match response_format with
-             | Types.Verbose ->
-                 (* Original verbose format with extra fields *)
-                 let extra_json = match result.Types.extra with
-                   | [] -> ""
-                   | extras ->
-                       let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
-                       if result.response = "" then json_str
-                       else "\n\n[Extra]\n" ^ json_str
-                 in
-                 result.response ^ extra_json
-             | _ ->
-                 (* Compact Protocol: use format_tool_result for encoding *)
-                 Compact_impl.format_tool_result ~format:response_format result
+           (* Phase 5: Response format - Compact DSL is deprecated, always use Verbose (JSON) *)
+           let response_text =
+             let extra_json = match result.Types.extra with
+               | [] -> ""
+               | extras ->
+                   let json_str = Yojson.Safe.to_string (`Assoc (List.map (fun (k, v) -> (k, `String v)) extras)) in
+                   if result.response = "" then json_str
+                   else "\n\n[Extra]\n" ^ json_str
+             in
+             result.response ^ extra_json
            in
 
            let content =

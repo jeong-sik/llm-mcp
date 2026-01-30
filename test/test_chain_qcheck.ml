@@ -111,7 +111,7 @@ let gen_chain_with_quorum : CT.chain QCheck.Gen.t =
     ) input_ids in
     let quorum_node = {
       CT.id = "quorum";
-      node_type = CT.Quorum { required; nodes = quorum_children };
+      node_type = CT.Quorum { consensus = CT.Count required; nodes = quorum_children; weights = [] };
       input_mapping = List.map (fun id -> (id, id)) input_ids;
       output_key = None;
       depends_on = None;
@@ -169,8 +169,8 @@ let normalize_node (node : CT.node) : CT.node =
   in
   let node_type =
     match node.CT.node_type with
-    | CT.Quorum { required; nodes } ->
-        CT.Quorum { required; nodes = sort_nodes_by_id nodes }
+    | CT.Quorum { consensus; nodes; weights } ->
+        CT.Quorum { consensus; nodes = sort_nodes_by_id nodes; weights }
     | other -> other
   in
   { node with CT.input_mapping; node_type }
@@ -190,7 +190,7 @@ let node_type_equal (t1 : CT.node_type) (t2 : CT.node_type) : bool =
       t1.name = t2.name &&
       Yojson.Safe.equal t1.args t2.args
   | CT.Quorum q1, CT.Quorum q2 ->
-      q1.required = q2.required &&
+      q1.consensus = q2.consensus &&
       List.length q1.nodes = List.length q2.nodes
   | CT.ChainRef r1, CT.ChainRef r2 ->
       r1 = r2

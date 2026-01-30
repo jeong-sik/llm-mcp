@@ -2401,40 +2401,6 @@ let call_mcp_with_env ~sw ~env ~server_name ~tool_name ~arguments ~timeout =
   let clock = Eio.Stdenv.clock env in
   call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout
 
-(** {1 Format-Aware Execution} *)
-
-(** Execute a tool and format result based on response_format.
-
-    This is the main entry point for LLM-to-LLM communication where
-    token efficiency matters. The format parameter controls output:
-    - Verbose: Full JSON (human readable, for debugging)
-    - Compact: DSL format "RES|OK|G3|150|result" (~70% token savings)
-    - Binary: Base64-encoded compact (for high-volume scenarios)
-*)
-let execute_formatted ~sw ~proc_mgr ~clock ~(format : response_format) args : string =
-  let result = execute ~sw ~proc_mgr ~clock args in
-  format_tool_result ~format result
-
-(** Execute with default Verbose format (backwards compatible) *)
-let execute_verbose ~sw ~proc_mgr ~clock args : string =
-  execute_formatted ~sw ~proc_mgr ~clock ~format:Verbose args
-
-(** Execute with Compact format (for MAGI inter-agent communication) *)
-let execute_compact ~sw ~proc_mgr ~clock args : string =
-  execute_formatted ~sw ~proc_mgr ~clock ~format:Compact args
-
-(** Convenience wrappers with Eio env *)
-let execute_formatted_with_env ~sw ~env ~format args =
-  let proc_mgr = Eio.Stdenv.process_mgr env in
-  let clock = Eio.Stdenv.clock env in
-  execute_formatted ~sw ~proc_mgr ~clock ~format args
-
-let execute_verbose_with_env ~sw ~env args =
-  execute_formatted_with_env ~sw ~env ~format:Verbose args
-
-let execute_compact_with_env ~sw ~env args =
-  execute_formatted_with_env ~sw ~env ~format:Compact args
-
 (** {1 Ollama Agentic Execution} - Re-exports from Tools_ollama_agentic *)
 
 let ollama_base_url = Tools_ollama_agentic.base_url

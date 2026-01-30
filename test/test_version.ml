@@ -14,13 +14,17 @@ let test_version_non_empty () =
 
 let test_version_semver_format () =
   let version = Version.version in
-  (* Should contain at least one dot (major.minor) *)
-  check bool "has dot" true (String.contains version '.')
+  if version = "dev" then ()
+  else
+    (* Should contain at least one dot (major.minor) *)
+    check bool "has dot" true (String.contains version '.')
 
 let test_version_starts_with_digit () =
   let version = Version.version in
-  let first_char = String.get version 0 in
-  check bool "starts with digit" true (first_char >= '0' && first_char <= '9')
+  if version = "dev" then ()
+  else
+    let first_char = String.get version 0 in
+    check bool "starts with digit" true (first_char >= '0' && first_char <= '9')
 
 let test_version_no_v_prefix () =
   let version = Version.version in

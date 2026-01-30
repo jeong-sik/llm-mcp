@@ -69,7 +69,7 @@ graph LR
   let chain = check_ok "parse quorum" (parse_chain mermaid) in
   let node = List.hd chain.nodes in
   match node.node_type with
-  | Quorum { required; _ } ->
+  | Quorum { consensus = Count required; _ } ->
       Alcotest.(check int) "required" 2 required
   | _ -> Alcotest.fail "expected Quorum node"
 
@@ -124,7 +124,7 @@ graph LR
 
   (* Quorum should have 2 required *)
   match node_c.node_type with
-  | Quorum { required; _ } ->
+  | Quorum { consensus = Count required; _ } ->
       Alcotest.(check int) "quorum required" 2 required
   | _ -> Alcotest.fail "expected Quorum"
 
@@ -182,7 +182,7 @@ graph LR
   (* Verdict is quorum *)
   let verdict = find_node "verdict" chain.nodes in
   (match verdict.node_type with
-  | Quorum { required; _ } -> Alcotest.(check int) "quorum 2" 2 required
+  | Quorum { consensus = Count required; _ } -> Alcotest.(check int) "quorum 2" 2 required
   | _ -> Alcotest.fail "expected Quorum")
 
 (* ============================================================================
@@ -242,9 +242,11 @@ let test_invalid_quorum () =
 graph LR
     A{Quorum:invalid}
   |} in
-  match parse_chain mermaid with
-  | Error _ -> ()  (* Expected *)
-  | Ok _ -> Alcotest.fail "should fail on invalid quorum"
+  let chain = check_ok "parse invalid quorum" (parse_chain mermaid) in
+  let node = List.hd chain.nodes in
+  match node.node_type with
+  | Quorum { consensus = Count 1; _ } -> ()
+  | _ -> Alcotest.fail "should default to Count 1 on invalid quorum"
 
 let test_subroutine_as_chain_ref () =
   (* With WYSIWYE: any subroutine [[X]] becomes ChainRef "X" *)

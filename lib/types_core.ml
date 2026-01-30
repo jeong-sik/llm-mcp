@@ -1,5 +1,7 @@
 (** Core types for LLM-MCP - Foundation types used across all domains *)
 
+[@@@warning "-32"]
+
 (** Thinking level for Gemini 3 *)
 type thinking_level = Low | High [@@deriving yojson]
 
@@ -51,6 +53,34 @@ let string_of_output_format = function
   | Text -> "text"
   | Json -> "json"
   | StreamJson -> "stream-json"
+
+(** Response format for tool output *)
+type response_format =
+  | Verbose     (* Full JSON, human-readable *)
+  | Compact     (* DSL: OK|G3|150|result (Deprecated) *)
+  | Binary      (* msgpack, base64 encoded (Deprecated) *)
+  | Base85      (* msgpack, base85 encoded (Deprecated) *)
+  | Compressed  (* zlib + base85 (Deprecated) *)
+  | ZstdDict    (* zstd with trained dictionary (Deprecated) *)
+  | Auto        (* Adaptive: auto-select based on response size (Deprecated) *)
+
+let response_format_of_string = function
+  | "compact" | "dsl" -> Compact
+  | "binary" | "msgpack" -> Binary
+  | "base85" | "ascii85" -> Base85
+  | "compressed" | "zlib" -> Compressed
+  | "zstd" | "zstd-dict" | "dict" -> ZstdDict
+  | "auto" | "adaptive" -> Auto
+  | "verbose" | "json" | _ -> Verbose
+
+let string_of_response_format = function
+  | Verbose -> "verbose"
+  | Compact -> "compact"
+  | Binary -> "binary"
+  | Base85 -> "base85"
+  | Compressed -> "compressed"
+  | ZstdDict -> "zstd-dict"
+  | Auto -> "auto"
 
 (** MCP Tool schema - defined early for use in tool_args *)
 type tool_schema = {

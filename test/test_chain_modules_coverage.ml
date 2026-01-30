@@ -15,6 +15,8 @@
 open Chain_types
 open Chain_category
 
+module CT = Chain_types
+
 (* ============================================================
    Test Utilities
    ============================================================ *)
@@ -155,7 +157,7 @@ let test_node_type_name () =
     (Tool { name="t"; args=`Null }, "tool");
     (Pipeline [], "pipeline");
     (Fanout [], "fanout");
-    (Quorum { required=2; nodes=[] }, "quorum");
+    (Quorum { consensus = Count 2; nodes = [] ; weights = [] }, "quorum");
     (ChainRef "ref", "chain_ref");
     (Cache { key_expr="k"; ttl_seconds=60; inner={id="x";node_type=Pipeline [];input_mapping=[];output_key=None;depends_on=None} }, "cache");
     (Batch { batch_size=10; parallel=true; inner={id="x";node_type=Pipeline [];input_mapping=[];output_key=None;depends_on=None}; collect_strategy=`List }, "batch");
@@ -245,9 +247,9 @@ let test_helper_functions () =
    | _ -> Alcotest.fail "Expected Fanout");
 
   (* make_quorum *)
-  let quorum = make_quorum ~id:"q" ~required:2 [n1] in
+  let quorum = make_quorum ~id:"q" ~consensus:(CT.Count 2) [n1] in
   (match quorum.node_type with
-   | Quorum { required; _ } -> Alcotest.(check int) "quorum required" 2 required
+   | Quorum { consensus = Count required; _ } -> Alcotest.(check int) "quorum required" 2 required
    | _ -> Alcotest.fail "Expected Quorum");
 
   (* make_retry *)
