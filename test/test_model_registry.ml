@@ -105,6 +105,54 @@ let test_model_info_invariants () =
   ) (Model_registry.all ())
 
 (* ──────────────────────────────────────────
+   Dynamic availability (v2)
+   ────────────────────────────────────────── *)
+
+let test_availability_filtering () =
+  (* Clear any previous state *)
+  Model_registry.clear_available_models ();
+
+  (* Before setting: all models available (backwards compat) *)
+  let r1 = Model_registry.resolve "reasoning" in
+  check bool "before set: reasoning resolves" true (Option.is_some r1);
+
+  (* Set only one model as available *)
+  Model_registry.set_available_models ["deepseek-r1:1.5b"];
+
+  (* Now reasoning should resolve to deepseek (only available one) *)
+  let r2 = Model_registry.resolve "reasoning" in
+  check bool "after set: reasoning resolves" true (Option.is_some r2);
+  let v2 = Option.get r2 in
+  check bool "resolves to available model" true
+    (String.length v2 > 0 && (String.sub v2 (String.length v2 - 14) 14 = "deepseek-r1:1.5b"
+     || v2 = "ollama:deepseek-r1:1.5b"));
+
+  (* Cleanup *)
+  Model_registry.clear_available_models ()
+
+let test_fallback_when_none_available () =
+  Model_registry.clear_available_models ();
+
+  (* Set models that don't match any in registry *)
+  Model_registry.set_available_models ["nonexistent-model"];
+
+  (* Should fallback to first in registry *)
+  let r = Model_registry.resolve "reasoning" in
+  check bool "fallback: reasoning still resolves" true (Option.is_some r);
+
+  Model_registry.clear_available_models ()
+
+let test_non_ollama_always_available () =
+  Model_registry.clear_available_models ();
+  Model_registry.set_available_models [];  (* Empty = no ollama models *)
+
+  (* Multimodal (gemini backend) should still resolve *)
+  let r = Model_registry.resolve "multimodal" in
+  check bool "multimodal resolves even with empty ollama" true (Option.is_some r);
+
+  Model_registry.clear_available_models ()
+
+(* ──────────────────────────────────────────
    Test runner
    ────────────────────────────────────────── *)
 
@@ -127,5 +175,10 @@ let () =
     ];
     "model_info", [
       test_case "field invariants" `Quick test_model_info_invariants;
+    ];
+    "availability (v2)", [
+      test_case "filtering" `Quick test_availability_filtering;
+      test_case "fallback" `Quick test_fallback_when_none_available;
+      test_case "non-ollama always available" `Quick test_non_ollama_always_available;
     ];
   ]

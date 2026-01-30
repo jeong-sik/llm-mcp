@@ -56,9 +56,40 @@ let split_tool_name name =
    ChainRun
    ============================================================================ *)
 
+(** Cached ollama model list. Populated on first chain.run per process. *)
+let ollama_models_cache : (string list) option ref = ref None
+
+(** Refresh ollama model list and update Model_registry. *)
+let refresh_ollama_models ~sw ~proc_mgr ~clock ~execute =
+  match !ollama_models_cache with
+  | Some _ -> ()  (* Already cached *)
+  | None ->
+    let result = execute ~sw ~proc_mgr ~clock Types.OllamaList in
+    if result.returncode = 0 then begin
+      (* Parse JSON response to extract model names *)
+      try
+        let json = Yojson.Safe.from_string result.response in
+        let models = Yojson.Safe.Util.(json |> member "models" |> to_list) in
+        let names = List.filter_map (fun m ->
+          try Some Yojson.Safe.Util.(m |> member "name" |> to_string)
+          with _ -> None
+        ) models in
+        ollama_models_cache := Some names;
+        Model_registry.set_available_models names
+      with _ ->
+        (* Parse failed, leave empty (all models assumed available) *)
+        ollama_models_cache := Some []
+    end
+    else begin
+      (* ollama not running, leave empty *)
+      ollama_models_cache := Some []
+    end
+
 let execute_chain_run
     ~sw ~proc_mgr ~clock ~execute ~call_mcp
     ~chain ~mermaid ~input ~trace ~node_timeout =
+  (* Refresh ollama model availability on first run *)
+  refresh_ollama_models ~sw ~proc_mgr ~clock ~execute;
   (* Parse from either JSON or Mermaid (WYSIWYE) *)
   let parse_result = match (chain, mermaid) with
     | (Some c, _) -> Chain_parser.parse_chain c

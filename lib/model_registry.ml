@@ -4,7 +4,7 @@
     to concrete model names. Allows Chain DSL to use
     [LLM:reasoning 'prompt'] instead of [LLM:ollama:falcon-h1r 'prompt'].
 
-    v1: hardcoded registry. v2 will add dynamic ollama list filtering. *)
+    v2: Dynamic availability filtering via [set_available_models]. *)
 
 type category =
   | Reasoning
@@ -75,22 +75,60 @@ let registry : model_info list = [
     context_length = 8192; thinking_style = false };
 ]
 
+(* ──────────────────────────────────────────────────────────────
+   Dynamic availability (v2)
+   Caller sets available models via set_available_models.
+   resolve() then filters by availability with fallback chain.
+   ────────────────────────────────────────────────────────────── *)
+
+(** Mutable set of available model names from ollama list.
+    Empty = no filtering (all models considered available). *)
+let available_models : (string, unit) Hashtbl.t = Hashtbl.create 32
+
+let set_available_models (names : string list) =
+  Hashtbl.clear available_models;
+  List.iter (fun name -> Hashtbl.add available_models name ()) names
+
+let clear_available_models () =
+  Hashtbl.clear available_models
+
+let is_available (m : model_info) : bool =
+  (* Non-ollama backends (gemini, claude) are always available *)
+  if m.backend <> "ollama" then true
+  (* If no models set, assume all available (backwards compat) *)
+  else if Hashtbl.length available_models = 0 then true
+  (* Check if model name is in available set *)
+  else Hashtbl.mem available_models m.name
+
 let all () = registry
 
 let by_category cat =
   List.filter (fun m -> m.category = cat) registry
 
 (** Resolve a category string to a concrete "backend:model" name.
+    Filters by availability and falls back through the list.
     Returns [None] if the input is not a recognized category
     (i.e. it's already a concrete model name and should pass through). *)
 let resolve s =
   match category_of_string s with
   | None -> None
   | Some cat ->
-    match by_category cat with
-    | [] -> None
+    (* Filter by availability, preserving preference order *)
+    let candidates =
+      by_category cat
+      |> List.filter is_available
+    in
+    match candidates with
+    | [] ->
+      (* Fallback: return first in registry even if unavailable *)
+      (match by_category cat with
+       | [] -> None
+       | best :: _ ->
+         if best.backend = "ollama" then
+           Some (Printf.sprintf "ollama:%s" best.name)
+         else
+           Some best.backend)
     | best :: _ ->
-      (* Prepend backend prefix for ollama models *)
       if best.backend = "ollama" then
         Some (Printf.sprintf "ollama:%s" best.name)
       else

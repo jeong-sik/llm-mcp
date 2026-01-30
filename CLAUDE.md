@@ -79,7 +79,14 @@ graph LR
 ```
 ["LLM:model 'prompt with {{variable}}'"]
 ```
-- Models: `gemini`, `claude`, `codex`, `ollama:model-name`
+- **Concrete models**: `gemini`, `claude`, `codex`, `ollama:model-name`
+- **Category aliases** (auto-resolves to best available):
+  | Category | Resolves to | Use case |
+  |----------|-------------|----------|
+  | `reasoning` | Falcon-H1R, DeepSeek-R1 | Complex reasoning, math |
+  | `coding` | qwen3-coder:30b | Code generation, review |
+  | `general` | qwen3:1.7b | General tasks |
+  | `multimodal` | gemini | Vision, multi-modal |
 - Variables: `{{input}}`, `{{node_id}}`, `{{node_id.field}}`
 
 ### Quorum Node
