@@ -14,3 +14,9 @@ val classify_error : Types.tool_result -> string option
 
 (** Check if result was streamed *)
 val was_streamed : Types.tool_result -> bool
+
+(** Create timeout error result *)
+val timeout_result : model:string -> extra:(string * string) list -> int -> Types.tool_result
+
+(** Create process error result *)
+val process_error_result : model:string -> extra:(string * string) list -> string -> Types.tool_result

@@ -85,3 +85,11 @@ let was_streamed (r : tool_result) : bool =
   match List.assoc_opt "streamed" r.extra with
   | Some "true" -> true
   | _ -> false
+
+(** Create timeout error result *)
+let timeout_result ~model ~extra timeout_sec : tool_result =
+  { model; returncode = -1; response = Printf.sprintf "Timeout after %ds" timeout_sec; extra }
+
+(** Create process error result *)
+let process_error_result ~model ~extra msg : tool_result =
+  { model; returncode = -1; response = Printf.sprintf "Error: %s" msg; extra }

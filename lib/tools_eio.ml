@@ -608,16 +608,8 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
               returncode = -1;
               response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
               extra = extra_base @ [("parse_error", "true")]; }))
-    | Error (Timeout t) ->
-        { model = model_name;
-          returncode = -1;
-          response = sprintf "Timeout after %ds" t;
-          extra = extra_base; }
-    | Error (ProcessError msg) ->
-        { model = model_name;
-          returncode = -1;
-          response = sprintf "Error: %s" msg;
-          extra = extra_base; }
+    | Error (Timeout t) -> Tools_tracer.timeout_result ~model:model_name ~extra:extra_base t
+    | Error (ProcessError msg) -> Tools_tracer.process_error_result ~model:model_name ~extra:extra_base msg
   end
 
 (** Execute Claude via Direct Anthropic API (faster, no CLI overhead) *)
@@ -698,16 +690,8 @@ let execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt
               returncode = -1;
               response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
               extra = extra_base @ [("parse_error", "true")]; }))
-    | Error (Timeout t) ->
-        { model = model_name;
-          returncode = -1;
-          response = sprintf "Timeout after %ds" t;
-          extra = extra_base; }
-    | Error (ProcessError msg) ->
-        { model = model_name;
-          returncode = -1;
-          response = sprintf "Error: %s" msg;
-          extra = extra_base; }
+    | Error (Timeout t) -> Tools_tracer.timeout_result ~model:model_name ~extra:extra_base t
+    | Error (ProcessError msg) -> Tools_tracer.process_error_result ~model:model_name ~extra:extra_base msg
   end
 
 (** Execute Codex via Direct OpenAI API (faster, no CLI overhead) *)
@@ -788,16 +772,8 @@ let execute_codex_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~timeout ~strea
               returncode = -1;
               response = sprintf "Failed to parse API response: %s" (String.sub raw_response 0 (min 200 (String.length raw_response)));
               extra = extra_base @ [("parse_error", "true")]; }))
-    | Error (Timeout t) ->
-        { model = model_name;
-          returncode = -1;
-          response = sprintf "Timeout after %ds" t;
-          extra = extra_base; }
-    | Error (ProcessError msg) ->
-        { model = model_name;
-          returncode = -1;
-          response = sprintf "Error: %s" msg;
-          extra = extra_base; }
+    | Error (Timeout t) -> Tools_tracer.timeout_result ~model:model_name ~extra:extra_base t
+    | Error (ProcessError msg) -> Tools_tracer.process_error_result ~model:model_name ~extra:extra_base msg
   end
 
 (** Execute Gemini with automatic retry for recoverable errors *)
@@ -1057,16 +1033,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     returncode = r.exit_code;
                     response = get_output r;
                     extra = extra_base; }
-              | Error (Timeout t) ->
-                  { model = model_name;
-                    returncode = -1;
-                    response = sprintf "Timeout after %ds" t;
-                    extra = extra_base; }
-              | Error (ProcessError msg) ->
-                  { model = model_name;
-                    returncode = -1;
-                    response = sprintf "Error: %s" msg;
-                    extra = extra_base; }
+              | Error (Timeout t) -> Tools_tracer.timeout_result ~model:model_name ~extra:extra_base t
+              | Error (ProcessError msg) -> Tools_tracer.process_error_result ~model:model_name ~extra:extra_base msg
             end
       in
 
@@ -1134,16 +1102,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     returncode = r.exit_code;
                     response = clean_codex_output (get_output r);
                     extra = extra_base; }
-              | Error (Timeout t) ->
-                  { model = model_name;
-                    returncode = -1;
-                    response = sprintf "Timeout after %ds" t;
-                    extra = extra_base; }
-              | Error (ProcessError msg) ->
-                  { model = model_name;
-                    returncode = -1;
-                    response = sprintf "Error: %s" msg;
-                    extra = extra_base; }
+              | Error (Timeout t) -> Tools_tracer.timeout_result ~model:model_name ~extra:extra_base t
+              | Error (ProcessError msg) -> Tools_tracer.process_error_result ~model:model_name ~extra:extra_base msg
             end
       in
 
