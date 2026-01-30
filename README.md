@@ -66,4 +66,6 @@ stdio 모드:
 
 - 기본 HTTP 엔드포인트는 `/mcp`, `/health`입니다.
 - 절약 모드는 `LLM_MCP_BUDGET_MODE=true`로 켤 수 있습니다.
+- 요청 바디 최대 크기는 기본 20MB입니다. `LLM_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
+  - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
 - 체인 기능은 구현 중인 부분이 있어, 문서와 실제 동작이 다를 수 있습니다.

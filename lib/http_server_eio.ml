@@ -115,21 +115,91 @@ module Response = struct
 end
 
 module Request = struct
+  let default_max_body_bytes = 20 * 1024 * 1024
+
+  let parse_positive_int value =
+    try
+      let v = int_of_string value in
+      if v > 0 then Some v else None
+    with _ -> None
+
+  let max_body_bytes =
+    let from_env name =
+      match Sys.getenv_opt name with
+      | Some v -> parse_positive_int v
+      | None -> None
+    in
+    match from_env "LLM_MCP_MAX_BODY_BYTES" with
+    | Some v -> v
+    | None ->
+        (match from_env "MCP_MAX_BODY_BYTES" with
+         | Some v -> v
+         | None -> default_max_body_bytes)
+
+  let respond_error reqd status body =
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "text/plain; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+      ("access-control-allow-origin", "*");
+      ("access-control-allow-methods", "GET, POST, OPTIONS");
+      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+      ("connection", "close");
+    ] in
+    let response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd response body
+
+  let respond_too_large reqd max_bytes =
+    let body = Printf.sprintf
+      "413 Request Entity Too Large (max %d bytes)" max_bytes
+    in
+    respond_error reqd `Payload_too_large body
+
+  let respond_internal_error reqd exn =
+    let body = Printf.sprintf
+      "500 Internal Server Error: %s" (Printexc.to_string exn)
+    in
+    respond_error reqd `Internal_server_error body
+
   (** Read request body - accumulates chunks until EOF.
       Uses callback pattern - the response MUST be sent from within the callback. *)
   let read_body_async reqd callback =
+    let request = Httpun.Reqd.request reqd in
+    let content_length =
+      match Httpun.Headers.get request.headers "content-length" with
+      | Some v -> parse_positive_int v
+      | None -> None
+    in
+    (match content_length with
+     | Some len when len > max_body_bytes ->
+         respond_too_large reqd max_body_bytes
+     | _ ->
     let body = Httpun.Reqd.request_body reqd in
-    let chunks = ref [] in
+    let initial_capacity =
+      match content_length with
+      | Some len when len > 0 && len < max_body_bytes -> len
+      | _ -> 1024
+    in
+    let buf = Buffer.create initial_capacity in
+    let seen_bytes = ref 0 in
     let rec read_loop () =
       Httpun.Body.Reader.schedule_read body
         ~on_eof:(fun () ->
-          callback (String.concat "" (List.rev !chunks)))
+          let body_str = Buffer.contents buf in
+          try callback body_str with exn ->
+            respond_internal_error reqd exn)
         ~on_read:(fun buffer ~off ~len ->
-          let chunk = Bigstringaf.substring buffer ~off ~len in
-          chunks := chunk :: !chunks;
-          read_loop ())
+          let next_bytes = !seen_bytes + len in
+          if next_bytes > max_body_bytes then begin
+            respond_too_large reqd max_body_bytes
+          end else begin
+            seen_bytes := next_bytes;
+            let chunk = Bigstringaf.substring buffer ~off ~len in
+            Buffer.add_string buf chunk;
+            read_loop ()
+          end)
     in
-    read_loop ()
+    read_loop ())
 
   (** Get path from request target *)
   let path (request : Httpun.Request.t) =
