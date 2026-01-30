@@ -4,6 +4,11 @@
  (modules test_types test_binaries test_msgpack_size test_protocol_invariants test_input_compression test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
  (libraries llm_mcp.common alcotest str zstd))
 
+; Model Registry tests (category resolution, passthrough)
+(test
+ (name test_model_registry)
+ (libraries llm_mcp.common alcotest))
+
 ; Ollama integration test (requires OLLAMA_TEST=1)
 (executable
  (name test_ollama_integration)

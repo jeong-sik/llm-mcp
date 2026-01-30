@@ -65,6 +65,8 @@
    tools_stream_config
    ; Tools Ollama Agentic (pure agentic helpers)
    tools_ollama_agentic
+   ; Model Category Registry (LLM:reasoning → ollama:model)
+   model_registry
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
