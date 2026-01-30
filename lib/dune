@@ -50,6 +50,8 @@
    chain_iteration
    ; Chain Trace Types (pure type definitions)
    chain_trace_types
+   ; Tools Tracer (tracing helpers for LLM tools)
+   tools_tracer
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
