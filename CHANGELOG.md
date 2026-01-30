@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.24] - 2026-01-30
+
+### Changed
+- **API key validation pattern refactoring**: 5 API key checks unified via `Tools_tracer` helpers
+  - `require_api_key()` returns `Some error_result` if missing, `None` if valid
+  - `get_api_key()` retrieves key after validation
+  - Applied to: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY` (x2)
+- `tools_eio.ml`: 3,297 → 3,268 lines (-0.9%, total -7.6% from 3,536)
+
 ## [0.2.23] - 2026-01-30
 
 ### Added

@@ -505,18 +505,11 @@ let execute_gemini_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_leve
     ("use_cli", "false");
   ] in
 
-  (* Get API key *)
-  let api_key = match Sys.getenv_opt "GEMINI_API_KEY" with
-    | Some k -> k
-    | None -> ""
-  in
-  if String.length api_key = 0 then
-    { model = model_name;
-      returncode = -1;
-      response = "Error: GEMINI_API_KEY environment variable not set";
-      extra = extra_base @ [("error", "missing_api_key")]; }
-  else begin
-    (* Build API request body *)
+  match Tools_tracer.require_api_key ~env_var:"GEMINI_API_KEY" ~model:model_name ~extra:extra_base with
+  | Some err -> err
+  | None ->
+    let api_key = Tools_tracer.get_api_key "GEMINI_API_KEY" in
+    begin (* Build API request body *)
     let contents = `List [
       `Assoc [
         ("parts", `List [
@@ -596,18 +589,11 @@ let execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt
   let model_name = sprintf "claude-api (%s)" model in
   let extra_base = [("use_cli", "false")] in
 
-  (* Get API key *)
-  let api_key = match Sys.getenv_opt "ANTHROPIC_API_KEY" with
-    | Some k -> k
-    | None -> ""
-  in
-  if String.length api_key = 0 then
-    { model = model_name;
-      returncode = -1;
-      response = "Error: ANTHROPIC_API_KEY environment variable not set";
-      extra = extra_base @ [("error", "missing_api_key")]; }
-  else begin
-    (* Map model alias to API model ID *)
+  match Tools_tracer.require_api_key ~env_var:"ANTHROPIC_API_KEY" ~model:model_name ~extra:extra_base with
+  | Some err -> err
+  | None ->
+    let api_key = Tools_tracer.get_api_key "ANTHROPIC_API_KEY" in
+    begin (* Map model alias to API model ID *)
     let api_model = Tool_parsers.resolve_claude_model model in
 
     (* Build API request body *)
@@ -674,18 +660,11 @@ let execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt
 let execute_codex_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~timeout ~stream =
   let model_name = sprintf "codex-api (%s)" model in
   let extra_base = [("use_cli", "false")] in
-
-  (* Get API key *)
-  let api_key = match Sys.getenv_opt "OPENAI_API_KEY" with
-    | Some k -> k
-    | None -> ""
-  in
-  if String.length api_key = 0 then
-    { model = model_name;
-      returncode = -1;
-      response = "Error: OPENAI_API_KEY environment variable not set";
-      extra = extra_base @ [("error", "missing_api_key")]; }
-  else begin
+  match Tools_tracer.require_api_key ~env_var:"OPENAI_API_KEY" ~model:model_name ~extra:extra_base with
+  | Some err -> err
+  | None ->
+    let api_key = Tools_tracer.get_api_key "OPENAI_API_KEY" in
+    begin
     (* Map model alias to API model ID *)
     let api_model = match model with
       | "gpt-5.2" -> "gpt-5.2"
@@ -1242,16 +1221,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
 
   | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools } ->
       (* Z.ai GLM Cloud API - OpenAI-compatible with Function Calling *)
-      let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
-        | Some k -> k
-        | None -> ""
-      in
-      if String.length api_key = 0 then
-        { model = sprintf "glm (%s)" model;
-          returncode = -1;
-          response = "Error: ZAI_API_KEY environment variable not set";
-          extra = [("error", "missing_api_key")]; }
-      else begin
+      let model_name = sprintf "glm (%s)" model in
+      (match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
+      | Some err -> err
+      | None ->
+        let api_key = Tools_tracer.get_api_key "ZAI_API_KEY" in
+        begin
         (* Build OpenAI-compatible request body *)
         let messages = match system_prompt with
           | Some sys ->
@@ -1586,7 +1561,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               response = sprintf "Error after retries: %s" err_msg;
               extra = [("error", error_type); ("retried", "true")]; }
         end  (* close else begin for non-streaming *)
-      end  (* close else begin for api_key check *)
+        end)  (* close match require_api_key *)
 
   | OllamaList ->
       let cmd = "ollama" in
@@ -2575,16 +2550,12 @@ This chain will execute the goal using a stub model.|}
 
   | GlmTranslate { text; source_lang; target_lang; strategy; model; timeout } ->
       (* GLM Translation Agent - 6 strategies *)
-      let api_key = match Sys.getenv_opt "ZAI_API_KEY" with
-        | Some k -> k
-        | None -> ""
-      in
-      if String.length api_key = 0 then
-        { model = sprintf "glm.translate (%s)" model;
-          returncode = -1;
-          response = "Error: ZAI_API_KEY environment variable not set";
-          extra = [("error", "missing_api_key")]; }
-      else begin
+      let model_name = sprintf "glm.translate (%s)" model in
+      (match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
+      | Some err -> err
+      | None ->
+        let api_key = Tools_tracer.get_api_key "ZAI_API_KEY" in
+        begin
         (* Build translation prompt based on strategy *)
         let strategy_name = Types.string_of_translation_strategy strategy in
         let prompt = match strategy with
@@ -2706,7 +2677,7 @@ Show your reasoning process and provide the final translation.|} source_lang tar
                 ("source_lang", source_lang);
                 ("target_lang", target_lang);
               ]; }
-      end
+        end)  (* close match require_api_key *)
 
   | SetStreamDelta { enabled } ->
       let _ = (sw, proc_mgr, clock) in  (* Unused but needed for signature consistency *)
