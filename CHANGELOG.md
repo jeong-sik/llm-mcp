@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.25] - 2026-01-30
+
+### Added
+- **Model Category Registry** (`Model_registry`): semantic model selection for Chain DSL
+  - Categories: `reasoning`, `coding`, `general`, `multimodal`, `embedding`
+  - `LLM:reasoning 'prompt'` → resolves to best available ollama model
+  - `.mli` interface for API contract
+  - Alcotest suite: 10 test cases (resolve, passthrough, case-insensitive)
+
 ## [0.2.24] - 2026-01-30
 
 ### Changed
