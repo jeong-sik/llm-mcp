@@ -49,6 +49,27 @@ let get_input = function
        | None -> "(orchestrate: preset)")
   | _ -> "(non-llm operation)"
 
+(** Get tool name for logging (dot-separated format) *)
+let get_tool_name = function
+  | ChainRun _ -> "chain.run"
+  | ChainValidate _ -> "chain.validate"
+  | ChainList -> "chain.list"
+  | ChainToMermaid _ -> "chain.to_mermaid"
+  | ChainVisualize _ -> "chain.visualize"
+  | ChainConvert _ -> "chain.convert"
+  | ChainOrchestrate _ -> "chain.orchestrate"
+  | ChainCheckpoints _ -> "chain.checkpoints"
+  | ChainResume _ -> "chain.resume"
+  | OllamaList -> "ollama.list"
+  | PromptRegister _ -> "prompt.register"
+  | PromptList -> "prompt.list"
+  | PromptGet _ -> "prompt.get"
+  | GhPrDiff _ -> "gh.pr.diff"
+  | SlackPost _ -> "slack.post"
+  | SetStreamDelta _ -> "config.set_stream_delta"
+  | GetStreamDelta -> "config.get_stream_delta"
+  | _ -> "llm"
+
 (** Classify error type from tool result *)
 let classify_error (r : tool_result) : string option =
   if r.returncode = 0 then None

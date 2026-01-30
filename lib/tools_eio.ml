@@ -974,37 +974,14 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   in
   let model_for_log = get_model_name_for_tracing args in
   let stream_id_opt =
-    match args with
-    | Ollama { stream = true; _ } -> Some (generate_stream_id model_for_log)
-    | Gemini { stream = true; _ } -> Some (generate_stream_id model_for_log)
-    | Claude { stream = true; _ } -> Some (generate_stream_id model_for_log)
-    | Codex { stream = true; _ } -> Some (generate_stream_id model_for_log)
-    | Glm { stream = true; _ } -> Some (generate_stream_id model_for_log)
-    | _ -> None
+    if stream_flag then Some (generate_stream_id model_for_log) else None
   in
   let log_extra =
     match stream_id_opt with
     | Some sid -> [("stream_id", sid)]
     | None -> []
   in
-  let tool_for_log = match args with
-    | ChainRun _ -> "chain.run"
-    | ChainValidate _ -> "chain.validate"
-    | ChainList -> "chain.list"
-    | ChainToMermaid _ -> "chain.to_mermaid"
-    | ChainVisualize _ -> "chain.visualize"
-    | ChainConvert _ -> "chain.convert"
-    | ChainOrchestrate _ -> "chain.orchestrate"
-    | ChainCheckpoints _ -> "chain.checkpoints"
-    | ChainResume _ -> "chain.resume"
-    | OllamaList -> "ollama.list"
-    | PromptRegister _ -> "prompt.register"
-    | PromptList -> "prompt.list"
-    | PromptGet _ -> "prompt.get"
-    | GhPrDiff _ -> "gh.pr.diff"
-    | SlackPost _ -> "slack.post"
-    | _ -> "llm"
-  in
+  let tool_for_log = Tools_tracer.get_tool_name args in
   let prompt_for_log = get_input_for_tracing args in
   let log_start_ts = Unix.gettimeofday () in
   if log_enabled then
