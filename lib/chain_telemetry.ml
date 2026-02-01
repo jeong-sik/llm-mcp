@@ -16,7 +16,14 @@ open Chain_category
 
 (** {1 Helper for Stdlib.Mutex} *)
 let with_mutex mutex f =
-  Mutex.protect mutex f
+  Mutex.lock mutex;
+  Fun.protect
+    ~finally:(fun () ->
+      try Mutex.unlock mutex with
+      | ex ->
+          Log.warn "chain_telemetry" "Mutex.unlock failed in finalizer: %s"
+            (Printexc.to_string ex))
+    f
 
 (** {1 History Persistence} *)
 
@@ -34,11 +41,18 @@ let history_file =
 (** Append a JSON record to history file (thread-safe via OS) *)
 let append_history (json : Yojson.Safe.t) =
   try
-    Out_channel.with_open_gen [Open_append; Open_creat; Open_text] 0o644 history_file (fun oc ->
+    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 history_file in
+    Fun.protect
+      ~finally:(fun () ->
+        try close_out oc with
+        | ex ->
+            Log.warn "chain_telemetry" "close_out failed in finalizer: %s"
+              (Printexc.to_string ex))
+      (fun () ->
       output_string oc (Yojson.Safe.to_string json);
       output_char oc '\n';
       flush oc
-    )
+      )
   with exn ->
     (* Log telemetry write errors for debugging - non-critical *)
     Printf.eprintf "[Telemetry] Write error to %s: %s\n%!" history_file (Printexc.to_string exn)

@@ -239,13 +239,13 @@ let submit_batch ~sw ~clock ~executor config chains =
   let promises = List.map (fun chain ->
     Eio.Fiber.fork_promise ~sw (fun () ->
       Eio.Semaphore.acquire semaphore;
-      match execute_chain_with_policy ctx chain with
-      | result ->
-          Eio.Semaphore.release semaphore;
-          result
-      | exception exn ->
-          Eio.Semaphore.release semaphore;
-          raise exn
+      Fun.protect
+        ~finally:(fun () ->
+          try Eio.Semaphore.release semaphore with
+          | ex ->
+              Log.warn "chain_batch" "Semaphore.release failed in finalizer: %s"
+                (Printexc.to_string ex))
+        (fun () -> execute_chain_with_policy ctx chain)
     )
   ) chains in
 

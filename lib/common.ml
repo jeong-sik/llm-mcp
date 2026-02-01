@@ -214,17 +214,14 @@ let day_str () =
     Ensures process cleanup on exception. *)
 let run_command cmd =
   try
-    let with_process_in cmd f =
-      let ic = Unix.open_process_in cmd in
-      match f ic with
-      | result ->
-          ignore (Unix.close_process_in ic);
-          result
-      | exception exn ->
-          ignore (Unix.close_process_in ic);
-          raise exn
-    in
-    with_process_in cmd (fun ic ->
+    let ic = Unix.open_process_in cmd in
+    Fun.protect
+      ~finally:(fun () ->
+        try ignore (Unix.close_process_in ic) with
+        | ex ->
+            Log.warn "common" "close_process_in failed in finalizer: %s"
+              (Printexc.to_string ex))
+      (fun () ->
       let lines = ref [] in
       begin
         try

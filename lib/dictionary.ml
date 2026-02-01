@@ -68,16 +68,30 @@ let min_payload_size = 64  (** Minimum size for dictionary compression *)
 
 (** Read binary file with proper cleanup on exception *)
 let read_binary_file path =
-  In_channel.with_open_bin path (fun ic ->
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () ->
+      try close_in ic with
+      | ex ->
+          Log.warn "dictionary" "close_in failed in finalizer: %s"
+            (Printexc.to_string ex))
+    (fun () ->
     let len = in_channel_length ic in
     really_input_string ic len
-  )
+    )
 
 (** Write binary file with proper cleanup on exception *)
 let write_binary_file path content =
-  Out_channel.with_open_bin path (fun oc ->
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () ->
+      try close_out oc with
+      | ex ->
+          Log.warn "dictionary" "close_out failed in finalizer: %s"
+            (Printexc.to_string ex))
+    (fun () ->
     output_string oc content
-  )
+    )
 
 (** {1 Content Type Detection} *)
 
@@ -196,11 +210,18 @@ let load (path : string) : (t, string) result =
   | _ -> Error ("Failed to load dictionary: " ^ path)
 
 (** Save dictionary to file (v2 format with model_type).
-    Uses with_open_* for proper resource cleanup.
+    Uses Fun.protect for proper resource cleanup.
 *)
 let save (dict : t) (path : string) : (unit, string) result =
   try
-    Out_channel.with_open_bin path (fun oc ->
+    let oc = open_out_bin path in
+    Fun.protect
+      ~finally:(fun () ->
+        try close_out oc with
+        | ex ->
+            Log.warn "dictionary" "close_out failed in finalizer: %s"
+              (Printexc.to_string ex))
+      (fun () ->
       (* v2 format: ZDCT|v2|content_type|model_type|sample_count|created_at *)
       Printf.fprintf oc "%s|v2|%s|%s|%d|%.1f\n"
         magic
@@ -209,7 +230,7 @@ let save (dict : t) (path : string) : (unit, string) result =
         dict.sample_count
         dict.created_at;
       output_string oc dict.dict_data
-    );
+      );
     Ok ()
   with Sys_error e -> Error e
 
