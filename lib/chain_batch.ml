@@ -239,9 +239,13 @@ let submit_batch ~sw ~clock ~executor config chains =
   let promises = List.map (fun chain ->
     Eio.Fiber.fork_promise ~sw (fun () ->
       Eio.Semaphore.acquire semaphore;
-      Fun.protect
-        ~finally:(fun () -> Eio.Semaphore.release semaphore)
-        (fun () -> execute_chain_with_policy ctx chain)
+      match execute_chain_with_policy ctx chain with
+      | result ->
+          Eio.Semaphore.release semaphore;
+          result
+      | exception exn ->
+          Eio.Semaphore.release semaphore;
+          raise exn
     )
   ) chains in
 
