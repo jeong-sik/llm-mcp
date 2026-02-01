@@ -99,7 +99,12 @@ let stats_mutex = Mutex.create ()
 
 (** Helper for mutex-protected operations *)
 let with_mutex f =
-  Mutex.protect stats_mutex f
+  Mutex.lock stats_mutex;
+  Common.protect
+    ~module_name:"chain_stats"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock stats_mutex)
+    f
 
 (** {1 Data Collection} *)
 

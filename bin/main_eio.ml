@@ -1671,7 +1671,15 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       in
       let records =
         try
-          In_channel.with_open_text history_file (fun ic ->
+          let ic = open_in history_file in
+          Fun.protect
+            ~finally:(fun () ->
+              try close_in ic with
+              | ex ->
+                  Log.warn "main_eio"
+                    "close_in failed in finalizer (history_file=%s): %s"
+                    history_file (Printexc.to_string ex))
+            (fun () ->
             let rec read_lines acc =
               match input_line ic with
               | line ->
@@ -1680,7 +1688,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
               | exception End_of_file -> List.rev acc
             in
             read_lines []
-          )
+            )
         with _ -> []  (* File doesn't exist or can't be read *)
       in
       (* Return last 100 records, most recent first *)
@@ -1703,7 +1711,15 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       in
       let records =
         try
-          In_channel.with_open_text history_file (fun ic ->
+          let ic = open_in history_file in
+          Fun.protect
+            ~finally:(fun () ->
+              try close_in ic with
+              | ex ->
+                  Log.warn "main_eio"
+                    "close_in failed in finalizer (history_file=%s): %s"
+                    history_file (Printexc.to_string ex))
+            (fun () ->
             let rec read_lines acc =
               match input_line ic with
               | line ->
@@ -1712,7 +1728,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
               | exception End_of_file -> List.rev acc
             in
             read_lines []
-          )
+            )
         with _ -> []
       in
       (* Aggregate metrics from history *)

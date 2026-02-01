@@ -94,7 +94,12 @@ let registry_mutex = Mutex.create ()
 
 (** Helper for mutex-protected operations *)
 let with_mutex f =
-  Mutex.protect registry_mutex f
+  Mutex.lock registry_mutex;
+  Common.protect
+    ~module_name:"prompt_registry"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
+    f
 
 (** {1 Persistence} *)
 

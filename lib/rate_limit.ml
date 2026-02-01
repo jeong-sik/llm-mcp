@@ -62,7 +62,12 @@ let create_from_env () =
 (** {1 Rate Checking} *)
 
 let with_lock limiter f =
-  Mutex.protect limiter.mutex f
+  Mutex.lock limiter.mutex;
+  Common.protect
+    ~module_name:"rate_limit"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock limiter.mutex)
+    f
 
 (** Check if request is allowed (returns true) or rate limited (returns false) *)
 let check limiter ~key =
