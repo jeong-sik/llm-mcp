@@ -176,8 +176,42 @@ let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
       let func_name = func |> member "name" |> to_string in
       let func_description =
         (try func |> member "description" |> to_string with _ -> "") in
-      (* Parse parameters - simplified, just stores the raw JSON for now *)
-      let func_parameters = [] in  (* TODO: Full parameter parsing if needed *)
+      (* Parse parameters from JSON Schema format *)
+      let func_parameters = 
+        let params = func |> member "parameters" in
+        let properties = params |> member "properties" in
+        let required_list = 
+          try params |> member "required" |> to_list |> List.map to_string
+          with _ -> []
+        in
+        match properties with
+        | `Assoc props ->
+          List.filter_map (fun (name, prop) ->
+            try
+              let param_type = 
+                match prop |> member "type" |> to_string with
+                | "string" -> Types.JsonString
+                | "number" -> Types.JsonNumber
+                | "integer" -> Types.JsonInteger
+                | "boolean" -> Types.JsonBoolean
+                | "array" -> Types.JsonArray
+                | "object" -> Types.JsonObject
+                | _ -> Types.JsonString
+              in
+              let param_description = 
+                try Some (prop |> member "description" |> to_string)
+                with _ -> None
+              in
+              let param_enum =
+                try Some (prop |> member "enum" |> to_list |> List.map to_string)
+                with _ -> None
+              in
+              Some { Types.param_name = name; param_type; param_description;
+                     param_required = List.mem name required_list; param_enum }
+            with _ -> None
+          ) props
+        | _ -> []
+      in
       let schema = { Types.func_name; func_description; func_parameters } in
       { Types.tool_type = Types.GlmFunction;
         function_schema = Some schema;
