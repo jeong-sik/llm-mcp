@@ -1104,8 +1104,12 @@ let wants_sse headers =
 
 let accepts_streamable_mcp headers =
   match get_header headers "accept" with
-  | Some accept -> Mcp_protocol.Http_negotiation.accepts_streamable_mcp accept
-  | None -> false
+  | None -> true
+  | Some accept ->
+      let accept_l = String.lowercase_ascii accept in
+      contains_substring ~sub:"application/json" accept_l
+      || contains_substring ~sub:"text/event-stream" accept_l
+      || contains_substring ~sub:"*/*" accept_l
 
 let get_last_event_id headers =
   match get_header headers "last-event-id" with
@@ -1509,7 +1513,7 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
 
   if not (accepts_streamable_mcp headers) then begin
     let body = json_rpc_error (-32600)
-      "Invalid Accept header: must include application/json and text/event-stream" in
+      "Invalid Accept header: must include application/json or text/event-stream" in
     Response.json ~status:`Bad_request body reqd
   end else begin
     let wants_stream_headers = wants_sse headers in
