@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-01
+
+### Added
+- Spawn registry: inflight limit, timeout/age tracking, failure tracking
+- Server metrics + `/metrics` integration
+- `/stats` JSON endpoint
+- `scripts/mcp-smoke.sh`
+
+### Changed
+- `execute_spawn` integrates spawn state tracking
+
 ## [0.3.0] - 2026-02-01
 
 ### Added
@@ -32,7 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - **Compact DSL Protocol**: Removed `Types_compact`, `Compact_impl` modules and associated logic.
 - **Legacy Artifacts**: Deleted redundant compact protocol benchmarks and tests.
-
 ## [0.2.26] - 2026-01-30
 
 ### Added

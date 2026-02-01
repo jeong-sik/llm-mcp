@@ -1104,8 +1104,12 @@ let wants_sse headers =
 
 let accepts_streamable_mcp headers =
   match get_header headers "accept" with
-  | Some accept -> Mcp_protocol.Http_negotiation.accepts_streamable_mcp accept
-  | None -> false
+  | None -> true
+  | Some accept ->
+      let accept_l = String.lowercase_ascii accept in
+      contains_substring ~sub:"application/json" accept_l
+      || contains_substring ~sub:"text/event-stream" accept_l
+      || contains_substring ~sub:"*/*" accept_l
 
 let get_last_event_id headers =
   match get_header headers "last-event-id" with
@@ -1509,7 +1513,7 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
 
   if not (accepts_streamable_mcp headers) then begin
     let body = json_rpc_error (-32600)
-      "Invalid Accept header: must include application/json and text/event-stream" in
+      "Invalid Accept header: must include application/json or text/event-stream" in
     Response.json ~status:`Bad_request body reqd
   end else begin
     let wants_stream_headers = wants_sse headers in
@@ -1640,6 +1644,14 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
 
   | `GET, "/" ->
       Response.text "🐫 llm-mcp (OCaml Eio) MCP 2025-11-25 server" reqd
+
+  (* JSON stats endpoint - no auth required *)
+  | `GET, "/stats" ->
+      let body = Yojson.Safe.to_string (`Assoc [
+        ("server_metrics", Server_metrics.to_json ());
+        ("spawn_registry", Spawn_registry.to_json ());
+      ]) in
+      Response.json body reqd
 
   (* Chain stats endpoint for monitoring dashboard *)
   | `GET, "/chain/stats" ->
@@ -1782,7 +1794,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
          | _ -> ())
       ) records;
       let avg_duration = if !duration_count > 0 then float_of_int !total_duration_ms /. float_of_int !duration_count else 0.0 in
-      let metrics = Printf.sprintf {|# HELP chain_executions_total Total chain executions
+      let chain_metrics = Printf.sprintf {|# HELP chain_executions_total Total chain executions
 # TYPE chain_executions_total counter
 chain_executions_total{status="success"} %d
 chain_executions_total{status="failure"} %d
@@ -1806,6 +1818,13 @@ chain_duration_total_ms %d
         !success_count !failure_count
         !gemini_tokens !claude_tokens !codex_tokens !ollama_tokens !total_tokens
         avg_duration !total_duration_ms
+      in
+      let metrics =
+        String.concat "\n" [
+          Server_metrics.to_prometheus_text ();
+          Spawn_registry.to_prometheus_text ();
+          chain_metrics;
+        ]
       in
       let headers = Httpun.Headers.of_list [
         ("content-type", "text/plain; version=0.0.4; charset=utf-8");

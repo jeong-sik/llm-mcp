@@ -65,9 +65,19 @@ stdio 모드:
 ## 운영 메모
 
 - 기본 HTTP 엔드포인트는 `/mcp`, `/health`입니다.
+- SSE 스트림은 `GET /mcp`(권장) 또는 `GET /sse`로 연결할 수 있습니다.
 - 절약 모드는 `LLM_MCP_BUDGET_MODE=true`로 켤 수 있습니다.
 - 요청 바디 최대 크기는 기본 20MB입니다. `LLM_MCP_MAX_BODY_BYTES` 또는 `MCP_MAX_BODY_BYTES`로 조정하세요.
   - `Content-Length`가 없으면 스트리밍 누적 바이트로 제한하며, 초과 시 413을 반환합니다.
+- CORS 기본 모드는 permissive입니다.
+  - `LLM_MCP_CORS_MODE=restrict`
+  - `LLM_MCP_CORS_ALLOWED_ORIGINS="https://app.example.com,https://*.example.com"`
+  - `LLM_MCP_CORS_ALLOW_PRIVATE_NETWORK=true`
+  - `LLM_MCP_CORS_ALLOW_HEADERS="Content-Type, Accept, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Requested-With"`
+- 도구 호출을 순차 실행하려면 `LLM_MCP_TOOL_CALLS_SERIAL=true`를 설정하세요.
+- 도구 호출 수 상한은 `LLM_MCP_MAX_TOOL_CALLS_PER_TURN`로 제한합니다. (기본 16, 0=무제한)
+- 세션 강제 모드는 `LLM_MCP_REQUIRE_SESSION=true`로 활성화합니다.
+- 알 수 없는 세션을 거부하려면 `LLM_MCP_REJECT_UNKNOWN_SESSION=true`를 설정하세요.
 - 체인 기능은 구현 중인 부분이 있어, 문서와 실제 동작이 다를 수 있습니다.
 
 ## Chain Retry System (v0.3.0+)

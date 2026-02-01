@@ -27,91 +27,185 @@ let default_config = {
 
 (** ============== Request/Response Helpers ============== *)
 
+module Cors = struct
+  let mode =
+    Sys.getenv_opt "LLM_MCP_CORS_MODE"
+    |> Option.value ~default:"permissive"
+    |> String.lowercase_ascii
+
+  let split_csv value =
+    value
+    |> String.split_on_char ','
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+
+  let allowed_origins =
+    match Sys.getenv_opt "LLM_MCP_CORS_ALLOWED_ORIGINS" with
+    | Some value -> split_csv value
+    | None -> ["*"]
+
+  let allow_private_network =
+    match Sys.getenv_opt "LLM_MCP_CORS_ALLOW_PRIVATE_NETWORK" with
+    | Some v ->
+        let v = String.lowercase_ascii (String.trim v) in
+        v = "1" || v = "true" || v = "yes"
+    | None -> false
+
+  let allow_headers =
+    Sys.getenv_opt "LLM_MCP_CORS_ALLOW_HEADERS"
+    |> Option.value ~default:"Content-Type, Accept, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Requested-With"
+
+  let expose_headers = "Mcp-Session-Id, Mcp-Protocol-Version"
+  let allow_methods = "GET, POST, DELETE, OPTIONS"
+
+  let origin_of reqd =
+    let request = Httpun.Reqd.request reqd in
+    Httpun.Headers.get request.headers "origin"
+
+  let has_prefix ~prefix s =
+    let lp = String.length prefix in
+    String.length s >= lp && String.sub s 0 lp = prefix
+
+  let has_suffix ~suffix s =
+    let ls = String.length suffix in
+    let len = String.length s in
+    len >= ls && String.sub s (len - ls) ls = suffix
+
+  let matches_pattern origin pattern =
+    let pattern = String.trim pattern in
+    if pattern = "*" then true
+    else if String.length pattern > 0 && pattern.[String.length pattern - 1] = '*'
+    then
+      let prefix = String.sub pattern 0 (String.length pattern - 1) in
+      has_prefix ~prefix origin
+    else if String.length pattern > 0 && pattern.[0] = '*'
+    then
+      let suffix = String.sub pattern 1 (String.length pattern - 1) in
+      has_suffix ~suffix origin
+    else origin = pattern
+
+  let origin_allowed origin =
+    List.exists (matches_pattern origin) allowed_origins
+
+  let is_allowed reqd =
+    match mode with
+    | "restrict" -> (
+        match origin_of reqd with
+        | None -> true
+        | Some origin -> origin_allowed origin)
+    | _ -> true
+
+  let allow_origin_value reqd =
+    match mode with
+    | "permissive" -> Some "*"
+    | "restrict" -> (
+        match origin_of reqd with
+        | Some origin when origin_allowed origin -> Some origin
+        | _ -> None)
+    | _ -> Some "*"
+
+  let headers reqd ~include_methods ~include_headers ~include_expose =
+    let base =
+      match allow_origin_value reqd with
+      | Some origin ->
+          let vary = if origin = "*" then [] else [("vary", "Origin")] in
+          ("access-control-allow-origin", origin) :: vary
+      | None -> []
+    in
+    let headers =
+      if include_methods then
+        ("access-control-allow-methods", allow_methods) :: base
+      else base
+    in
+    let headers =
+      if include_headers then
+        ("access-control-allow-headers", allow_headers) :: headers
+      else headers
+    in
+    let headers =
+      if include_expose then
+        ("access-control-expose-headers", expose_headers) :: headers
+      else headers
+    in
+    if allow_private_network then
+      ("access-control-allow-private-network", "true") :: headers
+    else headers
+end
+
 module Response = struct
   let text ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false ~include_expose:false) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let json ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let html ?(status = `OK) body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/html; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false ~include_expose:false) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   (** 202 Accepted response for notifications (MCP Streamable HTTP) *)
   let accepted reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-length", "0");
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers `Accepted in
-    Httpun.Reqd.respond_with_string reqd response ""
+    Httpun.Reqd.respond_with_string reqd response "";
+    Server_metrics.finish_reqd reqd `Accepted
 
   let json_with_session ?(status = `OK) ~session_id ~protocol_version body reqd =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
       ("mcp-session-id", session_id);
       ("mcp-protocol-version", protocol_version);
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
 
   let cors_preflight reqd =
-    let headers = Httpun.Headers.of_list [
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+    let headers = Httpun.Headers.of_list ([
       ("access-control-max-age", "86400");
       ("content-length", "0");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers `No_content in
-    Httpun.Reqd.respond_with_string reqd response ""
+    Httpun.Reqd.respond_with_string reqd response "";
+    Server_metrics.finish_reqd reqd `No_content
 
   (** SSE streaming response for MCP streamable-http protocol *)
   let sse_stream ~session_id ~protocol_version reqd ~on_write =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/event-stream");
       ("cache-control", "no-cache");
       ("connection", "keep-alive");
       ("x-accel-buffering", "no");
-      ("access-control-allow-origin", "*");
       ("mcp-session-id", session_id);
       ("mcp-protocol-version", protocol_version);
-    ] in
+    ] @ Cors.headers reqd ~include_methods:false ~include_headers:false ~include_expose:true) in
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
-    on_write body
+    on_write body;
+    Server_metrics.finish_reqd reqd `OK
 end
 
 module Request = struct
@@ -137,17 +231,14 @@ module Request = struct
          | None -> default_max_body_bytes)
 
   let respond_error reqd status body =
-    let headers = Httpun.Headers.of_list [
+    let headers = Httpun.Headers.of_list ([
       ("content-type", "text/plain; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
-      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
       ("connection", "close");
-    ] in
+    ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let respond_too_large reqd max_bytes =
     let body = Printf.sprintf
@@ -241,6 +332,7 @@ let register_sse_client body =
   let id = !sse_client_counter in
   let client = { body; connected = true } in
   Hashtbl.add sse_clients id client;
+  Server_metrics.sse_open ();
   id
 
 let unregister_sse_client id =
@@ -248,6 +340,7 @@ let unregister_sse_client id =
    | Some c -> c.connected <- false
    | None -> ());
   Hashtbl.remove sse_clients id
+  ; Server_metrics.sse_close ()
 
 let sse_client_count () = Hashtbl.length sse_clients
 

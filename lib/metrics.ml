@@ -124,6 +124,12 @@ let init () =
     ~help:"Total MCP requests received" ();
   register_counter ~name:"llm_mcp_errors_total"
     ~help:"Total errors" ();
+  register_counter ~name:"llm_mcp_tool_calls_total"
+    ~help:"Total tool calls" ();
+  register_counter ~name:"llm_mcp_tool_calls_errors_total"
+    ~help:"Total tool call errors" ();
+  register_gauge ~name:"llm_mcp_tool_calls_inflight"
+    ~help:"Tool calls currently in flight" ();
   register_gauge ~name:"llm_mcp_active_sessions"
     ~help:"Currently active sessions" ();
   register_gauge ~name:"llm_mcp_uptime_seconds"
@@ -185,6 +191,18 @@ let record_error ?(error_type="unknown") () =
 
 let set_active_sessions count =
   set_gauge "llm_mcp_active_sessions" (float_of_int count)
+
+let record_tool_call ?(tool="unknown") () =
+  inc_counter "llm_mcp_tool_calls_total" ~labels:[("tool", tool)] ()
+
+let record_tool_call_error ?(tool="unknown") () =
+  inc_counter "llm_mcp_tool_calls_errors_total" ~labels:[("tool", tool)] ()
+
+let inc_tool_calls_inflight ?(tool="unknown") () =
+  inc_gauge "llm_mcp_tool_calls_inflight" ~labels:[("tool", tool)] ()
+
+let dec_tool_calls_inflight ?(tool="unknown") () =
+  dec_gauge "llm_mcp_tool_calls_inflight" ~labels:[("tool", tool)] ()
 
 (** Initialize on module load *)
 let () = init ()
