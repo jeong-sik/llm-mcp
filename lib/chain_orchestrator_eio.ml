@@ -290,6 +290,7 @@ let orchestrate
         | `String s -> Ok s
         | _ -> Ok (Yojson.Safe.to_string json)
       in
+      (* exec_fn with automatic retry for recoverable errors (rate limits, timeouts) *)
       let exec_fn ~model ?system ~prompt ?tools ?thinking () =
         let base_args = [
           ("prompt", `String prompt);
@@ -308,23 +309,34 @@ let orchestrate
           | _ -> args
         in
         let lowered = String.lowercase_ascii model in
+        (* Wrap LLM calls with retry for recoverable errors *)
+        let exec_with_retry name args_with_model =
+          let result = Chain_executor_retry.execute_llm_with_retry ~clock ~provider:name (fun () ->
+            match exec_via_tool ~name ~args:args_with_model with
+            | Ok v -> Ok v
+            | Error msg -> Error (Chain_executor_retry.classify_error msg)
+          ) in
+          match result.Chain_retry.value with
+          | Ok v -> Ok v
+          | Error e -> Error (Error.to_string e)
+        in
         match lowered with
         | "stub" | "mock" -> Ok (Printf.sprintf "[stub]%s" prompt)
         | "codex" | "gpt-5.2" ->
-            exec_via_tool ~name:"codex" ~args:(("model", `String "gpt-5.2") :: args)
+            exec_with_retry "codex" (("model", `String "gpt-5.2") :: args)
         | m when starts_with ~prefix:"gpt-" m ->
-            exec_via_tool ~name:"codex" ~args:(("model", `String model) :: args)
+            exec_with_retry "codex" (("model", `String model) :: args)
         | "claude" | "claude-cli" | "opus" | "sonnet" | "haiku" | "haiku-4.5" ->
-            exec_via_tool ~name:"claude" ~args:(("model", `String model) :: args)
+            exec_with_retry "claude" (("model", `String model) :: args)
         | "ollama" ->
-            exec_via_tool ~name:"ollama" ~args
+            exec_with_retry "ollama" args
         | m when starts_with ~prefix:"ollama:" m ->
             let ollama_model = String.sub model 7 (String.length model - 7) in
-            exec_via_tool ~name:"ollama" ~args:(("model", `String ollama_model) :: args)
+            exec_with_retry "ollama" (("model", `String ollama_model) :: args)
         | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
-            exec_via_tool ~name:"gemini" ~args:(("model", `String model) :: args)
+            exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->
-            exec_via_tool ~name:"gemini" ~args:(("model", `String "gemini-3-pro-preview") :: args)
+            exec_with_retry "gemini" (("model", `String "gemini-3-pro-preview") :: args)
       in
 
       (* Create tool execution wrapper *)

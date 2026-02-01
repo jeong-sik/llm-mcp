@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-01
+
+### Added
+- **Chain Retry System**: OpenClaw-inspired retry with exponential backoff
+  - `lib/chain_retry.ml`: Core retry policies and execution
+  - `lib/chain_executor_retry.ml`: Executor integration with circuit breaker
+  - `.mli` interface files for both modules
+- **Circuit Breaker**: Prevents cascade failures with configurable thresholds
+- **Error Classification**: `is_recoverable_message` for intelligent retry decisions
+- **40 New Tests**: Comprehensive retry and recovery testing
+  - `test_chain_retry.ml`: 11 tests
+  - `test_error_recovery.ml`: 11 tests
+  - `test_chain_executor_retry.ml`: 13 tests
+  - `test_orchestrator_retry_e2e.ml`: 5 tests
+
+### Changed
+- `chain_orchestrator_eio.ml`: LLM calls now wrapped with `execute_llm_with_retry`
+
 ## [0.2.27] - 2026-01-30
 
 ### Changed
