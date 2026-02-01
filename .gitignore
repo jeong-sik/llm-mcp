@@ -39,3 +39,6 @@ mz_chain_output*.log
 .worktree/
 data/chain_history.jsonl
 data/telemetry.jsonl
+.gemini/state/cache/
+logs/gemini/
+data/compression_dashboard.json
