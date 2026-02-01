@@ -708,16 +708,6 @@ let claude_cli_tests = [
   "help", `Quick, test_claude_cli_help;
 ]
 
-(* ============================================================================
-   Compact Protocol v0.1 tests
-   ============================================================================ *)
-
-open Types
-
-  "e2e special chars", `Quick, test_e2e_special_chars;
-  "e2e multi-agent sim", `Quick, test_e2e_multi_agent_simulation;
-]
-
 let () =
   run "Binaries" [
     "hook-input", hook_input_tests;
