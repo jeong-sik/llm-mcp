@@ -95,7 +95,7 @@ let registry_mutex = Mutex.create ()
 (** Helper for mutex-protected operations *)
 let with_mutex f =
   Mutex.lock registry_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock registry_mutex) f
+  Fun.protect ~finally:(fun () -> try Mutex.unlock registry_mutex with _ -> ()) f
 
 (** {1 Persistence} *)
 

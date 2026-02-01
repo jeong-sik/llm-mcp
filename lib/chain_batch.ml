@@ -240,7 +240,7 @@ let submit_batch ~sw ~clock ~executor config chains =
     Eio.Fiber.fork_promise ~sw (fun () ->
       Eio.Semaphore.acquire semaphore;
       Fun.protect
-        ~finally:(fun () -> Eio.Semaphore.release semaphore)
+        ~finally:(fun () -> try Eio.Semaphore.release semaphore with _ -> ())
         (fun () -> execute_chain_with_policy ctx chain)
     )
   ) chains in

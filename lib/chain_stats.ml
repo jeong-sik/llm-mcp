@@ -100,7 +100,7 @@ let stats_mutex = Mutex.create ()
 (** Helper for mutex-protected operations *)
 let with_mutex f =
   Mutex.lock stats_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock stats_mutex) f
+  Fun.protect ~finally:(fun () -> try Mutex.unlock stats_mutex with _ -> ()) f
 
 (** {1 Data Collection} *)
 

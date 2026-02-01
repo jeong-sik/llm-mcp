@@ -69,7 +69,7 @@ let min_payload_size = 64  (** Minimum size for dictionary compression *)
 (** Read binary file with proper cleanup on exception *)
 let read_binary_file path =
   let ic = open_in_bin path in
-  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
     let len = in_channel_length ic in
     really_input_string ic len
   )
@@ -77,7 +77,7 @@ let read_binary_file path =
 (** Write binary file with proper cleanup on exception *)
 let write_binary_file path content =
   let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
     output_string oc content
   )
 
@@ -203,7 +203,7 @@ let load (path : string) : (t, string) result =
 let save (dict : t) (path : string) : (unit, string) result =
   try
     let oc = open_out_bin path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
       (* v2 format: ZDCT|v2|content_type|model_type|sample_count|created_at *)
       Printf.fprintf oc "%s|v2|%s|%s|%d|%.1f\n"
         magic

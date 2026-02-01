@@ -1591,7 +1591,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       let records =
         try
           let ic = open_in history_file in
-          Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+          Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
             let rec read_lines acc =
               match input_line ic with
               | line ->
@@ -1624,7 +1624,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       let records =
         try
           let ic = open_in history_file in
-          Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+          Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
             let rec read_lines acc =
               match input_line ic with
               | line ->

@@ -185,7 +185,9 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
     let _ = call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_join" ~arguments:join_args in
     Fun.protect
       ~finally:(fun () ->
-        ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args))
+        try
+          ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args)
+        with _ -> ())
       (fun () ->
         Eio.Switch.run (fun hb_sw ->
           let interval = float_of_int (masc_heartbeat_interval ()) in

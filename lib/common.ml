@@ -215,7 +215,9 @@ let day_str () =
 let run_command cmd =
   try
     let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+    Fun.protect ~finally:(fun () ->
+      try ignore (Unix.close_process_in ic) with _ -> ()
+    ) (fun () ->
       let lines = ref [] in
       begin
         try

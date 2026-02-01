@@ -43,7 +43,7 @@ let metrics_mutex = Mutex.create ()
 
 let with_lock f =
   Mutex.lock metrics_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock metrics_mutex) f
+  Fun.protect ~finally:(fun () -> try Mutex.unlock metrics_mutex with _ -> ()) f
 
 (** {1 Metric Registration} *)
 
