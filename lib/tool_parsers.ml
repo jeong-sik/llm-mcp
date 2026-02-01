@@ -190,13 +190,13 @@ let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
             try
               let param_type = 
                 match prop |> member "type" |> to_string with
-                | "string" -> Types.JsonString
-                | "number" -> Types.JsonNumber
-                | "integer" -> Types.JsonInteger
-                | "boolean" -> Types.JsonBoolean
-                | "array" -> Types.JsonArray
-                | "object" -> Types.JsonObject
-                | _ -> Types.JsonString
+                | "string" -> Types.SchemaString
+                | "number" -> Types.SchemaNumber
+                | "integer" -> Types.SchemaInteger
+                | "boolean" -> Types.SchemaBoolean
+                | "array" -> Types.SchemaArray Types.SchemaString
+                | "object" -> Types.SchemaObject
+                | _ -> Types.SchemaString
               in
               let param_description = 
                 try Some (prop |> member "description" |> to_string)
