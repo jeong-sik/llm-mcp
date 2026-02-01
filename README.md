@@ -67,3 +67,31 @@ stdio 모드:
 - 기본 HTTP 엔드포인트는 `/mcp`, `/health`입니다.
 - 절약 모드는 `LLM_MCP_BUDGET_MODE=true`로 켤 수 있습니다.
 - 체인 기능은 구현 중인 부분이 있어, 문서와 실제 동작이 다를 수 있습니다.
+
+## Chain Retry System (v0.3.0+)
+
+LLM 호출의 자동 재시도 및 회로 차단기를 제공합니다.
+
+### 사용법
+
+```ocaml
+(* 자동 재시도 포함 LLM 호출 *)
+let result = Chain_executor_retry.execute_llm_with_retry 
+  ~clock ~provider:"gemini" (fun () ->
+    call_llm ~model ~prompt ()
+  ) in
+
+(* 회로 차단기 *)
+let breaker = Chain_executor_retry.create_breaker 
+  ~failure_threshold:5 ~reset_timeout:30.0 () in
+let result = Chain_executor_retry.execute_with_breaker 
+  ~clock ~breaker ~node_id:"node-1" f
+```
+
+### 복구 가능한 에러
+
+자동으로 재시도되는 에러:
+- Rate limit (429)
+- Connection timeout
+- Connection refused
+- 503, 502, 504 HTTP 에러
