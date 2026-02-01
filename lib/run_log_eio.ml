@@ -48,11 +48,10 @@ let append_jsonl_unlocked ~fs json =
 let append_jsonl_sys json =
   let path = ensure_log_dir () in
   let line = Yojson.Safe.to_string json ^ "\n" in
-  let oc =
-    open_out_gen [Open_creat; Open_append; Open_wronly] 0o644 path
-  in
-  output_string oc line;
-  close_out_noerr oc
+  Out_channel.with_open_gen [Open_creat; Open_append; Open_wronly] 0o644 path
+    (fun oc ->
+      output_string oc line
+    )
 
 let assoc_of_kv (kvs : (string * string) list) =
   `Assoc (List.map (fun (k, v) -> (k, `String v)) kvs)

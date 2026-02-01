@@ -183,26 +183,35 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
     let heartbeat_args = `Assoc [("agent_name", `String agent)] in
     let leave_args = `Assoc [("agent_name", `String agent)] in
     let _ = call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_join" ~arguments:join_args in
-    Fun.protect
-      ~finally:(fun () ->
-        ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args))
-      (fun () ->
-        Eio.Switch.run (fun hb_sw ->
-          let interval = float_of_int (masc_heartbeat_interval ()) in
-          let _ =
-            Eio.Fiber.fork ~sw:hb_sw (fun () ->
-              let rec loop () =
-                (* Heartbeat must never crash the main request flow. *)
-                (try
-                   ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args)
-                 with exn ->
-                   eprintf "[masc] heartbeat error: %s\n%!" (Printexc.to_string exn));
-                Eio.Time.sleep clock interval;
-                loop ()
-              in
-              loop ())
-          in
-          f ()))
+    let leave () =
+      try
+        ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args)
+      with _ -> ()
+    in
+    match
+      Eio.Switch.run (fun hb_sw ->
+        let interval = float_of_int (masc_heartbeat_interval ()) in
+        let _ =
+          Eio.Fiber.fork ~sw:hb_sw (fun () ->
+            let rec loop () =
+              (* Heartbeat must never crash the main request flow. *)
+              (try
+                 ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args)
+               with exn ->
+                 eprintf "[masc] heartbeat error: %s\n%!" (Printexc.to_string exn));
+              Eio.Time.sleep clock interval;
+              loop ()
+            in
+            loop ())
+        in
+        f ())
+    with
+    | result ->
+        leave ();
+        result
+    | exception exn ->
+        leave ();
+        raise exn
 
 (** {1 Streaming Execution} - Config from Tools_stream_config *)
 let stream_delta_enabled = Tools_stream_config.enabled
@@ -1835,9 +1844,10 @@ This chain will execute the goal using a stub model.|}
                  let chain_path = Filename.concat (Filename.concat repo_root "data") (Filename.concat "chains" (cid ^ ".json")) in
                  Log.info "chain_id_load" "Chain path: %s (exists: %b)" chain_path (Sys.file_exists chain_path);
                  (try
-                   let ic = open_in chain_path in
-                   let content = really_input_string ic (in_channel_length ic) in
-                   close_in ic;
+                   let content =
+                     In_channel.with_open_bin chain_path (fun ic ->
+                       really_input_string ic (in_channel_length ic))
+                   in
                    Log.info "chain_id_load" "Loaded chain file (%d bytes)" (String.length content);
                    Some (Yojson.Safe.from_string content)
                  with e ->

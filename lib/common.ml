@@ -211,11 +211,20 @@ let day_str () =
 (* ============================================ *)
 
 (** Run shell command and return output lines.
-    Uses Fun.protect for proper process cleanup on exception. *)
+    Ensures process cleanup on exception. *)
 let run_command cmd =
   try
-    let ic = Unix.open_process_in cmd in
-    Fun.protect ~finally:(fun () -> ignore (Unix.close_process_in ic)) (fun () ->
+    let with_process_in cmd f =
+      let ic = Unix.open_process_in cmd in
+      match f ic with
+      | result ->
+          ignore (Unix.close_process_in ic);
+          result
+      | exception exn ->
+          ignore (Unix.close_process_in ic);
+          raise exn
+    in
+    with_process_in cmd (fun ic ->
       let lines = ref [] in
       begin
         try

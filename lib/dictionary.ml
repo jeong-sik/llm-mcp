@@ -68,16 +68,14 @@ let min_payload_size = 64  (** Minimum size for dictionary compression *)
 
 (** Read binary file with proper cleanup on exception *)
 let read_binary_file path =
-  let ic = open_in_bin path in
-  Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+  In_channel.with_open_bin path (fun ic ->
     let len = in_channel_length ic in
     really_input_string ic len
   )
 
 (** Write binary file with proper cleanup on exception *)
 let write_binary_file path content =
-  let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+  Out_channel.with_open_bin path (fun oc ->
     output_string oc content
   )
 
@@ -160,7 +158,7 @@ let detect_model_type (data : string) : model_type =
     Supports both v1 (legacy) and v2 (with model_type) formats.
     - v1: "ZDCT|v1|json|100|1736697600.0"
     - v2: "ZDCT|v2|json|claude|100|1736697600.0"
-    Uses Fun.protect for proper resource cleanup.
+    Uses with_open_* for proper resource cleanup.
 *)
 let load (path : string) : (t, string) result =
   try
@@ -198,12 +196,11 @@ let load (path : string) : (t, string) result =
   | _ -> Error ("Failed to load dictionary: " ^ path)
 
 (** Save dictionary to file (v2 format with model_type).
-    Uses Fun.protect for proper resource cleanup.
+    Uses with_open_* for proper resource cleanup.
 *)
 let save (dict : t) (path : string) : (unit, string) result =
   try
-    let oc = open_out_bin path in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    Out_channel.with_open_bin path (fun oc ->
       (* v2 format: ZDCT|v2|content_type|model_type|sample_count|created_at *)
       Printf.fprintf oc "%s|v2|%s|%s|%d|%.1f\n"
         magic
