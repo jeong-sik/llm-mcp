@@ -119,6 +119,13 @@ let make_response ~id result =
     ("result", result);
   ]
 
+let env_bool name ~default =
+  match Sys.getenv_opt name with
+  | None -> default
+  | Some v ->
+      let v = String.lowercase_ascii (String.trim v) in
+      v = "1" || v = "true" || v = "yes" || v = "y"
+
 let make_error ~id code message =
   `Assoc [
     ("jsonrpc", `String "2.0");
@@ -424,31 +431,45 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
             | "tools/call" ->
                 (match req.params with
                  | Some params ->
-                     (* Get or create session for tools/call *)
-                     let effective_session_id = match session_id_opt with
+                     let require_session =
+                       env_bool "LLM_MCP_REQUIRE_SESSION" ~default:false
+                     in
+                     let reject_unknown =
+                       env_bool "LLM_MCP_REJECT_UNKNOWN_SESSION" ~default:false
+                     in
+                     let session_result =
+                       match session_id_opt with
+                       | None ->
+                           if require_session then begin
+                             eprintf "[session] tools/call rejected: missing session id\n%!";
+                             Error "Missing session id"
+                           end else Ok None
                        | Some sid ->
                            (match get_session store sid with
                             | Some _ ->
-                                (* Session exists, use it *)
-                                Some sid
+                                Ok (Some sid)
                             | None ->
-                                (* Session expired/not found, auto-create new one *)
-                                let now = Unix.gettimeofday () in
-                                let new_session = {
-                                  id = generate_session_id ();
-                                  protocol_version = P.protocol_version;
-                                  created_at = now;
-                                  last_accessed = now;
-                                } in
-                                put_session store new_session;
-                                eprintf "[session] Old session %s not found, auto-created: %s\n%!" sid new_session.id;
-                                Some new_session.id)
-                       | None ->
-                           (* No session ID provided, allow for compatibility *)
-                           eprintf "[session] No session ID, allowing tools/call anyway\n%!";
-                           None
+                                if reject_unknown then begin
+                                  eprintf "[session] tools/call rejected: unknown session %s\n%!" sid;
+                                  Error "Unknown session id"
+                                end else begin
+                                  let now = Unix.gettimeofday () in
+                                  let new_session = {
+                                    id = generate_session_id ();
+                                    protocol_version = P.protocol_version;
+                                    created_at = now;
+                                    last_accessed = now;
+                                  } in
+                                  put_session store new_session;
+                                  eprintf "[session] Old session %s not found, auto-created: %s\n%!" sid new_session.id;
+                                  Ok (Some new_session.id)
+                                end)
                      in
-                     (effective_session_id, handle_call_tool ~sw ~proc_mgr ~clock id params)
+                     (match session_result with
+                      | Error msg ->
+                          (session_id_opt, make_error ~id (-32602) msg)
+                      | Ok effective_session_id ->
+                          (effective_session_id, handle_call_tool ~sw ~proc_mgr ~clock id params))
                  | None ->
                      (session_id_opt, make_error ~id (-32602) "Missing params"))
             | "resources/list" ->
@@ -517,15 +538,10 @@ let auth_middleware headers =
 
 (** Send 401 Unauthorized response *)
 let send_unauthorized reqd message =
-  let headers = Httpun.Headers.of_list [
-    ("content-type", "application/json");
-    ("access-control-allow-origin", "*");
-  ] in
   let body = Yojson.Safe.to_string (`Assoc [
     ("error", `String message);
   ]) in
-  let response = Httpun.Response.create ~headers `Unauthorized in
-  Httpun.Reqd.respond_with_string reqd response body
+  Http.Response.json ~status:`Unauthorized body reqd
 
 (** {1 HTTP Server} *)
 
@@ -544,6 +560,9 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
     String.length s >= p && String.sub s 0 p = prefix
   in
 
+  if not (Http.Cors.is_allowed reqd) then
+    Http.Response.text ~status:`Forbidden "Forbidden" reqd
+  else
   match (meth, path) with
   (* Health check - no auth required *)
   | (`GET, "/health") ->
@@ -623,13 +642,14 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
           in
           if not (Rate_limit.check_global ~key:rate_key) then begin
             Metrics.record_error ~error_type:"rate_limit" ();
-            let headers = Httpun.Headers.of_list [
+            let body = Rate_limit.too_many_requests_body () in
+            let headers = Httpun.Headers.of_list ([
               ("content-type", "application/json");
+              ("content-length", string_of_int (String.length body));
               ("retry-after", "1");
-            ] in
+            ] @ Http.Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
             let response = Httpun.Response.create ~headers `Too_many_requests in
-            Httpun.Reqd.respond_with_string reqd response
-              (Rate_limit.too_many_requests_body ())
+            Httpun.Reqd.respond_with_string reqd response body
           end
           else
           (* Authentication and rate limit passed - route to endpoint *)
@@ -659,7 +679,7 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
               Http.Response.json body reqd
 
           (* SSE streaming endpoint for MCP Streamable HTTP *)
-          | (`GET, "/sse") ->
+          | (`GET, "/sse") | (`GET, "/mcp") ->
               let session_id =
                 extract_session_id None headers
                 |> Option.value ~default:(generate_session_id ())
