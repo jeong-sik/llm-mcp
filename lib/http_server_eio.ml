@@ -139,7 +139,8 @@ module Response = struct
       ("content-length", string_of_int (String.length body));
     ] @ Cors.headers reqd ~include_methods:false ~include_headers:false ~include_expose:false) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let json ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([
@@ -147,7 +148,8 @@ module Response = struct
       ("content-length", string_of_int (String.length body));
     ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let html ?(status = `OK) body reqd =
     let headers = Httpun.Headers.of_list ([
@@ -155,7 +157,8 @@ module Response = struct
       ("content-length", string_of_int (String.length body));
     ] @ Cors.headers reqd ~include_methods:false ~include_headers:false ~include_expose:false) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   (** 202 Accepted response for notifications (MCP Streamable HTTP) *)
   let accepted reqd =
@@ -163,7 +166,8 @@ module Response = struct
       ("content-length", "0");
     ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers `Accepted in
-    Httpun.Reqd.respond_with_string reqd response ""
+    Httpun.Reqd.respond_with_string reqd response "";
+    Server_metrics.finish_reqd reqd `Accepted
 
   let json_with_session ?(status = `OK) ~session_id ~protocol_version body reqd =
     let headers = Httpun.Headers.of_list ([
@@ -173,7 +177,8 @@ module Response = struct
       ("mcp-protocol-version", protocol_version);
     ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let not_found reqd =
     text ~status:`Not_found "404 Not Found" reqd
@@ -184,7 +189,8 @@ module Response = struct
       ("content-length", "0");
     ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers `No_content in
-    Httpun.Reqd.respond_with_string reqd response ""
+    Httpun.Reqd.respond_with_string reqd response "";
+    Server_metrics.finish_reqd reqd `No_content
 
   (** SSE streaming response for MCP streamable-http protocol *)
   let sse_stream ~session_id ~protocol_version reqd ~on_write =
@@ -198,7 +204,8 @@ module Response = struct
     ] @ Cors.headers reqd ~include_methods:false ~include_headers:false ~include_expose:true) in
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
-    on_write body
+    on_write body;
+    Server_metrics.finish_reqd reqd `OK
 end
 
 module Request = struct
@@ -230,7 +237,8 @@ module Request = struct
       ("connection", "close");
     ] @ Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
-    Httpun.Reqd.respond_with_string reqd response body
+    Httpun.Reqd.respond_with_string reqd response body;
+    Server_metrics.finish_reqd ~bytes:(String.length body) reqd status
 
   let respond_too_large reqd max_bytes =
     let body = Printf.sprintf
@@ -324,6 +332,7 @@ let register_sse_client body =
   let id = !sse_client_counter in
   let client = { body; connected = true } in
   Hashtbl.add sse_clients id client;
+  Server_metrics.sse_open ();
   id
 
 let unregister_sse_client id =
@@ -331,6 +340,7 @@ let unregister_sse_client id =
    | Some c -> c.connected <- false
    | None -> ());
   Hashtbl.remove sse_clients id
+  ; Server_metrics.sse_close ()
 
 let sse_client_count () = Hashtbl.length sse_clients
 

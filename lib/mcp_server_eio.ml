@@ -552,6 +552,7 @@ let extract_headers request =
 (** Handle HTTP request - httpun callback style *)
 let handle_http ~sw ~proc_mgr ~clock ~store reqd =
   let request = Httpun.Reqd.request reqd in
+  Server_metrics.register_reqd reqd request;
   let path = Http.Request.path request in
   let meth = Http.Request.meth request in
   let headers = extract_headers request in
@@ -599,13 +600,28 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
         )
       in
       Metrics.set_active_sessions session_count;
-      let body = Metrics.to_prometheus_text () in
+      let body =
+        String.concat "\n" [
+          Metrics.to_prometheus_text ();
+          Server_metrics.to_prometheus_text ();
+          Spawn_registry.to_prometheus_text ();
+        ]
+      in
       let headers = Httpun.Headers.of_list [
         ("content-type", "text/plain; version=0.0.4; charset=utf-8");
         ("content-length", string_of_int (String.length body));
       ] in
       let response = Httpun.Response.create ~headers `OK in
-      Httpun.Reqd.respond_with_string reqd response body
+      Httpun.Reqd.respond_with_string reqd response body;
+      Server_metrics.finish_reqd ~bytes:(String.length body) reqd `OK
+
+  (* JSON stats endpoint - no auth required *)
+  | (`GET, "/stats") ->
+      let body = Yojson.Safe.to_string (`Assoc [
+        ("server_metrics", Server_metrics.to_json ());
+        ("spawn_registry", Spawn_registry.to_json ());
+      ]) in
+      Http.Response.json body reqd
 
   (* Chain viewer UI + run history - no auth required *)
   | (`GET, "/chain/view") ->
@@ -649,7 +665,8 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
               ("retry-after", "1");
             ] @ Http.Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
             let response = Httpun.Response.create ~headers `Too_many_requests in
-            Httpun.Reqd.respond_with_string reqd response body
+            Httpun.Reqd.respond_with_string reqd response body;
+            Server_metrics.finish_reqd ~bytes:(String.length body) reqd `Too_many_requests
           end
           else
           (* Authentication and rate limit passed - route to endpoint *)
