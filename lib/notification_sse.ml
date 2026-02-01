@@ -74,19 +74,19 @@ let persist_event event_id event_str =
         ("event", `String event_str);
       ]) ^ "\n"
     in
-    let oc =
-      open_out_gen [Open_creat; Open_append; Open_wronly] 0o644 path
-    in
-    output_string oc line;
-    close_out_noerr oc;
+    Out_channel.with_open_gen [Open_creat; Open_append; Open_wronly] 0o644 path
+      (fun oc ->
+        output_string oc line
+      );
     (try
        let max_bytes = event_max_bytes () in
        let st = Unix.stat path in
        if st.Unix.st_size > max_bytes then begin
          let lines = Common.read_lines_tail ~max_bytes ~max_lines:max_buffer_size path in
-         let oc_trunc = open_out_gen [Open_creat; Open_trunc; Open_wronly] 0o644 path in
-         List.iter (fun l -> output_string oc_trunc (l ^ "\n")) lines;
-         close_out_noerr oc_trunc
+         Out_channel.with_open_gen [Open_creat; Open_trunc; Open_wronly] 0o644 path
+           (fun oc_trunc ->
+             List.iter (fun l -> output_string oc_trunc (l ^ "\n")) lines
+           )
        end
      with exn ->
        (* Log truncation errors for debugging - non-critical *)

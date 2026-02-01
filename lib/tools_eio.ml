@@ -1844,9 +1844,10 @@ This chain will execute the goal using a stub model.|}
                  let chain_path = Filename.concat (Filename.concat repo_root "data") (Filename.concat "chains" (cid ^ ".json")) in
                  Log.info "chain_id_load" "Chain path: %s (exists: %b)" chain_path (Sys.file_exists chain_path);
                  (try
-                   let ic = open_in chain_path in
-                   let content = really_input_string ic (in_channel_length ic) in
-                   close_in ic;
+                   let content =
+                     In_channel.with_open_bin chain_path (fun ic ->
+                       really_input_string ic (in_channel_length ic))
+                   in
                    Log.info "chain_id_load" "Loaded chain file (%d bytes)" (String.length content);
                    Some (Yojson.Safe.from_string content)
                  with e ->

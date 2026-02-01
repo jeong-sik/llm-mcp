@@ -141,10 +141,11 @@ let load_fewshot filename =
   let path = fewshot_dir () ^ "/" ^ filename in
   if Sys.file_exists path then
     try
-      let ic = open_in path in
-      let n = in_channel_length ic in
-      let s = really_input_string ic n in
-      close_in ic;
+      let s =
+        In_channel.with_open_bin path (fun ic ->
+          let n = in_channel_length ic in
+          really_input_string ic n)
+      in
       Some s
     with _ -> None
   else None
