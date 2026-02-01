@@ -63,12 +63,10 @@ let create_from_env () =
 
 let with_lock limiter f =
   Mutex.lock limiter.mutex;
-  Fun.protect
-    ~finally:(fun () ->
-      try Mutex.unlock limiter.mutex with
-      | ex ->
-          Log.warn "rate_limit" "Mutex.unlock failed in finalizer: %s"
-            (Printexc.to_string ex))
+  Common.protect
+    ~module_name:"rate_limit"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock limiter.mutex)
     f
 
 (** Check if request is allowed (returns true) or rate limited (returns false) *)

@@ -49,12 +49,10 @@ let registry_mutex = Mutex.create ()
 (** Helper for mutex-protected operations *)
 let with_mutex f =
   Mutex.lock registry_mutex;
-  Fun.protect
-    ~finally:(fun () ->
-      try Mutex.unlock registry_mutex with
-      | ex ->
-          Log.warn "chain_registry" "Mutex.unlock failed in finalizer: %s"
-            (Printexc.to_string ex))
+  Common.protect
+    ~module_name:"chain_registry"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock registry_mutex)
     f
 
 (** File-based persistence directory *)

@@ -43,12 +43,10 @@ let metrics_mutex = Mutex.create ()
 
 let with_lock f =
   Mutex.lock metrics_mutex;
-  Fun.protect
-    ~finally:(fun () ->
-      try Mutex.unlock metrics_mutex with
-      | ex ->
-          Log.warn "metrics" "Mutex.unlock failed in finalizer: %s"
-            (Printexc.to_string ex))
+  Common.protect
+    ~module_name:"metrics"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock metrics_mutex)
     f
 
 (** {1 Metric Registration} *)

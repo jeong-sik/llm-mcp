@@ -100,12 +100,10 @@ let stats_mutex = Mutex.create ()
 (** Helper for mutex-protected operations *)
 let with_mutex f =
   Mutex.lock stats_mutex;
-  Fun.protect
-    ~finally:(fun () ->
-      try Mutex.unlock stats_mutex with
-      | ex ->
-          Log.warn "chain_stats" "Mutex.unlock failed in finalizer: %s"
-            (Printexc.to_string ex))
+  Common.protect
+    ~module_name:"chain_stats"
+    ~finally_label:"Mutex.unlock"
+    ~finally:(fun () -> Mutex.unlock stats_mutex)
     f
 
 (** {1 Data Collection} *)
