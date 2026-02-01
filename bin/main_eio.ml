@@ -1196,17 +1196,98 @@ module Response = struct
 end
 
 module Request = struct
+  let default_max_body_bytes = 20 * 1024 * 1024
+
+  let parse_positive_int value =
+    try
+      let v = int_of_string value in
+      if v > 0 then Some v else None
+    with _ -> None
+
+  let max_body_bytes =
+    let from_env name =
+      match Sys.getenv_opt name with
+      | Some v -> parse_positive_int v
+      | None -> None
+    in
+    match from_env "LLM_MCP_MAX_BODY_BYTES" with
+    | Some v -> v
+    | None ->
+        (match from_env "MCP_MAX_BODY_BYTES" with
+         | Some v -> v
+         | None -> default_max_body_bytes)
+
+  let respond_error reqd status body =
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "text/plain; charset=utf-8");
+      ("content-length", string_of_int (String.length body));
+      ("access-control-allow-origin", "*");
+      ("access-control-allow-methods", "GET, POST, OPTIONS");
+      ("access-control-allow-headers", "Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id");
+      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+      ("connection", "close");
+    ] in
+    let response = Httpun.Response.create ~headers status in
+    Httpun.Reqd.respond_with_string reqd response body
+
+  let respond_too_large reqd max_bytes =
+    let body = Printf.sprintf
+      "413 Request Entity Too Large (max %d bytes)" max_bytes
+    in
+    respond_error reqd `Payload_too_large body
+
+  let respond_internal_error reqd exn =
+    let body = Printf.sprintf
+      "500 Internal Server Error: %s" (Printexc.to_string exn)
+    in
+    respond_error reqd `Internal_server_error body
+
   let read_body_async reqd callback =
+    let request = Httpun.Reqd.request reqd in
+    let content_length =
+      match Httpun.Headers.get request.headers "content-length" with
+      | Some v -> parse_positive_int v
+      | None -> None
+    in
     let body = Httpun.Reqd.request_body reqd in
-    let chunks = ref [] in
+    let stopped = ref false in
+    let stop () =
+      if not !stopped then begin
+        stopped := true;
+        (try Httpun.Body.Reader.close body with _ -> ())
+      end
+    in
+    match content_length with
+    | Some len when len > max_body_bytes ->
+        stop ();
+        respond_too_large reqd max_body_bytes
+    | _ ->
+    let initial_capacity =
+      match content_length with
+      | Some len when len > 0 && len < max_body_bytes -> len
+      | _ -> 1024
+    in
+    let buf = Buffer.create initial_capacity in
+    let seen_bytes = ref 0 in
     let rec read_loop () =
       Httpun.Body.Reader.schedule_read body
         ~on_eof:(fun () ->
-          callback (String.concat "" (List.rev !chunks)))
+          let body_str = Buffer.contents buf in
+          try callback body_str with exn ->
+            respond_internal_error reqd exn)
         ~on_read:(fun buffer ~off ~len ->
-          let chunk = Bigstringaf.substring buffer ~off ~len in
-          chunks := chunk :: !chunks;
-          read_loop ())
+          if !stopped then ()
+          else
+            let next_bytes = !seen_bytes + len in
+            if next_bytes > max_body_bytes then begin
+              stop ();
+              respond_too_large reqd max_body_bytes
+            end else begin
+              seen_bytes := next_bytes;
+              let chunk = Bigstringaf.substring buffer ~off ~len in
+              Buffer.add_string buf chunk;
+              read_loop ()
+            end)
     in
     read_loop ()
 
@@ -1590,8 +1671,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       in
       let records =
         try
-          let ic = open_in history_file in
-          Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+          In_channel.with_open_text history_file (fun ic ->
             let rec read_lines acc =
               match input_line ic with
               | line ->
@@ -1623,8 +1703,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       in
       let records =
         try
-          let ic = open_in history_file in
-          Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+          In_channel.with_open_text history_file (fun ic ->
             let rec read_lines acc =
               match input_line ic with
               | line ->
@@ -1744,7 +1823,11 @@ let make_request_handler ~sw ~clock ~proc_mgr ~store =
   fun _client_addr gluten_reqd ->
     let reqd = gluten_reqd.Gluten.Reqd.reqd in
     let request = Httpun.Reqd.request reqd in
-    route_request ~sw ~clock ~proc_mgr ~store request reqd
+    try
+      route_request ~sw ~clock ~proc_mgr ~store request reqd
+    with exn ->
+      let msg = Printf.sprintf "Internal Server Error: %s" (Printexc.to_string exn) in
+      Response.text ~status:`Internal_server_error msg reqd
 
 let error_handler _client_addr ?request:_ error start_response =
   let response_body = start_response Httpun.Headers.empty in
@@ -1775,6 +1858,12 @@ let run ~sw ~net ~clock ~proc_mgr ~store config =
   eprintf "         POST /mcp -> JSON-RPC requests\n";
   eprintf "   Graceful shutdown: SIGTERM/SIGINT supported\n%!";
 
+  let is_cancelled exn =
+    match exn with
+    | Shutdown -> true
+    | Eio.Cancel.Cancelled _ -> true
+    | _ -> false
+  in
   let rec accept_loop backoff_s =
     try
       let flow, client_addr = Eio.Net.accept ~sw socket in
@@ -1791,10 +1880,13 @@ let run ~sw ~net ~clock ~proc_mgr ~store config =
       );
       accept_loop 0.05
     with exn ->
-      eprintf "[llm-mcp] Accept error: %s\n%!" (Printexc.to_string exn);
-      (try Eio.Time.sleep clock backoff_s with _ -> ());
-      let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
-      accept_loop next_backoff
+      if is_cancelled exn then ()
+      else begin
+        eprintf "[llm-mcp] Accept error: %s\n%!" (Printexc.to_string exn);
+        (try Eio.Time.sleep clock backoff_s with _ -> ());
+        let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+        accept_loop next_backoff
+      end
   in
   accept_loop 0.05
 

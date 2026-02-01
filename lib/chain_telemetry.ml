@@ -16,8 +16,7 @@ open Chain_category
 
 (** {1 Helper for Stdlib.Mutex} *)
 let with_mutex mutex f =
-  Mutex.lock mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mutex) f
+  Mutex.protect mutex f
 
 (** {1 History Persistence} *)
 
@@ -35,8 +34,7 @@ let history_file =
 (** Append a JSON record to history file (thread-safe via OS) *)
 let append_history (json : Yojson.Safe.t) =
   try
-    let oc = open_out_gen [Open_append; Open_creat; Open_text] 0o644 history_file in
-    Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    Out_channel.with_open_gen [Open_append; Open_creat; Open_text] 0o644 history_file (fun oc ->
       output_string oc (Yojson.Safe.to_string json);
       output_char oc '\n';
       flush oc

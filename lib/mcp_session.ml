@@ -18,10 +18,12 @@ let sessions : (string, session) Hashtbl.t = Hashtbl.create 16
 (** Generate cryptographically secure session ID *)
 let generate_session_id () =
   (* Use /dev/urandom for secure random bytes *)
-  let ic = open_in_bin "/dev/urandom" in
-  let bytes = Bytes.create 16 in
-  really_input ic bytes 0 16;
-  close_in ic;
+  let bytes =
+    In_channel.with_open_bin "/dev/urandom" (fun ic ->
+      let buf = Bytes.create 16 in
+      really_input ic buf 0 16;
+      buf)
+  in
   (* Convert to hex string - visible ASCII only *)
   let hex = Buffer.create 32 in
   Bytes.iter (fun b -> Buffer.add_string hex (Printf.sprintf "%02x" (Char.code b))) bytes;

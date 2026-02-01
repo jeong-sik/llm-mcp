@@ -132,9 +132,9 @@ let save (store : checkpoint_store) (cp : checkpoint) : (unit, string) result =
     let path = checkpoint_path store cp.run_id in
     let json = checkpoint_to_json cp in
     let content = Yojson.Safe.pretty_to_string json in
-    let oc = open_out path in
-    output_string oc content;
-    close_out oc;
+    Out_channel.with_open_bin path (fun oc ->
+      output_string oc content
+    );
     Ok ()
   with exn ->
     Error (Printf.sprintf "Failed to save checkpoint: %s" (Printexc.to_string exn))
@@ -155,9 +155,10 @@ let load_eio ~fs (store : checkpoint_store) ~run_id : (checkpoint, string) resul
 let load (store : checkpoint_store) ~run_id : (checkpoint, string) result =
   let path = checkpoint_path store run_id in
   try
-    let ic = open_in path in
-    let content = really_input_string ic (in_channel_length ic) in
-    close_in ic;
+    let content =
+      In_channel.with_open_bin path (fun ic ->
+        really_input_string ic (in_channel_length ic))
+    in
     let json = Yojson.Safe.from_string content in
     checkpoint_of_json json
   with

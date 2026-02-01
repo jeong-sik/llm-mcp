@@ -42,8 +42,7 @@ let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Mutex.create ()
 
 let with_lock f =
-  Mutex.lock metrics_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock metrics_mutex) f
+  Mutex.protect metrics_mutex f
 
 (** {1 Metric Registration} *)
 
