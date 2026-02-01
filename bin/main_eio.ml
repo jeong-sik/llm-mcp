@@ -1645,6 +1645,14 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
   | `GET, "/" ->
       Response.text "🐫 llm-mcp (OCaml Eio) MCP 2025-11-25 server" reqd
 
+  (* JSON stats endpoint - no auth required *)
+  | `GET, "/stats" ->
+      let body = Yojson.Safe.to_string (`Assoc [
+        ("server_metrics", Server_metrics.to_json ());
+        ("spawn_registry", Spawn_registry.to_json ());
+      ]) in
+      Response.json body reqd
+
   (* Chain stats endpoint for monitoring dashboard *)
   | `GET, "/chain/stats" ->
       let stats = Chain_stats.compute () in
@@ -1786,7 +1794,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
          | _ -> ())
       ) records;
       let avg_duration = if !duration_count > 0 then float_of_int !total_duration_ms /. float_of_int !duration_count else 0.0 in
-      let metrics = Printf.sprintf {|# HELP chain_executions_total Total chain executions
+      let chain_metrics = Printf.sprintf {|# HELP chain_executions_total Total chain executions
 # TYPE chain_executions_total counter
 chain_executions_total{status="success"} %d
 chain_executions_total{status="failure"} %d
@@ -1810,6 +1818,13 @@ chain_duration_total_ms %d
         !success_count !failure_count
         !gemini_tokens !claude_tokens !codex_tokens !ollama_tokens !total_tokens
         avg_duration !total_duration_ms
+      in
+      let metrics =
+        String.concat "\n" [
+          Server_metrics.to_prometheus_text ();
+          Spawn_registry.to_prometheus_text ();
+          chain_metrics;
+        ]
       in
       let headers = Httpun.Headers.of_list [
         ("content-type", "text/plain; version=0.0.4; charset=utf-8");
