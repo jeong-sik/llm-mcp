@@ -134,8 +134,38 @@ let execute_tool_call ~sw ~net ~clock (tc : tool_call) ~external_mcp_url =
 
 (** Execute multiple tool calls in parallel using Eio fibers *)
 let execute_tool_calls ~sw ~net ~clock tool_calls ~external_mcp_url =
-  (* Use Eio.Fiber.List for parallel execution *)
-  Eio.Fiber.List.map (fun tc -> execute_tool_call ~sw ~net ~clock tc ~external_mcp_url) tool_calls
+  let max_tool_calls =
+    match Sys.getenv_opt "LLM_MCP_MAX_TOOL_CALLS_PER_TURN" with
+    | Some v ->
+        (try max 0 (int_of_string (String.trim v)) with _ -> 16)
+    | None -> 16
+  in
+  let tool_calls =
+    if max_tool_calls <= 0 then tool_calls
+    else
+      let total = List.length tool_calls in
+      if total <= max_tool_calls then tool_calls
+      else
+        let rec take acc n lst =
+          if n <= 0 then List.rev acc
+          else match lst with
+            | [] -> List.rev acc
+            | x :: xs -> take (x :: acc) (n - 1) xs
+        in
+        Printf.eprintf "[llm-mcp] tool_calls capped: %d -> %d\n%!" total max_tool_calls;
+        take [] max_tool_calls tool_calls
+  in
+  let serial =
+    match Sys.getenv_opt "LLM_MCP_TOOL_CALLS_SERIAL" with
+    | Some v ->
+        let v = String.lowercase_ascii (String.trim v) in
+        v = "1" || v = "true" || v = "yes"
+    | None -> false
+  in
+  if serial then
+    List.map (fun tc -> execute_tool_call ~sw ~net ~clock tc ~external_mcp_url) tool_calls
+  else
+    Eio.Fiber.List.map (fun tc -> execute_tool_call ~sw ~net ~clock tc ~external_mcp_url) tool_calls
 
 (** Single agent turn result *)
 type turn_result =

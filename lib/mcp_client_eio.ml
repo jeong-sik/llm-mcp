@@ -129,7 +129,16 @@ let call_tool t ~url ~tool_name ~arguments =
     ("arguments", arguments);
   ] in
   let start = Unix.gettimeofday () in
-  let result = call_mcp_server t ~url ~method_name:"tools/call" ~params in
+  Metrics.record_tool_call ~tool:tool_name ();
+  Metrics.inc_tool_calls_inflight ~tool:tool_name ();
+  let result =
+    Fun.protect
+      ~finally:(fun () -> Metrics.dec_tool_calls_inflight ~tool:tool_name ())
+      (fun () -> call_mcp_server t ~url ~method_name:"tools/call" ~params)
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error _ -> Metrics.record_tool_call_error ~tool:tool_name ());
   let duration_ms =
     int_of_float ((Unix.gettimeofday () -. start) *. 1000.0)
   in

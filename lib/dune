@@ -132,6 +132,8 @@
    checkpoint_store
    ; Logging (Eio)
    run_log_eio
+   server_metrics
+   spawn_registry
    ; Agent Loop (Eio)
    agent_loop_eio)
  (libraries

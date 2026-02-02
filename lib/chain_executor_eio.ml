@@ -1488,48 +1488,65 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
   record_start ctx node.id;
   let start = Unix.gettimeofday () in
 
-  (* Create spawned context based on clean flag *)
-  let spawn_ctx = if clean then begin
-    (* Clean context - fresh start *)
-    let new_ctx = make_context
-      ~start_time:ctx.start_time
-      ~trace_enabled:ctx.trace_enabled
-      ~timeout:ctx.timeout
-      ~chain_id:ctx.chain_id
-      ()
-    in
-    (* Optionally inherit cache *)
-    if inherit_cache then
-      Hashtbl.iter (fun k v -> Hashtbl.replace new_ctx.cache k v) ctx.cache;
-    (* Pass only specified variables *)
-    List.iter (fun var_name ->
-      match Hashtbl.find_opt ctx.outputs var_name with
-      | Some value -> Hashtbl.replace new_ctx.outputs var_name value
-      | None -> ()  (* Variable not found - silently skip *)
-    ) pass_vars;
-    new_ctx
-  end else begin
-    (* Non-clean: inherit everything (basically just grouping) *)
-    ctx
-  end in
+  match Spawn_registry.try_start ~label:node.id with
+  | Error msg ->
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      record_complete ctx node.id ~duration_ms ~success:false;
+      record_error ctx node.id msg;
+      Error msg
+  | Ok spawn_id ->
+      (* Create spawned context based on clean flag *)
+      let spawn_ctx = if clean then begin
+        (* Clean context - fresh start *)
+        let new_ctx = make_context
+          ~start_time:ctx.start_time
+          ~trace_enabled:ctx.trace_enabled
+          ~timeout:ctx.timeout
+          ~chain_id:ctx.chain_id
+          ()
+        in
+        (* Optionally inherit cache *)
+        if inherit_cache then
+          Hashtbl.iter (fun k v -> Hashtbl.replace new_ctx.cache k v) ctx.cache;
+        (* Pass only specified variables *)
+        List.iter (fun var_name ->
+          match Hashtbl.find_opt ctx.outputs var_name with
+          | Some value -> Hashtbl.replace new_ctx.outputs var_name value
+          | None -> ()  (* Variable not found - silently skip *)
+        ) pass_vars;
+        new_ctx
+      end else begin
+        (* Non-clean: inherit everything (basically just grouping) *)
+        ctx
+      end in
 
-  (* Execute inner node in spawned context *)
-  let result = execute_node spawn_ctx ~sw ~clock ~exec_fn ~tool_exec inner in
+      (* Execute inner node in spawned context *)
+      let result =
+        try execute_node spawn_ctx ~sw ~clock ~exec_fn ~tool_exec inner
+        with exn ->
+          Error (Printf.sprintf "Spawn execution failed: %s" (Printexc.to_string exn))
+      in
 
-  (* Copy result back to parent context (for downstream nodes) *)
-  (match result with
-  | Ok output ->
-      store_node_output ctx inner output;
-      store_node_output ctx node output
-  | Error _ -> ());
+      (* Copy result back to parent context (for downstream nodes) *)
+      (match result with
+      | Ok output ->
+          store_node_output ctx inner output;
+          store_node_output ctx node output
+      | Error _ -> ());
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
-  let success = Result.is_ok result in
-  record_complete ctx node.id ~duration_ms ~success;
-  (match result with
-  | Ok _ -> ()
-  | Error msg -> record_error ctx node.id msg);
-  result
+      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let success = Result.is_ok result in
+      let error_msg =
+        match result with
+        | Ok _ -> None
+        | Error msg -> Some msg
+      in
+      Spawn_registry.finish ~id:spawn_id ~ok:success ~error:error_msg;
+      record_complete ctx node.id ~duration_ms ~success;
+      (match result with
+      | Ok _ -> ()
+      | Error msg -> record_error ctx node.id msg);
+      result
 
 (** Execute a dynamically generated chain (ChainExec node)
 
