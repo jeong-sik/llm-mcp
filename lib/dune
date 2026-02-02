@@ -109,6 +109,8 @@
  (wrapped false)
  (flags (:standard -w -69))
  (modules
+   ; Time compatibility (Eio-native with Unix fallback)
+   time_compat
    ; Core Eio modules
    http_server_eio
    mcp_server_eio

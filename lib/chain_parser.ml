@@ -22,6 +22,9 @@
     - LLM_MCP_CHAIN_MAX_FANOUT (default: 20)
 *)
 
+(* Fiber-safe random state for subgraph ID generation *)
+let parser_rng = Random.State.make_self_init ()
+
 open Chain_types
 
 (** {1 Security Limits (P0.3)} *)
@@ -939,7 +942,7 @@ and parse_chain_inner (json : Yojson.Safe.t) : (chain, string) result =
   try
     let id =
       parse_string_with_default json "id"
-        (Printf.sprintf "subgraph_%d" (Random.int 10000))
+        (Printf.sprintf "subgraph_%d" (Random.State.int parser_rng 10000))
     in
     let nodes_json = json |> member "nodes" |> to_list in
     let* nodes = parse_nodes nodes_json in

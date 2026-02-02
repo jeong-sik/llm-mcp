@@ -32,7 +32,7 @@ let create_rate_limiter ~requests_per_min =
   let max_tokens = requests_per_min in
   {
     tokens = max_tokens;
-    last_refill = Unix.gettimeofday ();
+    last_refill = Time_compat.now ();
     max_tokens;
     refill_rate = float_of_int requests_per_min /. 60.0;
     mutex = Eio.Mutex.create ();
@@ -40,7 +40,7 @@ let create_rate_limiter ~requests_per_min =
 
 (** Refill tokens based on elapsed time *)
 let refill_tokens limiter =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let elapsed = now -. limiter.last_refill in
   let new_tokens = int_of_float (elapsed *. limiter.refill_rate) in
   if new_tokens > 0 then begin
@@ -180,7 +180,7 @@ let execute_chain_with_policy ctx chain =
   (* Acquire rate limit token *)
   acquire ~clock:ctx.clock limiter;
 
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
 
   (* Execute with retry *)
   let result = with_retry
@@ -192,7 +192,7 @@ let execute_chain_with_policy ctx chain =
     )
   in
 
-  let end_time = Unix.gettimeofday () in
+  let end_time = Time_compat.now () in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
 
   match result with
@@ -265,7 +265,7 @@ let submit_batch ~sw ~clock ~executor config chains =
   in
 
   {
-    batch_id = Printf.sprintf "batch_%d" (int_of_float (Unix.gettimeofday () *. 1000.0));
+    batch_id = Printf.sprintf "batch_%d" (int_of_float (Time_compat.now () *. 1000.0));
     results = List.rev results;
     stats = { final_stats with avg_duration_ms = avg_duration };
     failed_chains = List.rev failed;
@@ -383,7 +383,7 @@ let submit_chunked ~sw ~clock ~executor config strategy chains =
   in
 
   {
-    batch_id = Printf.sprintf "chunked_batch_%d" (int_of_float (Unix.gettimeofday () *. 1000.0));
+    batch_id = Printf.sprintf "chunked_batch_%d" (int_of_float (Time_compat.now () *. 1000.0));
     results = !all_results;
     stats = { final_stats with avg_duration_ms = avg_duration };
     failed_chains = !all_failed;

@@ -1,5 +1,8 @@
 (** Resilience Module - Circuit Breaker, Retry, and Timeout patterns for MCP servers *)
 
+(* Fiber-safe random state for jitter calculation *)
+let jitter_rng = Random.State.make_self_init ()
+
 (* ============================================ *)
 (* Types & Logger Interface (DI)                *)
 (* ============================================ *)
@@ -154,7 +157,7 @@ let calculate_delay policy attempt =
   let multiplied = base_delay *. (policy.backoff_multiplier ** float_of_int (attempt - 1)) in
   let capped = min multiplied (float_of_int policy.max_delay_ms) in
   if policy.jitter then
-    let jitter_factor = 0.75 +. (Random.float 0.5) in
+    let jitter_factor = 0.75 +. (Random.State.float jitter_rng 0.5) in
     capped *. jitter_factor
   else
     capped

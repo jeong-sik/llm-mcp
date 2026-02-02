@@ -137,7 +137,7 @@ let calc_parallelization_efficiency ~parallel_groups ~total_nodes =
 let result_to_metrics ~(chain_id: string) ~(goal: string) ~(started_at: float)
     ~(max_depth: int) ?(chain: chain option = None)
     (result: Chain_executor_eio.chain_result) : chain_metrics =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let node_metrics =
     match (result.trace, chain) with
     | ([], Some c) ->
@@ -221,9 +221,9 @@ let orchestrate
     ~(initial_chain : chain option)
     : (orchestration_result, orchestration_error) result =
 
-  let session_id = Printf.sprintf "orch-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  let session_id = Printf.sprintf "orch-%d" (int_of_float (Time_compat.now () *. 1000.0)) in
   let state = ref (init_state ~session_id ~goal ~tasks ~max_replans:config.max_replans) in
-  let started_at = Unix.gettimeofday () in
+  let started_at = Time_compat.now () in
 
   (* Design phase: Get chain from LLM (or use provided initial chain once) *)
   let pending_chain = ref initial_chain in
@@ -369,7 +369,7 @@ let orchestrate
   (* Main orchestration loop *)
   let rec loop () =
     (* Check timeout *)
-    let elapsed = Unix.gettimeofday () -. started_at in
+    let elapsed = Time_compat.now () -. started_at in
     if elapsed *. 1000.0 > float_of_int config.timeout_ms then
       Error Timeout
     else begin

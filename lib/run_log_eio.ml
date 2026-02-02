@@ -65,7 +65,7 @@ let build_fields ?run_id ?chain_id ?node_id ?node_type ?attempt ?duration_ms ?su
     ?model ?tool ?streamed ?prompt_chars ?response_chars ?error_class ?error
     ?(extra = []) ?(extra_json = []) ~event ~seq () =
   let base = [
-    ("ts", `Int (int_of_float (Unix.gettimeofday ())));
+    ("ts", `Int (int_of_float (Time_compat.now ())));
     ("iso", `String (Common.iso_timestamp ()));
     ("event", `String event);
     ("seq", `Int seq);

@@ -1,5 +1,8 @@
 (** Server-Sent Events (SSE) for MCP Streamable HTTP *)
 
+(* Fiber-safe random state for stream ID generation *)
+let stream_rng = Random.State.make_self_init ()
+
 (** SSE Event *)
 type event = {
   id : string option;
@@ -19,7 +22,7 @@ type stream_state = {
     OCaml 5.x Random is auto-initialized, but we add timestamp for extra safety. *)
 let create_stream () =
   let ts = int_of_float (Unix.gettimeofday () *. 1000.) mod 1000000 in
-  let stream_id = Printf.sprintf "s%d-%d" ts (Random.int 10000) in
+  let stream_id = Printf.sprintf "s%d-%d" ts (Random.State.int stream_rng 10000) in
   { stream_id; event_counter = 0 }
 
 (** Generate event ID for resumability *)

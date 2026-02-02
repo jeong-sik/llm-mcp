@@ -6,6 +6,9 @@
     @since 0.4.0
 *)
 
+(* Fiber-safe random state for jitter calculation *)
+let jitter_rng = Random.State.make_self_init ()
+
 (** {1 Retry Configuration} *)
 
 type retry_policy = {
@@ -64,7 +67,7 @@ let calculate_delay policy attempt =
     let with_jitter =
       if policy.jitter then
         let jitter_range = capped *. 0.2 in  (* ±10% jitter *)
-        capped +. (Random.float jitter_range) -. (jitter_range /. 2.0)
+        capped +. (Random.State.float jitter_rng jitter_range) -. (jitter_range /. 2.0)
       else capped
     in
     int_of_float (max 0.0 with_jitter)

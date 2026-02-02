@@ -8,6 +8,9 @@
     with the main execute function in tools_eio.ml.
 *)
 
+(* Fiber-safe random state for ID generation *)
+let chain_tool_rng = Random.State.make_self_init ()
+
 open Printf
 open Types
 
@@ -495,7 +498,7 @@ let execute_chain_orchestrate
 ```
 
 This chain will execute the goal using a stub model.|}
-          (Random.int 10000)
+          (Random.State.int chain_tool_rng 10000)
           (String.escaped (String.sub prompt 0 (min 50 (String.length prompt))))
     | "claude" | "claude-cli" ->
         let args = Types.Claude {
