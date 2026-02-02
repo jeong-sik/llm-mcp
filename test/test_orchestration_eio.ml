@@ -47,13 +47,13 @@ module Fast_strategy : VALIDATOR with type state = task_state and type context =
     if new_score >= 90.0 then
       { verdict = Pass (Printf.sprintf "Target reached: %.1f" new_score);
         confidence = 1.0;
-        context = new_state;
+        context = Some new_state;
         children = [];
         metadata = [("strategy", "fast"); ("delta", Printf.sprintf "%.1f" delta)]; }
     else
       { verdict = Warn (Printf.sprintf "Progress: %.1f" new_score);
         confidence = new_score /. 100.0;
-        context = new_state;
+        context = Some new_state;
         children = [];
         metadata = [("strategy", "fast")]; }
 end
@@ -78,13 +78,13 @@ module Accurate_strategy : VALIDATOR with type state = task_state and type conte
     if new_score >= 90.0 then
       { verdict = Pass (Printf.sprintf "Target reached: %.1f" new_score);
         confidence = 1.0;
-        context = new_state;
+        context = Some new_state;
         children = [];
         metadata = [("strategy", "accurate"); ("delta", Printf.sprintf "%.1f" delta)]; }
     else
       { verdict = Warn (Printf.sprintf "Progress: %.1f" new_score);
         confidence = new_score /. 100.0;
-        context = new_state;
+        context = Some new_state;
         children = [];
         metadata = [("strategy", "accurate")]; }
 end
@@ -105,14 +105,14 @@ let () = Eio_main.run @@ fun _env ->
         let validate state =
           { verdict = Pass "assessed";
             confidence = 1.0;
-            context = state;
+            context = Some state;
             children = [];
             metadata = [("current_score", Printf.sprintf "%.1f" state.score)]; }
       end in
 
       (* Dynamic strategy selector based on current progress *)
       let select_strategy (r : task_state result) =
-        let state = r.context in
+        let state = Option.get r.context in  (* context는 항상 Some *)
         if state.score < 50.0 then begin
           Printf.printf "  → Score %.1f < 50: Using FAST strategy\n%!" state.score;
           (module Fast_strategy : VALIDATOR with type state = task_state and type context = task_state)
@@ -130,11 +130,12 @@ let () = Eio_main.run @@ fun _env ->
         if iterations <= 0 || state.score >= 90.0 then state
         else begin
           let r = Dynamic.validate state in
+          let ctx = Option.get r.context in
           Printf.printf "  Iteration %d: score=%.1f, verdict=%s\n%!"
             (initial_state.attempts + iterations - state.attempts)
-            r.context.score
+            ctx.score
             (match r.verdict with Pass s -> "Pass:" ^ s | Warn s -> "Warn:" ^ s | _ -> "Other");
-          run r.context (iterations - 1)
+          run ctx (iterations - 1)
         end
       in
 
@@ -179,7 +180,7 @@ let () = Eio_main.run @@ fun _env ->
         let validate state =
           { verdict = Pass "v1 approved";
             confidence = 0.9;
-            context = { state with score = 95.0 };
+            context = Some { state with score = 95.0 };
             children = []; metadata = []; }
       end in
 
@@ -190,7 +191,7 @@ let () = Eio_main.run @@ fun _env ->
         let validate state =
           { verdict = Fail "v2 rejected";
             confidence = 0.1;
-            context = state;
+            context = Some state;
             children = []; metadata = []; }
       end in
 
@@ -201,7 +202,7 @@ let () = Eio_main.run @@ fun _env ->
         let validate state =
           { verdict = Pass "v3 approved";
             confidence = 0.8;
-            context = { state with score = 92.0 };
+            context = Some { state with score = 92.0 };
             children = []; metadata = []; }
       end in
 
@@ -236,7 +237,7 @@ let () = Eio_main.run @@ fun _env ->
           let passed = state.score >= 50.0 in
           { verdict = if passed then Pass "strategy ok" else Warn "strategy needs work";
             confidence = state.score /. 100.0;
-            context = state;
+            context = Some state;
             children = []; metadata = []; }
       end in
 
@@ -248,7 +249,7 @@ let () = Eio_main.run @@ fun _env ->
           let passed = state.attempts < 20 in
           { verdict = if passed then Pass "within budget" else Fail "too many attempts";
             confidence = if passed then 0.9 else 0.1;
-            context = state;
+            context = Some state;
             children = []; metadata = []; }
       end in
 
@@ -260,7 +261,7 @@ let () = Eio_main.run @@ fun _env ->
           let passed = state.score >= 90.0 in
           { verdict = if passed then Pass "quality achieved" else Warn "quality improving";
             confidence = state.score /. 100.0;
-            context = state;
+            context = Some state;
             children = []; metadata = []; }
       end in
 
