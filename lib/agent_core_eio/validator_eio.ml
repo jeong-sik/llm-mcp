@@ -23,7 +23,7 @@ type verdict =
 type 'ctx result = {
   verdict : verdict;
   confidence : float;           (** 0.0 - 1.0 *)
-  context : 'ctx;               (** 검증 컨텍스트 전달 *)
+  context : 'ctx option;        (** 검증 컨텍스트 전달 (타임아웃/에러 시 None) *)
   children : 'ctx result list;  (** 하위 검증 결과들 (메타 검증용) *)
   metadata : (string * string) list;
 }
@@ -246,7 +246,7 @@ module Compose = struct
         let children_meta = serialize_children r.children in
         { verdict = r.verdict;
           confidence = r.confidence;
-          context = f r.context;
+          context = Option.map f r.context;
           children = [];  (* 타입 변환으로 직접 보존 불가, metadata로 대체 *)
           metadata = children_meta @ r.metadata;
         }
@@ -405,7 +405,7 @@ module Make_progress_validator (S : sig
     in
     { verdict;
       confidence = progress;
-      context = ();
+      context = Some ();
       children = [];
       metadata = [("progress", Printf.sprintf "%.2f" progress)];
     }
@@ -432,7 +432,7 @@ let make_timeout_validator ~get_now ~deadline =
       in
       { verdict;
         confidence = Float.max 0.0 (Float.min 1.0 (remaining /. 300.0));
-        context = remaining;
+        context = Some remaining;
         children = [];
         metadata = [("remaining_seconds", Printf.sprintf "%.0f" remaining)];
       }

@@ -14,7 +14,7 @@ let () = Eio_main.run @@ fun env ->
       type context = unit
       let name = "always_pass"
       let validate _ =
-        { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+        { verdict = Pass "ok"; confidence = 1.0; context = Some (); children = []; metadata = []; }
     end in
 
     let module Always_fail : VALIDATOR with type state = int and type context = unit = struct
@@ -22,7 +22,7 @@ let () = Eio_main.run @@ fun env ->
       type context = unit
       let name = "always_fail"
       let validate _ =
-        { verdict = Fail "nope"; confidence = 0.0; context = (); children = []; metadata = []; }
+        { verdict = Fail "nope"; confidence = 0.0; context = Some (); children = []; metadata = []; }
     end in
 
     let module Check_positive : VALIDATOR with type state = int and type context = unit = struct
@@ -31,9 +31,9 @@ let () = Eio_main.run @@ fun env ->
       let name = "check_positive"
       let validate n =
         if n > 0 then
-          { verdict = Pass "positive"; confidence = 1.0; context = (); children = []; metadata = []; }
+          { verdict = Pass "positive"; confidence = 1.0; context = Some (); children = []; metadata = []; }
         else
-          { verdict = Fail "not positive"; confidence = 0.0; context = (); children = []; metadata = []; }
+          { verdict = Fail "not positive"; confidence = 0.0; context = Some (); children = []; metadata = []; }
     end in
 
     let module Slow_pass : VALIDATOR with type state = int and type context = unit = struct
@@ -42,7 +42,7 @@ let () = Eio_main.run @@ fun env ->
       let name = "slow_pass"
       let validate _ =
         Eio.Time.sleep clock 0.01;
-        { verdict = Pass "slow ok"; confidence = 0.9; context = (); children = []; metadata = []; }
+        { verdict = Pass "slow ok"; confidence = 0.9; context = Some (); children = []; metadata = []; }
     end in
 
     let verdict_tag = function
@@ -354,7 +354,7 @@ let () = Eio_main.run @@ fun env ->
         let name = "counting_pass"
         let validate _ =
           incr call_count;
-          { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 1.0; context = Some (); children = []; metadata = []; }
       end in
       let checkpoint = Checkpoint.{
         save = (fun _ _ -> ());

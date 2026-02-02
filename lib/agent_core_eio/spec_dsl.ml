@@ -142,10 +142,10 @@ module Make_verified
   (** Validator로 변환 *)
   let to_validator
       ~name:validator_name
-    : (module VALIDATOR with type state = state * input and type context = output option) =
+    : (module VALIDATOR with type state = state * input and type context = output) =
     (module struct
       type state = S.state * S.input
-      type context = S.output option
+      type context = S.output
 
       let name = validator_name
 
@@ -154,7 +154,7 @@ module Make_verified
         | Verified (out, _) ->
           { verdict = Pass "All contracts satisfied";
             confidence = 1.0;
-            context = Some out;
+            context = Some out;  (* 성공 시 출력 있음 *)
             children = [];
             metadata = [("spec", validator_name)]; }
         | Violation v ->
@@ -166,7 +166,7 @@ module Make_verified
           in
           { verdict = Fail reason;
             confidence = 0.0;
-            context = None;
+            context = None;  (* 실패 시 출력 없음 *)
             children = [];
             metadata = [("violation", violation_type)]; }
     end)
@@ -185,20 +185,18 @@ module Compose_spec
 
   let precondition (sa, _sb) i = A.precondition sa i
 
-  let postcondition (sa, sb) i o =
-    (* A를 실행한 결과로 B를 검증 *)
-    let a_out = A.transition sa i in
-    (* 중간 출력 추정 (실제론 run 필요) *)
-    A.postcondition sa i (Obj.magic a_out) &&
-    B.postcondition sb (Obj.magic a_out) o
+  let postcondition (_sa, _sb) _i _o =
+    (* TODO: Compose_spec is fundamentally broken at SPEC level.
+       SPEC only has transition (state -> input -> state), not run (which produces output).
+       To properly compose, we need IMPL-level composition or a redesign.
+       This module is currently unused. *)
+    failwith "Compose_spec.postcondition: not implemented (SPEC has no run, cannot get intermediate output)"
 
   let invariant (sa, sb) = A.invariant sa && B.invariant sb
 
-  let transition (sa, sb) i =
-    let sa' = A.transition sa i in
-    let b_input = Obj.magic sa' in  (* A의 새 상태를 B의 입력으로 *)
-    let sb' = B.transition sb b_input in
-    (sa', sb')
+  let transition (_sa, _sb) _i =
+    (* TODO: Same design issue - cannot get A's output at SPEC level *)
+    failwith "Compose_spec.transition: not implemented (SPEC has no run, cannot get intermediate output)"
 end
 
 (** {1 Migration Framework} *)
@@ -258,7 +256,7 @@ module Verify_migration (M : SPEC_MIGRATION) = struct
         if invariant_ok && compat_ok then
           { verdict = Pass "Migration safe";
             confidence = 1.0;
-            context = ();
+            context = Some ();
             children = [];
             metadata = [
               ("from_version", string_of_int M.Old.version);
@@ -270,7 +268,7 @@ module Verify_migration (M : SPEC_MIGRATION) = struct
           let reasons = if not compat_ok then "backward_incompat" :: reasons else reasons in
           { verdict = Fail (String.concat ", " reasons);
             confidence = 0.0;
-            context = ();
+            context = None;  (* 실패 시 컨텍스트 없음 *)
             children = [];
             metadata = [("issues", String.concat "," reasons)]; }
     end)
@@ -296,8 +294,8 @@ module Extract_properties (S : SPEC) = struct
     type input = S.input
     type state = S.state
     let name = "precondition_holds"
-    let generate_input () = Obj.magic ()  (* 실제론 생성기 필요 *)
-    let generate_state () = Obj.magic ()
+    let generate_input () = failwith "Precondition_property.generate_input: implement a generator for your input type"
+    let generate_state () = failwith "Precondition_property.generate_state: implement a generator for your state type"
     let property state input = S.precondition state input
   end
 
@@ -306,8 +304,8 @@ module Extract_properties (S : SPEC) = struct
     type input = S.input
     type state = S.state
     let name = "invariant_preserved"
-    let generate_input () = Obj.magic ()
-    let generate_state () = Obj.magic ()
+    let generate_input () = failwith "Invariant_property.generate_input: implement a generator for your input type"
+    let generate_state () = failwith "Invariant_property.generate_state: implement a generator for your state type"
     let property state input =
       if not (S.invariant state) then true  (* 전제 조건 *)
       else

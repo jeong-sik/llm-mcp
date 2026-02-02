@@ -24,7 +24,7 @@ let () = Eio_main.run @@ fun env ->
       let r = {
         verdict = Pass "ok";
         confidence = 0.9;
-        context = ();
+        context = Some ();
         children = [];
         metadata = [("key", "value")];
       } in
@@ -44,13 +44,13 @@ let () = Eio_main.run @@ fun env ->
           if n > 0 then
             { verdict = Pass "positive";
               confidence = 1.0;
-              context = "ok";
+              context = Some "ok";
               children = [];
               metadata = []; }
           else
             { verdict = Fail "not positive";
               confidence = 0.0;
-              context = "fail";
+              context = Some "fail";
               children = [];
               metadata = []; }
       end in
@@ -70,7 +70,7 @@ let () = Eio_main.run @@ fun env ->
         let validate n =
           { verdict = if n > 0 then Pass "v1 ok" else Fail "v1 fail";
             confidence = 0.8;
-            context = ();
+            context = Some ();
             children = [];
             metadata = []; }
       end in
@@ -81,7 +81,7 @@ let () = Eio_main.run @@ fun env ->
         let validate n =
           { verdict = if n > 5 then Pass "v2 ok" else Warn "v2 warn";
             confidence = 0.9;
-            context = ();
+            context = Some ();
             children = [];
             metadata = []; }
       end in
@@ -102,7 +102,7 @@ let () = Eio_main.run @@ fun env ->
           Eio.Time.sleep clock 0.01;
           { verdict = Pass "v1";
             confidence = 0.8;
-            context = ();
+            context = Some ();
             children = [];
             metadata = []; }
       end in
@@ -114,7 +114,7 @@ let () = Eio_main.run @@ fun env ->
           Eio.Time.sleep clock 0.01;
           { verdict = Pass "v2";
             confidence = 0.9;
-            context = ();
+            context = Some ();
             children = [];
             metadata = []; }
       end in
@@ -132,14 +132,14 @@ let () = Eio_main.run @@ fun env ->
         type context = unit
         let name = "v1"
         let validate () =
-          { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 1.0; context = Some (); children = []; metadata = []; }
       end in
       let module V2 : VALIDATOR with type state = unit and type context = unit = struct
         type state = unit
         type context = unit
         let name = "v2"
         let validate () =
-          { verdict = Pass "ok"; confidence = 0.9; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 0.9; context = Some (); children = []; metadata = []; }
       end in
       let module M = (val Meta.create ~sw ~name:"meta" ~policy:Meta.AllMustPass
         [(module V1 : VALIDATOR with type state = unit and type context = unit);
@@ -157,21 +157,21 @@ let () = Eio_main.run @@ fun env ->
         type context = unit
         let name = "v1"
         let validate () =
-          { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 1.0; context = Some (); children = []; metadata = []; }
       end in
       let module V2 : VALIDATOR with type state = unit and type context = unit = struct
         type state = unit
         type context = unit
         let name = "v2"
         let validate () =
-          { verdict = Fail "fail"; confidence = 0.0; context = (); children = []; metadata = []; }
+          { verdict = Fail "fail"; confidence = 0.0; context = Some (); children = []; metadata = []; }
       end in
       let module V3 : VALIDATOR with type state = unit and type context = unit = struct
         type state = unit
         type context = unit
         let name = "v3"
         let validate () =
-          { verdict = Pass "ok"; confidence = 0.8; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 0.8; context = Some (); children = []; metadata = []; }
       end in
       let module M = (val Meta.create ~sw ~name:"meta" ~policy:Meta.MajorityPass
         [(module V1 : VALIDATOR with type state = unit and type context = unit);
@@ -189,7 +189,7 @@ let () = Eio_main.run @@ fun env ->
         type context = unit
         let name = "v1"
         let validate () =
-          { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 1.0; context = Some (); children = []; metadata = []; }
       end in
       let module Nested = (val Meta.nested ~sw ~name:"nested"
         ~outer_policy:Meta.AllMustPass
@@ -209,21 +209,21 @@ let () = Eio_main.run @@ fun env ->
         type context = unit
         let name = "v1"
         let validate () =
-          { verdict = Pass "ok"; confidence = 1.0; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 1.0; context = Some (); children = []; metadata = []; }
       end in
       let module V2 : VALIDATOR with type state = unit and type context = unit = struct
         type state = unit
         type context = unit
         let name = "v2"
         let validate () =
-          { verdict = Fail "fail"; confidence = 0.0; context = (); children = []; metadata = []; }
+          { verdict = Fail "fail"; confidence = 0.0; context = Some (); children = []; metadata = []; }
       end in
       let module V3 : VALIDATOR with type state = unit and type context = unit = struct
         type state = unit
         type context = unit
         let name = "v3"
         let validate () =
-          { verdict = Pass "ok"; confidence = 0.9; context = (); children = []; metadata = []; }
+          { verdict = Pass "ok"; confidence = 0.9; context = Some (); children = []; metadata = []; }
       end in
       let validators = [
         (module V1 : VALIDATOR with type state = unit and type context = unit);
@@ -246,7 +246,7 @@ let () = Eio_main.run @@ fun env ->
         ~deadline:(now +. 120.0)) in
       let r = T.validate () in
       assert (match r.verdict with Pass _ -> true | _ -> false);
-      assert (r.context > 60.0);  (* 120초 남음 *)
+      assert (Option.get r.context > 60.0);  (* 120초 남음, context는 항상 Some *)
       Printf.printf "[OK] timeout validator\n%!"
     in
 
@@ -257,13 +257,13 @@ let () = Eio_main.run @@ fun env ->
         type context = int
         let name = "score_check"
         let validate n =
-          { verdict = Pass "checked"; confidence = 1.0; context = n;
+          { verdict = Pass "checked"; confidence = 1.0; context = Some n;
             children = []; metadata = []; }
       end in
 
       (* 점수에 따라 다른 Validator 선택 *)
       let choose_next (r : int result) =
-        if r.context >= 80 then
+        if Option.value ~default:0 r.context >= 80 then
           (module struct
             type state = int
             type context = int
@@ -305,13 +305,13 @@ let () = Eio_main.run @@ fun env ->
         type context = int
         let name = "doubler"
         let validate n =
-          { verdict = Pass "doubled"; confidence = 1.0; context = n * 2;
+          { verdict = Pass "doubled"; confidence = 1.0; context = Some (n * 2);
             children = []; metadata = []; }
       end in
 
       let module Mapped = (val Compose.map (fun x -> string_of_int x) (module V)) in
       let r = Mapped.validate 21 in
-      assert (r.context = "42");  (* int -> string 변환 *)
+      assert (r.context = Some "42");  (* int -> string 변환 *)
       Printf.printf "[OK] functor map\n%!"
     in
 
@@ -323,7 +323,7 @@ let () = Eio_main.run @@ fun env ->
         type context = int
         let name = "m"
         let validate n =
-          { verdict = Pass "m"; confidence = 1.0; context = n;
+          { verdict = Pass "m"; confidence = 1.0; context = Some n;
             children = []; metadata = []; }
       end in
 
@@ -334,7 +334,7 @@ let () = Eio_main.run @@ fun env ->
           type context = int
           let name = "f"
           let validate n =
-            { verdict = Pass "f"; confidence = 1.0; context = n * 2;
+            { verdict = Pass "f"; confidence = 1.0; context = Some (n * 2);
               children = []; metadata = []; }
         end)
       in
@@ -346,7 +346,7 @@ let () = Eio_main.run @@ fun env ->
           type context = int
           let name = "g"
           let validate _ =
-            { verdict = Pass "g"; confidence = 1.0; context = _r.context + 10;
+            { verdict = Pass "g"; confidence = 1.0; context = Some (Option.get _r.context + 10);
               children = []; metadata = []; }
         end)
       in
@@ -366,8 +366,8 @@ let () = Eio_main.run @@ fun env ->
       let right_result = Right.validate 5 in
 
       (* Both should produce same final context: (5 * 2) + 10 = 20 *)
-      assert (left_result.context = right_result.context);
-      assert (left_result.context = 20);
+      assert (Option.get left_result.context = Option.get right_result.context);
+      assert (left_result.context = Some 20);
 
       Printf.printf "[OK] monad associativity law\n%!"
     in
@@ -380,7 +380,7 @@ let () = Eio_main.run @@ fun env ->
         type context = int
         let name = "v"
         let validate n =
-          { verdict = Pass "v"; confidence = 0.9; context = n * 3;
+          { verdict = Pass "v"; confidence = 0.9; context = Some (n * 3);
             children = []; metadata = [("key", "value")]; }
       end in
 
@@ -405,7 +405,7 @@ let () = Eio_main.run @@ fun env ->
         type context = int
         let name = "v"
         let validate n =
-          { verdict = Pass "v"; confidence = 1.0; context = n;
+          { verdict = Pass "v"; confidence = 1.0; context = Some n;
             children = []; metadata = []; }
       end in
 
@@ -424,7 +424,7 @@ let () = Eio_main.run @@ fun env ->
 
       (* Both should produce: (10 + 3) * 2 = 26 *)
       assert (left_result.context = right_result.context);
-      assert (left_result.context = 26);
+      assert (left_result.context = Some 26);
 
       Printf.printf "[OK] functor composition law\n%!"
     in
@@ -437,7 +437,7 @@ let () = Eio_main.run @@ fun env ->
         type context = unit
         let name = "v1"
         let validate _ =
-          { verdict = Pass "v1 ok"; confidence = 0.8; context = ();
+          { verdict = Pass "v1 ok"; confidence = 0.8; context = Some ();
             children = []; metadata = []; }
       end in
       let module V2 : VALIDATOR with type state = int and type context = unit = struct
@@ -445,7 +445,7 @@ let () = Eio_main.run @@ fun env ->
         type context = unit
         let name = "v2"
         let validate _ =
-          { verdict = Pass "v2 ok"; confidence = 0.9; context = ();
+          { verdict = Pass "v2 ok"; confidence = 0.9; context = Some ();
             children = []; metadata = []; }
       end in
 

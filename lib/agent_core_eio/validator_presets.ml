@@ -269,7 +269,7 @@ module Timeout = struct
         | _ ->
           { verdict = Fail (Printf.sprintf "Timeout after %.1fs" timeout_sec);
             confidence = 0.0;
-            context = (Obj.magic () : c);  (* 타임아웃 시 컨텍스트 없음 *)
+            context = None;  (* 타임아웃 시 컨텍스트 없음 *)
             children = [];
             metadata = [("timeout", Printf.sprintf "%.1f" timeout_sec)]; }
     end)
@@ -333,7 +333,7 @@ module Circuit_breaker = struct
           Log.warn (fun m -> m "[%s] Circuit OPEN - fast failing" name);
           { verdict = Fail "Circuit breaker open";
             confidence = 0.0;
-            context = (Obj.magic () : c);
+            context = None;
             children = [];
             metadata = [("circuit", "open")]; }
         end
@@ -510,7 +510,7 @@ module Saga = struct
             Log.info (fun m -> m "[%s] Saga completed successfully (%d steps)" name (List.length steps));
             { verdict = Pass "All saga steps completed";
               confidence = 1.0;
-              context = (Obj.magic () : c);
+              context = None;
               children = [];
               metadata = [("completed_steps", string_of_int (List.length steps))]; }
           | step :: rest ->
@@ -594,7 +594,7 @@ module Checkpoint = struct
             Log.info (fun m -> m "[%s] All %d checkpoints passed" name (List.length validators));
             { verdict = Pass "All checkpoints passed";
               confidence = 1.0;
-              context = (Obj.magic () : c);
+              context = None;
               children = List.rev !results;
               metadata = [("checkpoints", string_of_int (List.length validators))]; }
           end
