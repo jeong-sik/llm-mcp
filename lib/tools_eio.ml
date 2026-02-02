@@ -182,31 +182,35 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
     ] in
     let heartbeat_args = `Assoc [("agent_name", `String agent)] in
     let leave_args = `Assoc [("agent_name", `String agent)] in
-    let _ = call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_join" ~arguments:join_args in
-    Fun.protect
-      ~finally:(fun () ->
+    (* Eio-idiomatic: use Switch.on_release for MASC session lifecycle *)
+    Eio.Switch.run (fun masc_sw ->
+      (* Register cleanup first, before join *)
+      Eio.Switch.on_release masc_sw (fun () ->
         try
           ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args)
         with ex ->
-          Log.warn "masc_hook" "masc_leave failed in finalizer: %s"
-            (Printexc.to_string ex))
-      (fun () ->
-        Eio.Switch.run (fun hb_sw ->
-          let interval = float_of_int (masc_heartbeat_interval ()) in
-          let _ =
-            Eio.Fiber.fork ~sw:hb_sw (fun () ->
-              let rec loop () =
-                (* Heartbeat must never crash the main request flow. *)
-                (try
-                   ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args)
-                 with exn ->
-                   eprintf "[masc] heartbeat error: %s\n%!" (Printexc.to_string exn));
-                Eio.Time.sleep clock interval;
-                loop ()
-              in
-              loop ())
+          Log.warn "masc_hook" "masc_leave failed in on_release: %s"
+            (Printexc.to_string ex)
+      );
+      (* Now join *)
+      let _ = call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_join" ~arguments:join_args in
+      (* Heartbeat fiber in same switch - will be cancelled when switch exits *)
+      let interval = float_of_int (masc_heartbeat_interval ()) in
+      let _ =
+        Eio.Fiber.fork ~sw:masc_sw (fun () ->
+          let rec loop () =
+            (* Heartbeat must never crash the main request flow. *)
+            (try
+               ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args)
+             with exn ->
+               eprintf "[masc] heartbeat error: %s\n%!" (Printexc.to_string exn));
+            Eio.Time.sleep clock interval;
+            loop ()
           in
-          f ()))
+          loop ())
+      in
+      f ()
+    )
 
 (** {1 Streaming Execution} - Config from Tools_stream_config *)
 let stream_delta_enabled = Tools_stream_config.enabled
