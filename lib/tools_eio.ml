@@ -608,7 +608,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Claude { prompt; model; long_context; system_prompt; working_directory = _; timeout; stream; use_cli; fallback_to_api; _ } ->
+  | Claude { prompt; model; long_context; system_prompt; working_directory = _; timeout; stream; use_cli; fallback_to_api; api_key; _ } ->
       let model_name = sprintf "claude-cli (%s)" model in
       let extra_base = [("long_context", string_of_bool long_context)] in
 
@@ -647,7 +647,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           let cli_result = execute_via_cli () in
           if cli_result.returncode <> 0 && fallback_to_api then begin
             (* CLI failed, try API fallback *)
-            let api_result = execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream in
+            let api_result = execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream ?api_key_override:api_key () in
             if api_result.returncode = 0 then
               { api_result with extra = api_result.extra @ [("fallback_used", "true")] }
             else
@@ -657,7 +657,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             cli_result
         end else
           (* Direct API mode *)
-          execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream
+          execute_claude_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream ?api_key_override:api_key ()
       in
       if log_enabled then
         Run_log_eio.record_event
@@ -870,13 +870,23 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools } ->
+  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools; api_key } ->
       (* Z.ai GLM Cloud API - OpenAI-compatible with Function Calling *)
       let model_name = sprintf "glm (%s)" model in
-      (match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
-      | Some err -> err
+      (* Resolve API key: explicit override > ZAI_API_KEY env var *)
+      let resolved_key = match api_key with
+        | Some k -> Some k
+        | None ->
+          match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
+          | Some _err -> None
+          | None -> Some (Tools_tracer.get_api_key "ZAI_API_KEY")
+      in
+      (match resolved_key with
       | None ->
-        let api_key = Tools_tracer.get_api_key "ZAI_API_KEY" in
+        (match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
+         | Some err -> err
+         | None -> Tools_tracer.process_error_result ~model:model_name ~extra:[] "No API key")
+      | Some api_key ->
         begin
         (* Build OpenAI-compatible request body *)
         let messages = match system_prompt with
@@ -1381,6 +1391,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         stream = false;
                         use_cli = true;
                         fallback_to_api = true;
+                        api_key = None;
                       }
                   | "codex" | "gpt-5.2" ->
                       Types.Codex {
@@ -1429,6 +1440,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         do_sample = true;
                         web_search = false;
                         tools = [];  (* No tools for chain execution by default *)
+                        api_key = None;
                       }
                   | _ ->
                       (* Default to Gemini for unknown models *)
@@ -1709,6 +1721,7 @@ This chain will execute the goal using a stub model.|}
               stream = false;
               use_cli = true;
               fallback_to_api = true;
+              api_key = None;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -2079,7 +2092,8 @@ This chain will execute the goal using a stub model.|}
                            execute ~sw ~proc_mgr ~clock (Claude {
                              prompt; model; long_context = false; system_prompt = None;
                              output_format = Text; allowed_tools = []; working_directory = "";
-                             timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true
+                             timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true;
+                             api_key = None
                            })
                          else if starts_with ~prefix:"codex" model_name || starts_with ~prefix:"gpt" model_name then
                            execute ~sw ~proc_mgr ~clock (Codex {
@@ -2754,6 +2768,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   stream = false;
                   use_cli = true;
                   fallback_to_api = true;
+                  api_key = None;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response

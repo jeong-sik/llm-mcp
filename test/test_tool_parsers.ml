@@ -277,6 +277,7 @@ let test_build_claude_cmd () =
     stream = false;
     use_cli = true;
     fallback_to_api = true;
+    api_key = None;
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->
@@ -302,6 +303,7 @@ let test_build_claude_cmd_with_long_context () =
     stream = false;
     use_cli = true;
     fallback_to_api = true;
+    api_key = None;
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->
