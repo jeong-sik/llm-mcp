@@ -104,7 +104,8 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
   let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
   let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
-  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream; use_cli; fallback_to_api }
+  let api_key = json |> member "api_key" |> to_string_option in
+  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream; use_cli; fallback_to_api; api_key }
 
 (** Parse JSON arguments for Codex tool *)
 let parse_codex_args (json : Yojson.Safe.t) : tool_args =
@@ -252,7 +253,8 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let web_search = json |> member "web_search" |> to_bool_option |> Option.value ~default:false in
   (* New: Parse tools array *)
   let tools = parse_glm_tools json in
-  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools }
+  let api_key = json |> member "api_key" |> to_string_option in
+  Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools; api_key }
 
 (** Parse JSON arguments for glm.translate tool *)
 let parse_glm_translate_args (json : Yojson.Safe.t) : tool_args =

@@ -31,6 +31,7 @@ type tool_args =
       stream : bool;
       use_cli : bool;  (* true=CLI, false=direct Anthropic API *)
       fallback_to_api : bool;  (* true=fallback to API on CLI failure *)
+      api_key : string option;  (* Override ANTHROPIC_API_KEY env var *)
     }
   | Codex of {
       prompt : string;
@@ -130,6 +131,7 @@ type tool_args =
       do_sample : bool;  (* true=diverse sampling, false=greedy deterministic *)
       web_search : bool;  (* DEPRECATED: Use tools instead. Kept for backward compat *)
       tools : glm_tool list;  (* Generic tool list: web_search, function, code_interpreter *)
+      api_key : string option;  (* Override ZAI_API_KEY env var *)
     }
   | GlmTranslate of {
       text : string;

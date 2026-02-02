@@ -9,4 +9,6 @@ val execute_direct_api :
   system_prompt:string option ->
   timeout:int ->
   stream:'a ->
+  ?api_key_override:string ->
+  unit ->
   Types_core.tool_result

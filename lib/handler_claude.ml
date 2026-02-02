@@ -5,15 +5,28 @@ open Printf
 open Types
 open Cli_runner_eio
 
-(** Execute Claude via Direct Anthropic API (faster, no CLI overhead) *)
-let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream =
+(** Execute Claude via Direct Anthropic API (faster, no CLI overhead)
+    @param api_key_override Optional API key override. When provided, skips
+    ANTHROPIC_API_KEY env var lookup. Used for multi-account rotation. *)
+let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream ?api_key_override () =
   let model_name = sprintf "claude-api (%s)" model in
   let extra_base = [("use_cli", "false")] in
 
-  match Tools_tracer.require_api_key ~env_var:"ANTHROPIC_API_KEY" ~model:model_name ~extra:extra_base with
-  | Some err -> err
+  (* Resolve API key: override > env var *)
+  let resolved_key = match api_key_override with
+    | Some k -> Some k
+    | None ->
+      match Tools_tracer.require_api_key ~env_var:"ANTHROPIC_API_KEY" ~model:model_name ~extra:extra_base with
+      | Some _err -> None
+      | None -> Some (Tools_tracer.get_api_key "ANTHROPIC_API_KEY")
+  in
+  match resolved_key with
   | None ->
-    let api_key = Tools_tracer.get_api_key "ANTHROPIC_API_KEY" in
+    (* No override and env var missing — return error like before *)
+    (match Tools_tracer.require_api_key ~env_var:"ANTHROPIC_API_KEY" ~model:model_name ~extra:extra_base with
+     | Some err -> err
+     | None -> (* unreachable *) Tools_tracer.process_error_result ~model:model_name ~extra:extra_base "No API key")
+  | Some api_key ->
     begin (* Map model alias to API model ID *)
     let api_model = Tool_parsers.resolve_claude_model model in
 

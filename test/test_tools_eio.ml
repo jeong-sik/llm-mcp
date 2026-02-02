@@ -117,6 +117,7 @@ data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",
         stream = false;
         use_cli = false;  (* Use direct API for tests *)
         fallback_to_api = false;
+        api_key = None;
       } in
       let result = execute ~sw ~proc_mgr ~clock invalid_args in
       assert (String.length result.model > 0);

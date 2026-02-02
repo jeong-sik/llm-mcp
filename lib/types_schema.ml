@@ -170,6 +170,10 @@ Note: long_context=true uses API key (charges apply), false uses Max subscriptio
         ("description", `String "Fallback to direct API if CLI fails.");
         ("default", `Bool true);
       ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ANTHROPIC_API_KEY. Pass OAuth token or API key directly for multi-account rotation.");
+      ]);
       response_format_schema;
     ]);
     ("required", `List [`String "prompt"]);
@@ -499,6 +503,10 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
           ]);
         ]);
         ("default", `List []);
+      ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ZAI_API_KEY. Pass API key directly for multi-account rotation.");
       ]);
       response_format_schema;
     ]);
