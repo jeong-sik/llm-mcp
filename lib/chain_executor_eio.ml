@@ -12,6 +12,9 @@
     - Trace generation for debugging
 *)
 
+(* Fiber-safe random state for MCTS and random delay *)
+let executor_rng = Random.State.make_self_init ()
+
 (** {1 Type Aliases from Chain_types} *)
 
 (** Re-export Chain_types for local use *)
@@ -211,7 +214,7 @@ let add_trace ctx node_id event =
   (* Record to local trace *)
   (if ctx.trace_enabled then
     let entry = {
-      timestamp = Unix.gettimeofday () -. ctx.start_time;
+      timestamp = Time_compat.now () -. ctx.start_time;
       node_id;
       event;
     } in
@@ -221,7 +224,7 @@ let add_trace ctx node_id event =
    | ChainStart { chain_id; mermaid_dsl } ->
        Chain_telemetry.emit (Chain_telemetry.chain_start ~chain_id ~nodes:0 ?mermaid_dsl ())
    | ChainComplete { chain_id; success = _ } ->
-       let duration_ms = int_of_float ((Unix.gettimeofday () -. ctx.start_time) *. 1000.0) in
+       let duration_ms = int_of_float ((Time_compat.now () -. ctx.start_time) *. 1000.0) in
        Chain_telemetry.emit (Chain_telemetry.ChainComplete {
          Chain_telemetry.complete_chain_id = chain_id;
          complete_duration_ms = duration_ms;
@@ -244,7 +247,7 @@ let add_trace ctx node_id event =
          Chain_telemetry.error_node_id = node_id;
          error_message = message;
          error_retries = 0;
-         error_timestamp = Unix.gettimeofday ();
+         error_timestamp = Time_compat.now ();
        }))
 
 let record_start ?(node_type = "unknown") ctx node_id =
@@ -582,7 +585,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
       else
         ();
       record_start ctx node.id ~node_type:"llm";
-      let start = Unix.gettimeofday () in
+      let start = Time_compat.now () in
 
       (* Create Langfuse generation if tracing is enabled *)
       let langfuse_gen = match ctx.langfuse_trace with
@@ -621,7 +624,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
       (* Empty response guard: retry with enhanced prompt on empty output *)
       let rec try_with_empty_guard ~attempt ~prompt_to_use =
         let result = exec_fn ~model:effective_model ?system:final_system ~prompt:prompt_to_use ?tools:tools_arg ?thinking:thinking_arg () in
-        let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+        let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
         match result with
         | Ok output when is_empty_response output && attempt < max_empty_retries ->
             (* Empty response detected - log and retry with enhanced prompt *)
@@ -712,7 +715,7 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
       | Ok output -> Ok output
       | Error msg ->
           (* Calculate duration for error case *)
-          let error_duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          let error_duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
           (* End Langfuse generation with error *)
           (match langfuse_gen with
@@ -751,7 +754,7 @@ let masc_agent_name () =
 (** Execute MASC broadcast node - calls masc.masc_broadcast via tool_exec *)
 let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention : (string, string) result =
   record_start ctx node.id ~node_type:"masc_broadcast";
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let inputs = Hashtbl.fold (fun k v acc -> (k, v) :: acc) ctx.outputs [] in
   let resolved_message = substitute_prompt message inputs in
   let mentions_str = if mention = [] then "" else " " ^ String.concat " " mention in
@@ -768,7 +771,7 @@ let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention 
     try tool_exec ~name:"masc.masc_broadcast" ~args
     with exn -> Error (Printexc.to_string exn)
   in
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   match result with
   | Ok output ->
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_broadcast";
@@ -782,13 +785,13 @@ let execute_masc_broadcast ctx ~tool_exec (node : node) ~message ~room ~mention 
 (** Execute MASC listen node - polls masc.masc_messages with timeout *)
 let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec ~room : (string, string) result =
   record_start ctx node.id ~node_type:"masc_listen";
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let poll_interval = 0.5 in (* Poll every 500ms *)
   let filter_re = Option.map Re.Pcre.regexp filter in
 
   (* Poll loop with timeout *)
   let rec poll_loop ~since_seq ~collected =
-    let elapsed = Unix.gettimeofday () -. start in
+    let elapsed = Time_compat.now () -. start in
     if elapsed >= timeout_sec then begin
       (* Timeout reached, return collected messages *)
       let messages_json = Printf.sprintf "[%s]" (String.concat "," (List.rev collected)) in
@@ -851,7 +854,7 @@ let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec
     end
   in
   let result = poll_loop ~since_seq:0 ~collected:[] in
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   match result with
   | Ok output ->
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_listen";
@@ -865,7 +868,7 @@ let execute_masc_listen ctx ~clock ~tool_exec (node : node) ~filter ~timeout_sec
 (** Execute MASC claim node - calls masc.masc_claim or masc.masc_claim_next *)
 let execute_masc_claim ctx ~tool_exec (node : node) ~task_id ~room : (string, string) result =
   record_start ctx node.id ~node_type:"masc_claim";
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   (* Choose tool based on whether task_id is provided *)
   let tool_name, args = match task_id with
     | Some tid ->
@@ -884,7 +887,7 @@ let execute_masc_claim ctx ~tool_exec (node : node) ~task_id ~room : (string, st
     try tool_exec ~name:tool_name ~args
     with exn -> Error (Printexc.to_string exn)
   in
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   match result with
   | Ok output ->
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"masc_claim";
@@ -900,13 +903,13 @@ let execute_tool_node ctx ~tool_exec ~(node : node) (tool : node_type) : (string
   match tool with
   | Tool { name; args } ->
       record_start ctx node.id ~node_type:"tool";
-      let start = Unix.gettimeofday () in
+      let start = Time_compat.now () in
       let resolved_args = substitute_json ctx args in
       let result =
         try tool_exec ~name ~args:resolved_args
         with exn -> Error (Printexc.to_string exn)
       in
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       (match result with
       | Ok output ->
           record_complete ctx node.id ~duration_ms ~success:true ~node_type:"tool";
@@ -925,7 +928,7 @@ let apply_adapter_transform = Chain_adapter_eio.apply_adapter_transform
 (** Execute an adapter node *)
 let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string, string) result =
   record_start ctx node.id ~node_type:"adapter";
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let finalize ~success ~duration_ms output =
     record_complete ctx node.id ~duration_ms ~success ~node_type:"adapter";
     store_node_output ctx node output;
@@ -935,7 +938,7 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
   let input_value = resolve_single_input ctx input_ref in
   if input_value = "" then begin
     let msg = Printf.sprintf "Adapter: empty input from '%s'" input_ref in
-    let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+    let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
     match on_error with
     | `Fail ->
         record_error ctx node.id ~node_type:"adapter" msg;
@@ -951,7 +954,7 @@ let execute_adapter ctx (node : node) ~input_ref ~transform ~on_error : (string,
   else
     (* Apply transformation *)
     let result = apply_adapter_transform transform input_value in
-    let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+    let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
     match result with
     | Ok output ->
         Ok (finalize ~success:true ~duration_ms output)
@@ -1076,7 +1079,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~max_iterations ~max_depth ~expansion_threshold ~early_stop ~parallel_sims
     : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Get exploration constant from policy *)
   let exploration_c = match policy with
@@ -1138,8 +1141,8 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             let exp_scores = List.map (fun s -> exp ((s -. max_score) /. temp)) scores in
             let sum = List.fold_left (+.) 0.0 exp_scores in
             let probs = List.map (fun e -> e /. sum) exp_scores in
-            (* Sample from distribution *)
-            let r = Random.float 1.0 in
+            (* Sample from distribution - using fiber-safe RNG *)
+            let r = Random.State.float executor_rng 1.0 in
             let rec sample acc = function
               | [] -> (match list_hd_opt node.children with Some c -> c | None -> failwith "MCTS: no children to sample")
               | (child, prob) :: rest ->
@@ -1318,7 +1321,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     match sorted with best :: _ -> Some best | [] -> None
   in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   match best_child with
   | None ->
@@ -1340,7 +1343,7 @@ and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
     ~key_expr ~ttl_seconds (inner : node) : (string, string) result =
   record_start ctx node.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Generate cache key by resolving the key expression *)
   let cache_key = resolve_single_input ctx key_expr in
@@ -1349,7 +1352,7 @@ and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
   (* Check cache *)
   let cached = match Hashtbl.find_opt ctx.cache full_key with
     | Some (result, timestamp) ->
-        if ttl_seconds = 0 || Unix.gettimeofday () -. timestamp < float_of_int ttl_seconds then
+        if ttl_seconds = 0 || Time_compat.now () -. timestamp < float_of_int ttl_seconds then
           Some result
         else begin
           (* Expired - remove from cache *)
@@ -1369,12 +1372,12 @@ and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
         (match inner_result with
         | Ok output ->
             (* Store in cache *)
-            Hashtbl.replace ctx.cache full_key (output, Unix.gettimeofday ());
+            Hashtbl.replace ctx.cache full_key (output, Time_compat.now ());
             Ok output
         | Error _ as e -> e)
   in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   let success = Result.is_ok result in
   record_complete ctx node.id ~duration_ms ~success;
   (match result with
@@ -1386,7 +1389,7 @@ and execute_cache ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
 and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
     ~batch_size ~parallel ~collect_strategy (inner : node) : (string, string) result =
   record_start ctx node.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Get input as JSON array *)
   let input_str = resolve_single_input ctx (Printf.sprintf "{{%s}}" node.id) in
@@ -1404,7 +1407,7 @@ and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
 
   match items with
   | Error msg ->
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx node.id ~duration_ms ~success:false;
       record_error ctx node.id msg;
       Error msg
@@ -1463,7 +1466,7 @@ and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
         | `Last -> (match List.rev outputs with h :: _ -> Ok h | [] -> Error "No successful results")
       in
 
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       let success = Result.is_ok final_result in
       record_complete ctx node.id ~duration_ms ~success;
       (match final_result with
@@ -1486,11 +1489,11 @@ and execute_batch ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
 and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
     ~clean ~pass_vars ~inherit_cache (inner : node) : (string, string) result =
   record_start ctx node.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   match Spawn_registry.try_start ~label:node.id with
   | Error msg ->
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx node.id ~duration_ms ~success:false;
       record_error ctx node.id msg;
       Error msg
@@ -1534,7 +1537,7 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
           store_node_output ctx node output
       | Error _ -> ());
 
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       let success = Result.is_ok result in
       let error_msg =
         match result with
@@ -1648,9 +1651,9 @@ and execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec (nodes : node list) : 
 (** Execute nodes in sequence (Pipeline container node) *)
 and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let result = execute_sequential ctx ~sw ~clock ~exec_fn ~tool_exec nodes in
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   (match result with
    | Ok output ->
        store_node_output ctx parent output;
@@ -1663,7 +1666,7 @@ and execute_pipeline ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes :
 (** Execute nodes in parallel (Fanout) *)
 and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Collect results from parallel execution *)
   let results = ref [] in
@@ -1677,7 +1680,7 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
       )
   ) nodes);
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   (* Check if all succeeded *)
   let outputs = List.filter_map (fun (id, r) ->
@@ -1709,7 +1712,7 @@ and execute_fanout ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (nodes : n
 *)
 and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~consensus ~weights (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let _ = (sw, clock, exec_fn, tool_exec) in  (* suppress unused warnings *)
 
   (* Collect results from already-executed nodes or ChainRef lookups *)
@@ -1733,7 +1736,7 @@ and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~consensus
     | Error msg -> failures := (node.id, msg) :: !failures
   ) nodes;
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   let total = List.length nodes in
   let success_count = List.length !successes in
 
@@ -1782,7 +1785,7 @@ and execute_quorum ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~consensus
 (** Execute conditional gate *)
 and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~then_node ~else_node : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Simple condition evaluation: check if referenced output is truthy *)
   let condition_met =
@@ -1805,7 +1808,7 @@ and execute_gate ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~condition ~
       | None -> Ok ""  (* No else branch, return empty *)
   in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   (match result with
   | Ok output ->
       record_complete ctx parent.id ~duration_ms ~success:true;
@@ -1861,7 +1864,7 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
   record_start ctx parent.id;
   let mermaid_dsl = Some (Chain_mermaid_parser.chain_to_mermaid chain) in
   add_trace ctx parent.id (ChainStart { chain_id = chain.id; mermaid_dsl });
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Compile chain to get parallel groups *)
   let result = match Chain_compiler.compile chain with
@@ -1892,7 +1895,7 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
       execute_groups parallel_groups
   in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   let success = Result.is_ok result in
   add_trace ctx parent.id (ChainComplete { chain_id = chain.id; success });
   record_complete ctx parent.id ~duration_ms ~success;
@@ -1911,11 +1914,11 @@ and execute_subgraph ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) (chain :
 (** Execute map (transform output) *)
 and execute_map ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func (inner : node) : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   (match result with
   | Ok output ->
       (* Apply transformation function *)
@@ -1936,13 +1939,13 @@ and execute_map ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func (inner 
 (** Execute bind (dynamic routing based on output) *)
 and execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func:_ (inner : node) : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Bind executes inner, then could route to another node based on output *)
   (* For now, just execute inner and return *)
   let result = execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
   (match result with
   | Ok output ->
       record_complete ctx parent.id ~duration_ms ~success:true;
@@ -1956,7 +1959,7 @@ and execute_bind ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~func:_ (inn
 (** Execute merge (combine parallel results) *)
 and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (nodes : node list) : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Execute all nodes in parallel, handling ChainRef nodes specially *)
   let results = ref [] in
@@ -1979,7 +1982,7 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
       )
   ) nodes);
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   (* Merge results based on strategy *)
   let outputs = List.filter_map (fun (id, r) ->
@@ -2013,12 +2016,12 @@ and execute_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node) ~strategy (
 and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~metric ~operator ~value ~input_node ~on_pass ~on_fail : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* First, execute the input node to get the value *)
   match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec input_node with
   | Error msg ->
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx parent.id ~duration_ms ~success:false;
       Error (Printf.sprintf "Threshold input node failed: %s" msg)
   | Ok input_output ->
@@ -2032,7 +2035,7 @@ and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       in
       (match extracted_value with
        | None ->
-           let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+           let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
            record_complete ctx parent.id ~duration_ms ~success:false;
            Error (Printf.sprintf "Could not extract metric '%s' from output" metric)
        | Some v ->
@@ -2056,7 +2059,7 @@ and execute_threshold ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                | Some n -> execute_node ctx ~sw ~clock ~exec_fn ~tool_exec n
                | None -> Ok input_output  (* No fail branch, return input *)
            in
-           let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+           let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
            (match branch_result with
             | Ok output ->
                 record_complete ctx parent.id ~duration_ms ~success:true;
@@ -2071,7 +2074,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~goal_metric ~goal_operator ~goal_value ~action_node ~measure_func
     ~max_iterations ~strategy_hints ~conversational ~relay_models : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Initialize conversation context if conversational mode is enabled *)
   let prev_conversation = ctx.conversation in
@@ -2143,7 +2146,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   let rec iterate iteration last_value =
     if iteration > max_iterations then begin
       ctx.iteration_ctx <- None;  (* Clear iteration context on completion *)
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx parent.id ~duration_ms ~success:false;
       Error (Printf.sprintf "Goal not achieved after %d iterations (last value: %.2f, target: %.2f)"
                max_iterations last_value goal_value)
@@ -2167,7 +2170,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       (* Execute the action node *)
       match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec action_node with
       | Error msg ->
-          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
           record_complete ctx parent.id ~duration_ms ~success:false;
           Error (Printf.sprintf "Iteration %d failed: %s" iteration msg)
       | Ok output ->
@@ -2201,7 +2204,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
                if goal_met then begin
                  ctx.iteration_ctx <- None;  (* Clear iteration context on completion *)
                  ctx.conversation <- None;   (* Clear conversation context on completion *)
-                 let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+                 let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
                  record_complete ctx parent.id ~duration_ms ~success:true;
                  store_node_output ctx parent output;
                  Ok output
@@ -2217,7 +2220,7 @@ and execute_goal_driven ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 and execute_evaluator ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~candidates ~scoring_func ~scoring_prompt ~select_strategy ~min_score : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Execute all candidates in parallel *)
   let results = ref [] in
@@ -2390,7 +2393,7 @@ Reply with ONLY a number between 0.0 and 1.0:|}
         Some (id, output, score)
   ) !results in
 
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   if scored = [] then begin
     record_complete ctx parent.id ~duration_ms ~success:false;
@@ -2445,7 +2448,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~improver_prompt ~max_iterations ~score_threshold ~score_operator
     ~conversational ~relay_models : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let prev_conversation = ctx.conversation in
   (if conversational then
      let models = if relay_models = [] then ["gemini"; "claude"; "codex"] else relay_models in
@@ -2533,7 +2536,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
   let rec iterate iteration =
     if iteration > max_iterations then begin
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx parent.id ~duration_ms ~success:false;
       Error (Printf.sprintf "FeedbackLoop: Max iterations (%d) reached without meeting threshold %s%.2f"
                max_iterations op_str score_threshold)
@@ -2541,7 +2544,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       (* Execute current generator *)
       match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec !current_generator with
       | Error msg ->
-          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
           record_complete ctx parent.id ~duration_ms ~success:false;
           Error (Printf.sprintf "FeedbackLoop iteration %d failed: %s" iteration msg)
       | Ok output ->
@@ -2553,7 +2556,7 @@ and execute_feedback_loop ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 
           if passes_threshold score then begin
             (* Success: score meets threshold *)
-            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
             record_complete ctx parent.id ~duration_ms ~success:true;
             store_node_output ctx parent output;
             Ok output
@@ -2594,7 +2597,7 @@ and calculate_backoff_delay (strategy : Chain_types.backoff_strategy) (attempt :
   | Chain_types.Exponential base -> base *. (2.0 ** float_of_int attempt)
   | Chain_types.Linear base -> base *. float_of_int (attempt + 1)
   | Chain_types.Jitter (min_sec, max_sec) ->
-      min_sec +. Random.float (max_sec -. min_sec)
+      min_sec +. Random.State.float executor_rng (max_sec -. min_sec)
 
 (** Check if error matches retry patterns *)
 and should_retry (retry_on : string list) (error_msg : string) : bool =
@@ -2614,10 +2617,10 @@ and should_retry (retry_on : string list) (error_msg : string) : bool =
 and execute_retry ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~inner_node ~max_attempts ~backoff ~retry_on : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let rec attempt n last_error =
     if n > max_attempts then begin
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx parent.id ~duration_ms ~success:false;
       record_error ctx parent.id (Printf.sprintf "Max retries (%d) exceeded: %s" max_attempts last_error);
       Error (Printf.sprintf "Max retries (%d) exceeded: %s" max_attempts last_error)
@@ -2625,14 +2628,14 @@ and execute_retry ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
       if n > 1 then Eio.Time.sleep clock (calculate_backoff_delay backoff (n - 2));
       match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec inner_node with
       | Ok output ->
-          let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+          let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
           record_complete ctx parent.id ~duration_ms ~success:true;
           store_node_output ctx parent output;
           Ok output
       | Error msg ->
           if should_retry retry_on msg then attempt (n + 1) msg
           else begin
-            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
             record_complete ctx parent.id ~duration_ms ~success:false;
             record_error ctx parent.id msg;
             Error msg
@@ -2645,11 +2648,11 @@ and execute_retry ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 and execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~primary ~fallbacks : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let rec try_nodes nodes errors =
     match nodes with
     | [] ->
-        let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+        let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
         let msg = Printf.sprintf "All fallbacks failed: %s" (String.concat "; " (List.rev errors)) in
         record_complete ctx parent.id ~duration_ms ~success:false;
         record_error ctx parent.id msg;
@@ -2657,7 +2660,7 @@ and execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     | node :: rest ->
         match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec node with
         | Ok output ->
-            let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+            let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
             record_complete ctx parent.id ~duration_ms ~success:true;
             store_node_output ctx parent output;
             Ok output
@@ -2670,7 +2673,7 @@ and execute_fallback ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~nodes ~timeout : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let winner = ref None in
   let winner_mutex = Eio.Mutex.create () in
   let winner_cond = Eio.Condition.create () in
@@ -2716,7 +2719,7 @@ and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     try
       Eio.Time.with_timeout_exn clock timeout_sec (fun () ->
         let r = wait_for_winner () in
-        duration_ms := int_of_float ((Unix.gettimeofday () -. start) *. 1000.0);
+        duration_ms := int_of_float ((Time_compat.now () -. start) *. 1000.0);
         match r with
         | Some (winner_id, output) ->
             record_complete ctx parent.id ~duration_ms:!duration_ms ~success:true;
@@ -2728,7 +2731,7 @@ and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
             record_error ctx parent.id msg;
             Error msg)
     with Eio.Time.Timeout ->
-      duration_ms := int_of_float ((Unix.gettimeofday () -. start) *. 1000.0);
+      duration_ms := int_of_float ((Time_compat.now () -. start) *. 1000.0);
       let msg = Printf.sprintf "Race timeout after %.1fs" timeout_sec in
       record_complete ctx parent.id ~duration_ms:!duration_ms ~success:false;
       record_error ctx parent.id msg;
@@ -2740,7 +2743,7 @@ and execute_race ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
 and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
     ~nodes ~reducer ~initial ~min_results ~timeout : (string, string) result =
   record_start ctx parent.id;
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
 
   (* Stream for progressive results: Some (id, output) or None for completion *)
   let stream = Eio.Stream.create (List.length nodes) in
@@ -2805,7 +2808,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   let deadline = start +. timeout_sec in
 
   let rec consume () =
-    let now = Unix.gettimeofday () in
+    let now = Time_compat.now () in
     if now > deadline && !results_collected >= min_required then begin
       (* Timeout reached after min_results met *)
       Printf.eprintf "[StreamMerge] Timeout reached with %d results\n%!" !results_collected;
@@ -2841,7 +2844,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
           (* Check if we can return early (min_results met + optional timeout) *)
           if !results_collected >= min_required && timeout_sec < infinity then begin
             (* Wait briefly for more results or timeout *)
-            let remaining = deadline -. Unix.gettimeofday () in
+            let remaining = deadline -. Time_compat.now () in
             if remaining <= 0.0 then Ok !acc
             else consume ()  (* Keep consuming until timeout *)
           end else
@@ -2850,7 +2853,7 @@ and execute_stream_merge ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
   in
 
   let result = consume () in
-  let duration_ms = int_of_float ((Unix.gettimeofday () -. start) *. 1000.0) in
+  let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
 
   match result with
   | Ok output ->
@@ -2886,7 +2889,7 @@ let plan_to_steps (plan : execution_plan) : execution_step list =
 
 (** Execute a compiled execution plan *)
 let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?input ?checkpoint (plan : execution_plan) : chain_result =
-  let start_time = Unix.gettimeofday () in
+  let start_time = Time_compat.now () in
 
   (* Create Langfuse trace for observability if enabled *)
   let langfuse_trace =
@@ -2919,7 +2922,7 @@ let execute ~sw ~clock ~timeout ~trace ~exec_fn ~tool_exec ?input ?checkpoint (p
 
   (* Helper to build chain_result *)
   let make_result ~success ~output =
-    let duration_ms = int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0) in
+    let duration_ms = int_of_float ((Time_compat.now () -. start_time) *. 1000.0) in
     let trace_raw = traces_to_entries (List.rev !(ctx.traces)) in
     let trace = Chain_run_store.enrich_trace_entries ~chain:plan.chain ~outputs:ctx.outputs trace_raw in
 

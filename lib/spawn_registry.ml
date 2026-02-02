@@ -102,7 +102,7 @@ let cleanup_stale now_sec =
     List.length !to_remove
 
 let try_start ~label =
-  let now_sec = Unix.gettimeofday () in
+  let now_sec = Time_compat.now () in
   with_lock (fun () ->
     let removed = cleanup_stale now_sec in
     if removed > 0 then begin
@@ -126,7 +126,7 @@ let try_start ~label =
   )
 
 let finish ~id ~ok ~error =
-  let now_sec = Unix.gettimeofday () in
+  let now_sec = Time_compat.now () in
   with_lock (fun () ->
     (match Hashtbl.find_opt active id with
      | Some info ->
@@ -140,7 +140,7 @@ let finish ~id ~ok ~error =
   )
 
 let snapshot () =
-  let now_sec = Unix.gettimeofday () in
+  let now_sec = Time_compat.now () in
   with_lock (fun () ->
     let removed = cleanup_stale now_sec in
     if removed > 0 then begin

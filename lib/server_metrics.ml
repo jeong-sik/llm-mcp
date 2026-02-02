@@ -59,7 +59,7 @@ let bytes_out = ref 0
 let sse_open_ref = ref 0
 let sse_total = ref 0
 
-let now () = Unix.gettimeofday ()
+let now () = Time_compat.now ()
 
 let with_lock f = Eio.Mutex.use_rw ~protect:true state_mutex f
 

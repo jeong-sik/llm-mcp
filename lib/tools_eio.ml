@@ -9,6 +9,9 @@
     Re-exports pure functions from tools.ml (parse_*, build_*, etc.)
 *)
 
+(* Fiber-safe random state for ID generation *)
+let tools_rng = Random.State.make_self_init ()
+
 open Printf
 open Types
 open Cli_runner_eio
@@ -171,7 +174,7 @@ let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
     f ()
   else
     let base = masc_agent_base () in
-    let ts = int_of_float (Unix.gettimeofday ()) in
+    let ts = int_of_float (Time_compat.now ()) in
     let agent =
       let safe_label = String.map (fun c -> if c = '.' then '-' else c) label in
       Printf.sprintf "%s-%s-%d" base safe_label ts
@@ -559,7 +562,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
   in
   let tool_for_log = Tools_tracer.get_tool_name args in
   let prompt_for_log = get_input_for_tracing args in
-  let log_start_ts = Unix.gettimeofday () in
+  let log_start_ts = Time_compat.now () in
   if log_enabled then
     Run_log_eio.record_event
       ~event:"llm_call"
@@ -595,7 +598,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~model:model_for_log
           ~prompt_chars:(String.length prompt_for_log)
           ~response_chars:(String.length result.response)
-          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~duration_ms:(int_of_float ((Time_compat.now () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
           ~extra:log_extra
@@ -663,7 +666,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~model:model_for_log
           ~prompt_chars:(String.length prompt_for_log)
           ~response_chars:(String.length result.response)
-          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~duration_ms:(int_of_float ((Time_compat.now () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
           ~extra:log_extra
@@ -730,7 +733,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~model:model_for_log
           ~prompt_chars:(String.length prompt_for_log)
           ~response_chars:(String.length result.response)
-          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~duration_ms:(int_of_float ((Time_compat.now () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
           ~extra:log_extra
@@ -857,7 +860,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
           ~model:model_for_log
           ~prompt_chars:(String.length prompt_for_log)
           ~response_chars:(String.length result.response)
-          ~duration_ms:(int_of_float ((Unix.gettimeofday () -. log_start_ts) *. 1000.0))
+          ~duration_ms:(int_of_float ((Time_compat.now () -. log_start_ts) *. 1000.0))
           ~success:(result.returncode = 0)
           ~streamed:(result_streamed result)
           ~extra:log_extra
@@ -1691,7 +1694,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
 ```
 
 This chain will execute the goal using a stub model.|}
-              (Random.int 10000)
+              (Random.State.int tools_rng 10000)
               (String.escaped (String.sub prompt 0 (min 50 (String.length prompt))))
         | "claude" | "claude-cli" ->
             let args = Types.Claude {
@@ -1981,7 +1984,7 @@ This chain will execute the goal using a stub model.|}
         in
         let filtered = match max_age_hours with
           | Some hours ->
-              let now = Unix.gettimeofday () in
+              let now = Time_compat.now () in
               let max_age_secs = float_of_int hours *. 3600.0 in
               List.filter (fun cp -> now -. cp.Checkpoint_store.timestamp < max_age_secs) checkpoints
           | None -> checkpoints
@@ -2139,7 +2142,7 @@ This chain will execute the goal using a stub model.|}
         version;
         variables;
         metrics = None;
-        created_at = Unix.gettimeofday ();
+        created_at = Time_compat.now ();
         deprecated = false;
       } in
       Prompt_registry.register entry;

@@ -1932,6 +1932,10 @@ let start_server config =
   let net = Eio.Stdenv.net env in
   let clock = Eio.Stdenv.clock env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
+
+  (* Set global clock for Time_compat (Eio-native timestamps) *)
+  Time_compat.set_clock clock;
+
   let store = Mcp_server_eio.create_session_store () in
 
   (* Graceful shutdown setup *)

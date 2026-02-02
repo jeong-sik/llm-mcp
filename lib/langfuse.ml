@@ -16,6 +16,9 @@
     @since 2026-01
 *)
 
+(* Fiber-safe random state for ID generation *)
+let langfuse_rng = Random.State.make_self_init ()
+
 (** {1 Configuration} *)
 
 (** Langfuse configuration loaded from environment *)
@@ -53,7 +56,7 @@ let is_enabled () =
 let generate_id () =
   let random_bytes = Bytes.create 16 in
   for i = 0 to 15 do
-    Bytes.set random_bytes i (Char.chr (Random.int 256))
+    Bytes.set random_bytes i (Char.chr (Random.State.int langfuse_rng 256))
   done;
   (* Format as UUID: 8-4-4-4-12 *)
   let hex = Bytes.fold_left (fun acc c ->

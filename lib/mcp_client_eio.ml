@@ -128,7 +128,7 @@ let call_tool t ~url ~tool_name ~arguments =
     ("name", `String tool_name);
     ("arguments", arguments);
   ] in
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   Metrics.record_tool_call ~tool:tool_name ();
   Metrics.inc_tool_calls_inflight ~tool:tool_name ();
   let result =
@@ -140,7 +140,7 @@ let call_tool t ~url ~tool_name ~arguments =
    | Ok _ -> ()
    | Error _ -> Metrics.record_tool_call_error ~tool:tool_name ());
   let duration_ms =
-    int_of_float ((Unix.gettimeofday () -. start) *. 1000.0)
+    int_of_float ((Time_compat.now () -. start) *. 1000.0)
   in
   let error = match result with Ok _ -> None | Error msg -> Some msg in
   Telemetry_jsonl.log_tool_called
@@ -153,10 +153,10 @@ let call_tool t ~url ~tool_name ~arguments =
 
 (** List available tools from MCP server *)
 let list_tools t ~url =
-  let start = Unix.gettimeofday () in
+  let start = Time_compat.now () in
   let result = call_mcp_server t ~url ~method_name:"tools/list" ~params:`Null in
   let duration_ms =
-    int_of_float ((Unix.gettimeofday () -. start) *. 1000.0)
+    int_of_float ((Time_compat.now () -. start) *. 1000.0)
   in
   let error = match result with Ok _ -> None | Error msg -> Some msg in
   Telemetry_jsonl.log_tool_called

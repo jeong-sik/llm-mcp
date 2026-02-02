@@ -13,6 +13,9 @@
     Uses Eio for file I/O operations.
 *)
 
+(* Fiber-safe random state for run ID generation *)
+let checkpoint_rng = Random.State.make_self_init ()
+
 (** Token usage tracking - re-exported from Chain_category *)
 type token_usage = Chain_category.token_usage
 
@@ -56,8 +59,8 @@ let ensure_dir path =
 
 (** Generate a unique run ID *)
 let generate_run_id () =
-  let timestamp = Unix.gettimeofday () in
-  let random = Random.int 0xFFFF in
+  let timestamp = Time_compat.now () in
+  let random = Random.State.int checkpoint_rng 0xFFFF in
   Printf.sprintf "%d_%04x" (int_of_float (timestamp *. 1000.0)) random
 
 (** Get the file path for a checkpoint *)
@@ -202,7 +205,7 @@ let delete (store : checkpoint_store) ~run_id : unit =
 
 (** Cleanup checkpoints older than max_age_hours, returns count of deleted *)
 let cleanup_old (store : checkpoint_store) ~max_age_hours : int =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let max_age_seconds = float_of_int max_age_hours *. 3600.0 in
   let all = list_all store in
   let old_checkpoints = List.filter (fun cp ->
@@ -226,6 +229,6 @@ let make_checkpoint
     node_id;
     outputs;
     traces;
-    timestamp = Unix.gettimeofday ();
+    timestamp = Time_compat.now ();
     total_tokens;
   }

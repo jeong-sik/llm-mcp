@@ -6,6 +6,9 @@
 
 open Printf
 
+(* Fiber-safe random state for jitter calculation *)
+let jitter_rng = Random.State.make_self_init ()
+
 (** {1 Configuration Types} *)
 
 type retry_config = {
@@ -121,8 +124,8 @@ let calculate_delay ~config ~attempt : int =
   let capped_delay = min base_delay (float_of_int config.max_delay_ms) in
   let final_delay =
     if config.jitter then
-      (* Add up to 25% jitter *)
-      let jitter_factor = 0.75 +. (Random.float 0.5) in
+      (* Add up to 25% jitter - using fiber-safe local state *)
+      let jitter_factor = 0.75 +. (Random.State.float jitter_rng 0.5) in
       capped_delay *. jitter_factor
     else
       capped_delay

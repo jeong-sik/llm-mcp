@@ -60,11 +60,14 @@ let create_session_store () = {
   mutex = Eio.Mutex.create ();
 }
 
+(* Fiber-safe random state for session ID generation *)
+let session_rng = Random.State.make_self_init ()
+
 let generate_session_id () =
   sprintf "eio-%d-%d-%s"
     (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1000.0))
-    (String.sub (Digest.to_hex (Digest.string (string_of_float (Random.float 1.0)))) 0 8)
+    (int_of_float (Time_compat.now () *. 1000.0))
+    (String.sub (Digest.to_hex (Digest.string (string_of_float (Random.State.float session_rng 1.0)))) 0 8)
 
 (** Get session by ID from store *)
 let get_session store session_id =
@@ -83,7 +86,7 @@ let touch_session store session_id =
   Eio.Mutex.use_rw ~protect:true store.mutex (fun () ->
     match Hashtbl.find_opt store.sessions session_id with
     | Some session ->
-        let updated = { session with last_accessed = Unix.gettimeofday () } in
+        let updated = { session with last_accessed = Time_compat.now () } in
         Hashtbl.replace store.sessions session.id updated
     | None -> ()
   )
@@ -96,7 +99,7 @@ let remove_session store session_id =
 
 (** Clean up stale sessions (not accessed in 1 hour) *)
 let cleanup_stale_sessions store =
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let max_age = 3600.0 in (* 1 hour *)
   Eio.Mutex.use_rw ~protect:true store.mutex (fun () ->
     let to_remove = ref [] in
@@ -228,7 +231,7 @@ let handle_initialize ~store id params =
          | _ -> P.protocol_version)
     | _ -> P.protocol_version
   in
-  let now = Unix.gettimeofday () in
+  let now = Time_compat.now () in
   let session = {
     id = generate_session_id ();
     protocol_version;
@@ -453,7 +456,7 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
                                   eprintf "[session] tools/call rejected: unknown session %s\n%!" sid;
                                   Error "Unknown session id"
                                 end else begin
-                                  let now = Unix.gettimeofday () in
+                                  let now = Time_compat.now () in
                                   let new_session = {
                                     id = generate_session_id ();
                                     protocol_version = P.protocol_version;
@@ -681,8 +684,8 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                       ("protocol_version", `String session.protocol_version);
                       ("created_at", `Float session.created_at);
                       ("last_accessed", `Float session.last_accessed);
-                      ("age_seconds", `Float (Unix.gettimeofday () -. session.created_at));
-                      ("idle_seconds", `Float (Unix.gettimeofday () -. session.last_accessed));
+                      ("age_seconds", `Float (Time_compat.now () -. session.created_at));
+                      ("idle_seconds", `Float (Time_compat.now () -. session.last_accessed));
                     ] in
                     session_json :: acc
                   ) store.sessions [] in
@@ -733,7 +736,7 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
                   Eio.Time.sleep clock 30.0;  (* 30s heartbeat interval *)
                   if Http.sse_client_count () > 0 then begin
                     Http.send_sse_event body ~event:"heartbeat"
-                      ~data:(sprintf {|{"timestamp":%f}|} (Unix.gettimeofday ()));
+                      ~data:(sprintf {|{"timestamp":%f}|} (Time_compat.now ()));
                     heartbeat_loop (n + 1)
                   end
                 in
