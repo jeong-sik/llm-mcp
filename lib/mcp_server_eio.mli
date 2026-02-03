@@ -57,9 +57,10 @@ val health_response : unit -> string
 
 (** {1 Authentication} *)
 
-(** Check authorization header against LLM_MCP_API_KEY env var.
+(** Check authorization header against LLM_MCP_API_KEY (or MCP_API_KEY) env var.
     Returns [Ok ()] if authorized, [Error message] if not.
-    If LLM_MCP_API_KEY is not set, all requests are allowed (dev mode). *)
+    By default, LLM_MCP_API_KEY (or MCP_API_KEY) is required (secure by default).
+    Set LLM_MCP_ALLOW_NO_AUTH=1 to explicitly allow no-auth dev mode. *)
 val auth_middleware : (string * string) list -> (unit, string) result
 
 

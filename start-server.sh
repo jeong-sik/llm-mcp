@@ -1,10 +1,7 @@
 #!/bin/bash
-# Start OCaml llm-mcp server
+# Start OCaml llm-mcp server (delegates to start-llm-mcp.sh)
 
 cd "$(dirname "$0")"
 
-# Ensure opam env is set
-eval $(opam env)
-
-# Run on port 8935 (different from Python version on 8932)
-exec ./_build/default/bin/main.exe --port 8935
+# Run on port 8935 (legacy)
+exec ./start-llm-mcp.sh --port 8935

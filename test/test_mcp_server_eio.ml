@@ -206,32 +206,55 @@ let test_concurrent_session_access () =
 
 (** {1 Authentication Tests} *)
 
-(** Test auth with no env var allows all requests *)
-let test_auth_no_env_allows_all () =
-  (* Ensure LLM_MCP_API_KEY is not set *)
-  let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
-  (match original with
-   | Some _ -> Unix.putenv "LLM_MCP_API_KEY" ""
-   | None -> ());
+(** Test auth with no env var requires key by default *)
+let test_auth_no_env_requires_key () =
+  let original_key = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
+  Unix.putenv "LLM_MCP_API_KEY" "";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
 
-  (* Test with no Authorization header *)
   let headers = [("content-type", "application/json")] in
   let result = Server.auth_middleware headers in
 
-  (* Restore original env *)
-  (match original with
+  (match original_key with
    | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
+   | None -> ());
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
    | None -> ());
 
   match result with
-  | Ok () -> check bool "auth passed" true true
-  | Error _ -> fail "auth should pass in dev mode"
+  | Error _ -> check bool "missing key rejected" true true
+  | Ok () -> fail "auth should require key by default"
+
+(** Test auth allows no-auth when explicit env override is set *)
+let test_auth_allow_no_auth_env () =
+  let original_key = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
+  Unix.putenv "LLM_MCP_API_KEY" "";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "1";
+
+  let headers = [("content-type", "application/json")] in
+  let result = Server.auth_middleware headers in
+
+  (match original_key with
+   | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
+   | None -> ());
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> ());
+
+  match result with
+  | Ok () -> check bool "allow-no-auth accepted" true true
+  | Error _ -> fail "auth should pass when allow-no-auth is set"
 
 (** Test auth with env var requires valid token *)
 let test_auth_with_env_requires_token () =
   (* Set API key *)
   let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
   Unix.putenv "LLM_MCP_API_KEY" "test-secret-123";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
 
   (* Test with valid Bearer token *)
   let headers = [("authorization", "Bearer test-secret-123")] in
@@ -241,16 +264,47 @@ let test_auth_with_env_requires_token () =
   (match original with
    | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
    | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
 
   match result with
   | Ok () -> check bool "valid token accepted" true true
   | Error msg -> fail (Printf.sprintf "auth should pass with valid token: %s" msg)
 
+(** Test auth accepts MCP_API_KEY fallback *)
+let test_auth_with_mcp_api_key_env () =
+  let original_llm = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_mcp = Sys.getenv_opt "MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
+  Unix.putenv "LLM_MCP_API_KEY" "";
+  Unix.putenv "MCP_API_KEY" "mcp-secret-123";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
+
+  let headers = [("x-mcp-api-key", "mcp-secret-123")] in
+  let result = Server.auth_middleware headers in
+
+  (match original_llm with
+   | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
+   | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_mcp with
+   | Some v -> Unix.putenv "MCP_API_KEY" v
+   | None -> Unix.putenv "MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
+
+  match result with
+  | Ok () -> check bool "MCP_API_KEY accepted" true true
+  | Error msg -> fail (Printf.sprintf "auth should accept MCP_API_KEY: %s" msg)
+
 (** Test auth rejects wrong token *)
 let test_auth_wrong_token_rejected () =
   (* Set API key *)
   let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
   Unix.putenv "LLM_MCP_API_KEY" "correct-token";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
 
   (* Test with wrong Bearer token *)
   let headers = [("authorization", "Bearer wrong-token")] in
@@ -260,6 +314,9 @@ let test_auth_wrong_token_rejected () =
   (match original with
    | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
    | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
 
   match result with
   | Error _ -> check bool "wrong token rejected" true true
@@ -269,7 +326,9 @@ let test_auth_wrong_token_rejected () =
 let test_auth_missing_header_rejected () =
   (* Set API key *)
   let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
   Unix.putenv "LLM_MCP_API_KEY" "secret-key";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
 
   (* Test with no Authorization header *)
   let headers = [("content-type", "application/json")] in
@@ -279,6 +338,9 @@ let test_auth_missing_header_rejected () =
   (match original with
    | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
    | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
 
   match result with
   | Error _ -> check bool "missing header rejected" true true
@@ -288,7 +350,9 @@ let test_auth_missing_header_rejected () =
 let test_auth_invalid_format_rejected () =
   (* Set API key *)
   let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
   Unix.putenv "LLM_MCP_API_KEY" "secret-key";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
 
   (* Test with invalid format (no "Bearer " prefix) *)
   let headers = [("authorization", "secret-key")] in
@@ -298,10 +362,55 @@ let test_auth_invalid_format_rejected () =
   (match original with
    | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
    | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
 
   match result with
   | Error _ -> check bool "invalid format rejected" true true
   | Ok () -> fail "auth should reject invalid format"
+
+(** Test auth accepts X-API-Key header *)
+let test_auth_x_api_key_header () =
+  let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
+  Unix.putenv "LLM_MCP_API_KEY" "secret-key";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
+
+  let headers = [("x-api-key", "secret-key")] in
+  let result = Server.auth_middleware headers in
+
+  (match original with
+   | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
+   | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
+
+  match result with
+  | Ok () -> check bool "x-api-key accepted" true true
+  | Error msg -> fail (Printf.sprintf "auth should accept x-api-key: %s" msg)
+
+(** Test auth accepts X-MCP-API-Key header *)
+let test_auth_x_mcp_api_key_header () =
+  let original = Sys.getenv_opt "LLM_MCP_API_KEY" in
+  let original_allow = Sys.getenv_opt "LLM_MCP_ALLOW_NO_AUTH" in
+  Unix.putenv "LLM_MCP_API_KEY" "secret-key";
+  Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "";
+
+  let headers = [("x-mcp-api-key", "secret-key")] in
+  let result = Server.auth_middleware headers in
+
+  (match original with
+   | Some v -> Unix.putenv "LLM_MCP_API_KEY" v
+   | None -> Unix.putenv "LLM_MCP_API_KEY" "");
+  (match original_allow with
+   | Some v -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" v
+   | None -> Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "");
+
+  match result with
+  | Ok () -> check bool "x-mcp-api-key accepted" true true
+  | Error msg -> fail (Printf.sprintf "auth should accept x-mcp-api-key: %s" msg)
 
 (** {1 Header Extraction Tests} *)
 
@@ -379,11 +488,15 @@ let () =
     ];
 
     "authentication", [
-      test_case "no env allows all" `Quick test_auth_no_env_allows_all;
+      test_case "no env requires key" `Quick test_auth_no_env_requires_key;
+      test_case "allow-no-auth env" `Quick test_auth_allow_no_auth_env;
       test_case "valid token accepted" `Quick test_auth_with_env_requires_token;
+      test_case "MCP_API_KEY fallback accepted" `Quick test_auth_with_mcp_api_key_env;
       test_case "wrong token rejected" `Quick test_auth_wrong_token_rejected;
       test_case "missing header rejected" `Quick test_auth_missing_header_rejected;
       test_case "invalid format rejected" `Quick test_auth_invalid_format_rejected;
+      test_case "x-api-key accepted" `Quick test_auth_x_api_key_header;
+      test_case "x-mcp-api-key accepted" `Quick test_auth_x_mcp_api_key_header;
     ];
 
     "header_extraction", [

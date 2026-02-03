@@ -493,50 +493,92 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
 
 (** {1 Authentication Middleware} *)
 
+let env_truthy name =
+  match Sys.getenv_opt name with
+  | Some v ->
+      let v = String.lowercase_ascii (String.trim v) in
+      v = "1" || v = "true" || v = "yes"
+  | None -> false
+
+let header_value_ci name headers =
+  let target = String.lowercase_ascii name in
+  List.find_map (fun (key, value) ->
+    if String.lowercase_ascii key = target then Some value else None
+  ) headers
+
 (** Extract Bearer token from Authorization header *)
 let extract_bearer_token headers =
-  let auth_header = List.find_opt (fun (name, _value) ->
-    String.lowercase_ascii name = "authorization"
-  ) headers in
-  match auth_header with
+  match header_value_ci "authorization" headers with
   | None -> None
-  | Some (_name, value) ->
-      (* Check if it starts with "Bearer " *)
+  | Some value ->
       let prefix = "Bearer " in
       let prefix_len = String.length prefix in
       if String.length value > prefix_len &&
          String.sub value 0 prefix_len = prefix then
-        Some (String.sub value prefix_len (String.length value - prefix_len))
+        Some (String.sub value prefix_len (String.length value - prefix_len) |> String.trim)
       else
         None
+
+let extract_api_key headers =
+  let pick name =
+    header_value_ci name headers |> Option.map String.trim
+  in
+  match pick "x-mcp-api-key" with
+  | Some v when v <> "" -> Some v
+  | _ ->
+      match pick "x-api-key" with
+      | Some v when v <> "" -> Some v
+      | _ -> extract_bearer_token headers
+
+let normalize_env value =
+  match value with
+  | None -> None
+  | Some v ->
+      let trimmed = String.trim v in
+      if trimmed = "" then None else Some trimmed
+
+let expected_api_key () =
+  match normalize_env (Sys.getenv_opt "LLM_MCP_API_KEY") with
+  | Some v -> Some ("LLM_MCP_API_KEY", v)
+  | None ->
+      (match normalize_env (Sys.getenv_opt "MCP_API_KEY") with
+       | Some v -> Some ("MCP_API_KEY", v)
+       | None -> None)
 
 (** Check if request is authenticated
 
     Returns Ok () if:
-    - LLM_MCP_API_KEY env var is not set (development mode)
-    - Valid Bearer token matches LLM_MCP_API_KEY
+    - LLM_MCP_ALLOW_NO_AUTH=1 (explicit development override)
+    - Valid API key matches LLM_MCP_API_KEY or MCP_API_KEY
 
     Returns Error msg if:
-    - LLM_MCP_API_KEY is set but Authorization header is missing
-    - Bearer token doesn't match expected value
+    - LLM_MCP_API_KEY/MCP_API_KEY is missing (secure by default)
+    - API key header is missing or invalid
 *)
 let auth_middleware headers =
-  match Sys.getenv_opt "LLM_MCP_API_KEY" with
-  | None | Some "" ->
-      (* Development mode - no auth required (empty string = unset) *)
-      Ok ()
-  | Some expected_token ->
-      (* Production mode - check Bearer token *)
-      match extract_bearer_token headers with
+  let allow_no_auth =
+    env_truthy "LLM_MCP_ALLOW_NO_AUTH"
+    || env_truthy "MCP_ALLOW_NO_AUTH"
+  in
+  match expected_api_key () with
+  | None ->
+      if allow_no_auth then
+        Ok ()
+      else begin
+        eprintf "[auth] Missing LLM_MCP_API_KEY/MCP_API_KEY (auth required)\n%!";
+        Error "Unauthorized: LLM_MCP_API_KEY or MCP_API_KEY is required"
+      end
+  | Some (_env_name, expected_token) ->
+      match extract_api_key headers with
       | None ->
-          eprintf "[auth] Missing or invalid Authorization header\n%!";
-          Error "Unauthorized: Missing or invalid Authorization header"
+          eprintf "[auth] Missing API key header\n%!";
+          Error "Unauthorized: Missing API key"
       | Some token ->
           if String.equal token expected_token then
             Ok ()
           else begin
-            eprintf "[auth] Invalid Bearer token provided\n%!";
-            Error "Unauthorized: Invalid Bearer token"
+            eprintf "[auth] Invalid API key provided\n%!";
+            Error "Unauthorized: Invalid API key"
           end
 
 (** Send 401 Unauthorized response *)
@@ -544,7 +586,14 @@ let send_unauthorized reqd message =
   let body = Yojson.Safe.to_string (`Assoc [
     ("error", `String message);
   ]) in
-  Http.Response.json ~status:`Unauthorized body reqd
+  let headers = Httpun.Headers.of_list ([
+    ("content-type", "application/json; charset=utf-8");
+    ("content-length", string_of_int (String.length body));
+    ("www-authenticate", "API-Key");
+  ] @ Http.Cors.headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
+  let response = Httpun.Response.create ~headers `Unauthorized in
+  Httpun.Reqd.respond_with_string reqd response body;
+  Server_metrics.finish_reqd ~bytes:(String.length body) reqd `Unauthorized
 
 (** {1 HTTP Server} *)
 
@@ -586,62 +635,11 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
 
   (* Readiness probe - for Kubernetes *)
   | (`GET, "/ready") ->
-      (* Check if server can handle requests *)
-      let ready = true in (* TODO: Add deeper checks if needed *)
+      let ready = true in
       if ready then
-        Http.Response.json ~status:`OK
-          {|{"status":"ready"}|} reqd
+        Http.Response.json ~status:`OK {|{"status":"ready"}|} reqd
       else
-        Http.Response.json ~status:`Service_unavailable
-          {|{"status":"not_ready"}|} reqd
-
-  (* Prometheus metrics endpoint *)
-  | (`GET, "/metrics") ->
-      let session_count =
-        Eio.Mutex.use_ro store.mutex (fun () ->
-          Hashtbl.length store.sessions
-        )
-      in
-      Metrics.set_active_sessions session_count;
-      let body =
-        String.concat "\n" [
-          Metrics.to_prometheus_text ();
-          Server_metrics.to_prometheus_text ();
-          Spawn_registry.to_prometheus_text ();
-        ]
-      in
-      let headers = Httpun.Headers.of_list [
-        ("content-type", "text/plain; version=0.0.4; charset=utf-8");
-        ("content-length", string_of_int (String.length body));
-      ] in
-      let response = Httpun.Response.create ~headers `OK in
-      Httpun.Reqd.respond_with_string reqd response body;
-      Server_metrics.finish_reqd ~bytes:(String.length body) reqd `OK
-
-  (* JSON stats endpoint - no auth required *)
-  | (`GET, "/stats") ->
-      let body = Yojson.Safe.to_string (`Assoc [
-        ("server_metrics", Server_metrics.to_json ());
-        ("spawn_registry", Spawn_registry.to_json ());
-      ]) in
-      Http.Response.json body reqd
-
-  (* Chain viewer UI + run history - no auth required *)
-  | (`GET, "/chain/view") ->
-      Http.Response.html Chain_view_page.html reqd
-
-  | (`GET, "/chain/runs") ->
-      let body = Chain_run_store.list_runs_json () |> Yojson.Safe.to_string in
-      Http.Response.json body reqd
-
-  | (`GET, path) when starts_with ~prefix:"/chain/runs/" path ->
-      let prefix_len = String.length "/chain/runs/" in
-      let run_id = String.sub path prefix_len (String.length path - prefix_len) in
-      (match Chain_run_store.get_run_json ~run_id with
-       | Some json ->
-           Http.Response.json (Yojson.Safe.to_string (`Assoc [("run", json)])) reqd
-       | None ->
-           Http.Response.not_found reqd)
+        Http.Response.json ~status:`Service_unavailable {|{"status":"not_ready"}|} reqd
 
   (* CORS preflight - no auth required *)
   | (`OPTIONS, _) ->
@@ -674,6 +672,54 @@ let handle_http ~sw ~proc_mgr ~clock ~store reqd =
           else
           (* Authentication and rate limit passed - route to endpoint *)
           match (meth, path) with
+          (* Prometheus metrics endpoint *)
+          | (`GET, "/metrics") ->
+              let session_count =
+                Eio.Mutex.use_ro store.mutex (fun () ->
+                  Hashtbl.length store.sessions
+                )
+              in
+              Metrics.set_active_sessions session_count;
+              let body =
+                String.concat "\n" [
+                  Metrics.to_prometheus_text ();
+                  Server_metrics.to_prometheus_text ();
+                  Spawn_registry.to_prometheus_text ();
+                ]
+              in
+              let headers = Httpun.Headers.of_list [
+                ("content-type", "text/plain; version=0.0.4; charset=utf-8");
+                ("content-length", string_of_int (String.length body));
+              ] in
+              let response = Httpun.Response.create ~headers `OK in
+              Httpun.Reqd.respond_with_string reqd response body;
+              Server_metrics.finish_reqd ~bytes:(String.length body) reqd `OK
+
+          (* JSON stats endpoint *)
+          | (`GET, "/stats") ->
+              let body = Yojson.Safe.to_string (`Assoc [
+                ("server_metrics", Server_metrics.to_json ());
+                ("spawn_registry", Spawn_registry.to_json ());
+              ]) in
+              Http.Response.json body reqd
+
+          (* Chain viewer UI + run history *)
+          | (`GET, "/chain/view") ->
+              Http.Response.html Chain_view_page.html reqd
+
+          | (`GET, "/chain/runs") ->
+              let body = Chain_run_store.list_runs_json () |> Yojson.Safe.to_string in
+              Http.Response.json body reqd
+
+          | (`GET, path) when starts_with ~prefix:"/chain/runs/" path ->
+              let prefix_len = String.length "/chain/runs/" in
+              let run_id = String.sub path prefix_len (String.length path - prefix_len) in
+              (match Chain_run_store.get_run_json ~run_id with
+               | Some json ->
+                   Http.Response.json (Yojson.Safe.to_string (`Assoc [("run", json)])) reqd
+               | None ->
+                   Http.Response.not_found reqd)
+
           (* Session stats endpoint *)
           | (`GET, "/sessions") ->
               let sessions_json =
@@ -801,7 +847,7 @@ let run ~sw ~env ?(config = Http.default_config) () =
   eprintf "[llm-mcp-eio] Starting on http://%s:%d\n%!" config.host config.port;
   eprintf "[llm-mcp-eio] Available tools: %d\n%!" (List.length Types.all_schemas);
   eprintf "[llm-mcp-eio] Multi-tenancy: Enabled (per-connection sessions)\n%!";
-  (match Sys.getenv_opt "LLM_MCP_API_KEY" with
+  (match expected_api_key () with
    | None -> eprintf "[llm-mcp-eio] Authentication: Disabled (development mode)\n%!"
    | Some _ -> eprintf "[llm-mcp-eio] Authentication: Enabled (Bearer token required)\n%!");
 
