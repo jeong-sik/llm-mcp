@@ -148,7 +148,7 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
             let description = tool_json |> member "description" |> to_string_option |> Option.value ~default:"" in
             let input_schema = tool_json |> member "input_schema" in
             Some { Types.name; description; input_schema }
-          with _ -> None
+          with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
         ) tool_list)
     | _ -> None
   in
@@ -166,8 +166,8 @@ let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
   match tool_type with
   | Types.GlmWebSearch ->
       let web_search_obj = json |> member "web_search" in
-      let enable = (try web_search_obj |> member "enable" |> to_bool with _ -> true) in
-      let search_result = (try web_search_obj |> member "search_result" |> to_bool with _ -> true) in
+      let enable = (try web_search_obj |> member "enable" |> to_bool with Yojson.Safe.Util.Type_error _ -> true) in
+      let search_result = (try web_search_obj |> member "search_result" |> to_bool with Yojson.Safe.Util.Type_error _ -> true) in
       { Types.tool_type = Types.GlmWebSearch;
         function_schema = None;
         web_search_config = Some (enable, search_result);
@@ -176,14 +176,14 @@ let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
       let func = json |> member "function" in
       let func_name = func |> member "name" |> to_string in
       let func_description =
-        (try func |> member "description" |> to_string with _ -> "") in
+        (try func |> member "description" |> to_string with Yojson.Safe.Util.Type_error _ -> "") in
       (* Parse parameters from JSON Schema format *)
       let func_parameters = 
         let params = func |> member "parameters" in
         let properties = params |> member "properties" in
         let required_list = 
           try params |> member "required" |> to_list |> List.map to_string
-          with _ -> []
+          with Yojson.Safe.Util.Type_error _ -> []
         in
         match properties with
         | `Assoc props ->
@@ -201,15 +201,15 @@ let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
               in
               let param_description = 
                 try Some (prop |> member "description" |> to_string)
-                with _ -> None
+                with Yojson.Safe.Util.Type_error _ -> None
               in
               let param_enum =
                 try Some (prop |> member "enum" |> to_list |> List.map to_string)
-                with _ -> None
+                with Yojson.Safe.Util.Type_error _ -> None
               in
               Some { Types.param_name = name; param_type; param_description;
                      param_required = List.mem name required_list; param_enum }
-            with _ -> None
+            with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
           ) props
         | _ -> []
       in
@@ -220,7 +220,7 @@ let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
         code_interpreter_config = None }
   | Types.GlmCodeInterpreter ->
       let ci_obj = json |> member "code_interpreter" in
-      let sandbox = (try ci_obj |> member "sandbox" |> to_string with _ -> "auto") in
+      let sandbox = (try ci_obj |> member "sandbox" |> to_string with Yojson.Safe.Util.Type_error _ -> "auto") in
       { Types.tool_type = Types.GlmCodeInterpreter;
         function_schema = None;
         web_search_config = None;

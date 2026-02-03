@@ -102,7 +102,7 @@ let curl_post_auth email token url body =
 
 (* Get string from JSON *)
 let get_string_opt json key =
-  try Some Yojson.Safe.Util.(json |> member key |> to_string) with _ -> None
+  try Some Yojson.Safe.Util.(json |> member key |> to_string) with Yojson.Safe.Util.Type_error _ -> None
 
 let get_string json key default =
   Option.value ~default (get_string_opt json key)
@@ -122,26 +122,26 @@ let format_datetime s =
 let format_issue issue =
   let open Yojson.Safe.Util in
   let key = get_string issue "key" "?" in
-  let fields = try member "fields" issue with _ -> `Null in
+  let fields = try member "fields" issue with Yojson.Safe.Util.Type_error _ -> `Null in
   let summary = get_string fields "summary" "(요약 없음)" in
   let status =
     try fields |> member "status" |> member "name" |> to_string
-    with _ -> "미정"
+    with Yojson.Safe.Util.Type_error _ -> "미정"
   in
   let assignee =
     try
       let a = fields |> member "assignee" in
       if a = `Null then "미할당"
       else a |> member "displayName" |> to_string
-    with _ -> "미할당"
+    with Yojson.Safe.Util.Type_error _ -> "미할당"
   in
   let priority =
     try fields |> member "priority" |> member "name" |> to_string
-    with _ -> "미정"
+    with Yojson.Safe.Util.Type_error _ -> "미정"
   in
   let updated =
     try fields |> member "updated" |> to_string |> format_datetime
-    with _ -> "미정"
+    with Yojson.Safe.Util.Type_error _ -> "미정"
   in
 
   Printf.printf "\n%s | %s\n" (bold (cyan key)) summary;
@@ -155,12 +155,12 @@ let format_issue issue =
       let epic_key = get_string parent "key" "" in
       let epic_summary =
         try parent |> member "fields" |> member "summary" |> to_string
-        with _ -> ""
+        with Yojson.Safe.Util.Type_error _ -> ""
       in
       if epic_key <> "" then
         Printf.printf "  Epic: %s (%s)\n" epic_key epic_summary
     end
-  with _ -> ())
+  with Yojson.Safe.Util.Type_error _ -> ())
 
 (* Query JIRA issues *)
 let query_jira email token jql =
@@ -183,7 +183,7 @@ let query_jira email token jql =
         None
       end else
         Some json
-    with _ -> Some json)
+    with Yojson.Safe.Util.Type_error _ -> Some json)
   with e ->
     Printf.printf "❌ JSON 파싱 오류: %s\n" (Printexc.to_string e);
     Printf.printf "  응답: %s\n" (String.sub resp 0 (min 200 (String.length resp)));
@@ -216,11 +216,11 @@ let create_issue email token project summary description issue_type priority =
       Printf.printf "\n%s 이슈가 성공적으로 생성되었습니다: %s\n" (green "✅") key;
       Printf.printf "🔗 %s/browse/%s\n\n" jira_base_url key;
       true
-    with _ ->
+    with Yojson.Safe.Util.Type_error _ ->
       Printf.printf "❌ 이슈 생성 실패\n";
       Printf.printf "  응답: %s\n" resp;
       false)
-  with _ ->
+  with Yojson.Json_error _ ->
     Printf.printf "❌ JSON 파싱 오류\n";
     false
 
@@ -234,10 +234,10 @@ let get_attachments email token issue_key download_dir =
     let json = Yojson.Safe.from_string resp in
     let open Yojson.Safe.Util in
 
-    let summary = try json |> member "fields" |> member "summary" |> to_string with _ -> "" in
+    let summary = try json |> member "fields" |> member "summary" |> to_string with Yojson.Safe.Util.Type_error _ -> "" in
     let attachments =
       try json |> member "fields" |> member "attachment" |> to_list
-      with _ -> []
+      with Yojson.Safe.Util.Type_error _ -> []
     in
 
     Printf.printf "\n📋 %s: %s\n" issue_key summary;
@@ -251,14 +251,14 @@ let get_attachments email token issue_key download_dir =
 
       List.iteri (fun i att ->
         let filename = get_string att "filename" "unknown" in
-        let size = try att |> member "size" |> to_int with _ -> 0 in
+        let size = try att |> member "size" |> to_int with Yojson.Safe.Util.Type_error _ -> 0 in
         let created =
           let c = get_string att "created" "" in
           if String.length c >= 10 then String.sub c 0 10 else c
         in
         let author =
           try att |> member "author" |> member "displayName" |> to_string
-          with _ -> "unknown"
+          with Yojson.Safe.Util.Type_error _ -> "unknown"
         in
         let content_url = get_string att "content" "" in
 
@@ -355,7 +355,7 @@ let run jql key attachments download create project summary description issue_ty
         | None -> ()
         | Some json ->
             let open Yojson.Safe.Util in
-            let issues = try json |> member "issues" |> to_list with _ -> [] in
+            let issues = try json |> member "issues" |> to_list with Yojson.Safe.Util.Type_error _ -> [] in
 
             if issues = [] then
               Printf.printf "\n❌ 조건에 맞는 이슈가 없습니다.\n\n"
@@ -370,7 +370,7 @@ let run jql key attachments download create project summary description issue_ty
               List.iter (fun issue ->
                 let status =
                   try issue |> member "fields" |> member "status" |> member "name" |> to_string
-                  with _ -> "미정"
+                  with Yojson.Safe.Util.Type_error _ -> "미정"
                 in
                 let existing = try Hashtbl.find by_status status with Not_found -> [] in
                 Hashtbl.replace by_status status (issue :: existing)
