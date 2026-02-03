@@ -9,6 +9,7 @@
 *)
 
 open Printf
+module Http = Http_server_eio
 
 (** ============== Configuration ============== *)
 
@@ -1055,9 +1056,19 @@ let log_debug fmt =
 
 (** ============== Request Helpers ============== *)
 
-let starts_with ~prefix s =
-  let plen = String.length prefix in
-  String.length s >= plen && String.sub s 0 plen = prefix
+let normalize_lower s = String.lowercase_ascii s
+
+let env_truthy name =
+  match Sys.getenv_opt name with
+  | Some v ->
+      let v = normalize_lower (String.trim v) in
+      v = "1" || v = "true" || v = "yes"
+  | None -> false
+
+let is_loopback_host host =
+  match normalize_lower host with
+  | "localhost" | "127.0.0.1" | "::1" | "[::1]" -> true
+  | _ -> false
 
 let contains_substring ~sub s =
   let len_s = String.length s in
@@ -1074,15 +1085,8 @@ let truncate_for_log s =
   if String.length s <= max_len then s
   else (String.sub s 0 max_len) ^ "..."
 
-let allowed_origins = [
-  "http://localhost"; "https://localhost";
-  "http://127.0.0.1"; "https://127.0.0.1";
-]
-
-let validate_origin headers =
-  match Httpun.Headers.get headers "origin" with
-  | None -> true
-  | Some origin -> List.exists (fun prefix -> starts_with ~prefix origin) allowed_origins
+let check_api_key headers =
+  Mcp_server_eio.auth_middleware (Httpun.Headers.to_list headers)
 
 let get_header headers name = Httpun.Headers.get headers name
 let get_header_or headers name default =
@@ -1131,10 +1135,8 @@ let get_or_create_session ~protocol_version headers =
 (** ============== Response Helpers ============== *)
 
 module Response = struct
-  let cors_headers = [
-    ("access-control-allow-origin", "*");
-    ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
-  ]
+  let cors_headers reqd ~include_methods ~include_headers ~include_expose =
+    Http.Cors.headers reqd ~include_methods ~include_headers ~include_expose
 
   let mcp_headers session_id protocol_version = [
     ("mcp-session-id", session_id);
@@ -1145,7 +1147,8 @@ module Response = struct
     let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json");
       ("content-length", string_of_int (String.length body));
-    ] @ mcp_headers session_id protocol_version @ cors_headers) in
+    ] @ mcp_headers session_id protocol_version
+      @ cors_headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
@@ -1153,7 +1156,7 @@ module Response = struct
     let headers = Httpun.Headers.of_list ([
       ("content-type", "application/json");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers) in
+    ] @ cors_headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
@@ -1169,21 +1172,17 @@ module Response = struct
     let headers = Httpun.Headers.of_list ([
       ("content-type", "text/html; charset=utf-8");
       ("content-length", string_of_int (String.length body));
-    ] @ cors_headers) in
+    ] @ cors_headers reqd ~include_methods:false ~include_headers:false ~include_expose:false) in
     let response = Httpun.Response.create ~headers status in
     Httpun.Reqd.respond_with_string reqd response body
 
   let not_found reqd = text ~status:`Not_found "404 Not Found" reqd
 
   let cors_preflight reqd =
-    let headers = Httpun.Headers.of_list [
-      ("access-control-allow-origin", "*");
-      ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
-      ("access-control-allow-headers", "Content-Type, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID, Accept, Origin");
-      ("access-control-expose-headers", "Mcp-Session-Id, Mcp-Protocol-Version");
+    let headers = Httpun.Headers.of_list ([
       ("access-control-max-age", "86400");
       ("content-length", "0");
-    ] in
+    ] @ cors_headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
     let response = Httpun.Response.create ~headers `No_content in
     Httpun.Reqd.respond_with_string reqd response ""
 
@@ -1193,7 +1192,8 @@ module Response = struct
       ("cache-control", "no-cache");
       ("connection", "keep-alive");
       ("x-accel-buffering", "no");
-    ] @ mcp_headers session_id protocol_version @ cors_headers) in
+    ] @ mcp_headers session_id protocol_version
+      @ cors_headers reqd ~include_methods:false ~include_headers:false ~include_expose:true) in
     let response = Httpun.Response.create ~headers `OK in
     let body = Httpun.Reqd.respond_with_streaming reqd response in
     on_write body
@@ -1580,7 +1580,7 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
       if json_response = `Null then begin
         let resp_headers = Httpun.Headers.of_list ([
           ("content-length", "0");
-        ] @ Response.cors_headers) in
+        ] @ Response.cors_headers reqd ~include_methods:true ~include_headers:true ~include_expose:true) in
         let resp = Httpun.Response.create ~headers:resp_headers `Accepted in
         Httpun.Reqd.respond_with_string reqd resp ""
       end
@@ -1595,7 +1595,8 @@ let handle_post_mcp ~sw ~clock ~proc_mgr ~store headers reqd =
         let resp_headers = Httpun.Headers.of_list ([
           ("content-type", "text/event-stream");
           ("content-length", string_of_int (String.length body));
-        ] @ Response.mcp_headers session_id protocol_version @ Response.cors_headers) in
+        ] @ Response.mcp_headers session_id protocol_version
+          @ Response.cors_headers reqd ~include_methods:false ~include_headers:false ~include_expose:true) in
         let resp = Httpun.Response.create ~headers:resp_headers `OK in
         Httpun.Reqd.respond_with_string reqd resp body
       end else
@@ -1612,7 +1613,8 @@ let handle_delete_mcp headers reqd =
       Notification_sse.unregister session_id;
       Mcp_session.delete_session session_id;
       let hdrs = Httpun.Headers.of_list (
-        Response.mcp_headers session_id protocol_version @ Response.cors_headers
+        Response.mcp_headers session_id protocol_version
+        @ Response.cors_headers reqd ~include_methods:true ~include_headers:true ~include_expose:true
       ) in
       let resp = Httpun.Response.create ~headers:hdrs `No_content in
       Httpun.Reqd.respond_with_string reqd resp ""
@@ -1626,18 +1628,26 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
   let path = Request.path request in
   let meth = Request.meth request in
   let headers = Request.headers request in
-  let is_mcp_path = path = "/mcp" || path = "/" in
+  let is_mcp_path = path = "/mcp" in
+  let is_public_path = path = "/health" in
   let protocol_version = get_protocol_version headers in
+  let is_preflight = meth = `OPTIONS in
 
-  (* Origin validation for MCP paths *)
-  if is_mcp_path && meth <> `OPTIONS && not (validate_origin headers) then
+  if is_preflight then
+    Response.cors_preflight reqd
+  (* Origin validation (DNS rebinding protection) *)
+  else if (not is_public_path) && not (Http.Cors.is_allowed reqd) then
     Response.json ~status:`Forbidden (json_rpc_error (-32600) "Invalid origin") reqd
-  (* Protocol version validation *)
-  else if is_mcp_path && meth <> `OPTIONS && not (is_valid_protocol_version protocol_version) then
-    Response.json ~status:`Bad_request (json_rpc_error (-32600) "Unsupported protocol version") reqd
-  else match (meth, path) with
-  | `OPTIONS, _ ->
-      Response.cors_preflight reqd
+  else
+    match (if (not is_public_path) then check_api_key headers else Ok ()) with
+    | Error msg ->
+        Response.json ~status:`Unauthorized (json_rpc_error (-32600) msg) reqd
+    | Ok () ->
+        (* Protocol version validation (MCP paths only) *)
+        if is_mcp_path && not (is_valid_protocol_version protocol_version) then
+          Response.json ~status:`Bad_request (json_rpc_error (-32600) "Unsupported protocol version") reqd
+        else
+          match (meth, path) with
 
   | `GET, "/health" ->
       health_handler request reqd
@@ -1645,7 +1655,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
   | `GET, "/" ->
       Response.text "🐫 llm-mcp (OCaml Eio) MCP 2025-11-25 server" reqd
 
-  (* JSON stats endpoint - no auth required *)
+  (* JSON stats endpoint (auth required) *)
   | `GET, "/stats" ->
       let body = Yojson.Safe.to_string (`Assoc [
         ("server_metrics", Server_metrics.to_json ());
@@ -1653,13 +1663,13 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       ]) in
       Response.json body reqd
 
-  (* Chain stats endpoint for monitoring dashboard *)
+  (* Chain stats endpoint (auth required) *)
   | `GET, "/chain/stats" ->
       let stats = Chain_stats.compute () in
       let body = Yojson.Safe.to_string (Chain_stats.to_json stats) in
       Response.json body reqd
 
-  (* Chain status endpoint for currently running chains *)
+  (* Chain status endpoint (auth required) *)
   | `GET, "/chain/status" ->
       let status = Chain_telemetry.get_running_chains () in
       let body = Yojson.Safe.to_string (`List (List.map (fun (id, started, progress) ->
@@ -1672,7 +1682,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       ) status)) in
       Response.json body reqd
 
-  (* Chain history endpoint - read past executions from JSONL *)
+  (* Chain history endpoint (auth required) - read past executions from JSONL *)
   | `GET, "/chain/history" ->
       let history_file = match Sys.getenv_opt "LLM_MCP_CHAIN_HISTORY_FILE" with
         | Some path -> path
@@ -1712,7 +1722,7 @@ let route_request ~sw ~clock ~proc_mgr ~store request reqd =
       let body = Yojson.Safe.to_string (`List recent) in
       Response.json body reqd
 
-  (* Prometheus metrics endpoint for monitoring integration *)
+  (* Prometheus metrics endpoint (auth required) for monitoring integration *)
   | `GET, "/metrics" ->
       let history_file = match Sys.getenv_opt "LLM_MCP_CHAIN_HISTORY_FILE" with
         | Some path -> path
@@ -1990,24 +2000,61 @@ let start_server config =
 open Cmdliner
 
 let host_arg =
-  let doc = "Host to bind (default: 127.0.0.1)" in
+  let doc = "Host to bind (default: 127.0.0.1; non-loopback requires --public or LLM_MCP_PUBLIC=1)" in
   Arg.(value & opt string "127.0.0.1" & info ["host"] ~doc)
 
 let port_arg =
   let doc = "HTTP port (default: 8932)" in
   Arg.(value & opt int 8932 & info ["port"; "p"] ~docv:"PORT" ~doc)
 
-let main host port =
+let public_arg =
+  let doc = "Allow binding to non-loopback host (sets LLM_MCP_PUBLIC=1)" in
+  Arg.(value & flag & info ["public"] ~doc)
+
+let allow_no_auth_arg =
+  let doc = "Allow running without API key (sets LLM_MCP_ALLOW_NO_AUTH=1; not recommended)" in
+  Arg.(value & flag & info ["allow-no-auth"] ~doc)
+
+let normalize_env value =
+  match value with
+  | None -> None
+  | Some v ->
+      let trimmed = String.trim v in
+      if trimmed = "" then None else Some trimmed
+
+let has_api_key () =
+  match normalize_env (Sys.getenv_opt "LLM_MCP_API_KEY") with
+  | Some _ -> true
+  | None ->
+      (match normalize_env (Sys.getenv_opt "MCP_API_KEY") with
+       | Some _ -> true
+       | None -> false)
+
+let main host port public allow_no_auth =
   (* Enable backtrace recording for debugging *)
   Printexc.record_backtrace true;
   (* Enable chain stats collection *)
   Chain_stats.enable ();
+  if public then Unix.putenv "LLM_MCP_PUBLIC" "1";
+  if allow_no_auth then Unix.putenv "LLM_MCP_ALLOW_NO_AUTH" "1";
+  let public_enabled = env_truthy "LLM_MCP_PUBLIC" in
+  let allow_no_auth_enabled = env_truthy "LLM_MCP_ALLOW_NO_AUTH" in
+  if (not (is_loopback_host host)) && not public_enabled then begin
+    eprintf "LLM-MCP: Refusing to bind to non-loopback host (%s) without --public or LLM_MCP_PUBLIC=1\n%!" host;
+    exit 2
+  end;
+  if not allow_no_auth_enabled then begin
+    if not (has_api_key ()) then begin
+      eprintf "LLM-MCP: LLM_MCP_API_KEY (or MCP_API_KEY) is required. Set --allow-no-auth or LLM_MCP_ALLOW_NO_AUTH=1 to bypass.\n%!";
+      exit 2
+    end
+  end;
   let config = { default_config with host; port } in
   start_server config
 
 let cmd =
   let doc = "LLM-MCP Server (Eio) - MCP 2025-11-25" in
   let info = Cmd.info "llm-mcp" ~version:Version.version ~doc in
-  Cmd.v info Term.(const main $ host_arg $ port_arg)
+  Cmd.v info Term.(const main $ host_arg $ port_arg $ public_arg $ allow_no_auth_arg)
 
 let () = exit (Cmd.eval cmd)

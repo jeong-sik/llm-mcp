@@ -1,6 +1,6 @@
 #!/bin/bash
 # LLM-MCP (OCaml) - Start Script (HTTP default)
-# Usage: ./start-llm-mcp.sh [--stdio] [--port PORT]
+# Usage: ./start-llm-mcp.sh [--stdio] [--port PORT] [--host HOST] [--public] [--allow-no-auth]
 #        ./start-llm-mcp.sh --masc-hook [--masc-agent NAME] [--masc-heartbeat-sec N]
 
 set -e
@@ -32,6 +32,8 @@ clean_args=()
 masc_hook=""
 masc_agent=""
 masc_heartbeat=""
+public_flag="false"
+allow_no_auth_flag="false"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --masc-hook|--masc-hook=true|--masc-hook=1)
@@ -60,6 +62,16 @@ while [ "$#" -gt 0 ]; do
             masc_heartbeat="${1#*=}"
             shift
             ;;
+        --public)
+            public_flag="true"
+            clean_args+=("$1")
+            shift
+            ;;
+        --allow-no-auth)
+            allow_no_auth_flag="true"
+            clean_args+=("$1")
+            shift
+            ;;
         *)
             clean_args+=("$1")
             shift
@@ -77,7 +89,21 @@ if [ -n "$masc_heartbeat" ]; then
     export LLM_MCP_MASC_HEARTBEAT_SEC="$masc_heartbeat"
 fi
 
+if [ "$public_flag" = "true" ]; then
+    export LLM_MCP_PUBLIC=1
+fi
+if [ "$allow_no_auth_flag" = "true" ]; then
+    export LLM_MCP_ALLOW_NO_AUTH=1
+fi
+
 set -- "${clean_args[@]}"
+
+is_truthy() {
+    case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes) return 0 ;;
+    esac
+    return 1
+}
 
 # Resolve target port/stdout mode from args for safe cleanup
 resolve_port() {
@@ -207,6 +233,11 @@ fi
 
 PORT="$(resolve_port "$@")"
 if ! is_stdio_mode "$@"; then
+    if ! is_truthy "${LLM_MCP_ALLOW_NO_AUTH:-}" \
+        && [ -z "${LLM_MCP_API_KEY:-}" ] && [ -z "${MCP_API_KEY:-}" ]; then
+        echo "Error: LLM_MCP_API_KEY (or MCP_API_KEY) is required. Set --allow-no-auth or LLM_MCP_ALLOW_NO_AUTH=1 to bypass." >&2
+        exit 2
+    fi
     if ! is_launchd_job && command -v launchctl >/dev/null 2>&1; then
         if launchctl list 2>/dev/null | grep -q "com.jeong-sik.llm-mcp"; then
             echo "launchd com.jeong-sik.llm-mcp is managing llm-mcp; aborting direct start." >&2

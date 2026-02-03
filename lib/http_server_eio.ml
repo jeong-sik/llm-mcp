@@ -30,7 +30,7 @@ let default_config = {
 module Cors = struct
   let mode =
     Sys.getenv_opt "LLM_MCP_CORS_MODE"
-    |> Option.value ~default:"permissive"
+    |> Option.value ~default:"restrict"
     |> String.lowercase_ascii
 
   let split_csv value =
@@ -39,10 +39,25 @@ module Cors = struct
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")
 
+  let default_allowed_origins = [
+    "http://localhost";
+    "http://localhost:*";
+    "https://localhost";
+    "https://localhost:*";
+    "http://127.0.0.1";
+    "http://127.0.0.1:*";
+    "https://127.0.0.1";
+    "https://127.0.0.1:*";
+    "http://[::1]";
+    "http://[::1]:*";
+    "https://[::1]";
+    "https://[::1]:*";
+  ]
+
   let allowed_origins =
     match Sys.getenv_opt "LLM_MCP_CORS_ALLOWED_ORIGINS" with
     | Some value -> split_csv value
-    | None -> ["*"]
+    | None -> default_allowed_origins
 
   let allow_private_network =
     match Sys.getenv_opt "LLM_MCP_CORS_ALLOW_PRIVATE_NETWORK" with
@@ -53,7 +68,7 @@ module Cors = struct
 
   let allow_headers =
     Sys.getenv_opt "LLM_MCP_CORS_ALLOW_HEADERS"
-    |> Option.value ~default:"Content-Type, Accept, Authorization, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Requested-With"
+    |> Option.value ~default:"Content-Type, Accept, Authorization, X-API-Key, X-MCP-API-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Requested-With"
 
   let expose_headers = "Mcp-Session-Id, Mcp-Protocol-Version"
   let allow_methods = "GET, POST, DELETE, OPTIONS"
