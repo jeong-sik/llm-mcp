@@ -1,7 +1,7 @@
 (lang dune 3.13)
 
 (name llm_mcp)
-(version 0.3.3)
+(version 0.4.0)
 
 (generate_opam_files true)
 

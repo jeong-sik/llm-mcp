@@ -1,5 +1,6 @@
 ; =============================================================================
-; llm_mcp_common - Shared modules (NO Lwt, NO Eio runtime!)
+; llm_mcp_common - Shared modules (NO Lwt, NO Eio_main.run!)
+;   Eio dep is for Eio.Mutex (fiber-cooperative locking), not for runtime.
 ; =============================================================================
 (library
  (name llm_mcp_common)
@@ -74,6 +75,7 @@
    notification_sse
    sse)
  (libraries
+   eio
    yojson
    str
    unix

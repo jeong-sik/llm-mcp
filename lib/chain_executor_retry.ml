@@ -169,7 +169,7 @@ type circuit_breaker = {
   mutable last_failure : float;
   failure_threshold : int;
   reset_timeout : float;
-  lock : Mutex.t;
+  lock : Eio.Mutex.t;
 }
 
 (** Create a circuit breaker *)
@@ -179,13 +179,12 @@ let create_breaker ?(failure_threshold = 5) ?(reset_timeout = 30.0) () = {
   last_failure = 0.0;
   failure_threshold;
   reset_timeout;
-  lock = Mutex.create ();
+  lock = Eio.Mutex.create ();
 }
 
 (** Check if circuit allows execution *)
 let circuit_allows breaker =
-  Mutex.lock breaker.lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock breaker.lock) (fun () ->
+  Eio.Mutex.use_rw ~protect:true breaker.lock (fun () ->
     match breaker.state with
     | Closed -> true
     | Open ->
@@ -199,16 +198,14 @@ let circuit_allows breaker =
 
 (** Record success *)
 let circuit_success breaker =
-  Mutex.lock breaker.lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock breaker.lock) (fun () ->
+  Eio.Mutex.use_rw ~protect:true breaker.lock (fun () ->
     breaker.failure_count <- 0;
     breaker.state <- Closed
   )
 
 (** Record failure *)
 let circuit_failure breaker =
-  Mutex.lock breaker.lock;
-  Fun.protect ~finally:(fun () -> Mutex.unlock breaker.lock) (fun () ->
+  Eio.Mutex.use_rw ~protect:true breaker.lock (fun () ->
     breaker.failure_count <- breaker.failure_count + 1;
     breaker.last_failure <- Unix.gettimeofday ();
     if breaker.failure_count >= breaker.failure_threshold then
