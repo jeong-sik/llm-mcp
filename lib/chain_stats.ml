@@ -94,17 +94,12 @@ let stats_data : raw_data = {
   active_chains = 0;
 }
 
-(** Standard mutex for thread-safe operations *)
-let stats_mutex = Mutex.create ()
+(** Eio mutex for fiber-cooperative synchronization *)
+let stats_mutex = Eio.Mutex.create ()
 
 (** Helper for mutex-protected operations *)
 let with_mutex f =
-  Mutex.lock stats_mutex;
-  Common.protect
-    ~module_name:"chain_stats"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock stats_mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true stats_mutex (fun () -> f ())
 
 (** {1 Data Collection} *)
 
@@ -259,6 +254,35 @@ let compute ?(since=0.0) () =
     }
   )
 
+(** {1 Cascade Data (must precede reset)} *)
+
+(** Cascade-specific statistics *)
+type cascade_stats = {
+  total_cascades: int;
+  tier0_resolved: int;    (* Resolved at cheapest tier *)
+  tier1_resolved: int;    (* Resolved at mid tier *)
+  tier2_plus_resolved: int; (* Resolved at expensive tier *)
+  total_escalations: int;
+  total_hard_failures: int;
+  avg_tier: float;
+  estimated_savings_pct: float;  (* % saved vs always using top tier *)
+} [@@deriving yojson]
+
+(** Raw cascade data *)
+type cascade_raw = {
+  mutable cascade_count: int;
+  mutable tier_resolutions: int list;  (* Which tier resolved each cascade *)
+  mutable escalation_count: int;
+  mutable hard_failure_count: int;
+}
+
+let cascade_data : cascade_raw = {
+  cascade_count = 0;
+  tier_resolutions = [];
+  escalation_count = 0;
+  hard_failure_count = 0;
+}
+
 (** {1 Reset and Management} *)
 
 (** Reset all statistics *)
@@ -277,7 +301,11 @@ let reset () =
     stats_data.failure_count <- 0;
     stats_data.total_tokens <- 0;
     stats_data.total_cost <- 0.0;
-    stats_data.active_chains <- 0
+    stats_data.active_chains <- 0;
+    cascade_data.cascade_count <- 0;
+    cascade_data.tier_resolutions <- [];
+    cascade_data.escalation_count <- 0;
+    cascade_data.hard_failure_count <- 0
   )
 
 (** {1 Subscription Management} *)
@@ -347,6 +375,43 @@ let model_statistics () : model_stats list =
     |> List.sort (fun (a : model_stats) (b : model_stats) -> compare b.total_tokens a.total_tokens)
   )
 
+(** {1 Cascade Statistics} *)
+
+(** Track a cascade execution result *)
+let track_cascade ~resolved_tier ~escalations ~hard_failures =
+  with_mutex (fun () ->
+    cascade_data.cascade_count <- cascade_data.cascade_count + 1;
+    cascade_data.tier_resolutions <- resolved_tier :: cascade_data.tier_resolutions;
+    cascade_data.escalation_count <- cascade_data.escalation_count + escalations;
+    cascade_data.hard_failure_count <- cascade_data.hard_failure_count + hard_failures
+  )
+
+(** Compute cascade statistics snapshot *)
+let cascade_snapshot () : cascade_stats =
+  with_mutex (fun () ->
+    let total = cascade_data.cascade_count in
+    let tiers = cascade_data.tier_resolutions in
+    let tier0 = List.length (List.filter (fun t -> t = 0) tiers) in
+    let tier1 = List.length (List.filter (fun t -> t = 1) tiers) in
+    let tier2_plus = List.length (List.filter (fun t -> t >= 2) tiers) in
+    let avg = if total = 0 then 0.0
+      else float_of_int (List.fold_left (+) 0 tiers) /. float_of_int total in
+    (* Savings: if all went to max tier, cost would be higher.
+       Estimate: tier0 saves ~100%, tier1 saves ~50%, tier2+ saves 0% *)
+    let savings = if total = 0 then 0.0
+      else (float_of_int tier0 *. 1.0 +. float_of_int tier1 *. 0.5) /. float_of_int total *. 100.0 in
+    {
+      total_cascades = total;
+      tier0_resolved = tier0;
+      tier1_resolved = tier1;
+      tier2_plus_resolved = tier2_plus;
+      total_escalations = cascade_data.escalation_count;
+      total_hard_failures = cascade_data.hard_failure_count;
+      avg_tier = avg;
+      estimated_savings_pct = savings;
+    }
+  )
+
 (** {1 Serialization} *)
 
 (** Convert stats to JSON *)
@@ -355,7 +420,7 @@ let to_json (stats : stats) =
 
 (** Convert stats to compact string summary *)
 let to_summary (stats : stats) =
-  Printf.sprintf
+  let base = Printf.sprintf
     "Chains: %d (%.1f%% success) | Nodes: %d | Tokens: %d ($%.2f) | Avg: %.0fms P95: %.0fms"
     stats.total_chains
     (stats.success_rate *. 100.0)
@@ -364,6 +429,14 @@ let to_summary (stats : stats) =
     stats.estimated_cost_usd
     stats.avg_duration_ms
     stats.p95_duration_ms
+  in
+  let cs = cascade_snapshot () in
+  if cs.total_cascades > 0 then
+    Printf.sprintf "%s | Cascades: %d (T0:%d T1:%d T2+:%d, avg_tier:%.1f, savings:%.0f%%)"
+      base cs.total_cascades cs.tier0_resolved cs.tier1_resolved
+      cs.tier2_plus_resolved cs.avg_tier cs.estimated_savings_pct
+  else
+    base
 
 (** {1 Pretty Printing} *)
 

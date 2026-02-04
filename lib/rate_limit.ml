@@ -28,7 +28,7 @@ type t = {
   rate: float;          (** Tokens added per second *)
   burst: int;           (** Maximum bucket capacity *)
   buckets: (string, bucket) Hashtbl.t;
-  mutex: Mutex.t;
+  mutex: Eio.Mutex.t;
 }
 
 (** {1 Configuration} *)
@@ -53,7 +53,7 @@ let create ?(rate=default_rate) ?(burst=default_burst) () =
     rate;
     burst;
     buckets = Hashtbl.create 256;
-    mutex = Mutex.create ();
+    mutex = Eio.Mutex.create ();
   }
 
 let create_from_env () =
@@ -62,12 +62,7 @@ let create_from_env () =
 (** {1 Rate Checking} *)
 
 let with_lock limiter f =
-  Mutex.lock limiter.mutex;
-  Common.protect
-    ~module_name:"rate_limit"
-    ~finally_label:"Mutex.unlock"
-    ~finally:(fun () -> Mutex.unlock limiter.mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true limiter.mutex (fun () -> f ())
 
 (** Check if request is allowed (returns true) or rate limited (returns false) *)
 let check limiter ~key =
