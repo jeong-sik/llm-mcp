@@ -8,12 +8,12 @@ OCaml 기반 MCP 서버. 여러 LLM CLI를 MCP 도구로 호출하고, **Chain E
 
 | 기능 | 설명 |
 |------|------|
-| **Multi-LLM 호출** | Gemini, Claude, Codex, Ollama를 MCP 도구로 통합 |
-| **Chain Engine** | Mermaid/JSON DSL로 LLM 파이프라인 정의 |
-| **MAGI 패턴** | 3-LLM 합의 (Quorum) 기반 의사결정 |
-| **Cascade 라우팅** | 비용/품질 최적화 - 저렴한 모델 → 고품질 모델 자동 에스컬레이션 |
-| **프리셋** | 코드 리뷰, 리서치, 장애 대응 등 사전 정의된 체인 |
-| **체크포인트** | 장기 실행 체인의 상태 저장/재개 |
+| Multi-LLM 호출 | Gemini, Claude, Codex, Ollama를 MCP 도구로 통합 |
+| Chain Engine | Mermaid/JSON DSL로 LLM 파이프라인 정의 |
+| MAGI 패턴 | 3-LLM 합의 (Quorum) 기반 의사결정 |
+| Cascade 라우팅 | 비용/품질 최적화 - confidence 기반 모델 에스컬레이션 |
+| 프리셋 | 코드 리뷰, 리서치, 장애 대응 등 사전 정의된 체인 |
+| 체크포인트 | 장기 실행 체인의 상태 저장/재개 |
 
 ## 아키텍처
 
@@ -176,12 +176,12 @@ curl -X POST http://localhost:8932/mcp -d '{
 
 | 문서 | 내용 |
 |------|------|
-| **CLAUDE.md** | Chain DSL 전체 문법, 노드 타입, 패턴 예제 |
+| CLAUDE.md | Chain DSL 전체 문법, 노드 타입, 패턴 예제 |
 | docs/PRESETS.md | 프리셋 상세 + Mermaid 다이어그램 |
 | docs/SETUP.md | 설치/실행/연동 |
 | docs/OBSERVABILITY.md | 메트릭, 알림 임계값 |
 | docs/CHAIN_DSL.md | Chain DSL 스펙 |
-| docs/USE_CASES.md | 사용 사례별 예제 |
+| docs/PROTOCOL.md | 프로토콜 상세 |
 
 ## 환경변수
 
@@ -196,31 +196,3 @@ curl -X POST http://localhost:8932/mcp -d '{
 | `MASC_AGENT_NAME` | chain-engine | MASC 연동 시 에이전트 이름 |
 
 상세 설정은 `docs/SETUP.md` 참고.
-
-## Chain Retry System (v0.3.0+)
-
-LLM 호출의 자동 재시도 및 회로 차단기를 제공합니다.
-
-### 사용법
-
-```ocaml
-(* 자동 재시도 포함 LLM 호출 *)
-let result = Chain_executor_retry.execute_llm_with_retry 
-  ~clock ~provider:"gemini" (fun () ->
-    call_llm ~model ~prompt ()
-  ) in
-
-(* 회로 차단기 *)
-let breaker = Chain_executor_retry.create_breaker 
-  ~failure_threshold:5 ~reset_timeout:30.0 () in
-let result = Chain_executor_retry.execute_with_breaker 
-  ~clock ~breaker ~node_id:"node-1" f
-```
-
-### 복구 가능한 에러
-
-자동으로 재시도되는 에러:
-- Rate limit (429)
-- Connection timeout
-- Connection refused
-- 503, 502, 504 HTTP 에러
