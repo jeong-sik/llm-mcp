@@ -234,6 +234,8 @@ let broadcast json =
   let event = format_event ~id:current_event_id ~event_type:"notification" data in
   buffer_event current_event_id event;
   persist_event current_event_id event;
+  (* Collect failed clients to remove after iteration (can't modify during Hashtbl.iter) *)
+  let failed = ref [] in
   Hashtbl.iter
     (fun session_id client ->
       if current_event_id > client.last_acked_id then (
@@ -241,12 +243,13 @@ let broadcast json =
           client.push event;
           client.last_sent_id <- current_event_id;
           incr broadcast_success_count
-        with exn ->
-          (* CRITICAL: Log broadcast failures - messages may be lost *)
+        with _exn ->
+          (* Connection closed - mark for removal *)
           incr broadcast_failure_count;
-          Printf.eprintf "[SSE] ⚠️ Broadcast failed to session %s (client_id=%d): %s\n%!"
-            session_id client.id (Printexc.to_string exn)))
-    clients
+          failed := (session_id, client.id) :: !failed))
+    clients;
+  (* Remove failed clients to prevent zombie accumulation *)
+  List.iter (fun (sid, cid) -> unregister_if_current sid cid) !failed
 
 let get_broadcast_stats () =
   (!broadcast_success_count, !broadcast_failure_count)
