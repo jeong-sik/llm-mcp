@@ -2399,6 +2399,7 @@ let test_stream_merge_mermaid_parse () =
         | FeedbackLoop _ -> "FeedbackLoop"
         | Masc_broadcast _ -> "Masc_broadcast"
         | Masc_listen _ -> "Masc_listen"
+        | Cascade _ -> "Cascade"
         | Masc_claim _ -> "Masc_claim"
       in
       (match merge_node.node_type with

@@ -503,6 +503,19 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
       else if text = "Race" || String.length text >= 5 && String.sub text 0 5 = "Race:" then
         (* Race runs multiple nodes and returns first result *)
         Ok (Race { nodes = []; timeout = None })
+      else if String.length text >= 8 && String.sub text 0 8 = "Cascade:" then
+        (* Cascade:threshold:context_mode *)
+        let rest = String.sub text 8 (String.length text - 8) in
+        let parts = String.split_on_char ':' rest in
+        let threshold = (match parts with
+          | t :: _ -> (try float_of_string t with _ -> 0.7)
+          | [] -> 0.7) in
+        let ctx_mode = (match parts with
+          | _ :: cm :: _ -> Chain_types.context_mode_of_string cm
+          | _ -> Chain_types.CM_Summary) in
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = ctx_mode; task_hint = None; default_threshold = threshold })
+      else if text = "Cascade" then
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7 })
       else
         (* Unknown stadium text - treat as LLM with default model *)
         Ok (Llm { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
@@ -1070,6 +1083,18 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         Ok (Fallback { primary = placeholder_primary; fallbacks = [] })
       else if content = "Race" || (String.length content >= 5 && String.sub content 0 5 = "Race:") then
         Ok (Race { nodes = []; timeout = None })
+      else if String.length content >= 8 && String.sub content 0 8 = "Cascade:" then
+        let rest = String.sub content 8 (String.length content - 8) in
+        let parts = String.split_on_char ':' rest in
+        let threshold = (match parts with
+          | t :: _ -> (try float_of_string t with _ -> 0.7)
+          | [] -> 0.7) in
+        let ctx_mode = (match parts with
+          | _ :: cm :: _ -> Chain_types.context_mode_of_string cm
+          | _ -> Chain_types.CM_Summary) in
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = ctx_mode; task_hint = None; default_threshold = threshold })
+      else if content = "Cascade" then
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7 })
       else
         Ok (Llm { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
 
@@ -1477,6 +1502,23 @@ let mermaid_to_chain ?(id = "mermaid_chain") (graph : mermaid_graph) : (chain, s
                       (* No inputs - keep placeholder *)
                       let placeholder = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
                       Retry { max_attempts; backoff; retry_on; node = placeholder })
+              | Cascade c ->
+                  let input_ids =
+                    match Hashtbl.find_opt deps mnode.id with
+                    | Some ids -> ids
+                    | None -> []
+                  in
+                  let incoming_nodes = List.map (fun input_id ->
+                    { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                  ) input_ids in
+                  let tiers = List.mapi (fun i source_node ->
+                    { Chain_types.tier_node = source_node;
+                      tier_index = i;
+                      confidence_threshold = c.default_threshold;
+                      cost_weight = float_of_int i;
+                      pass_context = true }
+                  ) incoming_nodes in
+                  Cascade { c with tiers }
               | Evaluator { scoring_func; scoring_prompt; select_strategy; min_score; candidates = _ } ->
                   (* Candidates from incoming edges *)
                   let input_ids =
@@ -1626,6 +1668,23 @@ let mermaid_to_chain_with_meta ?(id = "mermaid_chain") (graph : mermaid_graph) (
                     | [] ->
                         let placeholder = { id = "_retry_inner"; node_type = ChainRef "_retry_inner"; input_mapping = []; output_key = None; depends_on = None } in
                         Retry { max_attempts; backoff; retry_on; node = placeholder })
+                | Cascade c ->
+                    let input_ids =
+                      match Hashtbl.find_opt deps mnode.id with
+                      | Some ids -> ids
+                      | None -> []
+                    in
+                    let incoming_nodes = List.map (fun input_id ->
+                      { id = input_id ^ "_ref"; node_type = ChainRef input_id; input_mapping = []; output_key = None; depends_on = None }
+                    ) input_ids in
+                    let tiers = List.mapi (fun i source_node ->
+                      { Chain_types.tier_node = source_node;
+                        tier_index = i;
+                        confidence_threshold = c.default_threshold;
+                        cost_weight = float_of_int i;
+                        pass_context = true }
+                    ) incoming_nodes in
+                    Cascade { c with tiers }
                 | Evaluator { scoring_func; scoring_prompt; select_strategy; min_score; candidates = _ } ->
                     let input_ids =
                       match Hashtbl.find_opt deps mnode.id with
@@ -1924,6 +1983,7 @@ let node_type_to_id (nt : node_type) (fallback : string) : string =
   | Masc_broadcast { message; _ } -> Printf.sprintf "masc_broadcast_%s" (String.sub message 0 (min 20 (String.length message)))
   | Masc_listen { timeout_sec; _ } -> Printf.sprintf "masc_listen_%.0fs" timeout_sec
   | Masc_claim { task_id; _ } -> Printf.sprintf "masc_claim_%s" (Option.value task_id ~default:"next")
+  | Cascade { tiers; _ } -> Printf.sprintf "cascade_%d" (List.length tiers)
 
 (** Escape text for Mermaid node labels:
     - Newlines → space (Mermaid doesn't support \n in labels)
@@ -2053,6 +2113,8 @@ let node_type_to_text (nt : node_type) : string =
       Printf.sprintf "MASC:listen '%s' %.0fs" filter_str timeout_sec
   | Masc_claim { task_id; _ } ->
       Printf.sprintf "MASC:claim %s" (Option.value task_id ~default:"next")
+  | Cascade { tiers; context_mode; default_threshold; _ } ->
+      Printf.sprintf "Cascade:%.2g:%s (%d tiers)" default_threshold (Chain_types.context_mode_to_string context_mode) (List.length tiers)
 
 (** Convert a node_type to Mermaid shape *)
 let node_type_to_shape (nt : node_type) : string * string =
@@ -2060,7 +2122,7 @@ let node_type_to_shape (nt : node_type) : string * string =
   | Llm _ | Tool _ -> ("[", "]")
   | Quorum _ | Gate _ | Merge _ | Threshold _ | Evaluator _ | GoalDriven _ | FeedbackLoop _ -> ("{", "}")
   | Pipeline _ | Fanout _ | Map _ | Bind _ | ChainRef _ | Subgraph _ | Cache _ | Batch _ | Spawn _ -> ("[[", "]]")
-  | Retry _ | Fallback _ | Race _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
+  | Retry _ | Fallback _ | Race _ | Cascade _ -> ("(", ")")  (* Resilience nodes: rounded rectangle *)
   | ChainExec _ -> ("{{", "}}")  (* Meta nodes: hexagon *)
   | Adapter _ -> (">/", "/")  (* Adapter nodes: asymmetric shape *)
   | Mcts _ -> ("{", "}")  (* MCTS: diamond like decision nodes *)
@@ -2096,6 +2158,7 @@ let node_type_to_class (nt : node_type) : string =
   | StreamMerge _ -> "streammerge"
   | FeedbackLoop _ -> "feedbackloop"
   | Masc_broadcast _ | Masc_listen _ | Masc_claim _ -> "masc"
+  | Cascade _ -> "cascade"
 
 (** Mermaid classDef color scheme for node types *)
 let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#000
@@ -2121,6 +2184,7 @@ let mermaid_class_defs = {|    classDef llm fill:#4ecdc4,stroke:#1a535c,color:#0
     classDef spawn fill:#b8e994,stroke:#6ab04c,color:#000
     classDef mcts fill:#e056fd,stroke:#8e44ad,color:#fff
     classDef feedbackloop fill:#ff7f50,stroke:#cc5500,color:#fff
+    classDef cascade fill:#00cec9,stroke:#00b894,color:#000
 |}
 
 (** Convert Chain AST to Mermaid text (standard-compliant, uses chain.config.direction) *)
@@ -2282,6 +2346,7 @@ let chain_to_ascii (chain : chain) : string =
       | Masc_broadcast _ -> "📢"
       | Masc_listen _ -> "👂"
       | Masc_claim _ -> "✋"
+      | Cascade _ -> "⏫"
     in
     let text = node_type_to_text n.node_type in
     let short_text = if String.length text > 30 then String.sub text 0 27 ^ "..." else text in

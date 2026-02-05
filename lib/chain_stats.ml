@@ -272,13 +272,27 @@ type cascade_stats = {
 type cascade_raw = {
   mutable cascade_count: int;
   mutable tier_resolutions: int list;  (* Which tier resolved each cascade *)
+  mutable tier_resolution_count: int;  (* Track list length to avoid O(n) List.length *)
   mutable escalation_count: int;
   mutable hard_failure_count: int;
 }
 
+(** Maximum tier history to retain (prevents unbounded memory growth) *)
+let max_tier_history = 10_000
+
+(** Take first n elements from a list *)
+let list_take n lst =
+  let rec aux acc i = function
+    | [] -> List.rev acc
+    | _ when i >= n -> List.rev acc
+    | x :: rest -> aux (x :: acc) (i + 1) rest
+  in
+  aux [] 0 lst
+
 let cascade_data : cascade_raw = {
   cascade_count = 0;
   tier_resolutions = [];
+  tier_resolution_count = 0;
   escalation_count = 0;
   hard_failure_count = 0;
 }
@@ -304,6 +318,7 @@ let reset () =
     stats_data.active_chains <- 0;
     cascade_data.cascade_count <- 0;
     cascade_data.tier_resolutions <- [];
+    cascade_data.tier_resolution_count <- 0;
     cascade_data.escalation_count <- 0;
     cascade_data.hard_failure_count <- 0
   )
@@ -382,6 +397,13 @@ let track_cascade ~resolved_tier ~escalations ~hard_failures =
   with_mutex (fun () ->
     cascade_data.cascade_count <- cascade_data.cascade_count + 1;
     cascade_data.tier_resolutions <- resolved_tier :: cascade_data.tier_resolutions;
+    cascade_data.tier_resolution_count <- cascade_data.tier_resolution_count + 1;
+    (* Cap tier history to prevent unbounded memory growth.
+       Truncate at 2x threshold for amortized O(1) - avoids O(n) on every insert. *)
+    if cascade_data.tier_resolution_count > max_tier_history * 2 then begin
+      cascade_data.tier_resolutions <- list_take max_tier_history cascade_data.tier_resolutions;
+      cascade_data.tier_resolution_count <- max_tier_history
+    end;
     cascade_data.escalation_count <- cascade_data.escalation_count + escalations;
     cascade_data.hard_failure_count <- cascade_data.hard_failure_count + hard_failures
   )

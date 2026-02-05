@@ -160,9 +160,25 @@ type mcts_policy =
 val mcts_policy_to_yojson : mcts_policy -> Yojson.Safe.t
 val mcts_policy_of_yojson : Yojson.Safe.t -> (mcts_policy, string) result
 
+(** {1 Cascade Types} *)
+
+type confidence_level = High | Medium | Low
+
+val confidence_level_to_yojson : confidence_level -> Yojson.Safe.t
+val confidence_level_of_yojson : Yojson.Safe.t -> (confidence_level, string) result
+val confidence_to_float : confidence_level -> float
+val confidence_of_string : string -> confidence_level
+
+type context_mode = CM_None | CM_Summary | CM_Full
+
+val context_mode_to_yojson : context_mode -> Yojson.Safe.t
+val context_mode_of_yojson : Yojson.Safe.t -> (context_mode, string) result
+val context_mode_to_string : context_mode -> string
+val context_mode_of_string : string -> context_mode
+
 (** {1 Core Types} *)
 
-(** The 22 supported node types (including MCTS) *)
+(** The 23 supported node types (including Cascade) *)
 type node_type =
   | Llm of {
       model : string;
@@ -287,6 +303,14 @@ type node_type =
       task_id : string option;
       room : string option;
     }
+  | Cascade of {
+      tiers : cascade_tier list;
+      confidence_prompt : string option;
+      max_escalations : int;
+      context_mode : context_mode;
+      task_hint : string option;
+      default_threshold : float;
+    }
 
 (** A single execution node *)
 and node = {
@@ -295,6 +319,14 @@ and node = {
   input_mapping : (string * string) list;
   output_key : string option;
   depends_on : string list option;
+}
+
+and cascade_tier = {
+  tier_node : node;
+  tier_index : int;
+  confidence_threshold : float;
+  cost_weight : float;
+  pass_context : bool;
 }
 
 (** A complete chain definition *)
@@ -331,6 +363,8 @@ val node_to_yojson : node -> Yojson.Safe.t
 val node_of_yojson : Yojson.Safe.t -> (node, string) result
 val chain_to_yojson : chain -> Yojson.Safe.t
 val chain_of_yojson : Yojson.Safe.t -> (chain, string) result
+val cascade_tier_to_yojson : cascade_tier -> Yojson.Safe.t
+val cascade_tier_of_yojson : Yojson.Safe.t -> (cascade_tier, string) result
 
 (** {1 Execution Results} *)
 
@@ -401,6 +435,7 @@ val make_retry : id:string -> node:node -> max_attempts:int -> ?backoff:backoff_
 val make_fallback : id:string -> primary:node -> fallbacks:node list -> node
 val make_race : id:string -> nodes:node list -> ?timeout:float -> unit -> node
 val make_feedback_loop : id:string -> generator:node -> evaluator_config:evaluator_config -> improver_prompt:string -> max_iterations:int -> score_threshold:float -> ?score_operator:threshold_op -> ?conversational:bool -> ?relay_models:string list -> unit -> node
+val make_cascade : id:string -> tiers:cascade_tier list -> ?confidence_prompt:string option -> ?max_escalations:int -> ?context_mode:context_mode -> ?task_hint:string -> ?default_threshold:float -> unit -> node
 
 (** {1 Batch Execution Types} *)
 

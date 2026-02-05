@@ -993,6 +993,33 @@ let ucb1_value ~c (parent_visits : int) (node : mcts_tree_node) : float =
 (** String helper - from Chain_utils *)
 let string_contains = Chain_utils.string_contains
 
+(** {2 Cascade helpers} *)
+
+(** Parse confidence level from LLM output. Returns (confidence_level, cleaned_output) *)
+let parse_confidence_from_output (output : string) : (Chain_types.confidence_level * string) =
+  let re = Str.regexp_case_fold {|[Cc]onfidence:\s*\(High\|Medium\|Low\)|} in
+  try
+    ignore (Str.search_forward re output 0);
+    let level_str = Str.matched_group 1 output in
+    let level = Chain_types.confidence_of_string level_str in
+    (* Remove the confidence line from output *)
+    let cleaned = Str.global_replace (Str.regexp_case_fold {|[Cc]onfidence:\s*\(High\|Medium\|Low\)\n?|}) "" output in
+    (level, String.trim cleaned)
+  with Not_found ->
+    (Low, output)
+
+let build_confidence_system_prompt ~confidence_prompt task_hint =
+  match confidence_prompt with
+  | Some custom -> custom
+  | None ->
+    let hint = match task_hint with Some h -> Printf.sprintf " Task: %s." h | None -> "" in
+    Printf.sprintf "After your response, on a new line, rate your confidence: 'Confidence: High', 'Confidence: Medium', or 'Confidence: Low'.%s" hint
+
+let summarize_for_context output =
+  let max_len = 500 in
+  if String.length output <= max_len then output
+  else String.sub output 0 max_len ^ "..."
+
 (** Forward declaration for recursive execution *)
 let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string, string) result =
   match node.node_type with
@@ -1072,6 +1099,96 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
       execute_masc_listen ctx ~clock ~tool_exec node ~filter ~timeout_sec ~room
   | Masc_claim { task_id; room } ->
       execute_masc_claim ctx ~tool_exec node ~task_id ~room
+  (* Cascade: tiered LLM execution with confidence-based escalation *)
+  | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold = _ } ->
+      execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec node tiers ~confidence_prompt max_escalations context_mode task_hint
+
+(** Execute Cascade node: tiered LLM execution with confidence-based escalation *)
+and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
+    tiers ~confidence_prompt max_escalations context_mode task_hint =
+  record_start ctx node.id ~node_type:"cascade";
+  let start = Time_compat.now () in
+  let sorted_tiers = List.sort (fun a b -> compare a.Chain_types.tier_index b.Chain_types.tier_index) tiers in
+  let confidence_system = build_confidence_system_prompt ~confidence_prompt task_hint in
+  let rec try_tier remaining escalations hard_failures prev_context =
+    match remaining with
+    | [] ->
+      (* All tiers exhausted -- return last tier's output or error *)
+      let last_output = match prev_context with Some c -> c | None -> "All cascade tiers exhausted" in
+      Hashtbl.replace ctx.outputs "cascade_tier" "exhausted";
+      Hashtbl.replace ctx.outputs "cascade_escalations" (string_of_int escalations);
+      Hashtbl.replace ctx.outputs "cascade_hard_failures" (string_of_int hard_failures);
+      Chain_stats.track_cascade ~resolved_tier:(List.length sorted_tiers - 1) ~escalations ~hard_failures;
+      let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
+      record_complete ctx node.id ~duration_ms ~success:true ~node_type:"cascade";
+      store_node_output ctx node last_output;
+      Ok last_output
+    | tier :: rest ->
+      if escalations >= max_escalations then begin
+        let output = match prev_context with Some c -> c | None -> "Max escalations reached" in
+        Hashtbl.replace ctx.outputs "cascade_tier" (string_of_int tier.Chain_types.tier_index);
+        Hashtbl.replace ctx.outputs "cascade_escalations" (string_of_int escalations);
+        Hashtbl.replace ctx.outputs "cascade_hard_failures" (string_of_int hard_failures);
+        Chain_stats.track_cascade ~resolved_tier:tier.tier_index ~escalations ~hard_failures;
+        let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
+        record_complete ctx node.id ~duration_ms ~success:true ~node_type:"cascade";
+        store_node_output ctx node output;
+        Ok output
+      end else begin
+        (* Inject confidence prompt into tier's LLM system instruction *)
+        let tier_node = match tier.tier_node.node_type with
+          | Llm llm_config ->
+            let augmented_system = match llm_config.system with
+              | Some s -> Some (s ^ "\n\n" ^ confidence_system)
+              | None -> Some confidence_system
+            in
+            { tier.tier_node with node_type = Llm { llm_config with system = augmented_system } }
+          | _ -> tier.tier_node
+        in
+        (* Add context from previous tier if applicable *)
+        let tier_node = match context_mode, prev_context with
+          | Chain_types.CM_None, _ | _, None -> tier_node
+          | CM_Summary, Some prev ->
+            let summary = summarize_for_context prev in
+            (match tier_node.node_type with
+             | Llm llm_config ->
+               let new_prompt = Printf.sprintf "Previous attempt (summarized): %s\n\n%s" summary llm_config.prompt in
+               { tier_node with node_type = Llm { llm_config with prompt = new_prompt } }
+             | _ -> tier_node)
+          | CM_Full, Some prev ->
+            (match tier_node.node_type with
+             | Llm llm_config ->
+               let new_prompt = Printf.sprintf "Previous attempt (full): %s\n\n%s" prev llm_config.prompt in
+               { tier_node with node_type = Llm { llm_config with prompt = new_prompt } }
+             | _ -> tier_node)
+        in
+        try
+          match execute_node ctx ~sw ~clock ~exec_fn ~tool_exec tier_node with
+          | Ok raw_output ->
+            let (confidence, cleaned) = parse_confidence_from_output raw_output in
+            let score = Chain_types.confidence_to_float confidence in
+            if score >= tier.confidence_threshold then begin
+              Hashtbl.replace ctx.outputs "cascade_tier" (string_of_int tier.tier_index);
+              Hashtbl.replace ctx.outputs "cascade_escalations" (string_of_int escalations);
+              Hashtbl.replace ctx.outputs "cascade_hard_failures" (string_of_int hard_failures);
+              Chain_stats.track_cascade ~resolved_tier:tier.tier_index ~escalations ~hard_failures;
+              let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
+              record_complete ctx node.id ~duration_ms ~success:true ~node_type:"cascade";
+              store_node_output ctx node cleaned;
+              Ok cleaned
+            end else
+              try_tier rest (escalations + 1) hard_failures (Some cleaned)
+          | Error msg ->
+            record_error ctx node.id msg;
+            try_tier rest escalations (hard_failures + 1) prev_context
+        with
+        | Out_of_memory | Stack_overflow | Sys.Break as exn -> raise exn
+        | exn ->
+          record_error ctx node.id (Printexc.to_string exn);
+          try_tier rest escalations (hard_failures + 1) prev_context
+      end
+  in
+  try_tier sorted_tiers 0 0 None
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)

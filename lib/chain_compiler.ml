@@ -64,6 +64,8 @@ let rec collect_nested_dependencies (node : Chain_types.node) : string list =
         List.concat_map collect_nested_dependencies nodes
     | Chain_types.FeedbackLoop { generator; _ } ->
         collect_nested_dependencies generator
+    | Chain_types.Cascade { tiers; _ } ->
+        List.concat_map (fun t -> collect_nested_dependencies t.Chain_types.tier_node) tiers
     | Chain_types.Llm _ | Chain_types.Tool _ | Chain_types.ChainRef _
     | Chain_types.ChainExec _ | Chain_types.Adapter _
     | Chain_types.Masc_broadcast _ | Chain_types.Masc_listen _ | Chain_types.Masc_claim _ ->
@@ -245,6 +247,8 @@ let rec calculate_depth (node : Chain_types.node) : int =
   | Chain_types.StreamMerge { nodes; _ } ->
       (* StreamMerge depth: 1 + max of inner nodes depth *)
       1 + List.fold_left (fun acc n -> max acc (calculate_depth n)) 0 nodes
+  | Chain_types.Cascade { tiers; _ } ->
+      1 + List.fold_left (fun acc t -> max acc (calculate_depth t.Chain_types.tier_node)) 0 tiers
   | Chain_types.FeedbackLoop { generator; max_iterations; _ } ->
       (* FeedbackLoop depth: 1 + generator depth * max_iterations (worst case) *)
       1 + (calculate_depth generator) * max_iterations

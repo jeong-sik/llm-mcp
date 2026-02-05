@@ -158,7 +158,29 @@ type mcts_policy =
   | Softmax of float              (** Temperature-based selection *)
 [@@deriving yojson]
 
-(** The 22 supported node types (including 3 resilience + Adapter + Cache + Batch + MCTS) *)
+(** Confidence level for Cascade self-assessment *)
+type confidence_level = High | Medium | Low
+[@@deriving yojson]
+
+let confidence_to_float = function
+  | High -> 1.0 | Medium -> 0.5 | Low -> 0.2
+
+let confidence_of_string s =
+  match String.lowercase_ascii s with
+  | "high" -> High | "medium" -> Medium | _ -> Low
+
+(** Context passing mode between cascade tiers *)
+type context_mode = CM_None | CM_Summary | CM_Full
+[@@deriving yojson]
+
+let context_mode_to_string = function
+  | CM_None -> "none" | CM_Summary -> "summary" | CM_Full -> "full"
+
+let context_mode_of_string s =
+  match String.lowercase_ascii s with
+  | "none" -> CM_None | "full" -> CM_Full | _ -> CM_Summary
+
+(** The 23 supported node types (including Cascade) *)
 type node_type =
   | Llm of {
       model : string;     (** Model name: gemini, claude, codex, ollama:*, glm *)
@@ -322,6 +344,14 @@ type node_type =
       task_id : string option;        (** Specific task ID (None = claim_next) *)
       room : string option;           (** Room name (None = current room) *)
     }
+  | Cascade of {
+      tiers : cascade_tier list;
+      confidence_prompt : string option;
+      max_escalations : int;
+      context_mode : context_mode;
+      task_hint : string option;
+      default_threshold : float;
+    }
 [@@deriving yojson]
 
 (** A single execution node *)
@@ -334,6 +364,15 @@ and node = {
   depends_on : string list option; [@yojson.option]  (** Explicit dependencies *)
 }
 [@@deriving yojson]
+
+(** A tier in a Cascade node *)
+and cascade_tier = {
+  tier_node : node;
+  tier_index : int;
+  confidence_threshold : float;
+  cost_weight : float;
+  pass_context : bool;
+}
 
 (** A complete chain definition *)
 and chain = {
@@ -436,6 +475,7 @@ let node_type_name = function
   | Masc_broadcast _ -> "masc_broadcast"
   | Masc_listen _ -> "masc_listen"
   | Masc_claim _ -> "masc_claim"
+  | Cascade _ -> "cascade"
 
 (** Helper: Create a simple LLM node *)
 let make_llm_node ~id ~model ?system ~prompt ?timeout ?tools ?prompt_ref ?(prompt_vars=[]) ?(thinking=false) () =
@@ -510,6 +550,13 @@ let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
       generator; evaluator_config; improver_prompt;
       max_iterations; score_threshold; score_operator;
       conversational; relay_models
+    }; input_mapping = []; output_key = None; depends_on = None }
+
+let make_cascade ~id ~tiers ?(confidence_prompt=None) ?(max_escalations=2)
+    ?(context_mode=CM_Summary) ?task_hint ?(default_threshold=0.7) () =
+  { id; node_type = Cascade {
+      tiers; confidence_prompt; max_escalations; context_mode; task_hint;
+      default_threshold
     }; input_mapping = []; output_key = None; depends_on = None }
 
 (** {1 Batch Execution Types - Phase 5} *)
@@ -623,6 +670,8 @@ let rec count_parallel_groups (node: node) : int =
   | FeedbackLoop { generator; _ } ->
       (* FeedbackLoop wraps generator - count generator's parallel groups *)
       count_parallel_groups generator
+  | Cascade { tiers; _ } ->
+      List.fold_left (fun acc t -> acc + count_parallel_groups t.tier_node) 0 tiers
   | Llm _ | Tool _ | ChainRef _ | ChainExec _ | Adapter _
   | Masc_broadcast _ | Masc_listen _ | Masc_claim _ -> 0
 

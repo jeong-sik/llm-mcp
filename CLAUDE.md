@@ -66,6 +66,7 @@ graph LR
 | Retry | `("Retry:3")` | `(rounded)` |
 | Fallback | `("Fallback")` | `(rounded)` |
 | Race | `("Race")` | `(rounded)` |
+| Cascade | `("Cascade:0.7:summary")` | `(rounded)` |
 | Adapter | `>/"Adapter:Extract .data"/` | `>/trap/` |
 | Cache | `[["Cache:key_expr,ttl,node_id"]]` | `[[double]]` |
 | GoalDriven | `{GoalDriven:metric:op:value:max_iter}` | `{diamond}` |
@@ -197,6 +198,28 @@ graph LR
     fallback("Fallback")
     main --> fallback
 ```
+
+### 5. Cascade (Cost/Speed-Optimized LLM Routing)
+```mermaid
+graph LR
+    glm["LLM:ollama:glm-4.7-flash '{{input}}'"]
+    gemini["LLM:gemini '{{input}}'"]
+    claude["LLM:claude '{{input}}'"]
+    cascade("Cascade:0.7:summary")
+    glm --> cascade
+    gemini --> cascade
+    claude --> cascade
+```
+
+Cascade differs from Fallback:
+- **Fallback** = availability: next model on error/timeout
+- **Cascade** = quality: next model when confidence is insufficient
+
+Parameters: `Cascade:threshold:context_mode`
+- `threshold`: confidence threshold (0.0-1.0, default 0.7)
+- `context_mode`: `none`, `summary` (default, 500 chars), `full`
+
+Each tier's LLM self-assesses confidence (`Confidence: High/Medium/Low`). If below threshold, escalates to the next tier. Preset: `cascade-default.json` (3-tier: GLM-4.7-flash -> Gemini -> Claude).
 
 ---
 

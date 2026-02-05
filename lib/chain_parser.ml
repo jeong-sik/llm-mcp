@@ -922,6 +922,30 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
       let room = parse_string_opt json "room" in
       Ok (Masc_claim { task_id; room })
 
+  | "cascade" ->
+      let open Yojson.Safe.Util in
+      let tiers_json = json |> member "tiers" |> to_list in
+      let* tiers =
+        let rec aux acc = function
+          | [] -> Ok (List.rev acc)
+          | j :: rest ->
+              (match Chain_types.cascade_tier_of_yojson j with
+               | Ok t -> aux (t :: acc) rest
+               | Error e -> Error (Printf.sprintf "Invalid cascade tier: %s" e))
+        in
+        aux [] tiers_json
+      in
+      let confidence_prompt = parse_string_opt json "confidence_prompt" in
+      let max_escalations = parse_int_with_default json "max_escalations" 2 in
+      let context_mode =
+        match parse_string_opt json "context_mode" with
+        | Some s -> Chain_types.context_mode_of_string s
+        | None -> Chain_types.CM_Summary
+      in
+      let task_hint = parse_string_opt json "task_hint" in
+      let default_threshold = match parse_float_opt json "default_threshold" with Some v -> v | None -> 0.7 in
+      Ok (Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold })
+
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
 
@@ -995,6 +1019,8 @@ let rec has_placeholder_in_node_type = function
   | Evaluator { candidates; _ } -> List.exists has_placeholder_node candidates
   | Mcts { strategies; simulation; _ } ->
       List.exists has_placeholder_node strategies || has_placeholder_node simulation
+  | Cascade { tiers; _ } ->
+      List.exists (fun (t : Chain_types.cascade_tier) -> has_placeholder_node t.tier_node) tiers
   | _ -> false
 
 and has_placeholder_node (n : Chain_types.node) =
@@ -1028,6 +1054,9 @@ let rec collect_placeholders_in_node_type acc = function
   | Mcts { strategies; simulation; _ } ->
       let acc = List.fold_left collect_placeholders_in_node acc strategies in
       collect_placeholders_in_node acc simulation
+  | Cascade { tiers; _ } ->
+      List.fold_left (fun acc' (t : Chain_types.cascade_tier) ->
+        collect_placeholders_in_node acc' t.tier_node) acc tiers
   | _ -> acc
 
 and collect_placeholders_in_node acc (n : Chain_types.node) =
@@ -1154,6 +1183,8 @@ let rec collect_all_nodes (acc : Chain_types.node list) (n : Chain_types.node) :
       collect_all_nodes acc simulation
   | Chain_types.FeedbackLoop { generator; _ } ->
       collect_all_nodes acc generator
+  | Chain_types.Cascade { tiers; _ } ->
+      List.fold_left (fun acc' t -> collect_all_nodes acc' t.Chain_types.tier_node) acc tiers
   | Chain_types.Llm _
   | Chain_types.Tool _
   | Chain_types.ChainRef _
@@ -1426,6 +1457,14 @@ let validate_chain_strict (c : Chain_types.chain) : (unit, string) result =
     | Chain_types.Masc_listen { timeout_sec; _ } ->
         if timeout_sec <= 0.0 then addf "%s: masc_listen.timeout_sec must be > 0" path
     | Chain_types.Masc_claim _ -> ()  (* No validation needed for claim *)
+    | Chain_types.Cascade { tiers; max_escalations; _ } ->
+        if tiers = [] then addf "%s: cascade.tiers is empty" path;
+        if max_escalations <= 0 then addf "%s: cascade.max_escalations must be > 0" path;
+        List.iter (fun (t : Chain_types.cascade_tier) ->
+          if t.confidence_threshold < 0.0 || t.confidence_threshold > 1.0 then
+            addf "%s: cascade tier %d threshold out of range [0.0, 1.0]" path t.tier_index;
+          validate_node (Printf.sprintf "%s/cascade/tier%d" path t.tier_index) t.tier_node
+        ) tiers
     )
   in
 
@@ -1844,6 +1883,18 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
         let fields = [("type", `String "masc_claim")] in
         let fields = match task_id with Some t -> fields @ [("task_id", `String t)] | None -> fields in
         (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
+    | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold } ->
+        let tier_json = `List (List.map Chain_types.cascade_tier_to_yojson tiers) in
+        let fields = [
+          ("type", `String "cascade");
+          ("tiers", tier_json);
+          ("max_escalations", `Int max_escalations);
+          ("context_mode", `String (Chain_types.context_mode_to_string context_mode));
+          ("default_threshold", `Float default_threshold);
+        ] in
+        let fields = match confidence_prompt with Some p -> ("confidence_prompt", `String p) :: fields | None -> fields in
+        let fields = match task_hint with Some h -> ("task_hint", `String h) :: fields | None -> fields in
+        fields
   in
   `Assoc (base @ type_fields @ input_mapping)
 

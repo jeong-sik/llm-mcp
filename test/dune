@@ -385,3 +385,8 @@
 (test
  (name test_retry_edge_cases)
  (libraries llm_mcp.resilience llm_mcp.common alcotest eio eio_main unix))
+
+; Cascade Node tests (confidence parsing, tier routing, Mermaid DSL, stats)
+(test
+ (name test_cascade)
+ (libraries llm_mcp.common alcotest eio eio_main str))
