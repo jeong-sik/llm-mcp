@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-05
+
+### Added
+- **Cascade Node**: Cost/quality-optimized LLM routing
+  - Starts with cheapest model, escalates on low confidence
+  - Parameters: `Cascade:threshold:context_mode`
+  - Default preset: `cascade-default.json` (GLM → Gemini → Claude)
+  - Differs from Fallback: Cascade = quality-based, Fallback = availability-based
+
+### Changed
+- **README Expansion**: Architecture diagram, Chain examples, API reference
+  - Added feature overview table
+  - Added MAGI and Cascade pattern examples
+  - Added preset table, tool list, environment variables
+
 ## [0.3.3] - 2026-02-02
 
 ### Added
