@@ -88,7 +88,7 @@
    ;; Version auto-sync from dune-project
    dune-build-info)
  (ocamlopt_flags (:standard -O3))
- ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support
+ (instrumentation (backend bisect_ppx))
  (preprocess (pps ppx_deriving_yojson)))
 
 ; =============================================================================
@@ -99,8 +99,8 @@
  (public_name llm_mcp.resilience)
  (wrapped false)
  (modules mcp_resilience retry chain_retry chain_executor_retry)
- (libraries eio unix yojson str llm_mcp.common))
- ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support
+ (libraries eio unix yojson str llm_mcp.common)
+ (instrumentation (backend bisect_ppx)))
 
 ; =============================================================================
 ; llm_mcp_eio - Pure Eio Library (NO Lwt!)
@@ -162,7 +162,7 @@
    zstd
    llm_mcp_resilience)
  (ocamlopt_flags (:standard -O3))
- ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support
+ (instrumentation (backend bisect_ppx))
  (preprocess (pps ppx_deriving_yojson)))
 
 ; =============================================================================
