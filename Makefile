@@ -20,19 +20,19 @@ clean:
 	rm -rf _coverage *.coverage
 
 # Run tests with coverage instrumentation
-# NOTE: bisect_ppx pending ppxlib 0.37+ support (OCaml 5.2+ AST changes)
-# TODO: Re-enable when bisect_ppx is updated
 coverage:
-	@echo "⚠️  Coverage disabled: bisect_ppx pending ppxlib 0.37+ support"
-	@echo "Running tests instead..."
-	dune test
-	@echo ""
-	@echo "When bisect_ppx is updated, run:"
-	@echo "  dune test --instrument-with bisect_ppx"
+	mkdir -p _coverage
+	BISECT_FILE=_coverage/bisect dune test --instrument-with bisect_ppx --force
+	@echo "Coverage data written to _coverage/"
 
-# Generate HTML coverage report (placeholder)
-coverage-html:
-	@echo "⚠️  Coverage HTML disabled: bisect_ppx pending ppxlib 0.37+ support"
+# Generate HTML coverage report
+coverage-html: coverage
+	bisect-ppx-report html --coverage-path _coverage
+	@echo "Report at _coverage/index.html"
+
+# Generate summary coverage report (text)
+coverage-summary: coverage
+	bisect-ppx-report summary --coverage-path _coverage
 
 # Generate documentation
 doc:

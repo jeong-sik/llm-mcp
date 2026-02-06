@@ -13,5 +13,5 @@
    ca-certs
    mirage-crypto-rng-eio
    logs)
- ; TODO: (instrumentation (backend bisect_ppx)) - pending ppxlib 0.37+ support
+ (instrumentation (backend bisect_ppx))
  (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

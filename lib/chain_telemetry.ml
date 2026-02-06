@@ -405,7 +405,7 @@ let event_to_json_string event =
 let event_of_json_string str =
   match Yojson.Safe.from_string str with
   | json -> chain_event_of_yojson json
-  | exception _ -> Error "Invalid JSON"
+  | exception _ -> Result.Error "Invalid JSON"
 
 (** {1 Pretty Printing} *)
 
