@@ -457,7 +457,7 @@
  (public_name jira-query)
  (package llm_mcp)
  (modules jira_query)
- (libraries yojson cmdliner unix))
+ (libraries eio eio_main cohttp-eio tls-eio ca-certs mirage-crypto-rng.unix base64 yojson cmdliner uri unix))
 
 (executable
  (name auto_sharder)
