@@ -437,3 +437,8 @@
 (test
  (name test_dictionary_coverage)
  (libraries llm_mcp.common alcotest str unix))
+
+; Mermaid Parser Coverage tests (helpers, all node types, metadata, edges, multiline)
+(test
+ (name test_mermaid_parser_coverage)
+ (libraries llm_mcp.common alcotest str))
