@@ -1,0 +1,65 @@
+{
+  "id": "figma-visual-regression",
+  "name": "Figma Visual Regression (SSIM + Text)",
+  "description": "Runs figma_verify_visual for a Figma URL + HTML. Returns structured JSON with overall_passed, visual_verification, and text_verification.",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "parse-url",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_parse_url",
+        "args": { "url": "{{input.figma_url}}" }
+      },
+      "output_key": "figma_meta"
+    },
+    {
+      "id": "verify-visual",
+      "type": "tool",
+      "tool": {
+        "server": "figma",
+        "name": "figma_verify_visual",
+        "args": {
+          "file_key": "{{figma_meta.file_key}}",
+          "node_id": "{{figma_meta.node_id}}",
+          "token": "env:FIGMA_TOKEN",
+          "html": "{{input.html}}",
+          "target_ssim": 0.95,
+          "max_iterations": 3,
+          "width": 375,
+          "height": 812
+        }
+      },
+      "depends_on": ["parse-url"],
+      "output_key": "verification"
+    }
+  ],
+  "output": "verify-visual",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "figma_url": {
+        "type": "string",
+        "description": "Figma URL containing file_key and node-id (e.g., https://www.figma.com/design/<file_key>/... ?node-id=1-2)"
+      },
+      "html": {
+        "type": "string",
+        "description": "HTML string to render and compare against the Figma node render."
+      }
+    },
+    "required": ["figma_url", "html"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "overall_passed": { "type": "boolean" },
+      "visual_verification": { "type": "object" },
+      "text_verification": { "type": "object" }
+    }
+  },
+  "metadata": {
+    "tags": ["figma", "visual-regression", "ssim", "text", "verify"],
+    "estimated_duration_sec": 60
+  }
+}

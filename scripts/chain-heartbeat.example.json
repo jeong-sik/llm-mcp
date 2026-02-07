@@ -1,0 +1,15 @@
+{
+  "jobs": [
+    {
+      "name": "figma-visual-regression-example",
+      "enabled": true,
+      "chain_id": "figma-visual-regression",
+      "timeout_s": 180,
+      "input": {
+        "figma_url": "https://www.figma.com/design/FILE_KEY/Design?node-id=1-2",
+        "html_file": "~/me/path/to/render.html"
+      }
+    }
+  ]
+}
+
