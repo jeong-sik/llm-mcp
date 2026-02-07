@@ -45,6 +45,9 @@ module Validation_stack = Validation_stack
 (** Ollama Backend - Direct Eio implementation for local LLM *)
 module Ollama_backend_eio = Ollama_backend_eio
 
+(** Claude CLI Backend - Non-interactive `claude` CLI wrapper (Eio) *)
+module Claude_cli_backend_eio = Claude_cli_backend_eio
+
 (** Main functor for creating agent loops *)
 module Make_Loop = Agent_loop_eio.Make
 

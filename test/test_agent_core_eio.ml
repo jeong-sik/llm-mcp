@@ -6,6 +6,7 @@
 
 module AC = Agent_core_eio
 module Types = Agent_core_eio.Types
+module Claude = AC.Claude_cli_backend_eio
 
 (** {1 Test Helpers} *)
 
@@ -178,6 +179,24 @@ let test_default_config () =
   Alcotest.(check int) "timeout_ms" 60_000 config.Types.timeout_ms;
   Alcotest.(check int) "max_messages" 50 config.Types.max_messages
 
+(** {1 CLI Execution Tests} *)
+
+let test_exec_command_with_output_handles_quotes () =
+  (* The previous implementation used `/bin/sh -c` with ad-hoc quoting and would
+     break on args like "a'b". Running argv directly avoids shell quoting bugs. *)
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  Eio.Switch.run @@ fun sw ->
+  let config = { Claude.default_config with timeout_ms = Some 5_000 } in
+  match Claude.exec_command_with_output ~sw ~proc_mgr ~clock ~config
+          ~cmd:["python3"; "-c"; "import sys; print(sys.argv[1])"; "a'b"]
+  with
+  | Ok stdout ->
+    Alcotest.(check string) "stdout" "a'b\n" stdout
+  | Error msg ->
+    Alcotest.fail msg
+
 (** {1 Test Runner} *)
 
 let retry_tests = [
@@ -202,9 +221,14 @@ let types_tests = [
   "default config values", `Quick, test_default_config;
 ]
 
+let cli_tests = [
+  "exec_command_with_output argv-safe", `Quick, test_exec_command_with_output_handles_quotes;
+]
+
 let () =
   Alcotest.run "Agent Core Eio" [
     "Retry", retry_tests;
     "Timeout", timeout_tests;
     "Types", types_tests;
+    "CLI", cli_tests;
   ]

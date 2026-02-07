@@ -119,16 +119,9 @@ let parse_stream_line line : (string option, string) result =
 
 (** Execute claude CLI command and capture output (simple version without pipes) *)
 let exec_command ~sw ~proc_mgr ~clock ~(config:config) ~(cmd:string list) : (string, string) result =
-  let cmd_str = String.concat " " (List.map (fun s ->
-      if String.contains s ' ' || String.contains s '"' then
-        Printf.sprintf "'%s'" s
-      else s
-    ) cmd)
-  in
-
   try
-    (* Use shell to execute the command *)
-    let proc = Eio.Process.spawn ~sw proc_mgr ["/bin/sh"; "-c"; cmd_str] in
+    (* Run argv directly (no shell). Avoids quoting bugs + injection surface. *)
+    let proc = Eio.Process.spawn ~sw proc_mgr cmd in
 
     (* Wait for process to complete *)
     let wait_for_process () =
@@ -157,13 +150,6 @@ let exec_command ~sw ~proc_mgr ~clock ~(config:config) ~(cmd:string list) : (str
 
 (** Execute claude CLI with proper stdout/stderr capture *)
 let exec_command_with_output ~sw ~proc_mgr ~clock ~(config:config) ~(cmd:string list) : (string, string) result =
-  let cmd_str = String.concat " " (List.map (fun s ->
-      if String.contains s ' ' || String.contains s '"' then
-        Printf.sprintf "'%s'" s
-      else s
-    ) cmd)
-  in
-
   try
     (* Create pipes for stdout/stderr using Eio.Process.pipe *)
     let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
@@ -173,7 +159,7 @@ let exec_command_with_output ~sw ~proc_mgr ~clock ~(config:config) ~(cmd:string 
     let proc = Eio.Process.spawn ~sw proc_mgr
         ~stdout:stdout_w
         ~stderr:stderr_w
-        ["/bin/sh"; "-c"; cmd_str]
+        cmd
     in
 
     (* Close write ends after spawn *)
