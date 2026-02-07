@@ -1316,6 +1316,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 | _ -> false
               in
               let trace_effective = trace || env_truthy "LLM_MCP_CHAIN_FORCE_TRACE" in
+              let gemini_api_key = Tools_tracer.get_api_key "GEMINI_API_KEY" |> String.trim in
+              let gemini_use_cli_default =
+                (* Prefer direct API when key is present to avoid local CLI drift
+                   (e.g. "only 2.0 models are visible" depending on CLI install). *)
+                if gemini_api_key <> "" then false else Tool_parsers.default_use_cli ()
+              in
               let starts_with ~prefix s =
                 let prefix_len = String.length prefix in
                 String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
@@ -1385,7 +1391,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = timeout_int;
                         stream = false;
-                        use_cli = true;  (* MASC integration enabled *)
+                        use_cli = gemini_use_cli_default;
                         fallback_to_api = true;
                       }
                   | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
@@ -1462,7 +1468,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         output_format = Types.Text;
                         timeout = timeout_int;
                         stream = false;
-                        use_cli = true;  (* MASC integration enabled *)
+                        use_cli = gemini_use_cli_default;
                         fallback_to_api = true;
                       }
                 in

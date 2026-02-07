@@ -55,6 +55,17 @@ let resolve_claude_model (model : string) : string =
   | "opus" | "opus-4" -> "claude-opus-4-20250514"
   | _ -> model
 
+(** Resolve Gemini model aliases to stable IDs (for CLI / API parity). *)
+let resolve_gemini_model (model : string) : string =
+  match String.lowercase_ascii model with
+  | "gemini" -> "gemini-3-pro-preview"
+  | "pro" -> "gemini-2.5-pro"
+  | "flash" -> "gemini-2.5-flash"
+  | "flash-lite" -> "gemini-2.5-flash-lite"
+  | "3-pro" -> "gemini-3-pro-preview"
+  | "3-flash" -> "gemini-3-flash-preview"
+  | _ -> model
+
 (** {1 Argument Parsers} *)
 
 (** Parse JSON arguments for Gemini tool *)
@@ -74,7 +85,16 @@ let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
     |> output_format_of_string in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:default_timeout in
   let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:default_stream in
-  let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
+  let use_cli =
+    match json |> member "use_cli" |> to_bool_option with
+    | Some v -> v
+    | None ->
+        (* If an API key is available, prefer direct API by default:
+           - broader model coverage than the CLI in some setups
+           - avoids "only 2.0 is visible" drift from local CLI installs *)
+        let api_key = Tools_tracer.get_api_key "GEMINI_API_KEY" |> String.trim in
+        if api_key <> "" then false else default_use_cli ()
+  in
   let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
   Gemini { prompt; model; thinking_level; yolo; output_format; timeout; stream; use_cli; fallback_to_api }
 
@@ -421,6 +441,7 @@ let build_gemini_cmd args =
   | Gemini { prompt; model; yolo; thinking_level; output_format; _ } ->
       let prefix = thinking_prompt_prefix thinking_level in
       let enhanced_prompt = if String.length prefix > 0 then prefix ^ prompt else prompt in
+      let model = resolve_gemini_model model in
       let cmd = ["gemini"; "-m"; model; "-p"] in
       let cmd = if yolo then cmd @ ["--yolo"] else cmd in
       let cmd = match output_format with
