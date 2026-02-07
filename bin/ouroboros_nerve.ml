@@ -13,32 +13,48 @@ let analyze_pain line =
 let run_with_nerve command =
   Printf.printf "🧠 [NERVE] Innervating command: %s\n" (String.concat " " command);
 
-  let cmd = String.concat " " command in
-  let ic = Unix.open_process_in (cmd ^ " 2>&1") in
+  let prog, args =
+    match command with
+    | [] -> ("", [])
+    | p :: rest -> (p, rest)
+  in
+  if prog = "" then 1
+  else
+    let argv = Array.of_list (prog :: args) in
+    let env = Unix.environment () in
+    let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+    let out_r, out_w = Unix.pipe () in
+    (* Merge stderr into stdout. *)
+    let pid = Unix.create_process_env prog argv env devnull_in out_w out_w in
+    Unix.close devnull_in;
+    Unix.close out_w;
+    let ic = Unix.in_channel_of_descr out_r in
 
-  let pain_level = ref 0 in
+    let pain_level = ref 0 in
 
-  (try
-    while true do
-      let line = input_line ic in
-      print_endline line;
-      if analyze_pain line then begin
-        Printf.printf "⚡ [NERVE] Pain Detected: %s\n" (String.sub line 0 (min 50 (String.length line)));
-        incr pain_level
-      end
-    done
-  with End_of_file -> ());
+    (try
+       while true do
+         let line = input_line ic in
+         print_endline line;
+         if analyze_pain line then begin
+           Printf.printf "⚡ [NERVE] Pain Detected: %s\n"
+             (String.sub line 0 (min 50 (String.length line)));
+           incr pain_level
+         end
+       done
+     with End_of_file -> ());
 
-  let exit_status = Unix.close_process_in ic in
+    let _ = close_in_noerr ic in
+    let _pid, exit_status = Unix.waitpid [] pid in
 
-  if !pain_level > 0 then begin
-    Printf.printf "\n🚑 [REFLEX] System felt %d units of pain.\n" !pain_level;
-    print_endline "Broadcasting SOS to Swarm..."
-  end;
+    if !pain_level > 0 then begin
+      Printf.printf "\n🚑 [REFLEX] System felt %d units of pain.\n" !pain_level;
+      print_endline "Broadcasting SOS to Swarm..."
+    end;
 
-  match exit_status with
-  | Unix.WEXITED n -> n
-  | _ -> 1
+    match exit_status with
+    | Unix.WEXITED n -> n
+    | _ -> 1
 
 let print_usage () =
   print_endline "Usage: ouroboros-nerve <command>"

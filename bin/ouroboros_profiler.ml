@@ -15,17 +15,38 @@ let profile_command label command =
 
   let start_time = Unix.gettimeofday () in
 
-  let ic = Unix.open_process_in (command ^ " 2>&1") in
-  let output = Buffer.create 256 in
-  (try while true do Buffer.add_string output (input_line ic); Buffer.add_char output '\n' done
-   with End_of_file -> ());
-  let exit_status = Unix.close_process_in ic in
+  let prog, args =
+    match command with
+    | [] -> ("", [])
+    | p :: rest -> (p, rest)
+  in
+  if prog = "" then begin
+    prerr_endline "❌ Missing command";
+    exit 2
+  end;
+  let argv = Array.of_list (prog :: args) in
+  let env = Unix.environment () in
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+  let out_r, out_w = Unix.pipe () in
+  (* Merge stderr into stdout; only count bytes to avoid buffering huge output. *)
+  let pid = Unix.create_process_env prog argv env devnull_in out_w out_w in
+  Unix.close devnull_in;
+  Unix.close out_w;
+  let tmp = Bytes.create 8192 in
+  let rec count_bytes acc =
+    match Unix.read out_r tmp 0 (Bytes.length tmp) with
+    | 0 -> acc
+    | n -> count_bytes (acc + n)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> count_bytes acc
+  in
+  let output_size = count_bytes 0 in
+  (try Unix.close out_r with _ -> ());
+  let _pid, exit_status = Unix.waitpid [] pid in
 
   let end_time = Unix.gettimeofday () in
   let duration = end_time -. start_time in
 
   let success = match exit_status with Unix.WEXITED 0 -> true | _ -> false in
-  let output_size = Buffer.length output in
 
   Printf.printf "✅ Finished in %.4fs. (Efficiency Score: %d/100)\n" duration (score duration);
 
@@ -43,11 +64,13 @@ let profile_command label command =
   close_out oc
 
 let print_usage () =
-  print_endline "Usage: ouroboros-profiler '<command>'"
+  print_endline "Usage: ouroboros-profiler -- <command> [args...]"
 
 let () =
-  if Array.length Sys.argv < 2 then begin
+  let args = Array.to_list Sys.argv |> List.tl in
+  match args with
+  | "--" :: cmd when cmd <> [] ->
+      profile_command "External Task" cmd
+  | _ ->
     print_usage ();
     exit 1
-  end;
-  profile_command "External Task" Sys.argv.(1)

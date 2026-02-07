@@ -17,15 +17,22 @@ let log msg =
 
 let run_evolution () =
   log "🔄 Starting Ouroboros evolution cycle...";
-  let cmd = Printf.sprintf "dune exec ouroboros-loop -- --cycles 1 2>&1" in
-  let ic = Unix.open_process_in cmd in
-  try
-    while true do
-      let line = input_line ic in
-      log (Printf.sprintf "Output: %s" line)
-    done
-  with End_of_file ->
-    ignore (Unix.close_process_in ic)
+  let argv = [| "dune"; "exec"; "ouroboros-loop"; "--"; "--cycles"; "1" |] in
+  let env = Unix.environment () in
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+  let out_r, out_w = Unix.pipe () in
+  let pid = Unix.create_process_env "dune" argv env devnull_in out_w out_w in
+  Unix.close devnull_in;
+  Unix.close out_w;
+  let ic = Unix.in_channel_of_descr out_r in
+  (try
+     while true do
+       let line = input_line ic in
+       log (Printf.sprintf "Output: %s" line)
+     done
+   with End_of_file -> ());
+  close_in_noerr ic;
+  ignore (Unix.waitpid [] pid)
 
 let run_rescue_mission () =
   let tasks_dir = Filename.concat me_root "logs/swarm/tasks" in

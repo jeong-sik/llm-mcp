@@ -40,21 +40,17 @@ let claude_available () : bool =
 
 (** Call Claude CLI *)
 let call_claude ~prompt () : (string, string) result =
-  (* Escape special characters for shell *)
-  let escaped_prompt = String.concat "\\n" (String.split_on_char '\n' prompt) in
-  let escaped_prompt = String.concat "\\\"" (String.split_on_char '"' escaped_prompt) in
-
-  let cmd = Printf.sprintf
-    "echo \"%s\" | claude -p --model haiku 2>/dev/null"
-    escaped_prompt in
-
-  let ic = Unix.open_process_in cmd in
-  let output = In_channel.input_all ic in
-  let status = Unix.close_process_in ic in
-
-  match status with
-  | Unix.WEXITED 0 -> Ok (String.trim output)
-  | _ -> Error (Printf.sprintf "Claude CLI error: %s" output)
+  let res =
+    Common.Subprocess.run_capture
+      ~timeout_s:30.0
+      ~stdin:prompt
+      ~stderr:`Dev_null
+      "claude"
+      [ "-p"; "--model"; "haiku" ]
+  in
+  match res.status with
+  | Unix.WEXITED 0 -> Ok (String.trim res.stdout)
+  | _ -> Error (Printf.sprintf "Claude CLI error: %s" (truncate 200 res.stderr))
 
 (** Mock tool executor - no tools for Claude tests *)
 let mock_tool_exec ~name:_ ~args:_ = Error "No tools"

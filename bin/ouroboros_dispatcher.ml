@@ -7,20 +7,36 @@ let log_dir = Filename.concat (Filename.concat me_root "logs/evolution") "war_ro
 
 let deploy_agent task_name =
   let log_file = Filename.concat log_dir (Printf.sprintf "%s_%d.log" task_name (timestamp ())) in
-  let cmd = Printf.sprintf "dune exec ouroboros-spawn -- '%s' 'echo Processing %s...' 2>&1" task_name task_name in
-
-  let ic = Unix.open_process_in cmd in
-  let output = Buffer.create 256 in
-  (try
-    while true do
-      Buffer.add_string output (input_line ic);
-      Buffer.add_char output '\n'
-    done
-  with End_of_file -> ());
-  let exit_status = Unix.close_process_in ic in
+  let argv =
+    [|
+      "dune";
+      "exec";
+      "ouroboros-spawn";
+      "--";
+      task_name;
+      "--";
+      "echo";
+      "Processing";
+      task_name ^ "...";
+    |]
+  in
+  let env = Unix.environment () in
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+  let out_r, out_w = Unix.pipe () in
+  (* Merge stderr into stdout for stable logging. *)
+  let pid = Unix.create_process_env "dune" argv env devnull_in out_w out_w in
+  Unix.close devnull_in;
+  Unix.close out_w;
+  let ic = Unix.in_channel_of_descr out_r in
+  let output =
+    Fun.protect
+      ~finally:(fun () -> (try close_in ic with _ -> ()))
+      (fun () -> In_channel.input_all ic)
+  in
+  let _pid, exit_status = Unix.waitpid [] pid in
 
   let oc = open_out log_file in
-  output_string oc (Buffer.contents output);
+  output_string oc output;
   close_out oc;
 
   let status = match exit_status with Unix.WEXITED 0 -> "SUCCESS" | _ -> "FAIL" in

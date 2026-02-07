@@ -70,8 +70,6 @@ let claude_query
     | None -> cmd_parts
   in
 
-  let cmd = String.concat " " (List.map Filename.quote cmd_parts) in
-
   (* Run with timeout using alarm signal *)
   let old_handler = Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ ->
     raise (Failure (Printf.sprintf "claude CLI timed out after %ds" timeout))
@@ -80,7 +78,9 @@ let claude_query
 
   try
     (* Open process with stdin/stdout *)
-    let (out_ch, in_ch, err_ch) = Unix.open_process_full cmd (Unix.environment ()) in
+    let (out_ch, in_ch, err_ch) =
+      Unix.open_process_args_full "claude" (Array.of_list cmd_parts) (Unix.environment ())
+    in
 
     (* Write prompt to stdin *)
     output_string in_ch prompt;

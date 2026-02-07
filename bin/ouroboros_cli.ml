@@ -11,11 +11,16 @@ let run_script script_name args =
     Printf.printf "❌ Script not found: %s\n" script_path;
     exit 1
   end;
-  let cmd = Printf.sprintf "python3 %s %s" script_path (String.concat " " args) in
-  let exit_code = Unix.system cmd in
-  match exit_code with
-  | Unix.WEXITED n when n <> 0 -> exit n
-  | _ -> ()
+  let argv = Array.of_list ("python3" :: script_path :: args) in
+  let env = Unix.environment () in
+  let pid =
+    Unix.create_process_env "python3" argv env Unix.stdin Unix.stdout Unix.stderr
+  in
+  let _pid, status = Unix.waitpid [] pid in
+  match status with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WEXITED n -> exit n
+  | _ -> exit 1
 
 let usage () =
   print_endline {|
@@ -57,5 +62,6 @@ let () =
           run_script "ouroboros_sense.py" ["Status Check"];
           print_endline "\n[Heartbeat]";
           let heartbeat_log = Filename.concat me_root "logs/evolution/heartbeat.log" in
-          ignore (Unix.system (Printf.sprintf "tail -n 5 %s" heartbeat_log))
+          read_lines_tail ~max_bytes:8192 ~max_lines:5 heartbeat_log
+          |> List.iter print_endline
       | _ -> usage ()

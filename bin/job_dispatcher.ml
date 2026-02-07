@@ -5,12 +5,43 @@
 open Common
 open Yojson.Safe.Util
 
-(* Run shell command and return stdout *)
-let run_cmd cmd =
-  let ic = Unix.open_process_in cmd in
-  let all_input = In_channel.input_all ic in
-  let _ = Unix.close_process_in ic in
-  all_input
+let run_capture_stdout prog args =
+  let argv = Array.of_list (prog :: args) in
+  let env = Unix.environment () in
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+  let devnull_err = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
+  let stdout_r, stdout_w = Unix.pipe () in
+  let pid = Unix.create_process_env prog argv env devnull_in stdout_w devnull_err in
+  Unix.close devnull_in;
+  Unix.close devnull_err;
+  Unix.close stdout_w;
+  let output =
+    let ic = Unix.in_channel_of_descr stdout_r in
+    Fun.protect
+      ~finally:(fun () -> (try close_in ic with _ -> ()))
+      (fun () -> In_channel.input_all ic)
+  in
+  let _pid, _status = Unix.waitpid [] pid in
+  output
+
+let count_newer_md_files ~marker_mtime root_dir =
+  let count = ref 0 in
+  let rec walk dir =
+    try
+      Sys.readdir dir
+      |> Array.iter (fun name ->
+        let path = Filename.concat dir name in
+        try
+          if Sys.is_directory path then walk path
+          else if Filename.check_suffix path ".md" then begin
+            let st = Unix.stat path in
+            if st.Unix.st_mtime > marker_mtime then incr count
+          end
+        with _ -> ())
+    with _ -> ()
+  in
+  if Sys.file_exists root_dir && Sys.is_directory root_dir then walk root_dir;
+  !count
 
 (* Check embedding sync status *)
 let check_embedding_sync () =
@@ -20,11 +51,14 @@ let check_embedding_sync () =
   if not (Sys.file_exists last_sync_file) then
     ["📝 Embedding: First run (baseline needed)"], []
   else
-    (* Count files newer than marker *)
-    let cmd = Printf.sprintf "find %s/claude %s/memory/procedural-memory -name '*.md' -type f -newer %s 2>/dev/null | wc -l" 
-      me_root me_root last_sync_file in
-    let count_str = String.trim (run_cmd cmd) in
-    let count = try int_of_string count_str with Failure _ -> 0 in
+    let marker_mtime =
+      try (Unix.stat last_sync_file).Unix.st_mtime with _ -> Unix.time ()
+    in
+    let count =
+      count_newer_md_files ~marker_mtime (Filename.concat me_root "claude")
+      + count_newer_md_files ~marker_mtime
+          (Filename.concat me_root "memory/procedural-memory")
+    in
     
     if count >= 10 then
       [], [Printf.sprintf "🔄 Embedding sync needed: %d new docs" count; "💡 Run: /sync-memory"]
@@ -39,13 +73,11 @@ let check_websearch () =
   let script = Filename.concat me_root "scripts/auto-websearch.py" in
   
   if Sys.file_exists script then
-    let cmd = Printf.sprintf "python3 %s pending 2>/dev/null" script in
-    let output = run_cmd cmd in
-    if String.contains output '3' && String.length output > 0 then (* Simple heuristic *)
-       (* Parse output for better message later *)
-       [], ["🔍 WebSearch suggestions available (run auto-websearch.py)"]
-    else
-       [], []
+    let output = run_capture_stdout "python3" [ script; "pending" ] in
+    match int_of_string_opt (String.trim output) with
+    | Some n when n > 0 ->
+        [], [Printf.sprintf "🔍 WebSearch suggestions available (%d pending)" n]
+    | _ -> [], []
   else
     [], []
 

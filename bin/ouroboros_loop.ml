@@ -5,43 +5,42 @@ open Common
 
 let plans_dir = Filename.concat me_root "PLANS"
 
-(* Note: run_command here has different logic than Common.run_command *)
-let run_command cmd =
-  let exit_code = Unix.system cmd in
-  match exit_code with
-  | Unix.WEXITED 0 -> true
-  | Unix.WEXITED n ->
-      Printf.printf "❌ Command failed: %s (exit code %d)\n" cmd n;
-      false
-  | _ -> false
+let run_ok ?(stderr = `Dev_null) prog args =
+  let res = Subprocess.run_capture ~stderr prog args in
+  match res.status with Unix.WEXITED 0 -> true | _ -> false
 
 let git_clean_check () =
-  let ic = Unix.open_process_in "git status --porcelain" in
-  let output = try input_line ic with End_of_file -> "" in
-  ignore (Unix.close_process_in ic);
-  if output <> "" then
-    print_endline "⚠️  Git directory not clean. Please commit or stash changes first.\n   (Proceeding anyway for demonstration...)";
+  let out =
+    Subprocess.run_capture ~stderr:`Dev_null "git" [ "-C"; me_root; "status"; "--porcelain" ]
+    |> fun r -> String.trim r.stdout
+  in
+  if out <> "" then
+    print_endline
+      "⚠️  Git directory not clean. Please commit or stash changes first.\n   (Proceeding anyway for demonstration...)";
   true
 
 let verify_evolution () =
   print_endline "🔍 Verifying mutation safety...";
-  let cmd = Printf.sprintf "%s/scripts/sb doctor --no-network 2>/dev/null" me_root in
-  let exit_code = Unix.system cmd in
-  match exit_code with
-  | Unix.WEXITED 0 ->
-      print_endline "✅ Verification Passed.";
-      true
-  | _ ->
-      print_endline "🛑 Verification Failed.";
-      false
+  let sb = Filename.concat me_root "scripts/sb" in
+  if not (Sys.file_exists sb) then begin
+    print_endline "⚠️  sb script not found; skipping verification.";
+    true
+  end else if run_ok ~stderr:`Dev_null sb [ "doctor"; "--no-network" ] then begin
+    print_endline "✅ Verification Passed.";
+    true
+  end else begin
+    print_endline "🛑 Verification Failed.";
+    false
+  end
 
-let execute_mutation title ptype suggestion =
+let execute_mutation ~enable_git title ptype suggestion =
   Printf.printf "🧬 Mutating: %s...\n" title;
   ensure_dir plans_dir;
 
   let ts = timestamp () in
   let filename = Printf.sprintf "evolution_%d_%s.md" ts ptype in
   let filepath = Filename.concat plans_dir filename in
+  let relpath = Filename.concat "PLANS" filename in
 
   let content = Printf.sprintf {|# Evolution Result: %s
 **Status**: AUTONOMOUS_IMPLEMENTATION_ATTEMPT
@@ -55,15 +54,24 @@ let execute_mutation title ptype suggestion =
   close_out oc;
 
   if verify_evolution () then begin
-    if run_command "git add ." then begin
-      let commit_cmd = Printf.sprintf "git commit -m 'feat(singularity): autonomous evolution of %s'" title in
-      ignore (run_command commit_cmd);
-      print_endline "💾 State saved & Persistent."
-    end;
+    if enable_git then begin
+      if run_ok "git" [ "-C"; me_root; "add"; relpath ] then
+        ignore
+          (run_ok "git"
+             [
+               "-C";
+               me_root;
+               "commit";
+               "-m";
+               Printf.sprintf "feat(ouroboros): evolution %s" title;
+             ]);
+      print_endline "💾 Plan staged/committed (git enabled)."
+    end else
+      print_endline "💾 Plan written (git disabled).";
     true
   end else begin
     print_endline "🛡️  Survival Instinct Triggered: Rolling back broken mutation.";
-    ignore (run_command "git reset --hard HEAD");
+    (try Sys.remove filepath with _ -> ());
     false
   end
 
@@ -74,7 +82,7 @@ let sense_trends () = [
   ("Self-Replicating Code", "NEW_FEATURE", "Spawn sub-instances for parallel evolution");
 ]
 
-let main cycles =
+let main ~enable_git cycles =
   Printf.printf "♾️  Starting Ouroboros Loop (%d cycles)\n" cycles;
 
   if not (git_clean_check ()) then exit 1;
@@ -88,7 +96,7 @@ let main cycles =
     Printf.printf "  [GAP] %s -> Evolution REQUIRED.\n" title;
     Printf.printf "  🎲 MCTS Simulation: Optimizing '%s'...\n" title;
 
-    if execute_mutation title ptype suggestion then
+    if execute_mutation ~enable_git title ptype suggestion then
       Printf.printf "✨ Cycle %d Success!\n" i
     else begin
       Printf.printf "💥 Cycle %d Failed!\n" i;
@@ -102,8 +110,10 @@ let main cycles =
 
 let () =
   let cycles = ref 3 in
+  let enable_git = ref false in
   Arg.parse [
     ("--cycles", Arg.Set_int cycles, "Number of evolution cycles");
+    ("--git", Arg.Set enable_git, "Enable git add/commit for generated plans (default: off)");
   ] (fun _ -> ()) "Usage: ouroboros-loop [--cycles N]";
 
-  main !cycles
+  main ~enable_git:(!enable_git) !cycles

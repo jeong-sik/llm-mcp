@@ -285,36 +285,235 @@ let day_str () =
   Printf.sprintf "%02d" tm.Unix.tm_mday
 
 (* ============================================ *)
-(* Shell Command Execution                      *)
+(* Subprocess Execution (argv only)             *)
 (* ============================================ *)
 
-(** Run shell command and return output lines.
-    Ensures process cleanup on exception. *)
-let run_command cmd =
-  try
-    let ic = Unix.open_process_in cmd in
+module Subprocess = struct
+  type stderr_mode = [ `Capture | `Dev_null | `Stdout ]
+
+  type result = {
+    stdout : string;
+    stderr : string;
+    status : Unix.process_status;
+    timed_out : bool;
+  }
+
+  let env_with_overrides (overrides : (string * string) list) : string array =
+    let tbl = Hashtbl.create 32 in
+    Array.iter
+      (fun kv ->
+        match String.index_opt kv '=' with
+        | None -> ()
+        | Some i ->
+            let k = String.sub kv 0 i in
+            let v = String.sub kv (i + 1) (String.length kv - i - 1) in
+            Hashtbl.replace tbl k v)
+      (Unix.environment ());
+    List.iter (fun (k, v) -> Hashtbl.replace tbl k v) overrides;
+    Hashtbl.to_seq tbl |> Seq.map (fun (k, v) -> k ^ "=" ^ v) |> Array.of_seq
+
+  let write_all fd (s : string) =
+    let len = String.length s in
+    let rec loop off =
+      if off >= len then ()
+      else
+        match Unix.write_substring fd s off (len - off) with
+        | 0 -> ()
+        | n -> loop (off + n)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop off
+    in
+    loop 0
+
+  let run_capture
+      ?stdin
+      ?(env_overrides = [])
+      ?timeout_s
+      ?(stderr = `Capture)
+      (prog : string)
+      (args : string list)
+    : result
+    =
+    let argv = Array.of_list (prog :: args) in
+    let env = env_with_overrides env_overrides in
+
+    let stdout_r, stdout_w = Unix.pipe () in
+
+    let stderr_pipe =
+      match stderr with
+      | `Capture ->
+          let r, w = Unix.pipe () in
+          Some (r, w)
+      | `Stdout | `Dev_null -> None
+    in
+
+    let stdin_fd, stdin_write_opt =
+      match stdin with
+      | None ->
+          (Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644, None)
+      | Some s ->
+          let r, w = Unix.pipe () in
+          (r, Some (w, s))
+    in
+
+    let stderr_fd, stderr_r_opt, close_stderr_w_opt, close_devnull_out_opt =
+      match stderr with
+      | `Capture ->
+          let r, w = Option.get stderr_pipe in
+          (w, Some r, Some w, None)
+      | `Stdout -> (stdout_w, None, None, None)
+      | `Dev_null ->
+          let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
+          (devnull, None, None, Some devnull)
+    in
+
+    let pid =
+      Unix.create_process_env prog argv env stdin_fd stdout_w stderr_fd
+    in
+
+    (* Parent closes child-side FDs. *)
+    Unix.close stdout_w;
+    (match close_stderr_w_opt with Some fd -> Unix.close fd | None -> ());
+    Unix.close stdin_fd;
+    (match close_devnull_out_opt with Some fd -> Unix.close fd | None -> ());
+
+    (* Write stdin, if provided, then close the write end. *)
+    (match stdin_write_opt with
+     | None -> ()
+     | Some (w, s) ->
+         Fun.protect
+           ~finally:(fun () -> (try Unix.close w with _ -> ()))
+           (fun () -> write_all w s));
+
+    Unix.set_nonblock stdout_r;
+    Option.iter Unix.set_nonblock stderr_r_opt;
+
+    let stdout_buf = Buffer.create 4096 in
+    let stderr_buf = Buffer.create 1024 in
+    let tmp = Bytes.create 8192 in
+
+    let status_ref : Unix.process_status option ref = ref None in
+    let timed_out_ref = ref false in
+    let start = Unix.gettimeofday () in
+
+    let set_status st =
+      match !status_ref with Some _ -> () | None -> status_ref := Some st
+    in
+
+    let check_status_nohang () =
+      match Unix.waitpid [ Unix.WNOHANG ] pid with
+      | 0, _ -> ()
+      | _, st -> set_status st
+    in
+
+    let terminate () =
+      if not !timed_out_ref then begin
+        timed_out_ref := true;
+        (try Unix.kill pid Sys.sigterm with _ -> ());
+        for _i = 1 to 10 do
+          check_status_nohang ();
+          if !status_ref = None then Unix.sleepf 0.05
+        done;
+        if !status_ref = None then (try Unix.kill pid Sys.sigkill with _ -> ())
+      end
+    in
+
+    let rec drain_fd fd buf =
+      match Unix.read fd tmp 0 (Bytes.length tmp) with
+      | 0 -> `Eof
+      | n ->
+          Buffer.add_subbytes buf tmp 0 n;
+          `More
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain_fd fd buf
+      | exception Unix.Unix_error (Unix.EAGAIN, _, _)
+      | exception Unix.Unix_error (Unix.EWOULDBLOCK, _, _) -> `Wait
+    in
+
+    let rec loop open_fds =
+      if open_fds = [] then ()
+      else begin
+        (match timeout_s with
+         | None -> ()
+         | Some t ->
+             let elapsed = Unix.gettimeofday () -. start in
+             if elapsed >= t then terminate ());
+
+        check_status_nohang ();
+
+        let select_timeout =
+          match timeout_s with
+          | None -> 0.2
+          | Some t ->
+              let elapsed = Unix.gettimeofday () -. start in
+              let remaining = t -. elapsed in
+              if remaining <= 0.0 then 0.0 else min 0.2 remaining
+        in
+        let readable, _, _ = Unix.select open_fds [] [] select_timeout in
+
+        let still_open = ref open_fds in
+        let close_fd fd =
+          (try Unix.close fd with _ -> ());
+          still_open := List.filter (fun x -> x <> fd) !still_open
+        in
+
+        List.iter
+          (fun fd ->
+            let target_buf = if fd = stdout_r then stdout_buf else stderr_buf in
+            let rec drain_loop () =
+              match drain_fd fd target_buf with
+              | `More -> drain_loop ()
+              | `Wait -> ()
+              | `Eof -> close_fd fd
+            in
+            drain_loop ())
+          readable;
+
+        loop !still_open
+      end
+    in
+
     Fun.protect
       ~finally:(fun () ->
-        try ignore (Unix.close_process_in ic) with
-        | ex ->
-            Log.warn "common" "close_process_in failed in finalizer: %s"
-              (Printexc.to_string ex))
+        (try Unix.close stdout_r with _ -> ());
+        Option.iter (fun fd -> try Unix.close fd with _ -> ()) stderr_r_opt)
       (fun () ->
-      let lines = ref [] in
-      begin
-        try
-          while true do
-            lines := input_line ic :: !lines
-          done
-        with End_of_file -> ()
-      end;
-      List.rev !lines
-    )
-  with Unix.Unix_error _ | Sys_error _ -> []
+        let open_fds =
+          stdout_r :: (match stderr_r_opt with Some fd -> [ fd ] | None -> [])
+        in
+        loop open_fds);
 
-(** Run command and return output as string *)
-let run_cmd cmd =
-  String.concat "\n" (run_command cmd)
+    (match !status_ref with
+     | Some _ -> ()
+     | None ->
+         let _, st = Unix.waitpid [] pid in
+         set_status st);
+
+    {
+      stdout = Buffer.contents stdout_buf;
+      stderr = (match stderr with `Capture -> Buffer.contents stderr_buf | _ -> "");
+      status = Option.get !status_ref;
+      timed_out = !timed_out_ref;
+    }
+
+  let stdout_lines (s : string) : string list =
+    String.split_on_char '\n' s
+    |> List.map String.trim
+    |> List.filter (fun l -> l <> "")
+
+  let run_stdout_lines ?timeout_s ?(stderr = `Dev_null) prog args =
+    let res = run_capture ?timeout_s ~stderr prog args in
+    match res.status with
+    | Unix.WEXITED 0 -> stdout_lines res.stdout
+    | _ -> []
+end
+
+(** Run external command (argv only) and return stdout lines on success. *)
+let run_command ?timeout_s ?(stderr = `Dev_null) prog args =
+  try Subprocess.run_stdout_lines ?timeout_s ~stderr prog args
+  with _ -> []
+
+(** Run external command (argv only) and return stdout as a string on success. *)
+let run_cmd ?timeout_s ?(stderr = `Dev_null) prog args =
+  String.concat "\n" (run_command ?timeout_s ~stderr prog args)
 
 (** Escape special characters for JSON string *)
 let json_escape s =
@@ -330,11 +529,9 @@ let json_escape s =
   ) s;
   Buffer.contents buf
 
-(** Run git command in specified directory *)
+(** Run git command in specified directory (argv only). *)
 let run_git_command repo_path args =
-  let cmd = String.concat " " ("git" :: args) in
-  let full_cmd = Printf.sprintf "cd %s && %s 2>/dev/null" (Filename.quote repo_path) cmd in
-  run_command full_cmd
+  run_command ~stderr:`Dev_null "git" ("-C" :: repo_path :: args)
 
 (* ============================================ *)
 (* Output Formatting                            *)

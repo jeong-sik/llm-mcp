@@ -48,6 +48,25 @@ type gate_result = {
   notes : string;
 }
 
+let run_capture_stdout prog args =
+  let argv = Array.of_list (prog :: args) in
+  let env = Unix.environment () in
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+  let devnull_err = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
+  let stdout_r, stdout_w = Unix.pipe () in
+  let pid = Unix.create_process_env prog argv env devnull_in stdout_w devnull_err in
+  Unix.close devnull_in;
+  Unix.close devnull_err;
+  Unix.close stdout_w;
+  let output =
+    let ic = Unix.in_channel_of_descr stdout_r in
+    Fun.protect
+      ~finally:(fun () -> (try close_in ic with _ -> ()))
+      (fun () -> In_channel.input_all ic)
+  in
+  let _pid, _status = Unix.waitpid [] pid in
+  output
+
 let encode_image_b64 path =
   let ic = open_in_bin path in
   let n = in_channel_length ic in
@@ -111,15 +130,21 @@ let parse_result json =
   { is_clean_reference = is_clean; issues; confidence; notes }
 
 let magick_gray_stats path =
-  let cmd =
-    Printf.sprintf
-      "magick %s -colorspace Gray -format '%%[fx:mean] %%[fx:standard_deviation]' info:"
-      (Filename.quote path)
-  in
   try
-    let ic = Unix.open_process_in cmd in
-    let line = input_line ic in
-    let _ = Unix.close_process_in ic in
+    let line =
+      run_capture_stdout "magick"
+        [
+          path;
+          "-colorspace";
+          "Gray";
+          "-format";
+          "%[fx:mean] %[fx:standard_deviation]";
+          "info:";
+        ]
+      |> String.split_on_char '\n'
+      |> List.map String.trim
+      |> List.find (fun s -> s <> "")
+    in
     match String.split_on_char ' ' (String.trim line) with
     | [ mean_s; std_s ] -> Some (float_of_string mean_s, float_of_string std_s)
     | _ -> None
@@ -163,20 +188,17 @@ let call_ollama model image_b64 =
       ]
   in
   let body = Yojson.Safe.to_string payload in
-  let cmd =
-    Printf.sprintf "curl -s -X POST %s -H 'Content-Type: application/json' -d '%s'" ollama_chat_url
-      (String.escaped body)
-  in
-  let ic = Unix.open_process_in cmd in
-  let buf = Buffer.create 4096 in
-  (try
-     while true do
-       Buffer.add_string buf (input_line ic);
-       Buffer.add_char buf '\n'
-     done
-   with End_of_file -> ());
-  let _ = Unix.close_process_in ic in
-  Buffer.contents buf
+  run_capture_stdout "curl"
+    [
+      "-s";
+      "-X";
+      "POST";
+      ollama_chat_url;
+      "-H";
+      "Content-Type: application/json";
+      "-d";
+      body;
+    ]
 
 let extract_json text =
   let re = Re.Pcre.regexp "\\{[\\s\\S]*\\}" in
