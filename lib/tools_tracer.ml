@@ -13,6 +13,7 @@ let get_model_name = function
   | Codex { model; _ } -> Printf.sprintf "codex:%s" model
   | Ollama { model; _ } -> Printf.sprintf "ollama:%s" model
   | OllamaList -> "ollama:list"
+  | GeminiList _ -> "gemini:list"
   | Glm { model; _ } -> Printf.sprintf "glm:%s" model
   | GlmTranslate { model; _ } -> Printf.sprintf "glm.translate:%s" model
   | ChainRun _ -> "chain:run"
@@ -39,6 +40,7 @@ let get_input = function
   | Codex { prompt; _ } -> prompt
   | Ollama { prompt; _ } -> prompt
   | OllamaList -> "(list models)"
+  | GeminiList _ -> "(list models)"
   | Glm { prompt; _ } -> prompt
   | GlmTranslate { text; _ } -> Printf.sprintf "(translate: %s)" (String.sub text 0 (min 50 (String.length text)))
   | ChainRun { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
@@ -61,6 +63,7 @@ let get_tool_name = function
   | ChainCheckpoints _ -> "chain.checkpoints"
   | ChainResume _ -> "chain.resume"
   | OllamaList -> "ollama.list"
+  | GeminiList _ -> "gemini.list"
   | PromptRegister _ -> "prompt.register"
   | PromptList -> "prompt.list"
   | PromptGet _ -> "prompt.get"

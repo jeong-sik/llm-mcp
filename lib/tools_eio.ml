@@ -21,6 +21,7 @@ open Cli_runner_eio
 (* Pure functions - from Tool_parsers module *)
 let budget_mode_value = Tool_parsers.budget_mode_value
 let parse_gemini_args = Tool_parsers.parse_gemini_args
+let parse_gemini_list_args = Tool_parsers.parse_gemini_list_args
 let parse_claude_args = Tool_parsers.parse_claude_args
 let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
@@ -1224,6 +1225,9 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         end  (* close else begin for non-streaming *)
         end)  (* close match require_api_key *)
 
+  | GeminiList { filter; include_all } ->
+      Handler_gemini.list_models ~sw ~proc_mgr ~clock ~filter ~include_all ()
+
   | OllamaList ->
       let cmd = "ollama" in
       let cmd_args = ["list"] in
@@ -1480,13 +1484,16 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     if starts_with ~prefix:"Error:" output then Error output else Ok output
                 | None ->
                     let result =
-                      match name with
-                      | "gemini" ->
-                          let args = parse_gemini_args args in
-                          execute ~sw ~proc_mgr ~clock args
-                      | "claude-cli" ->
-                          let args = parse_claude_args args in
-                          execute ~sw ~proc_mgr ~clock args
+	                      match name with
+	                      | "gemini" ->
+	                          let args = parse_gemini_args args in
+	                          execute ~sw ~proc_mgr ~clock args
+	                      | "gemini_list" ->
+	                          let args = parse_gemini_list_args args in
+	                          execute ~sw ~proc_mgr ~clock args
+	                      | "claude-cli" ->
+	                          let args = parse_claude_args args in
+	                          execute ~sw ~proc_mgr ~clock args
                       | "codex" ->
                           let args = parse_codex_args args in
                           execute ~sw ~proc_mgr ~clock args
@@ -2835,13 +2842,16 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 if starts_with ~prefix:"Error:" output then Error output else Ok output
             | None ->
                 let result =
-                  match name with
-                  | "gemini" ->
-                      let args = parse_gemini_args args in
-                      execute ~sw ~proc_mgr ~clock args
-                  | "claude-cli" ->
-                      let args = parse_claude_args args in
-                      execute ~sw ~proc_mgr ~clock args
+	                  match name with
+	                  | "gemini" ->
+	                      let args = parse_gemini_args args in
+	                      execute ~sw ~proc_mgr ~clock args
+	                  | "gemini_list" ->
+	                      let args = parse_gemini_list_args args in
+	                      execute ~sw ~proc_mgr ~clock args
+	                  | "claude-cli" ->
+	                      let args = parse_claude_args args in
+	                      execute ~sw ~proc_mgr ~clock args
                   | "codex" ->
                       let args = parse_codex_args args in
                       execute ~sw ~proc_mgr ~clock args

@@ -88,6 +88,34 @@ Parameters:
   ];
 }
 
+let gemini_list_schema : tool_schema = {
+  name = "gemini_list";
+  description = {|List Gemini model IDs for selection/discovery.
+
+Behavior:
+- If GEMINI_API_KEY is set, fetch a live model list from the Gemini (Generative Language) API.
+- Otherwise, return a small static list + alias mapping (useful for offline discovery).
+
+Parameters:
+- filter: Optional substring filter on model id (case-insensitive)
+- include_all: Include non-generateContent models (default: false)|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("filter", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Optional substring filter on model id (case-insensitive)");
+      ]);
+      ("include_all", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Include non-generateContent models");
+        ("default", `Bool false);
+      ]);
+    ]);
+    ("required", `List []);
+  ];
+}
+
 let claude_schema : tool_schema = {
   name = "claude-cli";
   description = {|Run Claude Code CLI in print mode (-p).
@@ -1015,6 +1043,7 @@ Requires SLACK_BOT_TOKEN environment variable.|};
 
 let all_schemas = [
   gemini_schema;
+  gemini_list_schema;
   claude_schema;
   codex_schema;
   ollama_schema;

@@ -157,6 +157,13 @@ let parse_ollama_args (json : Yojson.Safe.t) : tool_args =
 let parse_ollama_list_args (_json : Yojson.Safe.t) : tool_args =
   OllamaList
 
+(** Parse JSON arguments for gemini_list tool *)
+let parse_gemini_list_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let filter = json |> member "filter" |> to_string_option in
+  let include_all = json |> member "include_all" |> to_bool_option |> Option.value ~default:false in
+  GeminiList { filter; include_all }
+
 (** Parse JSON arguments for GLM (Z.ai) tool *)
 (** Parse a single GLM tool from JSON *)
 let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =

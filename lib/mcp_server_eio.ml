@@ -275,6 +275,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let parse_args name : (Types.tool_args, string) result =
     match name with
     | "gemini" -> Ok (Tools_eio.parse_gemini_args arguments)
+    | "gemini_list" -> Ok (Tools_eio.parse_gemini_list_args arguments)
     | "claude-cli" -> Ok (Tools_eio.parse_claude_args arguments)
     | "codex" -> Ok (Tools_eio.parse_codex_args arguments)
     | "ollama" -> Ok (Tools_eio.parse_ollama_args arguments)
