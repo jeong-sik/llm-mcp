@@ -76,6 +76,29 @@ let test_lookup_entry_metadata () =
   check bool "has timestamp" true (e.registered_at > 0.0);
   check (option string) "description" (Some desc) e.description
 
+let test_load_from_dir_registers_chains () =
+  (* Isolated registry state for this test *)
+  clear ();
+  let dir = Printf.sprintf "/tmp/llm-mcp-chain-registry-load-%d-%d"
+    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  Unix.mkdir dir 0o755;
+
+  let chain_id = make_unique_id "load_dir_test" in
+  let chain = make_test_chain chain_id in
+  let path = Filename.concat dir (chain_id ^ ".json") in
+  let json = chain_to_yojson chain |> Yojson.Safe.pretty_to_string in
+  Out_channel.with_open_text path (fun oc -> Out_channel.output_string oc json);
+
+  let loaded, errors = load_from_dir dir in
+  check int "loaded" 1 loaded;
+  check int "errors" 0 (List.length errors);
+  check bool "exists after load" true (exists chain_id);
+  check bool "lookup after load" true (Option.is_some (lookup chain_id));
+
+  (* Best-effort cleanup *)
+  (try Sys.remove path with _ -> ());
+  (try Unix.rmdir dir with _ -> ())
+
 (** {1 Exists Tests} *)
 
 let test_exists_registered () =
@@ -184,6 +207,7 @@ let register_lookup_tests = [
   test_case "lookup missing" `Quick test_lookup_missing;
   test_case "lookup_exn missing" `Quick test_lookup_exn_missing;
   test_case "lookup entry metadata" `Quick test_lookup_entry_metadata;
+  test_case "load_from_dir registers chains" `Quick test_load_from_dir_registers_chains;
 ]
 
 let exists_tests = [
