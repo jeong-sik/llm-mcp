@@ -75,6 +75,7 @@ let test_mixed_errors () =
 
 (* Circuit breaker edge: exactly at threshold *)
 let test_breaker_at_threshold () =
+  Eio_main.run @@ fun _env ->
   let breaker = Chain_executor_retry.create_breaker ~failure_threshold:3 () in
   Chain_executor_retry.circuit_failure breaker;
   Chain_executor_retry.circuit_failure breaker;
@@ -84,6 +85,7 @@ let test_breaker_at_threshold () =
 
 (* Circuit breaker: success resets count *)
 let test_breaker_success_resets () =
+  Eio_main.run @@ fun _env ->
   let breaker = Chain_executor_retry.create_breaker ~failure_threshold:3 () in
   Chain_executor_retry.circuit_failure breaker;
   Chain_executor_retry.circuit_failure breaker;

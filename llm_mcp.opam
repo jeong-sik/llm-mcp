@@ -37,6 +37,8 @@ depends: [
   "integers" {>= "0.7"}
   "zstd" {>= "0.4"}
   "domainslib" {>= "0.5"}
+  "qcheck" {with-test}
+  "qcheck-alcotest" {with-test}
   "alcotest" {with-test & >= "1.6"}
   "odoc" {with-doc}
 ]
