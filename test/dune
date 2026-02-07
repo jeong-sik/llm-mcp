@@ -1,7 +1,7 @@
 ; Pure tests - NO Lwt, NO Eio runtime (uses llm_mcp.common only)
 (tests
- (names test_types test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
- (modules test_types test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser)
+ (names test_types test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser test_tools_tracer)
+ (modules test_types test_dictionary test_common test_mcp_session test_sse test_notification_sse test_safe_parse test_chain_mermaid_parser test_tools_tracer)
  (libraries llm_mcp.common alcotest str zstd))
 
 ; Model Registry tests (category resolution, passthrough)

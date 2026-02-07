@@ -86,18 +86,39 @@ let was_streamed (r : tool_result) : bool =
   | Some "true" -> true
   | _ -> false
 
-(** Get API key from environment, returns empty string if not set *)
+(** Known aliases for API key env vars. *)
+let api_key_aliases = function
+  | "GEMINI_API_KEY" -> [ "GOOGLE_AI_API_KEY" ]
+  | _ -> []
+
+(** Get API key from environment, returns empty string if not set.
+    Accepts aliases for some providers (e.g. GEMINI_API_KEY ↔ GOOGLE_AI_API_KEY). *)
 let get_api_key env_var =
-  match Sys.getenv_opt env_var with
-  | Some k -> k
-  | None -> ""
+  let get_nonempty k =
+    match Sys.getenv_opt k with
+    | Some v when String.length v > 0 -> Some v
+    | _ -> None
+  in
+  match get_nonempty env_var with
+  | Some v -> v
+  | None ->
+      api_key_aliases env_var
+      |> List.find_map get_nonempty
+      |> Option.value ~default:""
 
 (** Check if API key is set, returns Some error_result if missing *)
 let require_api_key ~env_var ~model ~extra : tool_result option =
   let api_key = get_api_key env_var in
   if String.length api_key = 0 then
+    let names = env_var :: api_key_aliases env_var in
+    let name_str =
+      match names with
+      | [] -> env_var
+      | [one] -> one
+      | _ -> String.concat " or " names
+    in
     Some { model; returncode = -1;
-           response = Printf.sprintf "Error: %s environment variable not set" env_var;
+           response = Printf.sprintf "Error: %s environment variable not set" name_str;
            extra = extra @ [("error", "missing_api_key")] }
   else
     None
