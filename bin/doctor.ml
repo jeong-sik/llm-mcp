@@ -29,12 +29,11 @@ type check_result = {
   latency_ms: float option;
 }
 
-(** Run shell command and capture output *)
-let run_command cmd =
-  let ic = Unix.open_process_in cmd in
-  let output = try input_line ic with End_of_file -> "" in
-  let _ = Unix.close_process_in ic in
-  output
+(** Run external command (argv-only) and capture stdout.
+    Stderr is discarded to keep doctor output clean. *)
+let run_command ?(timeout_s = 2.0) prog args =
+  let res = Common.Subprocess.run_capture ~timeout_s ~stderr:`Dev_null prog args in
+  res.stdout
 
 (** Check if command exists *)
 let command_exists cmd =
@@ -47,7 +46,9 @@ let get_env_opt key =
 (** 1. Check server health *)
 let check_server () =
   let start = Unix.gettimeofday () in
-  let output = run_command "curl -s http://127.0.0.1:8932/health 2>/dev/null" in
+  let output =
+    run_command "curl" [ "-s"; "http://127.0.0.1:8932/health" ]
+  in
   let latency = (Unix.gettimeofday () -. start) *. 1000.0 in
   if String.length output > 0 && String.sub output 0 1 = "{" then
     { name = "Server"; status = `Ok;
@@ -61,11 +62,23 @@ let check_ollama () =
   if not (command_exists "ollama") then
     { name = "Ollama"; status = `Fail; message = "Not installed"; latency_ms = None }
   else
-    let output = run_command "curl -s http://127.0.0.1:11434/api/tags 2>/dev/null | head -c 100" in
+    let output =
+      run_command "curl" [ "-s"; "http://127.0.0.1:11434/api/tags" ]
+      |> (fun s -> if String.length s > 100 then String.sub s 0 100 else s)
+    in
     if String.length output > 0 && String.sub output 0 1 = "{" then
-      let models = run_command "ollama list 2>/dev/null | tail -n +2 | wc -l | tr -d ' '" in
+      let models =
+        run_command "ollama" [ "list" ]
+        |> String.split_on_char '\n'
+        |> List.map String.trim
+        |> List.filter (fun l -> l <> "")
+        |> (fun lines ->
+             match lines with
+             | [] -> 0
+             | _header :: rest -> List.length rest)
+      in
       { name = "Ollama"; status = `Ok;
-        message = Printf.sprintf "%s models loaded" (String.trim models); latency_ms = None }
+        message = Printf.sprintf "%d models loaded" models; latency_ms = None }
     else
       { name = "Ollama"; status = `Warn;
         message = "Installed but not running"; latency_ms = None }

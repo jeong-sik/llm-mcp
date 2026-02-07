@@ -7,9 +7,29 @@ let script_dir = Filename.concat me_root "scripts"
 
 let check_connectivity filename =
   let base = Filename.chop_extension filename in
-  let cmd = Printf.sprintf "grep -r '%s' %s 2>/dev/null | grep -v '%s' > /dev/null 2>&1"
-    base script_dir filename in
-  Unix.system cmd = Unix.WEXITED 0
+  let target = Filename.concat script_dir filename in
+  let found = ref false in
+  let rec walk dir =
+    if not !found then begin
+      try
+        Sys.readdir dir
+        |> Array.iter (fun name ->
+          if not !found then begin
+            let path = Filename.concat dir name in
+            try
+              if Sys.is_directory path then
+                walk path
+              else if path <> target then
+                match read_file_opt path with
+                | None -> ()
+                | Some s -> if contains ~substring:base s then found := true
+            with _ -> ()
+          end)
+      with _ -> ()
+    end
+  in
+  if Sys.file_exists script_dir && Sys.is_directory script_dir then walk script_dir;
+  !found
 
 let scan_vitality () =
   print_endline "🏥 [SURGEON] Scanning system vitality (Usage & Imports)...";

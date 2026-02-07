@@ -33,6 +33,19 @@ let execute_chain ~sw ~clock ~exec_fn ~tool_exec chain =
 
 let ollama_chat_endpoint = "http://localhost:11434/api/chat"
 
+let curl_stdout ?(timeout_s = 2.0) args =
+  let res =
+    Common.Subprocess.run_capture ~timeout_s ~stderr:`Dev_null "curl" args
+  in
+  match res.status with
+  | Unix.WEXITED 0 -> Ok res.stdout
+  | _ -> Error "curl failed"
+
+let fetch_ollama_tags () : Yojson.Safe.t option =
+  match curl_stdout [ "-s"; "http://localhost:11434/api/tags" ] with
+  | Error _ -> None
+  | Ok out -> (try Some (Yojson.Safe.from_string out) with _ -> None)
+
 let call_ollama_chat ~model ~messages ?tools () : (string, string) result =
   let tmp_file = Filename.temp_file "ollama_chat_" ".json" in
   let body_assoc = [
@@ -48,12 +61,23 @@ let call_ollama_chat ~model ~messages ?tools () : (string, string) result =
   let oc = open_out tmp_file in
   output_string oc (Yojson.Safe.to_string body);
   close_out oc;
-  let cmd = Printf.sprintf
-    "curl -s -X POST %s -H 'Content-Type: application/json' -d @%s 2>/dev/null"
-    ollama_chat_endpoint tmp_file in
-  let ic = Unix.open_process_in cmd in
-  let output = In_channel.input_all ic in
-  let _ = Unix.close_process_in ic in
+  let output =
+    match
+      curl_stdout
+        [
+          "-s";
+          "-X";
+          "POST";
+          ollama_chat_endpoint;
+          "-H";
+          "Content-Type: application/json";
+          "-d";
+          "@" ^ tmp_file;
+        ]
+    with
+    | Ok s -> s
+    | Error _ -> ""
+  in
   (try Sys.remove tmp_file with _ -> ());
   try
     let json = Yojson.Safe.from_string output in
@@ -70,12 +94,28 @@ let call_ollama_chat ~model ~messages ?tools () : (string, string) result =
     Error (Printf.sprintf "Ollama error: %s\nRaw: %s" (Printexc.to_string exn) (truncate 200 output))
 
 let ollama_available () : bool =
-  let cmd = "curl -s http://localhost:11434/api/tags 2>/dev/null | grep -q 'models'" in
-  Sys.command cmd = 0
+  match fetch_ollama_tags () with
+  | None -> false
+  | Some json -> (
+      try
+        match Yojson.Safe.Util.(json |> member "models") with
+        | `List _ -> true
+        | _ -> false
+      with _ -> false)
 
 let model_available model =
-  let cmd = Printf.sprintf "curl -s http://localhost:11434/api/tags 2>/dev/null | grep -q '%s'" model in
-  Sys.command cmd = 0
+  match fetch_ollama_tags () with
+  | None -> false
+  | Some json -> (
+      try
+        let open Yojson.Safe.Util in
+        json |> member "models" |> to_list
+        |> List.exists (fun m ->
+             try
+               let name = m |> member "name" |> to_string in
+               name = model
+             with _ -> false)
+      with _ -> false)
 
 (* ============================================================================
    Calculator Tool

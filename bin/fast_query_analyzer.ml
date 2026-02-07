@@ -350,8 +350,10 @@ Now analyze and output JSON only (no markdown):|}
   in
 
   (* Use claude_cli module - for now, shell out *)
-  let cmd = Printf.sprintf "claude -p --model haiku --output-format json" in
-  let (out_ch, in_ch, err_ch) = Unix.open_process_full cmd (Unix.environment ()) in
+  let cmd_parts = [ "claude"; "-p"; "--model"; "haiku"; "--output-format"; "json" ] in
+  let (out_ch, in_ch, err_ch) =
+    Unix.open_process_args_full "claude" (Array.of_list cmd_parts) (Unix.environment ())
+  in
 
   output_string in_ch prompt;
   close_out in_ch;

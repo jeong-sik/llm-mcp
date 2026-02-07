@@ -12,26 +12,15 @@ open Cmdliner
 (** Get ME_ROOT from Common module *)
 let me_root () = Common.me_root
 
-(** Run a command and capture output, with timeout *)
-let run_command_with_timeout cmd timeout_sec =
-  let start = Unix.gettimeofday () in
-  let ic = Unix.open_process_in cmd in
-  let output = Buffer.create 256 in
-  begin
-    try
-      while true do
-        let elapsed = Unix.gettimeofday () -. start in
-        if elapsed > timeout_sec then raise Exit;
-        let line = input_line ic in
-        Buffer.add_string output line;
-        Buffer.add_char output '\n'
-      done
-    with
-    | End_of_file -> ()
-    | Exit -> ()
-  end;
-  let _ = Unix.close_process_in ic in
-  Buffer.contents output
+(** Run an external command (argv-only) and capture stdout, with a real timeout.
+    Stdout/stderr are isolated; stderr is discarded for stability. *)
+let run_command_with_timeout prog args timeout_sec =
+  try
+    let res =
+      Common.Subprocess.run_capture ~timeout_s:timeout_sec ~stderr:`Dev_null prog args
+    in
+    res.stdout
+  with _ -> ""
 
 (** Check if git index.lock exists *)
 let check_git_lock () =
@@ -52,7 +41,9 @@ let get_git_state () =
   else
     try
       (* Changed files *)
-      let changed_output = run_command_with_timeout "git diff --name-only HEAD 2>/dev/null" 0.5 in
+      let changed_output =
+        run_command_with_timeout "git" [ "-C"; me_root (); "diff"; "--name-only"; "HEAD" ] 0.5
+      in
       let changed_files =
         String.split_on_char '\n' changed_output
         |> List.filter (fun s -> String.length s > 0)
@@ -61,7 +52,11 @@ let get_git_state () =
       in
 
       (* Untracked files *)
-      let untracked_output = run_command_with_timeout "git ls-files --others --exclude-standard 2>/dev/null" 0.5 in
+      let untracked_output =
+        run_command_with_timeout "git"
+          [ "-C"; me_root (); "ls-files"; "--others"; "--exclude-standard" ]
+          0.5
+      in
       let untracked_files =
         String.split_on_char '\n' untracked_output
         |> List.filter (fun s -> String.length s > 0)
@@ -70,7 +65,11 @@ let get_git_state () =
       in
 
       (* Recent commits *)
-      let commits_output = run_command_with_timeout "git log -5 --oneline 2>/dev/null" 0.5 in
+      let commits_output =
+        run_command_with_timeout "git"
+          [ "-C"; me_root (); "log"; "-5"; "--oneline" ]
+          0.5
+      in
       let recent_commits =
         String.split_on_char '\n' commits_output
         |> List.filter (fun s -> String.length s > 0)

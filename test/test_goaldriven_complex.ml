@@ -34,6 +34,17 @@ let execute_chain ~sw ~clock ~exec_fn ~tool_exec chain =
 
 let ollama_endpoint = "http://localhost:11434/api/generate"
 
+let curl_stdout ?(timeout_s = 2.0) args =
+  let res = Common.Subprocess.run_capture ~timeout_s ~stderr:`Dev_null "curl" args in
+  match res.status with
+  | Unix.WEXITED 0 -> Ok res.stdout
+  | _ -> Error "curl failed"
+
+let fetch_ollama_tags () : Yojson.Safe.t option =
+  match curl_stdout [ "-s"; "http://localhost:11434/api/tags" ] with
+  | Error _ -> None
+  | Ok out -> (try Some (Yojson.Safe.from_string out) with _ -> None)
+
 let call_ollama ~model ~prompt () : (string, string) result =
   (* Use temp file to avoid shell escaping issues *)
   let tmp_file = Filename.temp_file "ollama_req_" ".json" in
@@ -47,12 +58,23 @@ let call_ollama ~model ~prompt () : (string, string) result =
   output_string oc (Yojson.Safe.to_string body);
   close_out oc;
   (* Call curl with @file *)
-  let cmd = Printf.sprintf
-    "curl -s -X POST %s -H 'Content-Type: application/json' -d @%s 2>/dev/null"
-    ollama_endpoint tmp_file in
-  let ic = Unix.open_process_in cmd in
-  let output = In_channel.input_all ic in
-  let _ = Unix.close_process_in ic in
+  let output =
+    match
+      curl_stdout
+        [
+          "-s";
+          "-X";
+          "POST";
+          ollama_endpoint;
+          "-H";
+          "Content-Type: application/json";
+          "-d";
+          "@" ^ tmp_file;
+        ]
+    with
+    | Ok s -> s
+    | Error _ -> ""
+  in
   (* Cleanup *)
   (try Sys.remove tmp_file with _ -> ());
   try
@@ -64,8 +86,14 @@ let call_ollama ~model ~prompt () : (string, string) result =
     Error (Printf.sprintf "Ollama error: %s\nRaw: %s" (Printexc.to_string exn) output)
 
 let ollama_available () : bool =
-  let cmd = "curl -s http://localhost:11434/api/tags 2>/dev/null | grep -q 'models'" in
-  Sys.command cmd = 0
+  match fetch_ollama_tags () with
+  | None -> false
+  | Some json -> (
+      try
+        match Yojson.Safe.Util.(json |> member "models") with
+        | `List _ -> true
+        | _ -> false
+      with _ -> false)
 
 let make_ollama_exec_fn () =
   fun ~model ?system:_ ~prompt ?tools:_ ?thinking:_ () ->

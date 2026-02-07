@@ -116,7 +116,7 @@
  (public_name llm-mcp-doctor)
  (package llm_mcp)
  (modules doctor)
- (libraries eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix yojson unix)
+ (libraries llm_mcp.common eio eio_main neo4j_bolt_eio mirage-crypto-rng.unix yojson unix)
  (ocamlopt_flags (:standard -O3)))
 
 (executable
@@ -464,4 +464,4 @@
  (public_name auto-sharder)
  (package llm_mcp)
  (modules auto_sharder)
- (libraries yojson cmdliner unix))
+ (libraries llm_mcp.common yojson cmdliner unix))

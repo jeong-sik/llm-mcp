@@ -58,41 +58,75 @@ let spawn_lab experiment_name =
   lab_dir
 
 let run_experiment lab_dir command =
-  Printf.printf "🧪 [LAB] Running experiment: '%s'\n" command;
-
-  (* Set ME_ROOT to lab_dir for the subprocess *)
-  Unix.putenv "ME_ROOT" lab_dir;
-
-  let full_cmd = Printf.sprintf "cd %s && %s" lab_dir command in
-  let exit_code = Unix.system full_cmd in
-
-  match exit_code with
-  | Unix.WEXITED 0 ->
-      print_endline "✨ Experiment SUCCESS!";
-      true
-  | Unix.WEXITED n ->
-      Printf.printf "💥 Experiment FAILED! (exit code: %d)\n" n;
+  match command with
+  | [] ->
+      prerr_endline "❌ Missing command";
       false
-  | _ ->
-      print_endline "💀 Lab exploded!";
-      false
+  | prog :: args ->
+      Printf.printf "🧪 [LAB] Running experiment (argv): %s\n"
+        (String.concat " " (prog :: args));
+
+      let env =
+        let tbl = Hashtbl.create 32 in
+        Array.iter
+          (fun kv ->
+            match String.index_opt kv '=' with
+            | None -> ()
+            | Some i ->
+                let k = String.sub kv 0 i in
+                let v = String.sub kv (i + 1) (String.length kv - i - 1) in
+                Hashtbl.replace tbl k v)
+          (Unix.environment ());
+        Hashtbl.replace tbl "ME_ROOT" lab_dir;
+        Hashtbl.to_seq tbl |> Seq.map (fun (k, v) -> k ^ "=" ^ v) |> Array.of_seq
+      in
+
+      let argv = Array.of_list (prog :: args) in
+      let cwd = Sys.getcwd () in
+      let exit_status =
+        Fun.protect
+          ~finally:(fun () -> (try Unix.chdir cwd with _ -> ()))
+          (fun () ->
+            Unix.chdir lab_dir;
+            let pid =
+              Unix.create_process_env prog argv env Unix.stdin Unix.stdout Unix.stderr
+            in
+            let _pid, status = Unix.waitpid [] pid in
+            status)
+      in
+
+      match exit_status with
+      | Unix.WEXITED 0 ->
+          print_endline "✨ Experiment SUCCESS!";
+          true
+      | Unix.WEXITED n ->
+          Printf.printf "💥 Experiment FAILED! (exit code: %d)\n" n;
+          false
+      | _ ->
+          print_endline "💀 Lab exploded!";
+          false
 
 let cleanup lab_dir =
   Printf.printf "🧹 [CLEANUP] Destroying lab %s...\n" lab_dir;
-  let cmd = Printf.sprintf "rm -rf %s" lab_dir in
-  ignore (Unix.system cmd)
+  rm_rf lab_dir
 
 let () =
-  if Array.length Sys.argv < 3 then begin
-    print_endline "Usage: ouroboros-spawn <experiment_name> <command>";
+  if Array.length Sys.argv < 4 then begin
+    print_endline "Usage: ouroboros-spawn <experiment_name> -- <command> [args...]";
     exit 1
   end;
 
-  let name = Sys.argv.(1) in
-  let cmd = Sys.argv.(2) in
+  let args = Array.to_list Sys.argv |> List.tl in
+  let name, command =
+    match args with
+    | name :: "--" :: cmd -> (name, cmd)
+    | _ ->
+        print_endline "Usage: ouroboros-spawn <experiment_name> -- <command> [args...]";
+        exit 1
+  in
 
   let lab = spawn_lab name in
-  let success = run_experiment lab cmd in
+  let success = run_experiment lab command in
   cleanup lab;
 
   exit (if success then 0 else 1)

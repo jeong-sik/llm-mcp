@@ -40,25 +40,55 @@ let parse_pg_url url =
 
 (** Run psql command and return success *)
 let run_psql host port user password database sql =
-  let cmd = Printf.sprintf
-    "PGPASSWORD=%s psql -h %s -p %s -U %s -d %s -c %s -t -q 2>/dev/null"
-    (Filename.quote password)
-    (Filename.quote host)
-    (Filename.quote port)
-    (Filename.quote user)
-    (Filename.quote database)
-    (Filename.quote sql)
+  let env =
+    (* Override/extend current environment with PGPASSWORD (argv-only, no shell). *)
+    let tbl = Hashtbl.create 32 in
+    Array.iter
+      (fun kv ->
+        match String.index_opt kv '=' with
+        | None -> ()
+        | Some i ->
+            let k = String.sub kv 0 i in
+            let v = String.sub kv (i + 1) (String.length kv - i - 1) in
+            Hashtbl.replace tbl k v)
+      (Unix.environment ());
+    Hashtbl.replace tbl "PGPASSWORD" password;
+    Hashtbl.to_seq tbl |> Seq.map (fun (k, v) -> k ^ "=" ^ v) |> Array.of_seq
   in
-  let ic = Unix.open_process_in cmd in
+  let argv =
+    [|
+      "psql";
+      "-h";
+      host;
+      "-p";
+      port;
+      "-U";
+      user;
+      "-d";
+      database;
+      "-c";
+      sql;
+      "-t";
+      "-q";
+    |]
+  in
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o644 in
+  let devnull_err = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
+  let stdout_r, stdout_w = Unix.pipe () in
+  let pid = Unix.create_process_env "psql" argv env devnull_in stdout_w devnull_err in
+  Unix.close devnull_in;
+  Unix.close devnull_err;
+  Unix.close stdout_w;
   let output =
-    try
-      let buf = Buffer.create 256 in
-      (try while true do Buffer.add_string buf (input_line ic); Buffer.add_char buf '\n' done
-       with End_of_file -> ());
-      String.trim (Buffer.contents buf)
-    with Sys_error _ | End_of_file -> ""
+    Fun.protect
+      ~finally:(fun () -> (try Unix.close stdout_r with _ -> ()))
+      (fun () ->
+        let ic = Unix.in_channel_of_descr stdout_r in
+        Fun.protect
+          ~finally:(fun () -> (try close_in ic with _ -> ()))
+          (fun () -> String.trim (In_channel.input_all ic)))
   in
-  let status = Unix.close_process_in ic in
+  let _pid, status = Unix.waitpid [] pid in
   (status = Unix.WEXITED 0, output)
 
 (** Get ISO timestamp *)

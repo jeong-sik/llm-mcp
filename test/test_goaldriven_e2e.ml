@@ -41,16 +41,32 @@ let execute_chain ~sw ~clock ~exec_fn ~tool_exec chain _input =
 
 let ollama_endpoint = "http://localhost:11434/api/generate"
 
+(** Minimal curl wrapper (argv-only). *)
+let curl_stdout ?(timeout_s = 2.0) args =
+  let res = Common.Subprocess.run_capture ~timeout_s ~stderr:`Dev_null "curl" args in
+  match res.status with
+  | Unix.WEXITED 0 -> Ok res.stdout
+  | _ -> Error "curl failed"
+
+let fetch_ollama_tags () : Yojson.Safe.t option =
+  match curl_stdout [ "-s"; "http://localhost:11434/api/tags" ] with
+  | Error _ -> None
+  | Ok out -> (try Some (Yojson.Safe.from_string out) with _ -> None)
+
 (** Call Ollama API directly *)
 let call_ollama ~model ~prompt () : (string, string) result =
-  let body = Printf.sprintf {|{"model":"%s","prompt":"%s","stream":false}|}
-    model (String.escaped prompt) in
-  let cmd = Printf.sprintf
-    "curl -s -X POST %s -H 'Content-Type: application/json' -d '%s' 2>/dev/null"
-    ollama_endpoint body in
-  let ic = Unix.open_process_in cmd in
-  let output = In_channel.input_all ic in
-  let _ = Unix.close_process_in ic in
+  let body =
+    `Assoc [ ("model", `String model); ("prompt", `String prompt); ("stream", `Bool false) ]
+    |> Yojson.Safe.to_string
+  in
+  let output =
+    match
+      curl_stdout
+        [ "-s"; "-X"; "POST"; ollama_endpoint; "-H"; "Content-Type: application/json"; "-d"; body ]
+    with
+    | Ok s -> s
+    | Error _ -> ""
+  in
   (* Parse JSON response *)
   try
     let json = Yojson.Safe.from_string output in
@@ -62,8 +78,14 @@ let call_ollama ~model ~prompt () : (string, string) result =
 
 (** Check if Ollama is available *)
 let ollama_available () : bool =
-  let cmd = "curl -s http://localhost:11434/api/tags 2>/dev/null | grep -q 'models'" in
-  Sys.command cmd = 0
+  match fetch_ollama_tags () with
+  | None -> false
+  | Some json -> (
+      try
+        match Yojson.Safe.Util.(json |> member "models") with
+        | `List _ -> true
+        | _ -> false
+      with _ -> false)
 
 (* ============================================================================
    Test Helpers

@@ -6,12 +6,6 @@ open Cmdliner
 
 (* --- Utils --- *)
 
-let run_cmd cmd =
-  let ic = Unix.open_process_in cmd in
-  let all_input = In_channel.input_all ic in
-  let _ = Unix.close_process_in ic in
-  all_input
-
 let today_str () =
   let tm = Unix.localtime (Unix.time ()) in
   Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
@@ -27,8 +21,17 @@ let get_journal_path date =
 let count_lines file =
   if not (Sys.file_exists file) then 0
   else
-    let cmd = Printf.sprintf "wc -l < %s" file in
-    try int_of_string (String.trim (run_cmd cmd)) with Failure _ -> 0
+    try
+      In_channel.with_open_text file (fun ic ->
+        let n = ref 0 in
+        (try
+           while true do
+             ignore (input_line ic);
+             incr n
+           done
+         with End_of_file -> ());
+        !n)
+    with _ -> 0
 
 let check_current threshold =
   let today = today_str () in

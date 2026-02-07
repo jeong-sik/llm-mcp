@@ -8,10 +8,7 @@ let synapse_dir = Filename.concat swarm_dir "synapses"
 let _task_dir = Filename.concat swarm_dir "tasks"  (* Reserved for future use *)
 
 let hostname =
-  let ic = Unix.open_process_in "hostname" in
-  let h = input_line ic in
-  ignore (Unix.close_process_in ic);
-  h
+  Unix.gethostname ()
 
 let heartbeat_file = Filename.concat swarm_dir (Printf.sprintf "heartbeat_%s.json" hostname)
 let liquid_state_path = Filename.concat (Filename.concat (Filename.concat me_root "lib") "state") "liquid_state.json"
