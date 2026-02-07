@@ -93,6 +93,29 @@ let write_binary_file path content =
     output_string oc content
     )
 
+(** Run an external process without invoking a shell.
+
+    This avoids command injection and quoting bugs from `Sys.command`/`/bin/sh -c`.
+    Stdout/stderr are redirected to /dev/null (dictionary CLI usage is best-effort). *)
+let run_process_silent (prog : string) (args : string list) : (int, string) result =
+  let argv = Array.of_list (prog :: args) in
+  let devnull = Unix.openfile "/dev/null" [Unix.O_WRONLY] 0o666 in
+  Fun.protect
+    ~finally:(fun () -> Unix.close devnull)
+    (fun () ->
+      try
+        let pid = Unix.create_process prog argv Unix.stdin devnull devnull in
+        match snd (Unix.waitpid [] pid) with
+        | Unix.WEXITED code -> Ok code
+        | Unix.WSIGNALED sig_ -> Ok (128 + sig_)
+        | Unix.WSTOPPED sig_ -> Ok (128 + sig_)
+      with
+      | Unix.Unix_error (Unix.ENOENT, _, _) ->
+          Error (Printf.sprintf "Missing executable: %s" prog)
+      | Unix.Unix_error (e, _, _) ->
+          Error (Printf.sprintf "Process error: %s" (Unix.error_message e))
+    )
+
 (** {1 Content Type Detection} *)
 
 let contains_substring s sub =
@@ -248,41 +271,49 @@ let train ~(samples : string list) ~(content_type : content_type) ?(model_type =
   if sample_count < min_samples then
     Error (Printf.sprintf "Need at least %d samples, got %d" min_samples sample_count)
   else
-    (* Write samples to temp files *)
-    let temp_dir = Filename.concat (Filename.get_temp_dir_name ()) "zdict_train" in
-    (try Unix.mkdir temp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-    let sample_files = List.mapi (fun i s ->
-      let path = Filename.concat temp_dir (Printf.sprintf "sample_%d.txt" i) in
-      write_binary_file path s;
-      path
-    ) samples in
-    (* Train with zstd CLI *)
-    let dict_path = Filename.concat temp_dir "trained.dict" in
-    let cmd = Printf.sprintf "zstd --train -o %s --maxdict=%d %s/*.txt 2>/dev/null"
-      dict_path default_dict_size temp_dir in
-    let exit_code = Sys.command cmd in
-    (* Clean up sample files *)
-    List.iter (fun f -> try Sys.remove f with _ -> ()) sample_files;
-    if exit_code <> 0 then
-      Error "zstd training failed (ensure zstd CLI is installed)"
-    else
-      try
-        let dict_data = read_binary_file dict_path in
-        Sys.remove dict_path;
-        (try Unix.rmdir temp_dir with _ -> ());
-        Ok {
-          dict_id = Printf.sprintf "dict_%s_%s_%d"
-            (string_of_content_type content_type)
-            (string_of_model_type model_type)
-            sample_count;
-          content_type;
-          model_type;
-          dict_data;
-          sample_count;
-          created_at = Unix.gettimeofday ();
-        }
-      with e ->
-        Error (Printf.sprintf "Failed to read trained dict: %s" (Printexc.to_string e))
+    (* Write samples to temp files (avoid a shared temp dir + shell globs). *)
+    let sample_files =
+      List.mapi (fun i s ->
+        let path = Filename.temp_file (Printf.sprintf "zdict_sample_%d_" i) ".txt" in
+        write_binary_file path s;
+        path
+      ) samples
+    in
+    let dict_path = Filename.temp_file "zdict_trained_" ".dict" in
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter (fun f -> try Sys.remove f with _ -> ()) sample_files;
+        try Sys.remove dict_path with _ -> ()
+      )
+      (fun () ->
+        (* Train with zstd CLI *)
+        let args =
+          ["--train"; "-o"; dict_path; Printf.sprintf "--maxdict=%d" default_dict_size]
+          @ sample_files
+        in
+        match run_process_silent "zstd" args with
+        | Ok 0 -> (
+            try
+              let dict_data = read_binary_file dict_path in
+              Ok {
+                dict_id = Printf.sprintf "dict_%s_%s_%d"
+                  (string_of_content_type content_type)
+                  (string_of_model_type model_type)
+                  sample_count;
+                content_type;
+                model_type;
+                dict_data;
+                sample_count;
+                created_at = Unix.gettimeofday ();
+              }
+            with e ->
+              Error (Printf.sprintf "Failed to read trained dict: %s" (Printexc.to_string e))
+          )
+        | Ok _ ->
+            Error "zstd training failed (ensure zstd CLI is installed)"
+        | Error msg ->
+            Error msg
+      )
 
 (** Train Universal dictionary from multiple model samples.
     Recommended for multi-agent scenarios (MASC).
@@ -309,32 +340,40 @@ let compress_with_dict (dict : t) ?(level = 3) (data : string) : string =
       let temp_in = Filename.temp_file "zdict_in" ".bin" in
       let temp_out = Filename.temp_file "zdict_out" ".zst" in
       let temp_dict = Filename.temp_file "zdict" ".dict" in
-      (* Write data and dict *)
-      write_binary_file temp_in data;
-      write_binary_file temp_dict dict.dict_data;
-      (* Compress with dict *)
-      let cmd = Printf.sprintf "zstd -%d -D %s -o %s %s 2>/dev/null"
-        level temp_dict temp_out temp_in in
-      let _ = Sys.command cmd in
-      (* Read result *)
-      let compressed = read_binary_file temp_out in
-      (* Clean up *)
-      Sys.remove temp_in;
-      Sys.remove temp_out;
-      Sys.remove temp_dict;
-      (* Build header: ZDCT + orig_size (4 BE) + dict_id_len (1) + dict_id *)
-      if String.length compressed >= orig_size then data
-      else
-        let dict_id_len = min 255 (String.length dict.dict_id) in
-        let header = Bytes.create (4 + 4 + 1 + dict_id_len) in
-        Bytes.blit_string magic 0 header 0 4;
-        Bytes.set header 4 (Char.chr ((orig_size lsr 24) land 0xFF));
-        Bytes.set header 5 (Char.chr ((orig_size lsr 16) land 0xFF));
-        Bytes.set header 6 (Char.chr ((orig_size lsr 8) land 0xFF));
-        Bytes.set header 7 (Char.chr (orig_size land 0xFF));
-        Bytes.set header 8 (Char.chr dict_id_len);
-        Bytes.blit_string dict.dict_id 0 header 9 dict_id_len;
-        Bytes.to_string header ^ compressed
+      Fun.protect
+        ~finally:(fun () ->
+          List.iter (fun f -> try Sys.remove f with _ -> ()) [temp_in; temp_out; temp_dict]
+        )
+        (fun () ->
+          (* Write data and dict *)
+          write_binary_file temp_in data;
+          write_binary_file temp_dict dict.dict_data;
+          (* Compress with dict (argv, no shell) *)
+          let args = [
+            Printf.sprintf "-%d" level;
+            "-D"; temp_dict;
+            "-o"; temp_out;
+            temp_in;
+          ] in
+          match run_process_silent "zstd" args with
+          | Ok 0 ->
+              let compressed = read_binary_file temp_out in
+              (* Build header: ZDCT + orig_size (4 BE) + dict_id_len (1) + dict_id *)
+              if String.length compressed >= orig_size then data
+              else
+                let dict_id_len = min 255 (String.length dict.dict_id) in
+                let header = Bytes.create (4 + 4 + 1 + dict_id_len) in
+                Bytes.blit_string magic 0 header 0 4;
+                Bytes.set header 4 (Char.chr ((orig_size lsr 24) land 0xFF));
+                Bytes.set header 5 (Char.chr ((orig_size lsr 16) land 0xFF));
+                Bytes.set header 6 (Char.chr ((orig_size lsr 8) land 0xFF));
+                Bytes.set header 7 (Char.chr (orig_size land 0xFF));
+                Bytes.set header 8 (Char.chr dict_id_len);
+                Bytes.blit_string dict.dict_id 0 header 9 dict_id_len;
+                Bytes.to_string header ^ compressed
+          | _ ->
+              data
+        )
     with _ -> data
 
 (** Decompress dictionary-compressed data *)
@@ -360,27 +399,25 @@ let decompress_with_dict (dict : t) (data : string) : (string, string) result =
         let temp_in = Filename.temp_file "zdict_in" ".zst" in
         let temp_out = Filename.temp_file "zdict_out" ".bin" in
         let temp_dict = Filename.temp_file "zdict" ".dict" in
-        write_binary_file temp_in compressed;
-        write_binary_file temp_dict dict.dict_data;
-        let cmd = Printf.sprintf "zstd -d -D %s -o %s %s 2>/dev/null"
-          temp_dict temp_out temp_in in
-        let exit_code = Sys.command cmd in
-        if exit_code <> 0 then begin
-          Sys.remove temp_in;
-          Sys.remove temp_dict;
-          (try Sys.remove temp_out with _ -> ());
-          Error "Decompression failed"
-        end else begin
-          let result = read_binary_file temp_out in
-          let result_len = String.length result in
-          Sys.remove temp_in;
-          Sys.remove temp_out;
-          Sys.remove temp_dict;
-          if result_len <> orig_size then
-            Error (Printf.sprintf "Size mismatch: expected %d, got %d" orig_size result_len)
-          else
-            Ok result
-        end
+        Fun.protect
+          ~finally:(fun () ->
+            List.iter (fun f -> try Sys.remove f with _ -> ()) [temp_in; temp_out; temp_dict]
+          )
+          (fun () ->
+            write_binary_file temp_in compressed;
+            write_binary_file temp_dict dict.dict_data;
+            let args = ["-d"; "-D"; temp_dict; "-o"; temp_out; temp_in] in
+            match run_process_silent "zstd" args with
+            | Ok 0 ->
+                let result = read_binary_file temp_out in
+                let result_len = String.length result in
+                if result_len <> orig_size then
+                  Error (Printf.sprintf "Size mismatch: expected %d, got %d" orig_size result_len)
+                else
+                  Ok result
+            | _ ->
+                Error "Decompression failed"
+          )
     with e -> Error (Printexc.to_string e)
 
 (** {1 Built-in Dictionaries} *)
