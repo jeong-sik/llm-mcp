@@ -1277,12 +1277,18 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
             response = sprintf "Error: %s" msg;
             extra = [("local", "true")]; })
 
-  | ChainRun { chain; mermaid; input; trace; checkpoint_enabled; timeout = user_timeout } ->
-      (* Parse from either JSON or Mermaid (WYSIWYE) *)
-      let parse_result = match (chain, mermaid) with
-        | (Some c, _) -> Chain_parser.parse_chain c
-        | (_, Some m) -> Chain_mermaid_parser.parse_mermaid_to_chain m
-        | (None, None) -> Error "Either 'chain' (JSON) or 'mermaid' (string) is required"
+  | ChainRun { chain; mermaid; chain_id; input; trace; checkpoint_enabled; timeout = user_timeout } ->
+      (* Parse from either JSON, Mermaid (WYSIWYE), or a registered preset chain_id. *)
+      let parse_result =
+        match (chain, mermaid, chain_id) with
+        | (Some c, _, _) -> Chain_parser.parse_chain c
+        | (_, Some m, _) -> Chain_mermaid_parser.parse_mermaid_to_chain m
+        | (None, None, Some id) ->
+            (match Chain_registry.lookup id with
+             | Some c -> Ok c
+             | None -> Error (sprintf "Chain '%s' not found in registry (use chain.list)" id))
+        | (None, None, None) ->
+            Error "Either 'chain' (JSON) or 'mermaid' (string) or 'chain_id' is required"
       in
       (match parse_result with
       | Error msg ->

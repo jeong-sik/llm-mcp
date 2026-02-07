@@ -651,8 +651,9 @@ let chain_run_schema : tool_schema = {
   description = {|Execute a Chain DSL workflow.
 
 Parameters:
-- chain: Chain DSL JSON (one of chain/mermaid required)
-- mermaid: Mermaid flowchart text (one of chain/mermaid required)
+- chain: Chain DSL JSON (one of chain/mermaid/chain_id required)
+- mermaid: Mermaid flowchart text (one of chain/mermaid/chain_id required)
+- chain_id: Registered chain preset ID (one of chain/mermaid/chain_id required)
 - input: Initial input (string or JSON object) available as {{input.*}}
 - trace: Enable execution trace (default: false)
 - timeout: Overall timeout in seconds (default: 300)
@@ -674,6 +675,10 @@ graph LR
       ("mermaid", `Assoc [
         ("type", `String "string");
         ("description", `String "Mermaid flowchart text (WYSIWYE - What You See Is What You Execute)");
+      ]);
+      ("chain_id", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Registered chain preset ID (from chain.list)");
       ]);
       ("input", `Assoc [
         ("oneOf", `List [

@@ -61,6 +61,7 @@ type tool_args =
   | ChainRun of {
       chain : Yojson.Safe.t option;  (* Chain definition as JSON *)
       mermaid : string option;       (* Mermaid flowchart text (WYSIWYE) *)
+      chain_id : string option;      (* Registered chain ID to load from data/chains/ *)
       input : string option;         (* Optional initial input *)
       trace : bool;                  (* Enable execution tracing *)
       checkpoint_enabled : bool;     (* Save checkpoints after each node *)

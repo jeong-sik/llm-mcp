@@ -219,6 +219,37 @@ data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",
       Printf.printf "[OK] GetStreamDelta execute test passed\n%!"
     in
 
+    (* Test 15: chain.run can execute a preset by chain_id (registry lookup) *)
+    let () =
+      let open Chain_types in
+      let chain_id = "chain-run-registry-test" in
+      let node : node = {
+        id = "echo1";
+        node_type = Tool { name = "echo"; args = `Assoc [("input", `String "hi")] };
+        input_mapping = [];
+        output_key = None;
+        depends_on = None;
+      } in
+      let chain = make_chain ~id:chain_id ~nodes:[node] ~output:"echo1" () in
+      Chain_registry.register chain;
+      let result =
+        execute_with_tracing ~sw ~proc_mgr ~clock
+          (ChainRun {
+            chain = None;
+            mermaid = None;
+            chain_id = Some chain_id;
+            input = None;
+            trace = false;
+            checkpoint_enabled = false;
+            timeout = Some 30;
+          })
+      in
+      assert (result.model = "chain.run");
+      assert (result.returncode = 0);
+      assert (result.response = "hi");
+      Printf.printf "[OK] chain.run registry chain_id test passed\n%!"
+    in
+
     (* Test 15: Stream delta 'was' value captures previous state correctly *)
     let () =
       (* Set to known state first *)

@@ -86,6 +86,24 @@ let test_parse_gemini_list_custom_values () =
       check bool "include_all true" true g.include_all
   | _ -> fail "Expected GeminiList variant"
 
+(** {1 Parse Chain Run Args Tests} *)
+
+let test_parse_chain_run_chain_id_only () =
+  let json = `Assoc [
+    ("chain_id", `String "simple-test");
+    ("input", `Assoc [("foo", `Int 1)]);
+  ] in
+  match Tool_parsers.parse_chain_run_args json with
+  | ChainRun r ->
+      check (option string) "chain none" None (Option.map (fun _ -> "present") r.chain);
+      check (option string) "mermaid none" None r.mermaid;
+      check (option string) "chain_id" (Some "simple-test") r.chain_id;
+      check (option string) "input serialized" (Some "{\"foo\":1}") r.input;
+      check bool "trace default false" false r.trace;
+      check bool "checkpoint default false" false r.checkpoint_enabled;
+      check (option int) "timeout default none" None r.timeout
+  | _ -> fail "Expected ChainRun variant"
+
 (** {1 Parse Claude Args Tests} *)
 
 let test_parse_claude_defaults () =
@@ -433,6 +451,10 @@ let () =
     "parse_gemini_list_args", [
       test_case "defaults" `Quick test_parse_gemini_list_defaults;
       test_case "custom values" `Quick test_parse_gemini_list_custom_values;
+    ];
+
+    "parse_chain_run_args", [
+      test_case "chain_id only" `Quick test_parse_chain_run_chain_id_only;
     ];
 
     "parse_claude_args", [
