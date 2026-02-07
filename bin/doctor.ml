@@ -38,8 +38,7 @@ let run_command cmd =
 
 (** Check if command exists *)
 let command_exists cmd =
-  let exit_code = Sys.command (Printf.sprintf "which %s > /dev/null 2>&1" cmd) in
-  exit_code = 0
+  Common.command_exists cmd
 
 (** Get environment variable with default *)
 let get_env_opt key =
