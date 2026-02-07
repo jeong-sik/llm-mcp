@@ -54,6 +54,10 @@ type tool_args =
       tools : tool_schema list option;  (* MCP tools for function calling *)
     }
   | OllamaList  (* List available Ollama models *)
+  | GeminiList of {
+      filter : string option;  (* Substring match on model id (case-insensitive) *)
+      include_all : bool;      (* Include non-generateContent models *)
+    }
   | ChainRun of {
       chain : Yojson.Safe.t option;  (* Chain definition as JSON *)
       mermaid : string option;       (* Mermaid flowchart text (WYSIWYE) *)

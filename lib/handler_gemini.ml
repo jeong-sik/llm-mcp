@@ -8,6 +8,210 @@ open Cli_runner_eio
 (** Circuit breaker for Gemini CLI calls *)
 let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli" ~failure_threshold:3 ()
 
+(** Gemini model aliases used across tools. *)
+let gemini_model_aliases : (string * string) list = [
+  ("gemini", "gemini-3-pro-preview");
+  ("pro", "gemini-2.5-pro");
+  ("flash", "gemini-2.5-flash");
+  ("flash-lite", "gemini-2.5-flash-lite");
+  ("3-pro", "gemini-3-pro-preview");
+  ("3-flash", "gemini-3-flash-preview");
+]
+
+let starts_with ~prefix s =
+  let prefix_len = String.length prefix in
+  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+
+let strip_prefix ~prefix s =
+  if starts_with ~prefix s then
+    String.sub s (String.length prefix) (String.length s - String.length prefix)
+  else
+    s
+
+let string_contains_ci ~needle haystack =
+  let n = String.lowercase_ascii needle in
+  let h = String.lowercase_ascii haystack in
+  match Str.search_forward (Str.regexp_string n) h 0 with
+  | _ -> true
+  | exception Not_found -> false
+
+(** Parse /v1beta/models list response into a compact JSON list.
+    Pure (no I/O) so it can be unit-tested. *)
+let parse_models_response ~(include_all : bool) ~(filter : string option) (json : Yojson.Safe.t)
+  : Yojson.Safe.t list =
+  let open Yojson.Safe.Util in
+  let models =
+    match json |> member "models" with
+    | `List xs -> xs
+    | _ -> []
+  in
+  let matches_filter id =
+    match filter with
+    | None -> true
+    | Some f -> string_contains_ci ~needle:f id
+  in
+  let parse_methods (m : Yojson.Safe.t) : string list =
+    match m |> member "supportedGenerationMethods" with
+    | `List xs ->
+        List.filter_map (fun x -> try Some (to_string x) with _ -> None) xs
+    | _ -> []
+  in
+  let to_opt_string (x : Yojson.Safe.t) : string option =
+    try Some (to_string x) with _ -> None
+  in
+  let to_opt_int (x : Yojson.Safe.t) : int option =
+    try Some (to_int x) with _ -> None
+  in
+  models
+  |> List.filter_map (fun m ->
+    let full_name = m |> member "name" |> to_opt_string in
+    match full_name with
+    | None -> None
+    | Some full ->
+        let id = strip_prefix ~prefix:"models/" full in
+        if not (matches_filter id) then None
+        else
+          let methods = parse_methods m in
+          let supports_generate = List.mem "generateContent" methods in
+          if (not include_all) && (not supports_generate) then None
+          else
+            let display_name = m |> member "displayName" |> to_opt_string in
+            let description = m |> member "description" |> to_opt_string in
+            let input_token_limit = m |> member "inputTokenLimit" |> to_opt_int in
+            let output_token_limit = m |> member "outputTokenLimit" |> to_opt_int in
+            Some (`Assoc [
+              ("id", `String id);
+              ("full_name", `String full);
+              ("display_name", (match display_name with Some s -> `String s | None -> `Null));
+              ("description", (match description with Some s -> `String s | None -> `Null));
+              ("input_token_limit", (match input_token_limit with Some n -> `Int n | None -> `Null));
+              ("output_token_limit", (match output_token_limit with Some n -> `Int n | None -> `Null));
+              ("supported_generation_methods", `List (List.map (fun s -> `String s) methods));
+              ("supports_generate_content", `Bool supports_generate);
+            ]))
+
+let aliases_to_json () : Yojson.Safe.t =
+  `Assoc (List.map (fun (a, m) -> (a, `String m)) gemini_model_aliases)
+
+let static_models_to_json ~(filter : string option) : Yojson.Safe.t list =
+  let unique = Hashtbl.create 16 in
+  let models =
+    gemini_model_aliases
+    |> List.map snd
+    |> List.filter (fun id -> if Hashtbl.mem unique id then false else (Hashtbl.add unique id (); true))
+  in
+  let matches_filter id =
+    match filter with
+    | None -> true
+    | Some f -> string_contains_ci ~needle:f id
+  in
+  models
+  |> List.filter matches_filter
+  |> List.map (fun id -> `Assoc [
+    ("id", `String id);
+    ("source", `String "static");
+  ])
+
+let list_models ~sw ~proc_mgr ~clock ~(filter : string option) ~(include_all : bool) () : tool_result =
+  let model_name = "gemini_list" in
+  let api_key = Tools_tracer.get_api_key "GEMINI_API_KEY" in
+  if String.length api_key = 0 then
+    let models = static_models_to_json ~filter in
+    let body = `Assoc [
+      ("source", `String "static");
+      ("note", `String "Set GEMINI_API_KEY to fetch live models from API.");
+      ("filter", (match filter with Some f -> `String f | None -> `Null));
+      ("include_all", `Bool include_all);
+      ("count", `Int (List.length models));
+      ("models", `List models);
+      ("aliases", aliases_to_json ());
+    ] |> Yojson.Safe.to_string
+    in
+    { model = model_name; returncode = 0; response = body; extra = [] }
+  else
+    let base_url = "https://generativelanguage.googleapis.com/v1beta/models" in
+    let build_url page_token =
+      let page_size = "200" in
+      match page_token with
+      | None ->
+          sprintf "%s?pageSize=%s" base_url page_size
+      | Some tok ->
+          sprintf "%s?pageSize=%s&pageToken=%s" base_url page_size (Uri.pct_encode tok)
+    in
+    let fetch_page page_token =
+      let url = build_url page_token in
+      let curl_args = [
+        "-s"; "-S";
+        "-H"; sprintf "x-goog-api-key: %s" api_key;
+        url
+      ] in
+      match run_command ~sw ~proc_mgr ~clock ~timeout:30 "curl" curl_args with
+      | Ok r -> Ok (get_output r)
+      | Error (Timeout t) -> Error (Tools_tracer.timeout_result ~model:model_name ~extra:[] t)
+      | Error (ProcessError msg) -> Error (Tools_tracer.process_error_result ~model:model_name ~extra:[] msg)
+    in
+    let rec loop page_token acc pages =
+      if pages >= 10 then
+        Ok acc
+      else
+        match fetch_page page_token with
+        | Error err -> Error err
+        | Ok raw ->
+            let json =
+              try Ok (Yojson.Safe.from_string raw)
+              with _ ->
+                Error { model = model_name; returncode = -1;
+                        response = sprintf "Failed to parse API response: %s"
+                          (String.sub raw 0 (min 200 (String.length raw)));
+                        extra = []; }
+            in
+            (match json with
+             | Error e -> Error e
+             | Ok j ->
+                 (* Handle API error shape *)
+                 let api_error =
+                   match j with
+                   | `Assoc _ ->
+                       (match Yojson.Safe.Util.member "error" j with
+                        | `Null -> None
+                        | err ->
+                            let msg =
+                              try Yojson.Safe.Util.(err |> member "message" |> to_string)
+                              with _ -> "Unknown API error"
+                            in
+                            Some msg)
+                   | _ -> None
+                 in
+                 (match api_error with
+                  | Some msg ->
+                      Error { model = model_name; returncode = -1;
+                              response = sprintf "API Error: %s" msg;
+                              extra = []; }
+                  | None ->
+                      let models = parse_models_response ~include_all ~filter j in
+                      let next_token =
+                        try Yojson.Safe.Util.(j |> member "nextPageToken" |> to_string_option)
+                        with _ -> None
+                      in
+                      let acc = acc @ models in
+                      (match next_token with
+                       | None -> Ok acc
+                       | Some tok -> loop (Some tok) acc (pages + 1)))
+    in
+    match loop None [] 0 with
+    | Error err -> err
+    | Ok models ->
+        let body = `Assoc [
+          ("source", `String "api");
+          ("filter", (match filter with Some f -> `String f | None -> `Null));
+          ("include_all", `Bool include_all);
+          ("count", `Int (List.length models));
+          ("models", `List models);
+          ("aliases", aliases_to_json ());
+        ] |> Yojson.Safe.to_string
+        in
+        { model = model_name; returncode = 0; response = body; extra = [] }
+
 (** Execute Gemini via Direct API (faster, no MASC) *)
 let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~timeout ~stream =
   let model_name = sprintf "gemini-api (%s)" model in

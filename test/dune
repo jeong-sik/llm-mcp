@@ -75,6 +75,11 @@
  (name test_tool_parsers)
  (libraries llm_mcp.common alcotest))
 
+; Gemini model listing parsing tests (no network)
+(test
+ (name test_gemini_list)
+ (libraries llm_mcp.eio llm_mcp.common alcotest))
+
 ; Chain Engine tests (types, parser, compiler, registry, conversation context)
 (test
  (name test_chain_engine)

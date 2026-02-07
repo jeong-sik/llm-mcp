@@ -65,6 +65,27 @@ let test_parse_gemini_thinking_levels () =
         | High -> fail "Expected Low thinking level")
    | _ -> fail "Expected Gemini variant")
 
+(** {1 Parse Gemini List Args Tests} *)
+
+let test_parse_gemini_list_defaults () =
+  let json = `Assoc [] in
+  match Tool_parsers.parse_gemini_list_args json with
+  | GeminiList g ->
+      check (option string) "default filter" None g.filter;
+      check bool "default include_all" false g.include_all
+  | _ -> fail "Expected GeminiList variant"
+
+let test_parse_gemini_list_custom_values () =
+  let json = `Assoc [
+    ("filter", `String "flash");
+    ("include_all", `Bool true);
+  ] in
+  match Tool_parsers.parse_gemini_list_args json with
+  | GeminiList g ->
+      check (option string) "custom filter" (Some "flash") g.filter;
+      check bool "include_all true" true g.include_all
+  | _ -> fail "Expected GeminiList variant"
+
 (** {1 Parse Claude Args Tests} *)
 
 let test_parse_claude_defaults () =
@@ -407,6 +428,11 @@ let () =
       test_case "defaults" `Quick test_parse_gemini_defaults;
       test_case "custom values" `Quick test_parse_gemini_custom_values;
       test_case "thinking levels" `Quick test_parse_gemini_thinking_levels;
+    ];
+
+    "parse_gemini_list_args", [
+      test_case "defaults" `Quick test_parse_gemini_list_defaults;
+      test_case "custom values" `Quick test_parse_gemini_list_custom_values;
     ];
 
     "parse_claude_args", [
