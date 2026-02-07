@@ -129,9 +129,7 @@ let save_metadata metadata output_path =
   try
     (* Create parent directories *)
     let parent = Filename.dirname output_path in
-    if not (Sys.file_exists parent) then begin
-      ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote parent)))
-    end;
+    Common.ensure_dir parent;
 
     let oc = open_out output_path in
     output_string oc (Yojson.Safe.pretty_to_string metadata);

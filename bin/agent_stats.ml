@@ -88,8 +88,7 @@ let save_agent_stats stats =
   let stats_file = get_stats_file () in
   (* Create parent directory *)
   let parent = Filename.dirname stats_file in
-  if not (Sys.file_exists parent) then
-    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote parent)));
+  Common.ensure_dir parent;
 
   (* Build JSON *)
   let items = Hashtbl.fold (fun k v acc -> (k, `Int v) :: acc) stats [] in

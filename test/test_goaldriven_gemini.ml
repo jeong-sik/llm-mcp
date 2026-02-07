@@ -34,7 +34,7 @@ let execute_chain ~sw ~clock ~exec_fn ~tool_exec chain _input =
 
 (** Check if Gemini CLI is available *)
 let gemini_available () : bool =
-  Sys.command "which gemini >/dev/null 2>&1" = 0
+  Common.command_exists "gemini"
 
 (** Call Gemini CLI *)
 let call_gemini ~prompt () : (string, string) result =

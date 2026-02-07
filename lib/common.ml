@@ -20,6 +20,46 @@ let rec ensure_dir path =
     try Unix.mkdir path 0o755 with Unix.Unix_error _ -> ()
   end
 
+(** Best-effort recursive deletion (rm -rf). *)
+let rec rm_rf path =
+  if Sys.file_exists path then
+    try
+      if Sys.is_directory path then begin
+        Sys.readdir path
+        |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+    with
+    | Sys_error _ | Unix.Unix_error _ -> ()
+
+(** Locate an executable in PATH (like `which`, but without spawning a shell). *)
+let which (prog : string) : string option =
+  let is_executable p =
+    try
+      Unix.access p [Unix.X_OK];
+      true
+    with Unix.Unix_error _ -> false
+  in
+  if not (Filename.is_relative prog) then
+    if Sys.file_exists prog && is_executable prog then Some prog else None
+  else
+    let path =
+      Sys.getenv_opt "PATH"
+      |> Option.value ~default:""
+      |> String.split_on_char ':'
+    in
+    let rec loop = function
+      | [] -> None
+      | dir :: rest ->
+          let cand = Filename.concat dir prog in
+          if Sys.file_exists cand && is_executable cand then Some cand else loop rest
+    in
+    loop path
+
+let command_exists (prog : string) : bool =
+  Option.is_some (which prog)
+
 (** Get current timestamp as integer *)
 let timestamp () = int_of_float (Unix.time ())
 

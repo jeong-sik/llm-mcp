@@ -65,8 +65,17 @@ if __name__ == "__main__":
 
 let test_viability child_path =
   Printf.printf "[FITNESS] Testing viability of %s...\n" (Filename.basename child_path);
-  let cmd = Printf.sprintf "python3 %s" child_path in
-  let result = Sys.command cmd in
+  let argv = [| "python3"; child_path |] in
+  let result =
+    try
+      let pid = Unix.create_process "python3" argv Unix.stdin Unix.stdout Unix.stderr in
+      match snd (Unix.waitpid [] pid) with
+      | Unix.WEXITED code -> code
+      | Unix.WSIGNALED sig_ -> 128 + sig_
+      | Unix.WSTOPPED sig_ -> 128 + sig_
+    with Unix.Unix_error _ ->
+      127
+  in
   if result = 0 then begin
     Printf.printf "[EVOLUTION] %s is FIT. Integrating into the system.\n" (Filename.basename child_path);
     true

@@ -40,8 +40,7 @@ let read_file path =
 (* Write file contents *)
 let write_file path content =
   let dir = Filename.dirname path in
-  if not (Sys.file_exists dir) then
-    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote dir)));
+  Common.ensure_dir dir;
   let oc = open_out path in
   output_string oc content;
   close_out oc
@@ -151,7 +150,7 @@ let create_shard epic ~dry_run ~quiet =
       Printf.printf "  %s Would create: %s\n" (blue "[DRY-RUN]") dir_name;
     true
   end else begin
-    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote shard_path)));
+    Common.ensure_dir shard_path;
 
     let now = Unix.gettimeofday () in
     let tm = Unix.localtime now in
@@ -206,15 +205,14 @@ let archive_shard _epic_key shard_path ~dry_run ~quiet =
       Printf.printf "  %s Would archive: %s\n" (blue "[DRY-RUN]") (Filename.basename shard_path);
     true
   end else begin
-    ignore (Sys.command (Printf.sprintf "mkdir -p %s" (Filename.quote archived_dir)));
+    Common.ensure_dir archived_dir;
     let archived_path = Filename.concat archived_dir (Filename.basename shard_path) in
     if Sys.file_exists archived_path then begin
       if not quiet then
         Printf.printf "  %s %s\n" (yellow "⚠️ Already archived:") (Filename.basename shard_path);
       false
     end else begin
-      let cmd = Printf.sprintf "mv %s %s" (Filename.quote shard_path) (Filename.quote archived_path) in
-      ignore (Sys.command cmd);
+      (try Sys.rename shard_path archived_path with Sys_error _ -> ());
       if not quiet then
         Printf.printf "  %s %s\n" (green "✅ Archived:") (Filename.basename shard_path);
       true

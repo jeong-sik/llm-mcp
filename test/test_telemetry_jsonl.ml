@@ -67,7 +67,7 @@ let test_ensure_dir_creates_nested () =
   TJ.ensure_dir nested;
   check bool "created" true (Sys.file_exists nested);
   (* Cleanup *)
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" base))
+  Common.rm_rf base
 
 (** {1 ensure_parent_dir Tests} *)
 
@@ -77,7 +77,7 @@ let test_ensure_parent_dir () =
   TJ.ensure_parent_dir file;
   check bool "parent exists" true (Sys.file_exists (Filename.dirname file));
   (* Cleanup *)
-  ignore (Sys.command (Printf.sprintf "rm -rf %s" base))
+  Common.rm_rf base
 
 (** {1 append_json Tests} *)
 
