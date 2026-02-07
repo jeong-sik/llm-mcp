@@ -233,6 +233,97 @@ This pipeline:
        | ExecutionFailed s -> s
        | _ -> "other")
 
+(** Test: Gemini model name is passed through to tool_exec (no hardcoding) *)
+let test_gemini_model_passthrough () =
+  Printf.printf "\n=== Testing Gemini Model Passthrough ===\n";
+
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+
+  Eio.Switch.run @@ fun sw ->
+
+  let seen_model = ref None in
+
+  let tool_exec ~name ~args =
+    (* Capture model passed to the gemini tool *)
+    (match (name, args) with
+     | ("gemini", `Assoc fields) -> (
+         match List.assoc_opt "model" fields with
+         | Some (`String m) -> seen_model := Some m
+         | _ -> ())
+     | _ -> ());
+    `String "[ok]"
+  in
+
+  let node =
+    {
+      Chain_types.id = "step1";
+      node_type = Chain_types.Llm {
+        model = "gemini-2.5-flash";
+        system = None;
+        prompt = "ping";
+        timeout = None;
+        tools = None;
+        prompt_ref = None;
+        prompt_vars = [];
+        thinking = false;
+      };
+      input_mapping = [];
+      output_key = None;
+      depends_on = None;
+    }
+  in
+
+  let chain =
+    Chain_types.make_chain
+      ~id:"gemini_model_passthrough"
+      ~nodes:[node]
+      ~output:"step1"
+      ~config:Chain_types.default_config
+      ~name:"Gemini model passthrough"
+      ~description:"Ensure chain execution passes gemini model string unchanged"
+      ()
+  in
+
+  let tasks = tasks_from_strings ["Run one gemini step"] in
+  let config = {
+    max_replans = 0;
+    timeout_ms = 5_000;
+    trace_enabled = false;
+    verify_on_complete = false;
+  } in
+
+  let result = orchestrate
+    ~sw
+    ~clock
+    ~config
+    ~llm_call:(fun ~prompt:_ -> failwith "llm_call should not be used when initial_chain is provided")
+    ~tool_exec
+    ~goal:"Test gemini model passthrough"
+    ~tasks
+    ~initial_chain:(Some chain)
+  in
+
+  match result with
+  | Error e ->
+      Printf.printf "❌ Orchestration failed: %s\n"
+        (match e with
+         | DesignFailed s -> Printf.sprintf "Design failed: %s" s
+         | CompileFailed s -> Printf.sprintf "Compile failed: %s" s
+         | ExecutionFailed s -> Printf.sprintf "Execution failed: %s" s
+         | VerificationFailed s -> Printf.sprintf "Verification failed: %s" s
+         | MaxReplansExceeded -> "Max replans exceeded"
+         | Timeout -> "Timeout");
+      failwith "Gemini model passthrough test failed"
+  | Ok _ ->
+      (match !seen_model with
+       | Some "gemini-2.5-flash" ->
+           Printf.printf "✅ Model passed through correctly: gemini-2.5-flash\n"
+       | Some other ->
+           failwith (Printf.sprintf "Expected model=gemini-2.5-flash, got %s" other)
+       | None ->
+           failwith "Expected gemini tool call with model field, got none")
+
 (** Test: Timeout handling *)
 let test_timeout_handling () =
   Printf.printf "\n=== Testing Timeout Handling ===\n";
@@ -316,6 +407,7 @@ let () =
   test_task_helpers ();
   test_masc_task_structure ();
   test_timeout_handling ();
+  test_gemini_model_passthrough ();
   test_pipeline_orchestration ();
   test_full_orchestration_cycle ();
 

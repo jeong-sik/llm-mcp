@@ -309,6 +309,12 @@ let orchestrate
           | _ -> args
         in
         let lowered = String.lowercase_ascii model in
+        let is_gemini_model m =
+          m = "gemini" ||
+          m = "pro" || m = "flash" || m = "flash-lite" ||
+          m = "3-pro" || m = "3-flash" ||
+          starts_with ~prefix:"gemini-" m
+        in
         (* Wrap LLM calls with retry for recoverable errors *)
         let exec_with_retry name args_with_model =
           let result = Chain_executor_retry.execute_llm_with_retry ~clock ~provider:name (fun () ->
@@ -333,7 +339,7 @@ let orchestrate
         | m when starts_with ~prefix:"ollama:" m ->
             let ollama_model = String.sub model 7 (String.length model - 7) in
             exec_with_retry "ollama" (("model", `String ollama_model) :: args)
-        | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
+        | m when is_gemini_model m ->
             exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->
             exec_with_retry "gemini" (("model", `String "gemini-3-pro-preview") :: args)
