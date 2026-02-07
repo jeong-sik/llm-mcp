@@ -7,6 +7,16 @@
 open Alcotest
 open Types
 
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+
 (** {1 Parse Gemini Args Tests} *)
 
 let test_parse_gemini_defaults () =
@@ -61,9 +71,34 @@ let test_parse_gemini_thinking_levels () =
   (match Tool_parsers.parse_gemini_args json_low with
    | Gemini g ->
        (match g.thinking_level with
-        | Low -> ()
-        | High -> fail "Expected Low thinking level")
+       | Low -> ()
+       | High -> fail "Expected Low thinking level")
    | _ -> fail "Expected Gemini variant")
+
+let test_parse_gemini_use_cli_default_prefers_api_key () =
+  let json = `Assoc [("prompt", `String "Hello world")] in
+
+  with_env "GEMINI_API_KEY" "dummy-key" (fun () ->
+    with_env "GOOGLE_AI_API_KEY" "" (fun () ->
+      match Tool_parsers.parse_gemini_args json with
+      | Gemini g ->
+          check bool "use_cli defaults to false when GEMINI_API_KEY is set" false g.use_cli
+      | _ -> fail "Expected Gemini variant"));
+
+  let json_explicit = `Assoc [("prompt", `String "Hello world"); ("use_cli", `Bool true)] in
+  with_env "GEMINI_API_KEY" "dummy-key" (fun () ->
+    match Tool_parsers.parse_gemini_args json_explicit with
+    | Gemini g ->
+        check bool "explicit use_cli=true is respected even when API key is set" true g.use_cli
+    | _ -> fail "Expected Gemini variant");
+
+  (* Alias support: GOOGLE_AI_API_KEY should behave the same as GEMINI_API_KEY *)
+  with_env "GEMINI_API_KEY" "" (fun () ->
+    with_env "GOOGLE_AI_API_KEY" "dummy-key" (fun () ->
+      match Tool_parsers.parse_gemini_args json with
+      | Gemini g ->
+          check bool "use_cli defaults to false when GOOGLE_AI_API_KEY is set" false g.use_cli
+      | _ -> fail "Expected Gemini variant"))
 
 (** {1 Parse Gemini List Args Tests} *)
 
@@ -446,6 +481,7 @@ let () =
       test_case "defaults" `Quick test_parse_gemini_defaults;
       test_case "custom values" `Quick test_parse_gemini_custom_values;
       test_case "thinking levels" `Quick test_parse_gemini_thinking_levels;
+      test_case "use_cli default prefers api key" `Quick test_parse_gemini_use_cli_default_prefers_api_key;
     ];
 
     "parse_gemini_list_args", [

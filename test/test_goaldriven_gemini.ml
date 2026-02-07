@@ -6,6 +6,11 @@
 
 open Chain_types
 
+let env_truthy name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "TRUE" | "yes" | "YES") -> true
+  | _ -> false
+
 (* ============================================================================
    Helpers
    ============================================================================ *)
@@ -34,27 +39,34 @@ let execute_chain ~sw ~clock ~exec_fn ~tool_exec chain _input =
 
 (** Check if Gemini CLI is available *)
 let gemini_available () : bool =
-  Common.command_exists "gemini"
+  Common.command_exists "gemini" && env_truthy "LLM_MCP_RUN_GEMINI_CLI_TESTS"
+
+let default_gemini_cli_model () : string =
+  match Sys.getenv_opt "LLM_MCP_GEMINI_CLI_MODEL" with
+  | Some m when String.trim m <> "" -> String.trim m
+  | _ -> "gemini-2.5-flash"
+
+let resolve_gemini_model (model : string) : string =
+  match String.lowercase_ascii (String.trim model) with
+  | "" | "gemini" -> default_gemini_cli_model ()
+  | "pro" -> "gemini-2.5-pro"
+  | "flash" -> "gemini-2.5-flash"
+  | "flash-lite" -> "gemini-2.5-flash-lite"
+  | "3-pro" -> "gemini-3-pro-preview"
+  | "3-flash" -> "gemini-3-flash-preview"
+  | m -> m
 
 (** Call Gemini CLI *)
-let call_gemini ~prompt () : (string, string) result =
-  (* Create temp file for prompt to avoid shell escaping issues *)
-  let tmp_file = Filename.temp_file "gemini_prompt" ".txt" in
-  let oc = open_out tmp_file in
-  output_string oc prompt;
-  close_out oc;
-
-  let cmd = Printf.sprintf "cat '%s' | gemini -m gemini-2.0-flash 2>/dev/null" tmp_file in
-  let ic = Unix.open_process_in cmd in
+let call_gemini ~model ~prompt () : (string, string) result =
+  let model = resolve_gemini_model model in
+  let argv = [| "gemini"; "-m"; model; "-p"; prompt |] in
+  let ic = Unix.open_process_args_in "gemini" argv in
   let output = In_channel.input_all ic in
   let status = Unix.close_process_in ic in
 
-  (* Cleanup *)
-  (try Sys.remove tmp_file with _ -> ());
-
   match status with
   | Unix.WEXITED 0 -> Ok (String.trim output)
-  | _ -> Error (Printf.sprintf "Gemini CLI error: %s" output)
+  | _ -> Error (Printf.sprintf "Gemini CLI error (model=%s): %s" model output)
 
 (** Mock tool executor - no tools for Gemini tests *)
 let mock_tool_exec ~name:_ ~args:_ = Error "No tools"
@@ -68,7 +80,7 @@ let make_gemini_exec_fn () : (model:string -> ?system:string -> prompt:string ->
   fun ~model ?system:_ ~prompt ?tools:_ ?thinking:_ () ->
     Printf.printf "  [exec] model=%s prompt=%s...\n%!"
       model (truncate 50 prompt);
-    call_gemini ~prompt ()
+    call_gemini ~model ~prompt ()
 
 (* ============================================================================
    Tests
@@ -330,7 +342,9 @@ No explanation, no markdown, just the raw JSON object.|};
 
 let () =
   if not (gemini_available ()) then begin
-    Printf.printf "⚠️  Gemini CLI not found, skipping tests\n";
+    Printf.printf "⚠️  Skipping Gemini CLI tests.\n";
+    Printf.printf "    - Set LLM_MCP_RUN_GEMINI_CLI_TESTS=1 to enable\n";
+    Printf.printf "    - Optionally set LLM_MCP_GEMINI_CLI_MODEL=gemini-2.5-flash\n";
     exit 0
   end;
 
