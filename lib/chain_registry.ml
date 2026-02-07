@@ -124,6 +124,44 @@ let register ?(description : string option) (chain : chain) : unit =
     | None -> ()
   )
 
+(** Load chain JSON files from a directory into the in-memory registry (no persistence).
+
+    This is intended for bootstrapping "preset" chains shipped with the repo
+    (e.g. data/chains/*.json) at server startup. *)
+let load_from_dir (dir : string) : (int * (string * string) list) =
+  if not (Sys.file_exists dir && Sys.is_directory dir) then
+    (0, [ (dir, "missing_or_not_a_directory") ])
+  else
+    let files = Sys.readdir dir in
+    let loaded = ref 0 in
+    let errors = ref [] in
+    Array.iter (fun file ->
+      if Filename.check_suffix file ".json" then begin
+        let path = Filename.concat dir file in
+        try
+          let content = In_channel.with_open_text path In_channel.input_all in
+          let json = Yojson.Safe.from_string content in
+          (* Prefer Chain_parser.parse_chain for optional/extended fields. *)
+          let parsed =
+            match Chain_parser.parse_chain json with
+            | Ok chain -> Ok chain
+            | Error msg ->
+                (match chain_of_yojson json with
+                 | Ok chain -> Ok chain
+                 | Error _ -> Error msg)
+          in
+          match parsed with
+          | Ok chain ->
+              register chain;
+              incr loaded
+          | Error msg ->
+              errors := (path, msg) :: !errors
+        with exn ->
+          errors := (path, Printexc.to_string exn) :: !errors
+      end
+    ) files;
+    (!loaded, List.rev !errors)
+
 (** Look up a chain by ID *)
 let lookup (id : string) : chain option =
   with_mutex (fun () ->

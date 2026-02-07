@@ -69,6 +69,58 @@ let generate_session_id () =
     (int_of_float (Time_compat.now () *. 1000.0))
     (String.sub (Digest.to_hex (Digest.string (string_of_float (Random.State.float session_rng 1.0)))) 0 8)
 
+(** {1 Preset Chains (chain_id)} *)
+
+let dir_exists path =
+  Sys.file_exists path && Sys.is_directory path
+
+let rec up_dir n path =
+  if n <= 0 then path else up_dir (n - 1) (Filename.dirname path)
+
+let load_preset_chains () =
+  (* Preset chains are shipped as JSON files (usually under data/chains).
+     We load them into the in-memory Chain_registry so `chain.run` can use `chain_id`
+     without needing users to paste the full JSON. *)
+  let candidates =
+    let from_env =
+      match Sys.getenv_opt "LLM_MCP_CHAIN_DIR" with
+      | Some dir -> [dir]
+      | None -> []
+    in
+    let from_repo_root =
+      match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
+      | Some root -> [Filename.concat (Filename.concat root "data") "chains"]
+      | None -> []
+    in
+    let cwd = Sys.getcwd () in
+    let from_cwd = [Filename.concat (Filename.concat cwd "data") "chains"] in
+    let exe_dir = Filename.dirname Sys.executable_name in
+    let from_exe =
+      let root = up_dir 3 exe_dir in
+      [Filename.concat (Filename.concat root "data") "chains"]
+    in
+    from_env @ from_repo_root @ from_cwd @ from_exe
+  in
+  match List.find_opt dir_exists candidates with
+  | None ->
+      eprintf "[llm-mcp-eio] Preset chains: not loaded (set LLM_MCP_CHAIN_DIR or run from repo root)\n%!"
+  | Some dir ->
+      let loaded, errors = Chain_registry.load_from_dir dir in
+      eprintf "[llm-mcp-eio] Preset chains: loaded %d from %s\n%!" loaded dir;
+      if errors <> [] then begin
+        let count = List.length errors in
+        let preview =
+          errors
+          |> List.to_seq
+          |> Seq.take 3
+          |> List.of_seq
+          |> List.map (fun (p, msg) -> sprintf "%s: %s" p msg)
+          |> String.concat "\n"
+        in
+        eprintf "[llm-mcp-eio] Preset chains: %d load errors (first up to 3):\n%s\n%!"
+          count preview
+      end
+
 (** Get session by ID from store *)
 let get_session store session_id =
   Eio.Mutex.use_ro store.mutex (fun () ->
@@ -851,6 +903,8 @@ let run ~sw ~env ?(config = Http.default_config) () =
   (match expected_api_key () with
    | None -> eprintf "[llm-mcp-eio] Authentication: Disabled (development mode)\n%!"
    | Some _ -> eprintf "[llm-mcp-eio] Authentication: Enabled (Bearer token required)\n%!");
+
+  load_preset_chains ();
 
   (* Create session store for multi-tenancy *)
   let store = create_session_store () in
