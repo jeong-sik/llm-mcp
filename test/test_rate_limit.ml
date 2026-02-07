@@ -196,7 +196,7 @@ let global_tests = [
   test_case "remaining_global" `Quick test_remaining_global;
 ]
 
-let () =
+let run_tests () =
   run "rate_limit" [
     ("create", create_tests);
     ("check", check_tests);
@@ -207,3 +207,7 @@ let () =
     ("env_config", env_tests);
     ("global", global_tests);
   ]
+
+let () =
+  (* Rate_limit uses Eio mutexes, so tests must run under an Eio context. *)
+  Eio_main.run (fun _env -> run_tests ())

@@ -228,7 +228,7 @@ let prometheus_tests = [
   test_case "duration" `Quick test_prometheus_duration;
 ]
 
-let () =
+let run_tests () =
   run "chain_stats" [
     ("percentile", percentile_tests);
     ("percentiles", percentiles_tests);
@@ -238,3 +238,8 @@ let () =
     ("string_of_stats", string_tests);
     ("to_prometheus", prometheus_tests);
   ]
+
+let () =
+  (* Chain_stats uses Eio mutexes internally (cascade stats), so tests must run
+     under an Eio context. *)
+  Eio_main.run (fun _env -> run_tests ())
