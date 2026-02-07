@@ -150,6 +150,33 @@ let list_models ~sw ~proc_mgr ~clock ~(filter : string option) ~(include_all : b
       | Error (Timeout t) -> Error (Tools_tracer.timeout_result ~model:model_name ~extra:[] t)
       | Error (ProcessError msg) -> Error (Tools_tracer.process_error_result ~model:model_name ~extra:[] msg)
     in
+    let parse_next_page_token (j : Yojson.Safe.t) : string option =
+      try Yojson.Safe.Util.(j |> member "nextPageToken" |> to_string_option)
+      with _ -> None
+    in
+    let parse_api_error (j : Yojson.Safe.t) : string option =
+      match Yojson.Safe.Util.member "error" j with
+      | `Null -> None
+      | err ->
+          let msg =
+            try Yojson.Safe.Util.(err |> member "message" |> to_string)
+            with _ -> "Unknown API error"
+          in
+          Some msg
+    in
+    let parse_json (raw : string) : (Yojson.Safe.t, tool_result) result =
+      match Yojson.Safe.from_string raw with
+      | j -> Ok j
+      | exception _ ->
+          let snippet =
+            let len = min 200 (String.length raw) in
+            String.sub raw 0 len
+          in
+          Error { model = model_name;
+                  returncode = -1;
+                  response = sprintf "Failed to parse API response: %s" snippet;
+                  extra = []; }
+    in
     let rec loop page_token acc pages =
       if pages >= 10 then
         Ok acc
@@ -157,46 +184,21 @@ let list_models ~sw ~proc_mgr ~clock ~(filter : string option) ~(include_all : b
         match fetch_page page_token with
         | Error err -> Error err
         | Ok raw ->
-            let json =
-              try Ok (Yojson.Safe.from_string raw)
-              with _ ->
-                Error { model = model_name; returncode = -1;
-                        response = sprintf "Failed to parse API response: %s"
-                          (String.sub raw 0 (min 200 (String.length raw)));
-                        extra = []; }
-            in
-            (match json with
-             | Error e -> Error e
+            (match parse_json raw with
+             | Error err -> Error err
              | Ok j ->
-                 (* Handle API error shape *)
-                 let api_error =
-                   match j with
-                   | `Assoc _ ->
-                       (match Yojson.Safe.Util.member "error" j with
-                        | `Null -> None
-                        | err ->
-                            let msg =
-                              try Yojson.Safe.Util.(err |> member "message" |> to_string)
-                              with _ -> "Unknown API error"
-                            in
-                            Some msg)
-                   | _ -> None
-                 in
-                 (match api_error with
+                 (match parse_api_error j with
                   | Some msg ->
-                      Error { model = model_name; returncode = -1;
+                      Error { model = model_name;
+                              returncode = -1;
                               response = sprintf "API Error: %s" msg;
                               extra = []; }
                   | None ->
                       let models = parse_models_response ~include_all ~filter j in
-                      let next_token =
-                        try Yojson.Safe.Util.(j |> member "nextPageToken" |> to_string_option)
-                        with _ -> None
-                      in
                       let acc = acc @ models in
-                      (match next_token with
-                       | None -> Ok acc
-                       | Some tok -> loop (Some tok) acc (pages + 1)))
+                      match parse_next_page_token j with
+                      | None -> Ok acc
+                      | Some tok -> loop (Some tok) acc (pages + 1)))
     in
     match loop None [] 0 with
     | Error err -> err
