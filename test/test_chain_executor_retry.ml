@@ -128,10 +128,12 @@ let test_execute_batch_with_retry () =
 
 (* Circuit breaker tests *)
 let test_circuit_breaker_closed () =
+  Eio_main.run @@ fun _env ->
   let breaker = Chain_executor_retry.create_breaker () in
   check bool "initially allows" true (Chain_executor_retry.circuit_allows breaker)
 
 let test_circuit_breaker_opens () =
+  Eio_main.run @@ fun _env ->
   let breaker = Chain_executor_retry.create_breaker ~failure_threshold:3 () in
   
   (* Record failures *)
@@ -143,6 +145,8 @@ let test_circuit_breaker_opens () =
   check bool "opens after 3 failures" false (Chain_executor_retry.circuit_allows breaker)
 
 let test_circuit_breaker_resets () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
   let breaker = Chain_executor_retry.create_breaker ~failure_threshold:2 ~reset_timeout:0.01 () in
   
   (* Open the circuit *)
@@ -151,7 +155,7 @@ let test_circuit_breaker_resets () =
   check bool "circuit open" false (Chain_executor_retry.circuit_allows breaker);
   
   (* Wait for reset *)
-  Unix.sleepf 0.02;
+  Eio.Time.sleep clock 0.02;
   check bool "circuit half-open" true (Chain_executor_retry.circuit_allows breaker);
   
   (* Success resets to closed *)

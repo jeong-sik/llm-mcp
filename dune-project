@@ -52,6 +52,8 @@
   (integers (>= 0.7))
   (zstd (>= 0.4))
   (domainslib (>= 0.5))
+  (qcheck :with-test)
+  (qcheck-alcotest :with-test)
   (alcotest (and :with-test (>= 1.6)))
   (bisect_ppx (and :with-test (>= 2.8)))
   (odoc :with-doc)))
