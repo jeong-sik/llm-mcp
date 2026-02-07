@@ -1316,6 +1316,12 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                 let prefix_len = String.length prefix in
                 String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
               in
+              let is_gemini_model m =
+                m = "gemini" ||
+                m = "pro" || m = "flash" || m = "flash-lite" ||
+                m = "3-pro" || m = "3-flash" ||
+                starts_with ~prefix:"gemini-" m
+              in
               let split_tool_name name =
                 let delim_idx =
                   match String.index_opt name '.' with
@@ -1366,10 +1372,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         use_cli = false;  (* Stub uses direct API *)
                         fallback_to_api = false;
                       }
-                  | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
+                  | m when is_gemini_model m ->
                       Types.Gemini {
                         prompt;
-                        model = "gemini-3-pro-preview";
+                        model;
                         thinking_level = Types.High;
                         yolo = false;
                         output_format = Types.Text;
@@ -1754,10 +1760,10 @@ This chain will execute the goal using a stub model.|}
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
             else failwith (Printf.sprintf "Ollama call failed: %s" result.response)
-        | "gemini" | _ ->
+        | model ->
             let args = Types.Gemini {
               prompt;
-              model = "gemini-3-pro-preview";
+              model;
               thinking_level = Types.High;
               yolo = false;
               output_format = Types.Text;
@@ -2701,18 +2707,18 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
             String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
           in
           let split_tool_name name =
-                       let delim_idx =
-                         match String.index_opt name '.' with
-                         | Some idx -> Some idx
-                         | None -> String.index_opt name ':'
-                       in
-                       match delim_idx with
-                       | None -> None
-                       | Some idx ->
-                           let server = String.sub name 0 idx in
-                           let tool_len = String.length name - idx - 1 in
-                           if server = "" || tool_len <= 0 then None
-                           else Some (server, String.sub name (idx + 1) tool_len)
+            let delim_idx =
+              match String.index_opt name '.' with
+              | Some idx -> Some idx
+              | None -> String.index_opt name ':'
+            in
+            match delim_idx with
+            | None -> None
+            | Some idx ->
+                let server = String.sub name 0 idx in
+                let tool_len = String.length name - idx - 1 in
+                if server = "" || tool_len <= 0 then None
+                else Some (server, String.sub name (idx + 1) tool_len)
           in
           let exec_fn ~model ?system ~prompt ?tools ?thinking () =
             let _ = system, thinking in  (* Unused for now, available for future enhancement *)
@@ -2735,20 +2741,27 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                       if schemas = [] then None else Some schemas
                   | _ -> None
             in
-            match model with
+            let lowered = String.lowercase_ascii model in
+            let is_gemini_model m =
+              m = "gemini" ||
+              m = "pro" || m = "flash" || m = "flash-lite" ||
+              m = "3-pro" || m = "3-flash" ||
+              starts_with ~prefix:"gemini-" m
+            in
+            match lowered with
             | "stub" | "mock" ->
                 Ok (sprintf "[%s]%s" model prompt)
-            | "gemini" ->
+            | m when is_gemini_model m ->
                 let args = Gemini {
                   prompt;
-                  model = "gemini-3-pro-preview";
+                  model;
                   thinking_level = High;
                   yolo = false;
                   output_format = Text;
                   timeout;
                   stream = false;
                   use_cli = false;  (* Avoid CLI exec issues; use direct API *)
-                        fallback_to_api = true;
+                  fallback_to_api = true;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
@@ -2787,7 +2800,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response
             | m when String.length m > 7 && String.sub m 0 7 = "ollama:" ->
-                let ollama_model = String.sub m 7 (String.length m - 7) in
+                let ollama_model = String.sub model 7 (String.length model - 7) in
                 let args = Ollama {
                   prompt;
                   model = ollama_model;

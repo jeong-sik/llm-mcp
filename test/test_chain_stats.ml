@@ -118,6 +118,7 @@ let test_stats_json_roundtrip () =
 (** {1 to_summary Tests} *)
 
 let test_to_summary_format () =
+  Eio_main.run @@ fun _env ->
   let s = test_stats () in
   let summary = to_summary s in
   check bool "contains chains count" true (Common.contains ~substring:"10" summary);
@@ -125,6 +126,7 @@ let test_to_summary_format () =
   check bool "contains tokens" true (Common.contains ~substring:"5000" summary)
 
 let test_to_summary_compact () =
+  Eio_main.run @@ fun _env ->
   let s = test_stats () in
   let summary = to_summary s in
   (* Summary should be single line, compact *)
