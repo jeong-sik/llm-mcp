@@ -77,7 +77,7 @@ jobs:
           mkdir -p _coverage
           # Full `dune test` currently pulls in optional integrations and WIP Eio tests.
           # Keep coverage green by running a stable core subset (same intent as build-and-test).
-          opam exec -- dune test test/test_dictionary.ml test/test_sse.ml --instrument-with bisect_ppx --force
+          opam exec -- dune test test_dictionary.ml test_sse.ml --instrument-with bisect_ppx --force
         env:
           BISECT_FILE: _coverage/bisect
       - name: Generate coverage summary
