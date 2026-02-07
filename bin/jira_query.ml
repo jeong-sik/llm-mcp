@@ -22,33 +22,6 @@ let get_credentials () =
   | Some e, Some t -> Some (e, t)
   | _ -> None
 
-(* Base64 encode for Basic Auth *)
-let base64_encode s =
-  let tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/" in
-  let len = String.length s in
-  let buf = Buffer.create ((len + 2) / 3 * 4) in
-  let rec loop i =
-    if i >= len then ()
-    else begin
-      let b0 = Char.code s.[i] in
-      let b1 = if i + 1 < len then Char.code s.[i + 1] else 0 in
-      let b2 = if i + 2 < len then Char.code s.[i + 2] else 0 in
-      Buffer.add_char buf tbl.[(b0 lsr 2) land 0x3F];
-      Buffer.add_char buf tbl.[((b0 lsl 4) lor (b1 lsr 4)) land 0x3F];
-      if i + 1 < len then
-        Buffer.add_char buf tbl.[((b1 lsl 2) lor (b2 lsr 6)) land 0x3F]
-      else
-        Buffer.add_char buf '=';
-      if i + 2 < len then
-        Buffer.add_char buf tbl.[b2 land 0x3F]
-      else
-        Buffer.add_char buf '=';
-      loop (i + 3)
-    end
-  in
-  loop 0;
-  Buffer.contents buf
-
 (* URL encode *)
 let url_encode s =
   let buf = Buffer.create (String.length s * 3) in
@@ -62,43 +35,92 @@ let url_encode s =
   ) s;
   Buffer.contents buf
 
-(* Curl GET with Basic Auth *)
-let curl_get_auth email token url =
-  let auth = base64_encode (email ^ ":" ^ token) in
-  let cmd = Printf.sprintf
-    "curl -s -H 'Authorization: Basic %s' -H 'Content-Type: application/json' '%s'"
-    auth url
-  in
-  let ic = Unix.open_process_in cmd in
-  let buf = Buffer.create 8192 in
-  (try
-     while true do
-       Buffer.add_string buf (input_line ic);
-       Buffer.add_char buf '\n'
-     done
-   with End_of_file -> ());
-  let _ = Unix.close_process_in ic in
-  Buffer.contents buf
+(* HTTPS/TLS Support *)
+let make_https_ctx () =
+  match Ca_certs.authenticator () with
+  | Error (`Msg m) ->
+      Printf.eprintf "Warning: Failed to load system CAs: %s. HTTPS will fail.\n%!" m;
+      None
+  | Ok authenticator ->
+      match Tls.Config.client ~authenticator () with
+      | Error (`Msg m) ->
+          Printf.eprintf "Warning: TLS config error: %s. HTTPS will fail.\n%!" m;
+          None
+      | Ok tls_config ->
+          Some (fun uri raw ->
+              let host =
+                match Uri.host uri with
+                | None -> None
+                | Some h ->
+                    match Domain_name.of_string h with
+                    | Error _ -> None
+                    | Ok dn ->
+                        match Domain_name.host dn with
+                        | Error _ -> None
+                        | Ok host -> Some host
+              in
+              Tls_eio.client_of_flow tls_config ?host raw)
 
-(* Curl POST with Basic Auth *)
-let curl_post_auth email token url body =
-  let auth = base64_encode (email ^ ":" ^ token) in
-  (* Escape body for shell *)
-  let escaped_body = String.concat "\\\"" (String.split_on_char '"' body) in
-  let cmd = Printf.sprintf
-    "curl -s -X POST -H 'Authorization: Basic %s' -H 'Content-Type: application/json' -d \"%s\" '%s'"
-    auth escaped_body url
+let read_all ?(max_size = 8 * 1024 * 1024) flow =
+  Eio.Buf_read.(of_flow ~max_size flow |> take_all)
+
+let basic_auth_header_value ~email ~token =
+  let auth = Base64.encode_string (email ^ ":" ^ token) in
+  "Basic " ^ auth
+
+let jira_headers ~email ~token =
+  Cohttp.Header.of_list [
+    ("Authorization", basic_auth_header_value ~email ~token);
+    ("Accept", "application/json");
+    ("Content-Type", "application/json");
+  ]
+
+let http_get_string ~sw ~client ~headers url =
+  let uri = Uri.of_string url in
+  let resp, body_flow = Cohttp_eio.Client.get client ~sw ~headers uri in
+  let status = Cohttp.Response.status resp in
+  let code = Cohttp.Code.code_of_status status in
+  let body_str = read_all body_flow in
+  if Cohttp.Code.is_success code then Ok body_str else Error (code, body_str)
+
+let http_post_string ~sw ~client ~headers url body =
+  let uri = Uri.of_string url in
+  let body_eio = Cohttp_eio.Body.of_string body in
+  let resp, body_flow = Cohttp_eio.Client.post client ~sw ~headers ~body:body_eio uri in
+  let status = Cohttp.Response.status resp in
+  let code = Cohttp.Code.code_of_status status in
+  let body_str = read_all body_flow in
+  if Cohttp.Code.is_success code then Ok body_str else Error (code, body_str)
+
+let ensure_dir path =
+  let rec loop p =
+    if p = "" || p = Filename.current_dir_name then ()
+    else if Sys.file_exists p then ()
+    else begin
+      let parent = Filename.dirname p in
+      if parent <> p then loop parent;
+      Unix.mkdir p 0o755
+    end
   in
-  let ic = Unix.open_process_in cmd in
-  let buf = Buffer.create 4096 in
-  (try
-     while true do
-       Buffer.add_string buf (input_line ic);
-       Buffer.add_char buf '\n'
-     done
-   with End_of_file -> ());
-  let _ = Unix.close_process_in ic in
-  Buffer.contents buf
+  try loop path with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+
+let download_to_file ~sw ~client ~headers ~fs ~url ~filepath =
+  let uri = Uri.of_string url in
+  let resp, body_flow = Cohttp_eio.Client.get client ~sw ~headers uri in
+  let status = Cohttp.Response.status resp in
+  let code = Cohttp.Code.code_of_status status in
+  if not (Cohttp.Code.is_success code) then
+    let body_str = read_all ~max_size:(1024 * 1024) body_flow in
+    Error (code, body_str)
+  else begin
+    ensure_dir (Filename.dirname filepath);
+    let file_path = Eio.Path.(fs / filepath) in
+    Eio.Path.with_open_out
+      ~create:(`Or_truncate 0o644)
+      file_path
+      (fun out_flow -> Eio.Flow.copy body_flow out_flow);
+    Ok ()
+  end
 
 (* Get string from JSON *)
 let get_string_opt json key =
@@ -163,148 +185,182 @@ let format_issue issue =
   with _ -> ())
 
 (* Query JIRA issues *)
-let query_jira email token jql =
+let query_jira ~sw ~client email token jql =
   let url = Printf.sprintf
     "%s/rest/api/3/search/jql?jql=%s&maxResults=50&fields=key,summary,status,assignee,reporter,priority,updated,created,parent"
     jira_base_url (url_encode jql)
   in
   Printf.printf "  요청 중: %s/rest/api/3/search/jql\n" jira_base_url;
-  let resp = curl_get_auth email token url in
-  try
-    let json = Yojson.Safe.from_string resp in
-    let open Yojson.Safe.Util in
+  let headers = jira_headers ~email ~token in
+  match http_get_string ~sw ~client ~headers url with
+  | Error (code, body) ->
+      Printf.printf "❌ HTTP 오류: %d\n" code;
+      Printf.printf "  응답: %s\n" (String.sub body 0 (min 200 (String.length body)));
+      None
+  | Ok resp ->
+      try
+        let json = Yojson.Safe.from_string resp in
+        let open Yojson.Safe.Util in
 
-    (* Check for error *)
-    (try
-      let errors = json |> member "errorMessages" |> to_list in
-      if errors <> [] then begin
-        Printf.printf "❌ JIRA API 오류:\n";
-        List.iter (fun e -> Printf.printf "  %s\n" (to_string e)) errors;
+        (* Check for error *)
+        (try
+          let errors = json |> member "errorMessages" |> to_list in
+          if errors <> [] then begin
+            Printf.printf "❌ JIRA API 오류:\n";
+            List.iter (fun e -> Printf.printf "  %s\n" (to_string e)) errors;
+            None
+          end else
+            Some json
+        with _ -> Some json)
+      with e ->
+        Printf.printf "❌ JSON 파싱 오류: %s\n" (Printexc.to_string e);
+        Printf.printf "  응답: %s\n" (String.sub resp 0 (min 200 (String.length resp)));
         None
-      end else
-        Some json
-    with _ -> Some json)
-  with e ->
-    Printf.printf "❌ JSON 파싱 오류: %s\n" (Printexc.to_string e);
-    Printf.printf "  응답: %s\n" (String.sub resp 0 (min 200 (String.length resp)));
-    None
 
 (* Create JIRA issue *)
-let create_issue email token project summary description issue_type priority =
+let create_issue ~sw ~client email token project summary description issue_type priority =
   let url = Printf.sprintf "%s/rest/api/3/issue" jira_base_url in
-  let payload = Printf.sprintf {|{
-    "fields": {
-      "project": {"key": "%s"},
-      "summary": "%s",
-      "description": {
-        "type": "doc",
-        "version": 1,
-        "content": [{"type": "paragraph", "content": [{"type": "text", "text": "%s"}]}]
-      },
-      "issuetype": {"name": "%s"},
-      "priority": {"name": "%s"}
-    }
-  }|} project summary description issue_type priority
+  let payload =
+    `Assoc [
+      ("fields",
+       `Assoc [
+         ("project", `Assoc [ ("key", `String project) ]);
+         ("summary", `String summary);
+         ("description",
+          `Assoc [
+            ("type", `String "doc");
+            ("version", `Int 1);
+            ("content",
+             `List [
+               `Assoc [
+                 ("type", `String "paragraph");
+                 ("content",
+                  `List [
+                    `Assoc [
+                      ("type", `String "text");
+                      ("text", `String description);
+                    ]
+                  ]);
+               ]
+             ]);
+          ]);
+         ("issuetype", `Assoc [ ("name", `String issue_type) ]);
+         ("priority", `Assoc [ ("name", `String priority) ]);
+       ]);
+    ]
+    |> Yojson.Safe.to_string
   in
   Printf.printf "이슈 생성 중: %s\n" summary;
-  let resp = curl_post_auth email token url payload in
-  try
-    let json = Yojson.Safe.from_string resp in
-    let open Yojson.Safe.Util in
-    (try
-      let key = json |> member "key" |> to_string in
-      Printf.printf "\n%s 이슈가 성공적으로 생성되었습니다: %s\n" (green "✅") key;
-      Printf.printf "🔗 %s/browse/%s\n\n" jira_base_url key;
-      true
-    with _ ->
-      Printf.printf "❌ 이슈 생성 실패\n";
-      Printf.printf "  응답: %s\n" resp;
-      false)
-  with _ ->
-    Printf.printf "❌ JSON 파싱 오류\n";
-    false
+  let headers = jira_headers ~email ~token in
+  match http_post_string ~sw ~client ~headers url payload with
+  | Error (code, body) ->
+      Printf.printf "❌ HTTP 오류: %d\n" code;
+      Printf.printf "  응답: %s\n" (String.sub body 0 (min 500 (String.length body)));
+      false
+  | Ok resp ->
+      try
+        let json = Yojson.Safe.from_string resp in
+        let open Yojson.Safe.Util in
+        (try
+          let key = json |> member "key" |> to_string in
+          Printf.printf "\n%s 이슈가 성공적으로 생성되었습니다: %s\n" (green "✅") key;
+          Printf.printf "🔗 %s/browse/%s\n\n" jira_base_url key;
+          true
+        with _ ->
+          Printf.printf "❌ 이슈 생성 실패\n";
+          Printf.printf "  응답: %s\n" resp;
+          false)
+      with _ ->
+        Printf.printf "❌ JSON 파싱 오류\n";
+        false
 
 (* Get attachments *)
-let get_attachments email token issue_key download_dir =
+let get_attachments ~sw ~client ~fs email token issue_key download_dir =
   let url = Printf.sprintf "%s/rest/api/3/issue/%s?fields=attachment,summary"
     jira_base_url issue_key
   in
-  let resp = curl_get_auth email token url in
-  try
-    let json = Yojson.Safe.from_string resp in
-    let open Yojson.Safe.Util in
+  let headers = jira_headers ~email ~token in
+  match http_get_string ~sw ~client ~headers url with
+  | Error (code, body) ->
+      Printf.printf "❌ HTTP 오류: %d\n" code;
+      Printf.printf "  응답: %s\n" (String.sub body 0 (min 200 (String.length body)));
+      false
+  | Ok resp ->
+      try
+        let json = Yojson.Safe.from_string resp in
+        let open Yojson.Safe.Util in
 
-    let summary = try json |> member "fields" |> member "summary" |> to_string with _ -> "" in
-    let attachments =
-      try json |> member "fields" |> member "attachment" |> to_list
-      with _ -> []
-    in
-
-    Printf.printf "\n📋 %s: %s\n" issue_key summary;
-    Printf.printf "%s\n" (String.make 80 '=');
-
-    if attachments = [] then begin
-      Printf.printf "  첨부파일 없음\n";
-      true
-    end else begin
-      Printf.printf "📎 첨부파일 (%d개):\n\n" (List.length attachments);
-
-      List.iteri (fun i att ->
-        let filename = get_string att "filename" "unknown" in
-        let size = try att |> member "size" |> to_int with _ -> 0 in
-        let created =
-          let c = get_string att "created" "" in
-          if String.length c >= 10 then String.sub c 0 10 else c
-        in
-        let author =
-          try att |> member "author" |> member "displayName" |> to_string
-          with _ -> "unknown"
-        in
-        let content_url = get_string att "content" "" in
-
-        let size_str =
-          if size > 1024 * 1024 then
-            Printf.sprintf "%.1fMB" (float_of_int size /. (1024. *. 1024.))
-          else if size > 1024 then
-            Printf.sprintf "%.1fKB" (float_of_int size /. 1024.)
-          else
-            Printf.sprintf "%dB" size
+        let summary = try json |> member "fields" |> member "summary" |> to_string with _ -> "" in
+        let attachments =
+          try json |> member "fields" |> member "attachment" |> to_list
+          with _ -> []
         in
 
-        Printf.printf "  %d. [%s] %s (%s)\n" (i + 1) created filename size_str;
-        Printf.printf "     작성자: %s\n" author;
-        Printf.printf "     URL: %s\n\n" content_url
-      ) attachments;
+        Printf.printf "\n📋 %s: %s\n" issue_key summary;
+        Printf.printf "%s\n" (String.make 80 '=');
 
-      (* Download if requested *)
-      (match download_dir with
-      | Some dir ->
-          Unix.mkdir dir 0o755 |> ignore;
-          Printf.printf "\n📥 다운로드 중... → %s/\n" dir;
+        if attachments = [] then begin
+          Printf.printf "  첨부파일 없음\n";
+          true
+        end else begin
+          Printf.printf "📎 첨부파일 (%d개):\n\n" (List.length attachments);
 
-          List.iter (fun att ->
+          List.iteri (fun i att ->
             let filename = get_string att "filename" "unknown" in
+            let size = try att |> member "size" |> to_int with _ -> 0 in
+            let created =
+              let c = get_string att "created" "" in
+              if String.length c >= 10 then String.sub c 0 10 else c
+            in
+            let author =
+              try att |> member "author" |> member "displayName" |> to_string
+              with _ -> "unknown"
+            in
             let content_url = get_string att "content" "" in
-            if content_url <> "" then begin
-              let filepath = Filename.concat dir filename in
-              let auth = base64_encode (email ^ ":" ^ token) in
-              let cmd = Printf.sprintf
-                "curl -s -H 'Authorization: Basic %s' -o '%s' '%s'"
-                auth filepath content_url
-              in
-              let _ = Sys.command cmd in
-              Printf.printf "  ✅ %s\n" filename
-            end
+
+            let size_str =
+              if size > 1024 * 1024 then
+                Printf.sprintf "%.1fMB" (float_of_int size /. (1024. *. 1024.))
+              else if size > 1024 then
+                Printf.sprintf "%.1fKB" (float_of_int size /. 1024.)
+              else
+                Printf.sprintf "%dB" size
+            in
+
+            Printf.printf "  %d. [%s] %s (%s)\n" (i + 1) created filename size_str;
+            Printf.printf "     작성자: %s\n" author;
+            Printf.printf "     URL: %s\n\n" content_url
           ) attachments;
 
-          Printf.printf "\n✅ 다운로드 완료: %s/\n" dir
-      | None -> ());
+          (* Download if requested *)
+          (match download_dir with
+          | Some dir ->
+              ensure_dir dir;
+              Printf.printf "\n📥 다운로드 중... → %s/\n" dir;
 
-      true
-    end
-  with e ->
-    Printf.printf "❌ 첨부파일 조회 오류: %s\n" (Printexc.to_string e);
-    false
+              List.iter (fun att ->
+                let filename = get_string att "filename" "unknown" in
+                let content_url = get_string att "content" "" in
+                if content_url <> "" then begin
+                  let filepath = Filename.concat dir filename in
+                  match download_to_file ~sw ~client ~headers ~fs ~url:content_url ~filepath with
+                  | Ok () ->
+                      Printf.printf "  ✅ %s\n" filename
+                  | Error (code, body) ->
+                      Printf.printf "  ❌ %s (HTTP %d)\n" filename code;
+                      Printf.printf "     응답: %s\n"
+                        (String.sub body 0 (min 200 (String.length body)))
+                end
+              ) attachments;
+
+              Printf.printf "\n✅ 다운로드 완료: %s/\n" dir
+          | None -> ());
+
+          true
+        end
+      with e ->
+        Printf.printf "❌ 첨부파일 조회 오류: %s\n" (Printexc.to_string e);
+        false
 
 (* Main run function *)
 let run jql key attachments download create project summary description issue_type priority =
@@ -313,10 +369,17 @@ let run jql key attachments download create project summary description issue_ty
       Printf.printf "❌ JIRA 자격증명을 가져올 수 없습니다.\n";
       Printf.printf "   JIRA_EMAIL 및 JIRA_API_TOKEN 환경변수를 설정하세요.\n"
   | Some (email, token) ->
+      Eio_main.run @@ fun env ->
+      Mirage_crypto_rng_unix.use_default ();
+      Eio.Switch.run @@ fun sw ->
+      let net = Eio.Stdenv.net env in
+      let fs = Eio.Stdenv.fs env in
+      let https = make_https_ctx () in
+      let client = Cohttp_eio.Client.make ~https net in
 
       (* Attachments mode *)
       if attachments <> "" then begin
-        let _ = get_attachments email token attachments download in ()
+        let _ = get_attachments ~sw ~client ~fs email token attachments download in ()
       end
 
       (* Create mode *)
@@ -325,7 +388,7 @@ let run jql key attachments download create project summary description issue_ty
           Printf.printf "❌ 이슈 생성을 위해서는 --summary가 필요합니다.\n"
         else begin
           let desc = if description = "" then summary else description in
-          let _ = create_issue email token project summary desc issue_type priority in ()
+          let _ = create_issue ~sw ~client email token project summary desc issue_type priority in ()
         end
       end
 
@@ -351,7 +414,7 @@ let run jql key attachments download create project summary description issue_ty
 
         Printf.printf "  쿼리: %s\n\n" query;
 
-        match query_jira email token query with
+        match query_jira ~sw ~client email token query with
         | None -> ()
         | Some json ->
             let open Yojson.Safe.Util in
