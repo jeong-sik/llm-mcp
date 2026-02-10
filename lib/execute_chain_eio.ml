@@ -145,7 +145,7 @@ let execute_chain_run
           in
           (* Create exec_fn that routes to appropriate LLM *)
           let exec_fn ~model ?system ~prompt ?tools () =
-            let _ = system in  (* Unused for now *)
+            let system_prompt = system in
             let parsed_tools = parse_tools tools in
             (* Category resolution: "reasoning" → "ollama:falcon-h1r" etc. *)
             let model = match Model_registry.resolve model with
@@ -178,7 +178,7 @@ let execute_chain_run
                     prompt;
                     model;
                     long_context = true;
-                    system_prompt = None;
+                    system_prompt;
                     output_format = Types.Text;
                     allowed_tools = [];
                     working_directory = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp";
@@ -199,7 +199,7 @@ let execute_chain_run
                   Types.Ollama {
                     prompt;
                     model = "qwen3:1.7b";
-                    system_prompt = None;
+                    system_prompt;
                     temperature = 0.7;
                     timeout = node_timeout;
                     stream = false;
@@ -210,7 +210,7 @@ let execute_chain_run
                   Types.Ollama {
                     prompt;
                     model = ollama_model;
-                    system_prompt = None;
+                    system_prompt;
                     temperature = 0.7;
                     timeout = node_timeout;
                     stream = false;
