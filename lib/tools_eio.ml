@@ -539,6 +539,143 @@ let get_input_for_tracing = Tools_tracer.get_input
 let classify_error_class = Tools_tracer.classify_error
 let result_streamed = Tools_tracer.was_streamed
 
+(** Apply Chain DSL `system` into backend-specific system_prompt when supported. *)
+let with_system_prompt (system : string option) (args : Types.tool_args) : Types.tool_args =
+  match system, args with
+  | None, _ -> args
+  | Some _, Claude c -> Claude { c with system_prompt = system }
+  | Some _, Ollama o -> Ollama { o with system_prompt = system }
+  | Some _, Glm g -> Glm { g with system_prompt = system }
+  | Some _, _ -> args
+
+(** Build tool_args for Chain DSL LLM nodes.
+
+    Pure function (no Eio), suitable for unit tests. *)
+let chain_llm_args
+    ~(timeout : int)
+    ~(gemini_use_cli : bool)
+    ~(parsed_tools : Types.tool_schema list option)
+    ~(model : string)
+    ?(system : string option)
+    ~(prompt : string)
+    () : Types.tool_args =
+  let starts_with ~prefix s =
+    let prefix_len = String.length prefix in
+    String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+  in
+  let is_gemini_model m =
+    m = "gemini" ||
+    m = "pro" || m = "flash" || m = "flash-lite" ||
+    m = "3-pro" || m = "3-flash" ||
+    starts_with ~prefix:"gemini-" m
+  in
+  let args =
+    match String.lowercase_ascii model with
+    | "stub" | "mock" ->
+        (* Stub model for tests and local smoke runs *)
+        Types.Gemini {
+          prompt;
+          model = "stub";
+          thinking_level = Types.Low;
+          yolo = false;
+          output_format = Types.Text;
+          timeout;
+          stream = false;
+          use_cli = false;  (* Stub uses direct API *)
+          fallback_to_api = false;
+        }
+    | m when is_gemini_model m ->
+        Types.Gemini {
+          prompt;
+          model;
+          thinking_level = Types.High;
+          yolo = false;
+          output_format = Types.Text;
+          timeout;
+          stream = false;
+          use_cli = gemini_use_cli;
+          fallback_to_api = true;
+        }
+    | "claude" | "opus" | "opus-4" | "sonnet" | "haiku" | "haiku-4.5" ->
+        Types.Claude {
+          prompt;
+          model;
+          long_context = true;
+          system_prompt = None;
+          output_format = Types.Text;
+          allowed_tools = [];
+          working_directory = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp";
+          timeout;
+          stream = false;
+          use_cli = true;
+          fallback_to_api = true;
+          api_key = None;
+        }
+    | "codex" | "gpt-5.2" ->
+        Types.Codex {
+          prompt;
+          model = "gpt-5.2";
+          reasoning_effort = Types.RXhigh;
+          sandbox = Types.WorkspaceWrite;
+          working_directory = None;
+          timeout;
+          stream = false;
+          use_cli = true;
+          fallback_to_api = true;
+        }
+    | "ollama" ->
+        (* Plain ollama defaults to qwen3:1.7b for fast testing *)
+        Types.Ollama {
+          prompt;
+          model = "qwen3:1.7b";
+          system_prompt = None;
+          temperature = 0.7;
+          timeout;
+          stream = false;
+          tools = parsed_tools;  (* Pass through tools from Chain DSL *)
+        }
+    | m when String.length m > 7 && String.sub m 0 7 = "ollama:" ->
+        let ollama_model = String.sub m 7 (String.length m - 7) in
+        Types.Ollama {
+          prompt;
+          model = ollama_model;
+          system_prompt = None;
+          temperature = 0.7;
+          timeout;
+          stream = false;
+          tools = parsed_tools;  (* Pass through tools from Chain DSL *)
+        }
+    | "glm" | "glm-4.7" | "glm-4.6" | "glm-4.5" ->
+        Types.Glm {
+          prompt;
+          model = "glm-4.7";
+          system_prompt = None;
+          temperature = 0.7;
+          max_tokens = Some 4096;
+          timeout;
+          stream = false;
+          thinking = false;  (* Faster for chain execution *)
+          do_sample = true;
+          web_search = false;
+          tools = [];  (* No tools for chain execution by default *)
+          api_key = None;
+        }
+    | _ ->
+        (* Default to Gemini for unknown models *)
+        Types.Gemini {
+          prompt;
+          model = "gemini-3-pro-preview";
+          thinking_level = Types.High;
+          yolo = false;
+          output_format = Types.Text;
+          timeout;
+          stream = false;
+          use_cli = gemini_use_cli;
+          fallback_to_api = true;
+        }
+  in
+  with_system_prompt system args
+
 (** {1 Main Execute Function} *)
 
 (** Execute a tool and return result - Direct Style *)
@@ -1354,7 +1491,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
               in
               (* Create exec_fn that routes to appropriate LLM *)
               let exec_fn ~model ?system ~prompt ?tools ?thinking () =
-                let _ = system, thinking in  (* Unused for now, available for future enhancement *)
+                let _ = thinking in  (* Available for future enhancement *)
                 (* Convert Yojson.Safe.t tools to tool_schema list option *)
                 let parsed_tools = match tools with
                   | None -> None
@@ -1478,6 +1615,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         fallback_to_api = true;
                       }
                 in
+                let args = with_system_prompt system args in
                 match args with
                 | Types.Gemini { model = "stub"; _ } ->
                     Ok (Printf.sprintf "[stub]%s" prompt)
@@ -2088,7 +2226,7 @@ This chain will execute the goal using a stub model.|}
                      in
                      (* Create exec_fn that routes to appropriate LLM *)
                      let exec_fn ~model ?system ~prompt ?tools ?thinking () =
-                       let _ = system, thinking in
+                       let _ = thinking in
                        let parsed_tools = match tools with
                          | None -> None
                          | Some json ->
@@ -2110,12 +2248,12 @@ This chain will execute the goal using a stub model.|}
                        let model_name = String.lowercase_ascii model in
                        let result =
                         if starts_with ~prefix:"gemini" model_name then
-                          execute ~sw ~proc_mgr ~clock (Gemini {
-                            prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true
+                         execute ~sw ~proc_mgr ~clock (Gemini {
+                           prompt; model; thinking_level = High; yolo = false; output_format = Text; timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true
                           })
                          else if starts_with ~prefix:"claude" model_name then
                            execute ~sw ~proc_mgr ~clock (Claude {
-                             prompt; model; long_context = false; system_prompt = None;
+                             prompt; model; long_context = false; system_prompt = system;
                              output_format = Text; allowed_tools = []; working_directory = "";
                              timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true;
                              api_key = None
@@ -2132,7 +2270,7 @@ This chain will execute the goal using a stub model.|}
                              | None -> "devstral"
                            in
                            execute ~sw ~proc_mgr ~clock (Ollama {
-                             prompt; model = ollama_model; system_prompt = None;
+                             prompt; model = ollama_model; system_prompt = system;
                              temperature = 0.7; timeout = node_timeout; stream = false; tools = parsed_tools
                            })
                          else
@@ -2740,7 +2878,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 else Some (server, String.sub name (idx + 1) tool_len)
           in
           let exec_fn ~model ?system ~prompt ?tools ?thinking () =
-            let _ = system, thinking in  (* Unused for now, available for future enhancement *)
+            let _ = thinking in  (* Available for future enhancement *)
             (* Convert Yojson.Safe.t tools to tool_schema list option *)
             let parsed_tools = match tools with
               | None -> None
@@ -2792,7 +2930,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   prompt;
                   model = "opus";
                   long_context = true;
-                  system_prompt = None;
+                  system_prompt = system;
                   output_format = Text;
                   allowed_tools = [];
                   working_directory;
@@ -2823,7 +2961,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 let args = Ollama {
                   prompt;
                   model = ollama_model;
-                  system_prompt = None;
+                  system_prompt = system;
                   temperature = 0.7;
                   timeout;
                   stream = false;
@@ -2835,7 +2973,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                 let args = Ollama {
                   prompt;
                   model;
-                  system_prompt = None;
+                  system_prompt = system;
                   temperature = 0.7;
                   timeout;
                   stream = false;
