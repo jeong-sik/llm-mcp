@@ -91,7 +91,7 @@ graph LR
 
 ```mermaid
 graph LR
-    glm["LLM:ollama:glm-4.7-flash '{{input}}'"]
+    glm["LLM:glm '{{input}}'"]
     gemini["LLM:gemini '{{input}}'"]
     claude["LLM:claude '{{input}}'"]
     cascade("Cascade:0.7:summary")

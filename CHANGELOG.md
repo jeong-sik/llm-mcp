@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-02-12
+
+### Changed
+- **GLM default model**: `glm-5` replaces `glm-4.7` as the default GLM model
+  - GLM-5: 745B MoE (44B active), 200K context, 128K output
+  - `glm-5-code`: coding-specialized variant added
+  - All GLM-4.x models (`glm-4.7`, `glm-4.6`, `glm-4.5`) still supported via explicit model name
+- **Cascade preset**: `cascade-default.json` tier 1 updated from `ollama:glm-4.7-flash` to `glm`
+- **Documentation**: ZAI-SETUP.md, README, CLAUDE.md updated for GLM-5
+
 ## [0.5.0] - 2026-02-05
 
 ### Added

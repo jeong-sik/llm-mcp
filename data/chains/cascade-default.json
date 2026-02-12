@@ -7,7 +7,7 @@
     {
       "id": "glm",
       "type": "llm",
-      "model": "ollama:glm-4.7-flash",
+      "model": "glm",
       "prompt": "{{input}}"
     },
     {
@@ -63,6 +63,6 @@
   "metadata": {
     "category": "routing",
     "use_case": "Cost optimization for general LLM queries",
-    "tier_models": ["ollama:glm-4.7-flash", "gemini", "claude"]
+    "tier_models": ["glm", "gemini", "claude"]
   }
 }
