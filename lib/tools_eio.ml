@@ -1107,7 +1107,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                     (try
                       if to_string finish_reason = "tool_calls" then
                         tool_calls_complete := true
-                    with _ -> ());
+                    with Yojson.Safe.Util.Type_error _ -> ()
+                       | exn -> Printf.eprintf "[llm-stream] finish_reason parse: %s\n%!" (Printexc.to_string exn));
                     (* Extract content chunk *)
                     (try
                       let content_chunk = delta |> member "content" |> to_string in
@@ -1126,7 +1127,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                           ]);
                         ])
                       end
-                    with _ -> ());
+                    with Yojson.Safe.Util.Type_error _ -> ()
+                       | exn -> Printf.eprintf "[llm-stream] content chunk parse: %s\n%!" (Printexc.to_string exn));
                     (* Extract reasoning chunk *)
                     (try
                       let reasoning_chunk = delta |> member "reasoning_content" |> to_string in
@@ -1144,7 +1146,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                           ]);
                         ])
                       end
-                    with _ -> ());
+                    with Yojson.Safe.Util.Type_error _ -> ()
+                       | exn -> Printf.eprintf "[llm-stream] reasoning chunk parse: %s\n%!" (Printexc.to_string exn));
                     (* Phase 2: Extract tool_calls chunks *)
                     (try
                       let tool_calls = delta |> member "tool_calls" |> to_list in
@@ -1190,13 +1193,16 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                               ]);
                             ])
                           end
-                        with _ -> ());
+                        with Yojson.Safe.Util.Type_error _ -> ()
+                           | exn -> Printf.eprintf "[llm-stream] tool_call args parse: %s\n%!" (Printexc.to_string exn));
                         (* Update accumulator *)
                         Hashtbl.replace tool_calls_acc key (call_id, func_name, args_buf)
                       ) tool_calls
-                    with _ -> ())
+                    with Yojson.Safe.Util.Type_error _ -> ()
+                       | exn -> Printf.eprintf "[llm-stream] tool_calls parse: %s\n%!" (Printexc.to_string exn))
                   | [] -> ())
-                with _ -> ()
+                with Yojson.Safe.Util.Type_error _ -> ()
+                   | exn -> Printf.eprintf "[llm-stream] SSE chunk parse: %s\n%!" (Printexc.to_string exn)
               end else begin
                 (* [DONE] - broadcast completion with tool calls if any *)
                 let tool_calls_json =

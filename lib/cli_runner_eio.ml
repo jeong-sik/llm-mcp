@@ -50,7 +50,7 @@ let terminate_process_safely proc =
     (* Send SIGTERM to process group (negative PID) *)
     (try Unix.kill (-pid) Sys.sigterm with Unix.Unix_error _ -> ());
     (* Give process time to cleanup, then force kill *)
-    Unix.sleepf 0.1;
+    Time_compat.sleep 0.1;
     (try Unix.kill (-pid) Sys.sigkill with Unix.Unix_error _ -> ());
     (* Also signal the process directly in case it's not a group leader *)
     (try Eio.Process.signal proc Sys.sigterm with _ -> ());

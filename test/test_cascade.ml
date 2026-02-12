@@ -106,6 +106,55 @@ let test_cascade_tier_yojson_roundtrip () =
     check string "tier_node id" tier.tier_node.id tier'.tier_node.id
   | Error e -> fail (Printf.sprintf "cascade_tier yojson roundtrip failed: %s" e)
 
+let test_parse_custom_cascade_tier_json () =
+  let json_str = {|{
+    "id": "cascade-custom-tier",
+    "nodes": [
+      { "id": "glm", "type": "llm", "model": "ollama:glm-4.7-flash", "prompt": "{{input}}" },
+      {
+        "id": "cascade",
+        "type": "cascade",
+        "tiers": [
+          {
+            "tier_node": { "id": "glm_ref", "type": "chain_ref", "ref": "glm" },
+            "tier_index": 0,
+            "confidence_threshold": 0.7,
+            "cost_weight": 0.0,
+            "pass_context": false
+          }
+        ],
+        "max_escalations": 2,
+        "context_mode": "summary",
+        "default_threshold": 0.7
+      }
+    ],
+    "output": "cascade",
+    "config": null
+  }|} in
+  let json = Yojson.Safe.from_string json_str in
+  match Chain_parser.parse_chain json with
+  | Error e -> fail (Printf.sprintf "parse_chain failed: %s" e)
+  | Ok chain ->
+    let cascade_node = List.find_opt (fun n ->
+      match n.node_type with Cascade _ -> true | _ -> false
+    ) chain.nodes in
+    match cascade_node with
+    | None -> fail "Expected a Cascade node"
+    | Some n ->
+      match n.node_type with
+      | Cascade { tiers; _ } ->
+        check int "tiers len" 1 (List.length tiers);
+        let t = List.hd tiers in
+        check int "tier_index" 0 t.tier_index;
+        check (float 0.001) "confidence_threshold" 0.7 t.confidence_threshold;
+        check (float 0.001) "cost_weight" 0.0 t.cost_weight;
+        check bool "pass_context" false t.pass_context;
+        check string "tier_node id" "glm_ref" t.tier_node.id;
+        (match t.tier_node.node_type with
+         | ChainRef ref_id -> check string "tier_node ref" "glm" ref_id
+         | _ -> fail "Expected tier_node.type=chain_ref")
+      | _ -> fail "Expected Cascade node_type"
+
 let test_confidence_level_yojson_roundtrip () =
   let test level =
     let json = confidence_level_to_yojson level in
@@ -415,6 +464,7 @@ let () =
       test_case "make_cascade defaults" `Quick test_make_cascade_defaults;
       test_case "node_type_name" `Quick test_node_type_name_cascade;
       test_case "tier yojson roundtrip" `Quick test_cascade_tier_yojson_roundtrip;
+      test_case "parse custom tier json" `Quick test_parse_custom_cascade_tier_json;
     ];
     "mermaid_parsing", [
       test_case "3-tier cascade" `Quick test_mermaid_3tier_cascade;
