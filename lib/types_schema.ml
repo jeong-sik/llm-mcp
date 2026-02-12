@@ -452,7 +452,7 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name: glm-5 (default), glm-4.7, glm-4.6, glm-4.5 (lowercase required)");
+        ("description", `String "Model name: glm-5 (default), glm-5-code (coding), glm-4.7, glm-4.6, glm-4.5 (lowercase required)");
         ("default", `String "glm-5");
       ]);
       ("system_prompt", `Assoc [
