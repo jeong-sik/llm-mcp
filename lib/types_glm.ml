@@ -1,7 +1,7 @@
 (* ============================================================================
    GLM Function Calling Types (Phase 1.1)
 
-   GLM 4.7 supports three tool types:
+   GLM 5 / GLM 4.7 supports three tool types:
    - web_search: Real-time web search
    - function: Custom function calling (OpenAI-compatible)
    - code_interpreter: Execute Python code in sandbox

@@ -395,12 +395,12 @@ Use this to discover which models are available before calling the ollama tool.|
 
 let glm_schema : tool_schema = {
   name = "glm";
-  description = {|Run glm-4.7 via Z.ai Cloud API (OpenAI-compatible) with Function Calling support.
+  description = {|Run GLM via Z.ai Cloud API (OpenAI-compatible) with Function Calling support.
 
-glm-4.7 is a 355B parameter MoE model (32B active) with:
-- State-of-the-art reasoning, coding, and agent capabilities
+glm-5 (default) is a 745B parameter MoE model (44B active) with:
+- Frontier-level reasoning, coding, and agentic capabilities
 - 200K context window, 128K output
-- 55+ tokens per second
+- Deep thinking mode via thinking parameter
 - **Function Calling**: Define custom tools for GLM to invoke
 
 Tool Types:
@@ -409,14 +409,15 @@ Tool Types:
 - code_interpreter: Execute Python code in sandbox
 
 Models (lowercase required by Z.ai API):
-- glm-4.7 (default): Best performance, MoE 355B/32B active
+- glm-5 (default): Frontier model, MoE 745B/44B active
+- glm-4.7: Previous flagship, MoE 355B/32B active
 - glm-4.6: Previous generation
 - glm-4.5: Older, cost-efficient
 - glm-4.5-air: Lightweight version
 
 Parameters:
 - prompt: The prompt to send (required)
-- model: Model name (default: glm-4.7)
+- model: Model name (default: glm-5)
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - max_tokens: Max tokens to generate (default: 131072 = 128K full)
@@ -451,8 +452,8 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name: glm-4.7 (default), glm-4.6, glm-4.5, glm-4.5-air (lowercase required)");
-        ("default", `String "glm-4.7");
+        ("description", `String "Model name: glm-5 (default), glm-4.7, glm-4.6, glm-4.5 (lowercase required)");
+        ("default", `String "glm-5");
       ]);
       ("system_prompt", `Assoc [
         ("type", `String "string");
@@ -545,7 +546,7 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
 (** GLM Translation Tool Schema *)
 let glm_translate_schema : tool_schema = {
   name = "glm.translate";
-  description = {|Translation Agent using GLM 4.7 with 6 different strategies.
+  description = {|Translation Agent using GLM-5 with 6 different strategies.
 
 Strategies:
 - general: Direct translation (fastest)
@@ -588,8 +589,8 @@ Requires ZAI_API_KEY environment variable.|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name (default: glm-4.7)");
-        ("default", `String "glm-4.7");
+        ("description", `String "Model name (default: glm-5)");
+        ("default", `String "glm-5");
       ]);
       ("timeout", `Assoc [
         ("type", `String "integer");

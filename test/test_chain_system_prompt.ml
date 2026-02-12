@@ -72,7 +72,7 @@ let test_chain_llm_args_glm_system_prompt () =
   in
   match args with
   | Types.Glm { model; system_prompt; _ } ->
-      check string "glm model" "glm-4.7" model;
+      check string "glm model" "glm-5" model;
       check (option string) "glm system_prompt" system system_prompt
   | _ ->
       fail "expected Types.Glm"
