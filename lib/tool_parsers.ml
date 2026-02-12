@@ -264,7 +264,7 @@ let parse_glm_tools (json : Yojson.Safe.t) : Types.glm_tool list =
 let parse_glm_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-5" in
   let system_prompt = json |> member "system_prompt" |> to_string_option in
   let temperature =
     try json |> member "temperature" |> to_float
@@ -291,7 +291,7 @@ let parse_glm_translate_args (json : Yojson.Safe.t) : tool_args =
   let target_lang = json |> member "target_lang" |> to_string in
   let strategy_str = json |> member "strategy" |> to_string_option |> Option.value ~default:"general" in
   let strategy = Types.translation_strategy_of_string strategy_str in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-4.7" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-5" in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
   GlmTranslate { text; source_lang; target_lang; strategy; model; timeout }
 

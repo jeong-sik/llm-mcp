@@ -23,14 +23,19 @@ export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 
 > **중요:** Z.ai API는 **소문자** 모델 이름 필수
 
-- `glm-4.7` - 최신, 355B MoE (32B active), 200K context
+### GLM-5 (2026-02-11 출시)
+- `glm-5` - 최신, 745B MoE (44B active), 200K context, 128K output ($1/$3.2 per M tokens)
+- `glm-5-code` - 코딩 특화 ($1.2/$5 per M tokens)
+
+### GLM-4.x (이전 세대)
+- `glm-4.7` - 355B MoE (32B active), 200K context
 - `glm-4.6` - 이전 세대
 - `glm-4.5` - 비용 효율적
 - `glm-4.5-air` - 경량 버전
 
-## GLM-4.7 Thinking 모드
+## GLM Thinking 모드
 
-GLM-4.7은 자동으로 Reasoning (사고 과정)을 수행합니다:
+GLM-4.7+ 은 자동으로 Reasoning (사고 과정)을 수행합니다:
 
 - **응답 구조:**
   - `content`: 최종 답변

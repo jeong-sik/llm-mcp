@@ -202,7 +202,7 @@ graph LR
 ### 5. Cascade (Cost/Speed-Optimized LLM Routing)
 ```mermaid
 graph LR
-    glm["LLM:ollama:glm-4.7-flash '{{input}}'"]
+    glm["LLM:glm '{{input}}'"]
     gemini["LLM:gemini '{{input}}'"]
     claude["LLM:claude '{{input}}'"]
     cascade("Cascade:0.7:summary")
@@ -219,7 +219,7 @@ Parameters: `Cascade:threshold:context_mode`
 - `threshold`: confidence threshold (0.0-1.0, default 0.7)
 - `context_mode`: `none`, `summary` (default, 500 chars), `full`
 
-Each tier's LLM self-assesses confidence (`Confidence: High/Medium/Low`). If below threshold, escalates to the next tier. Preset: `cascade-default.json` (3-tier: GLM-4.7-flash -> Gemini -> Claude).
+Each tier's LLM self-assesses confidence (`Confidence: High/Medium/Low`). If below threshold, escalates to the next tier. Preset: `cascade-default.json` (3-tier: GLM-5 -> Gemini -> Claude).
 
 ---
 

@@ -645,10 +645,11 @@ let chain_llm_args
           stream = false;
           tools = parsed_tools;  (* Pass through tools from Chain DSL *)
         }
-    | "glm" | "glm-4.7" | "glm-4.6" | "glm-4.5" ->
+    | "glm" | "glm-5" | "glm-5-code" | "glm-4.7" | "glm-4.6" | "glm-4.5" as m ->
+        let glm_model = if m = "glm" then "glm-5" else m in
         Types.Glm {
           prompt;
-          model = "glm-4.7";
+          model = glm_model;
           system_prompt = None;
           temperature = 0.7;
           max_tokens = Some 4096;
@@ -1586,10 +1587,11 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         stream = false;
                         tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
-                  | "glm" | "glm-4.7" | "glm-4.6" | "glm-4.5" ->
+                  | "glm" | "glm-5" | "glm-5-code" | "glm-4.7" | "glm-4.6" | "glm-4.5" as m ->
+                      let glm_model = if m = "glm" then "glm-5" else m in
                       Types.Glm {
                         prompt;
-                        model = "glm-4.7";
+                        model = glm_model;
                         system_prompt = None;
                         temperature = 0.7;
                         max_tokens = Some 4096;
