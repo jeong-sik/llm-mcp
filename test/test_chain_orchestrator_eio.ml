@@ -330,7 +330,7 @@ let test_timeout_handling () =
 
   let slow_llm ~prompt:_ =
     (* This would normally take a long time, but we set a short timeout *)
-    Unix.sleepf 0.5;  (* 500ms delay *)
+    Time_compat.sleep 0.5;  (* 500ms delay *)
     mock_llm_call ~prompt:""
   in
 

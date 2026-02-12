@@ -66,7 +66,7 @@ let test_circuit_breaker_half_open_recovery () =
   check bool "circuit open" false (Resilience.circuit_allows cb);
 
   (* Wait for timeout to transition to HalfOpen *)
-  Unix.sleepf 0.05;  (* 50ms > 10ms timeout for stability *)
+  Time_compat.sleep 0.05;  (* 50ms > 10ms timeout for stability *)
   check bool "half-open allows probe" true (Resilience.circuit_allows cb);
 
   (* Success in half-open *)

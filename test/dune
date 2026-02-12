@@ -324,7 +324,7 @@
 ; Rate limit module tests (Token bucket algorithm, headers)
 (test
  (name test_rate_limit)
- (libraries llm_mcp.common alcotest unix eio eio_main))
+ (libraries llm_mcp.common llm_mcp.eio alcotest unix eio eio_main))
 
 ; Ollama parser tests (streaming chunks, tool calls, chat responses)
 (test
