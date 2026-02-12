@@ -924,16 +924,48 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
 
   | "cascade" ->
       let open Yojson.Safe.Util in
+      let default_threshold = match parse_float_opt json "default_threshold" with Some v -> v | None -> 0.7 in
       let tiers_json = json |> member "tiers" |> to_list in
       let* tiers =
-        let rec aux acc = function
+        let parse_tier (j : Yojson.Safe.t) (idx : int) : (Chain_types.cascade_tier, string) result =
+          (* Backward-compatible with Chain_parser.chain_to_json output (derived yojson). *)
+          match Chain_types.cascade_tier_of_yojson j with
+          | Ok t -> Ok t
+          | Error _ ->
+              (* Chain file format: tier_node is a regular node object with "type" (not "node_type"). *)
+              let* tier_node =
+                match j |> member "tier_node" with
+                | `Null -> Error "Missing required field 'tier_node'"
+                | tn ->
+                    (match tn |> member "type" with
+                     | `String _ -> parse_node tn
+                     | _ ->
+                         (match Chain_types.node_of_yojson tn with
+                          | Ok n -> Ok n
+                          | Error e -> Error (Printf.sprintf "Invalid tier_node: %s" e)))
+              in
+              let tier_index = parse_int_with_default j "tier_index" idx in
+              let confidence_threshold =
+                match parse_float_opt j "confidence_threshold" with
+                | Some f -> f
+                | None -> default_threshold
+              in
+              let cost_weight =
+                match parse_float_opt j "cost_weight" with
+                | Some f -> f
+                | None -> 0.0
+              in
+              let pass_context = parse_bool_with_default j "pass_context" true in
+              Ok { Chain_types.tier_node; tier_index; confidence_threshold; cost_weight; pass_context }
+        in
+        let rec aux acc idx = function
           | [] -> Ok (List.rev acc)
           | j :: rest ->
-              (match Chain_types.cascade_tier_of_yojson j with
-               | Ok t -> aux (t :: acc) rest
+              (match parse_tier j idx with
+               | Ok t -> aux (t :: acc) (idx + 1) rest
                | Error e -> Error (Printf.sprintf "Invalid cascade tier: %s" e))
         in
-        aux [] tiers_json
+        aux [] 0 tiers_json
       in
       let confidence_prompt = parse_string_opt json "confidence_prompt" in
       let max_escalations = parse_int_with_default json "max_escalations" 2 in
@@ -943,7 +975,6 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | None -> Chain_types.CM_Summary
       in
       let task_hint = parse_string_opt json "task_hint" in
-      let default_threshold = match parse_float_opt json "default_threshold" with Some v -> v | None -> 0.7 in
       Ok (Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold })
 
   | unknown ->

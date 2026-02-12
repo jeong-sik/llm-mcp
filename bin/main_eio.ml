@@ -1961,13 +1961,13 @@ let start_server config =
       eprintf "🐫 llm-mcp: Sent shutdown notification to %d SSE clients\n%!" (sse_client_count ());
 
       (* Give clients 200ms to receive the notification *)
-      Unix.sleepf 0.2;
+      Time_compat.sleep 0.2;
 
       (* Gracefully close all SSE connections before Switch.fail *)
       close_all_sse_connections ();
 
       (* Give connections 200ms to complete close handshake *)
-      Unix.sleepf 0.2;
+      Time_compat.sleep 0.2;
 
       match !switch_ref with
       | Some sw -> Eio.Switch.fail sw Shutdown

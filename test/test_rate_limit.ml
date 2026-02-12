@@ -61,7 +61,7 @@ let test_check_refills_over_time () =
     let _ = RL.check limiter ~key:"client4" in ()
   done;
   (* Wait a tiny bit for refill (1000 tokens/sec = 1 token/ms) *)
-  Unix.sleepf 0.01;
+  Time_compat.sleep 0.01;
   (* Should have refilled *)
   check bool "refilled" true (RL.check limiter ~key:"client4")
 

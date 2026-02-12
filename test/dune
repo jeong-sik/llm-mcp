@@ -324,7 +324,7 @@
 ; Rate limit module tests (Token bucket algorithm, headers)
 (test
  (name test_rate_limit)
- (libraries llm_mcp.common alcotest unix eio eio_main))
+ (libraries llm_mcp.common llm_mcp.eio alcotest unix eio eio_main))
 
 ; Ollama parser tests (streaming chunks, tool calls, chat responses)
 (test
@@ -400,3 +400,45 @@
 (test
  (name test_cascade)
  (libraries llm_mcp.common alcotest eio eio_main str))
+
+; Wave 2 Coverage Tests
+
+; Types_glm coverage (GLM function calling, tool types, translation strategies)
+(test
+ (name test_types_glm_coverage)
+ (libraries llm_mcp.common alcotest))
+
+; Tools_ollama_agentic coverage (message builders, request/response parsing)
+(test
+ (name test_tools_ollama_agentic_coverage)
+ (libraries llm_mcp.common alcotest))
+
+; Agent_types coverage (role, message_to_json, token estimation)
+(test
+ (name test_agent_types_coverage)
+ (libraries llm_mcp.agent_core_eio alcotest eio eio_main))
+
+; Chain_evaluator additional coverage (metrics, triggers, verification, reports)
+(test
+ (name test_chain_evaluator_coverage)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Chain_types additional coverage (consensus, confidence, parallel groups, batch)
+(test
+ (name test_chain_types_coverage)
+ (libraries llm_mcp.common alcotest))
+
+; Types_core coverage (response_format, tool_result, enum roundtrips)
+(test
+ (name test_types_core_coverage)
+ (libraries llm_mcp.common alcotest))
+
+; Dictionary additional coverage (model_type, detect_model, save/load, pp)
+(test
+ (name test_dictionary_coverage)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Mermaid Parser Coverage tests (helpers, all node types, metadata, edges, multiline)
+(test
+ (name test_mermaid_parser_coverage)
+ (libraries llm_mcp.common alcotest str))
