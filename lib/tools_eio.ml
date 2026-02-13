@@ -1669,6 +1669,23 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "identity" ->
                           (* Identity tool: returns args unchanged *)
                           { Types.model = "identity"; returncode = 0; response = Yojson.Safe.to_string args; extra = [] }
+                      | "fetch" ->
+                          (* URL fetch with Accept: text/markdown for Cloudflare optimization *)
+                          let url = try args |> Yojson.Safe.Util.member "url" |> Yojson.Safe.Util.to_string
+                                    with _ -> "" in
+                          if url = "" then
+                            { Types.model = "fetch"; returncode = -1; response = "Error: fetch requires 'url' argument"; extra = [] }
+                          else
+                            let curl_result = Cli_runner_eio.run_command ~sw ~proc_mgr ~clock ~timeout:timeout_int
+                              "curl" ["-s"; "-L"; "-H"; "Accept: text/markdown, text/html;q=0.9"; url] in
+                            (match curl_result with
+                            | Error (Cli_runner_eio.Timeout t) ->
+                                { Types.model = "fetch"; returncode = -1;
+                                  response = sprintf "Error: fetch timed out after %ds" t; extra = [] }
+                            | Error (Cli_runner_eio.ProcessError msg) ->
+                                { Types.model = "fetch"; returncode = -1; response = sprintf "Error: fetch failed: %s" msg; extra = [] }
+                            | Ok r ->
+                                { Types.model = "fetch"; returncode = 0; response = r.stdout; extra = [] })
                       | _ ->
                           { Types.model = "chain.tool";
                             returncode = -1;
@@ -1988,6 +2005,23 @@ This chain will execute the goal using a stub model.|}
               | "identity" ->
                   (* Identity tool: returns args unchanged *)
                   { model = "identity"; returncode = 0; response = Yojson.Safe.to_string tool_args; extra = [] }
+              | "fetch" ->
+                  (* URL fetch with Accept: text/markdown for Cloudflare optimization *)
+                  let url = try tool_args |> Yojson.Safe.Util.member "url" |> Yojson.Safe.Util.to_string
+                            with _ -> "" in
+                  if url = "" then
+                    { model = "fetch"; returncode = 1; response = "Error: fetch requires 'url' argument"; extra = [] }
+                  else
+                    let curl_result = Cli_runner_eio.run_command ~sw ~proc_mgr ~clock ~timeout
+                      "curl" ["-s"; "-L"; "-H"; "Accept: text/markdown, text/html;q=0.9"; url] in
+                    (match curl_result with
+                    | Error (Cli_runner_eio.Timeout t) ->
+                        { model = "fetch"; returncode = 1;
+                          response = sprintf "Error: fetch timed out after %ds" t; extra = [] }
+                    | Error (Cli_runner_eio.ProcessError msg) ->
+                        { model = "fetch"; returncode = 1; response = sprintf "Error: fetch failed: %s" msg; extra = [] }
+                    | Ok r ->
+                        { model = "fetch"; returncode = 0; response = r.stdout; extra = [] })
               | _ ->
                   { model = name; returncode = 1; response = Printf.sprintf "Unknown tool: %s" name; extra = [] }
             in
