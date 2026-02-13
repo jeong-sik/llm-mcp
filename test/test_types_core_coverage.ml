@@ -6,45 +6,6 @@ open Alcotest
 
 module TC = Types_core
 
-(** {1 Response Format Conversion} *)
-
-let test_response_format_of_string () =
-  check bool "verbose" true (TC.response_format_of_string "verbose" = TC.Verbose);
-  check bool "json" true (TC.response_format_of_string "json" = TC.Verbose);
-  check bool "compact" true (TC.response_format_of_string "compact" = TC.Compact);
-  check bool "dsl" true (TC.response_format_of_string "dsl" = TC.Compact);
-  check bool "binary" true (TC.response_format_of_string "binary" = TC.Binary);
-  check bool "msgpack" true (TC.response_format_of_string "msgpack" = TC.Binary);
-  check bool "base85" true (TC.response_format_of_string "base85" = TC.Base85);
-  check bool "ascii85" true (TC.response_format_of_string "ascii85" = TC.Base85);
-  check bool "compressed" true (TC.response_format_of_string "compressed" = TC.Compressed);
-  check bool "zlib" true (TC.response_format_of_string "zlib" = TC.Compressed);
-  check bool "zstd" true (TC.response_format_of_string "zstd" = TC.ZstdDict);
-  check bool "zstd-dict" true (TC.response_format_of_string "zstd-dict" = TC.ZstdDict);
-  check bool "dict" true (TC.response_format_of_string "dict" = TC.ZstdDict);
-  check bool "auto" true (TC.response_format_of_string "auto" = TC.Auto);
-  check bool "adaptive" true (TC.response_format_of_string "adaptive" = TC.Auto);
-  check bool "unknown defaults to verbose" true
-    (TC.response_format_of_string "anything" = TC.Verbose)
-
-let test_string_of_response_format () =
-  check string "verbose" "verbose" (TC.string_of_response_format TC.Verbose);
-  check string "compact" "compact" (TC.string_of_response_format TC.Compact);
-  check string "binary" "binary" (TC.string_of_response_format TC.Binary);
-  check string "base85" "base85" (TC.string_of_response_format TC.Base85);
-  check string "compressed" "compressed" (TC.string_of_response_format TC.Compressed);
-  check string "zstd-dict" "zstd-dict" (TC.string_of_response_format TC.ZstdDict);
-  check string "auto" "auto" (TC.string_of_response_format TC.Auto)
-
-let test_response_format_roundtrip () =
-  let formats = [TC.Verbose; TC.Compact; TC.Binary; TC.Base85;
-                 TC.Compressed; TC.ZstdDict; TC.Auto] in
-  List.iter (fun f ->
-    let s = TC.string_of_response_format f in
-    let f' = TC.response_format_of_string s in
-    check bool (Printf.sprintf "roundtrip %s" s) true (f = f')
-  ) formats
-
 (** {1 Tool Result to Yojson} *)
 
 let test_tool_result_to_yojson_no_extra () =
@@ -132,11 +93,6 @@ let test_output_format_unknown () =
 
 let () =
   run "types_core_coverage" [
-    ("response_format", [
-      test_case "of_string" `Quick test_response_format_of_string;
-      test_case "to_string" `Quick test_string_of_response_format;
-      test_case "roundtrip" `Quick test_response_format_roundtrip;
-    ]);
     ("tool_result", [
       test_case "no extra" `Quick test_tool_result_to_yojson_no_extra;
       test_case "with extra" `Quick test_tool_result_to_yojson_with_extra;

@@ -3,6 +3,7 @@
     tool_call_to_json, estimate_tokens_of_message, default values *)
 
 open Alcotest
+module Agent_types = Agent_core_eio.Types
 
 (** {1 Role Conversion} *)
 
