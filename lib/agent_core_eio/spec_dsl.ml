@@ -172,33 +172,6 @@ module Make_verified
     end)
 end
 
-(** {1 Spec Composition} *)
-
-(** 두 스펙의 순차 합성: A의 출력이 B의 입력 *)
-module Compose_spec
-    (A : SPEC)
-    (B : SPEC with type input = A.output) = struct
-
-  type input = A.input
-  type output = B.output
-  type state = A.state * B.state
-
-  let precondition (sa, _sb) i = A.precondition sa i
-
-  let postcondition (_sa, _sb) _i _o =
-    (* TODO: Compose_spec is fundamentally broken at SPEC level.
-       SPEC only has transition (state -> input -> state), not run (which produces output).
-       To properly compose, we need IMPL-level composition or a redesign.
-       This module is currently unused. *)
-    failwith "Compose_spec.postcondition: not implemented (SPEC has no run, cannot get intermediate output)"
-
-  let invariant (sa, sb) = A.invariant sa && B.invariant sb
-
-  let transition (_sa, _sb) _i =
-    (* TODO: Same design issue - cannot get A's output at SPEC level *)
-    failwith "Compose_spec.transition: not implemented (SPEC has no run, cannot get intermediate output)"
-end
-
 (** {1 Migration Framework} *)
 
 (** 스펙 마이그레이션 시그니처 *)
