@@ -189,7 +189,7 @@ let parse_gemini_list_args (json : Yojson.Safe.t) : tool_args =
 let parse_glm_tool (json : Yojson.Safe.t) : Types.glm_tool =
   let open Yojson.Safe.Util in
   let tool_type_str = json |> member "type" |> to_string in
-  let tool_type = Types.glm_tool_type_of_string tool_type_str in
+  let tool_type = Types.glm_tool_type_of_string_unsafe tool_type_str in
   match tool_type with
   | Types.GlmWebSearch ->
       let web_search_obj = json |> member "web_search" in
@@ -290,7 +290,7 @@ let parse_glm_translate_args (json : Yojson.Safe.t) : tool_args =
   let source_lang = json |> member "source_lang" |> to_string in
   let target_lang = json |> member "target_lang" |> to_string in
   let strategy_str = json |> member "strategy" |> to_string_option |> Option.value ~default:"general" in
-  let strategy = Types.translation_strategy_of_string strategy_str in
+  let strategy = Types.translation_strategy_of_string_unsafe strategy_str in
   let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-5" in
   let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
   GlmTranslate { text; source_lang; target_lang; strategy; model; timeout }

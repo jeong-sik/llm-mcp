@@ -1066,7 +1066,9 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         in
         let body_fields =
           if List.length all_tools > 0 then
-            body_fields @ [("tools", Types.glm_tools_to_json all_tools)]
+            (match Types.glm_tools_to_json all_tools with
+             | Ok json -> body_fields @ [("tools", json)]
+             | Error _ -> body_fields)  (* Fallback: omit tools on error *)
           else
             body_fields
         in
