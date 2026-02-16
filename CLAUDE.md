@@ -20,7 +20,7 @@ prompt.get         - Get prompt by ID (with optional version)
 ### Presets (data/chains/)
 | ID | Description | When to Use |
 |----|-------------|-------------|
-| magi-code-review | 3-LLM consensus code review | 중요한 코드 변경 리뷰 |
+| consensus-review | 3-LLM consensus code review | 중요한 코드 변경 리뷰 |
 | mcts-mantra-review | MCTS + MANTRA refactoring | 리팩토링 품질 보장 |
 | deep-research | Multi-source research + fact-check | 깊은 리서치 필요 시 |
 | pr-review-pipeline | Automated PR review | CI 통합 자동 리뷰 |
@@ -153,20 +153,20 @@ b --> c
 
 ## Common Patterns
 
-### 1. MAGI (3-LLM Consensus)
+### 1. Consensus (3-LLM 합의)
 ```mermaid
 graph LR
     input["LLM:gemini 'Analyze'"]
-    casper["LLM:gemini 'Strategy'"]
-    balthasar["LLM:claude 'Values'"]
-    melchior["LLM:codex 'Code'"]
+    gemini["LLM:gemini 'Strategy'"]
+    claude["LLM:claude 'Values'"]
+    codex["LLM:codex 'Code'"]
     consensus{Quorum:2}
-    input --> casper
-    input --> balthasar
-    input --> melchior
-    casper --> consensus
-    balthasar --> consensus
-    melchior --> consensus
+    input --> gemini
+    input --> claude
+    input --> codex
+    gemini --> consensus
+    claude --> consensus
+    codex --> consensus
 ```
 
 ### 2. Pipeline (Sequential)
@@ -761,7 +761,7 @@ Compare metrics to determine which version performs better.
 
 ## Examples
 
-### Run MAGI Code Review
+### Run Consensus Code Review
 ```bash
 curl -X POST http://localhost:8932/mcp -H "Content-Type: application/json" -d '{
   "jsonrpc": "2.0",
@@ -770,7 +770,7 @@ curl -X POST http://localhost:8932/mcp -H "Content-Type: application/json" -d '{
   "params": {
     "name": "chain.orchestrate",
     "arguments": {
-      "chain_id": "magi-code-review",
+      "chain_id": "consensus-review",
       "input": {"file_path": "src/main.ts"}
     }
   }

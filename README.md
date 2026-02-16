@@ -10,7 +10,7 @@ OCaml 기반 MCP 서버. 여러 LLM CLI를 MCP 도구로 호출하고, **Chain E
 |------|------|
 | Multi-LLM 호출 | Gemini, Claude, Codex, Ollama를 MCP 도구로 통합 |
 | Chain Engine | Mermaid/JSON DSL로 LLM 파이프라인 정의 |
-| MAGI 패턴 | 3-LLM 합의 (Quorum) 기반 의사결정 |
+| Consensus 패턴 | 3-LLM 합의 (Quorum) 기반 의사결정 |
 | Cascade 라우팅 | 비용/품질 최적화 - confidence 기반 모델 에스컬레이션 |
 | 프리셋 | 코드 리뷰, 리서치, 장애 대응 등 사전 정의된 체인 |
 | 체크포인트 | 장기 실행 체인의 상태 저장/재개 |
@@ -75,16 +75,16 @@ stdio 모드:
 
 ## Chain Engine 예시
 
-### MAGI 패턴 (3-LLM 합의)
+### Consensus 패턴 (3-LLM 합의)
 
 ```mermaid
 graph LR
     input["LLM:gemini 'Analyze {{code}}'"]
-    casper["LLM:gemini 'Strategic view'"]
-    balthasar["LLM:claude 'Quality review'"]
-    melchior["LLM:codex 'Implementation'"]
+    gemini["LLM:gemini 'Strategic view'"]
+    claude["LLM:claude 'Quality review'"]
+    codex["LLM:codex 'Implementation'"]
     consensus{Quorum:2}
-    input --> casper & balthasar & melchior --> consensus
+    input --> gemini & claude & codex --> consensus
 ```
 
 ### Cascade 라우팅 (비용 최적화)
@@ -122,7 +122,7 @@ curl -X POST http://localhost:8932/mcp -H "Content-Type: application/json" -d '{
 
 | ID | 용도 | 설명 |
 |----|------|------|
-| `magi-code-review` | 코드 리뷰 | 3-LLM 합의 기반 |
+| `consensus-review` | 코드 리뷰 | 3-LLM 합의 기반 |
 | `mcts-mantra-review` | 리팩토링 | MCTS + MANTRA 품질 보장 |
 | `deep-research` | 리서치 | 멀티소스 + 팩트체크 |
 | `cascade-default` | 비용 최적화 | GLM → Gemini → Claude |
@@ -135,7 +135,7 @@ curl -X POST http://localhost:8932/mcp -d '{
   "method": "tools/call",
   "params": {
     "name": "chain.orchestrate",
-    "arguments": {"chain_id": "magi-code-review", "input": {"file": "main.ts"}}
+    "arguments": {"chain_id": "consensus-review", "input": {"file": "main.ts"}}
   }
 }'
 ```

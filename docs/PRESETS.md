@@ -6,7 +6,7 @@
 
 | Preset | When to Use | LLMs Used |
 |--------|-------------|-----------|
-| `magi-code-review` | 코드 리뷰가 필요할 때 | Codex + Claude + Gemini |
+| `consensus-review` | 코드 리뷰가 필요할 때 | Codex + Claude + Gemini |
 | `mcts-mantra-review` | 리팩토링 품질 보장이 필요할 때 | 3 LLM + MCTS 탐색 |
 | `deep-research` | 깊은 리서치 + 팩트체크 | Gemini + Claude |
 | `pr-review-pipeline` | PR 자동 리뷰 | Gemini + Claude |
@@ -17,7 +17,7 @@
 
 ---
 
-## 1. magi-code-review
+## 1. consensus-review
 
 **🎯 사용 시점**: 중요한 코드 변경에 다각도 리뷰가 필요할 때
 
@@ -25,25 +25,25 @@
 graph LR
     input["📄 Source Code"]
 
-    subgraph MAGI["🔮 MAGI Trinity"]
-        melchior["🔬 MELCHIOR<br/>(Codex)<br/>Logic/Bugs/Security"]
-        balthasar["💝 BALTHASAR<br/>(Claude)<br/>Clarity/Maintainability"]
-        casper["🎯 CASPER<br/>(Gemini)<br/>Architecture/Scale"]
+    subgraph Reviewers["🔍 Multi-LLM Review"]
+        codex["🔬 Codex<br/>Logic/Bugs/Security"]
+        claude["💝 Claude<br/>Clarity/Maintainability"]
+        gemini["🎯 Gemini<br/>Architecture/Scale"]
     end
 
     consensus{{"🗳️ Quorum:2<br/>Consensus"}}
     output["📋 Review Report"]
 
-    input --> melchior
-    input --> balthasar
-    input --> casper
-    melchior --> consensus
-    balthasar --> consensus
-    casper --> consensus
+    input --> codex
+    input --> claude
+    input --> gemini
+    codex --> consensus
+    claude --> consensus
+    gemini --> consensus
     consensus --> output
 
-    classDef magi fill:#9b59b6,stroke:#8e44ad,color:#fff
-    class melchior,balthasar,casper magi
+    classDef reviewer fill:#9b59b6,stroke:#8e44ad,color:#fff
+    class codex,claude,gemini reviewer
 ```
 
 **특징**:
@@ -263,13 +263,13 @@ graph LR
 
 ### CLI
 ```bash
-# MAGI 코드 리뷰
+# Consensus 코드 리뷰
 curl -X POST http://localhost:8932/mcp -d '{
   "method": "tools/call",
   "params": {
     "name": "chain.orchestrate",
     "arguments": {
-      "chain_id": "magi-code-review",
+      "chain_id": "consensus-review",
       "input": {"file_path": "src/main.ts"}
     }
   }
@@ -292,7 +292,7 @@ curl -X POST http://localhost:8932/mcp -d '{
 ```typescript
 // Claude Code에서
 await mcp.call("chain.orchestrate", {
-  chain_id: "magi-code-review",
+  chain_id: "consensus-review",
   input: { file_path: "src/feature.ts" }
 });
 ```
@@ -303,7 +303,7 @@ await mcp.call("chain.orchestrate", {
 
 | Situation | Recommended Preset |
 |-----------|-------------------|
-| 단순 코드 리뷰 | `magi-code-review` |
+| 단순 코드 리뷰 | `consensus-review` |
 | 리팩토링 품질 보장 | `mcts-mantra-review` |
 | 기술 리서치 | `deep-research` |
 | PR 자동화 | `pr-review-pipeline` |

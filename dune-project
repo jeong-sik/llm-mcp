@@ -19,7 +19,7 @@
 (package
  (name llm_mcp)
  (synopsis "Multi-LLM MCP Server in OCaml")
- (description "MAGI Trinity: Unified MCP wrapper for Gemini, Claude, and Codex CLIs")
+ (description "Unified MCP wrapper for Gemini, Claude, Codex, and Ollama CLIs with Chain Engine")
  (depends
   (ocaml (>= 5.1.0))
   (dune (>= 3.13))

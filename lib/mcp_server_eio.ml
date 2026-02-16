@@ -299,9 +299,9 @@ let handle_initialize ~store id params =
     ("serverInfo", P.server_info_to_json server_info);
     ("capabilities", P.capabilities_to_json capabilities);
     ("sessionId", `String session.id); (* Return session ID to client *)
-    ("instructions", `String "LLM-MCP provides multi-LLM access (MAGI Trinity). \
-      Tools: gemini (CASPER/strategy), claude-cli (BALTHASAR/values), codex (MELCHIOR/code), ollama (local). \
-      For MAGI consensus, call 2+ LLMs and compare results. \
+    ("instructions", `String "LLM-MCP provides multi-LLM access. \
+      Tools: gemini, claude-cli, codex, ollama (local). \
+      For consensus review, call 2+ LLMs and compare results. \
       Chain Engine: Use chain.run for multi-LLM workflows (Mermaid DSL supported).");
   ] in
   (Some session.id, make_response ~id result)

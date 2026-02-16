@@ -6,7 +6,7 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 
 | Chain | Description | Est. Time | Est. Cost |
 |-------|-------------|-----------|-----------|
-| [magi-code-review](#magi-code-review) | 3-LLM consensus code review | 120s | $0.15 |
+| [consensus-review](#consensus-review) | 3-LLM consensus code review | 120s | $0.15 |
 | [deep-research](#deep-research) | Multi-source research with fact-checking | 180s | $0.25 |
 | [pr-review-pipeline](#pr-review-pipeline) | Automated PR review | 90s | $0.12 |
 | [incident-response](#incident-response) | Automated incident triage | 120s | $0.18 |
@@ -16,15 +16,15 @@ Real-world chain examples demonstrating the Chain Engine's DAG execution capabil
 
 ---
 
-## MAGI Code Review
+## Consensus Review
 
-3-LLM consensus code review using MELCHIOR (Codex), BALTHASAR (Claude), CASPER (Gemini).
+3-LLM consensus code review using Codex, Claude, and Gemini.
 
 ```mermaid
 graph TD
-    A[read-target] --> B[melchior-review<br/>🔬 Codex<br/>bugs/perf/security]
-    A --> C[balthasar-review<br/>👩 Claude<br/>clarity/maintainability]
-    A --> D[casper-review<br/>🎯 Gemini<br/>architecture/scalability]
+    A[read-target] --> B[codex-review<br/>🔬 Codex<br/>bugs/perf/security]
+    A --> C[claude-review<br/>👩 Claude<br/>clarity/maintainability]
+    A --> D[gemini-review<br/>🎯 Gemini<br/>architecture/scalability]
     B --> E[consensus-merge<br/>📊 Gemini]
     C --> E
     D --> E
@@ -37,7 +37,7 @@ graph TD
 
 **Usage:**
 ```bash
-chain.orchestrate magi-code-review file_path=src/main.ts
+chain.orchestrate consensus-review file_path=src/main.ts
 ```
 
 ---
@@ -270,7 +270,7 @@ Input ──┼─ LLM-B ─┼── Coordinator ── Output
 {
   "tool": "chain.orchestrate",
   "args": {
-    "chain_id": "magi-code-review",
+    "chain_id": "consensus-review",
     "input": {
       "file_path": "src/main.ts"
     }
@@ -281,7 +281,7 @@ Input ──┼─ LLM-B ─┼── Coordinator ── Output
 ### Via OCaml API
 ```ocaml
 let open Chain_engine in
-let chain = load_chain "magi-code-review" in
+let chain = load_chain "consensus-review" in
 let input = `Assoc [("file_path", `String "src/main.ts")] in
 let result = execute ~sw ~clock ~env chain input in
 print_endline (Yojson.Safe.pretty_to_string result)

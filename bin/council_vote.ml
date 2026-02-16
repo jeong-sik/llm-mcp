@@ -1,4 +1,4 @@
-(** council_vote - MAGI Agent Council voting system
+(** council_vote - Agent Council voting system
 
     Ouroboros v7.0: Hive Mind (Agent Council)
     Convokes a council of AI agents to vote on complex decisions.
@@ -16,9 +16,9 @@ type agent = {
 }
 
 let agents = [
-  { name = "Gemini 3 Pro (CASPER)"; role = "1M Context & Web Search"; bias = "Innovation" };
-  { name = "Claude Opus 4.5 (BALTHASAR)"; role = "Ethics & 80.9% SWE-Score"; bias = "Caution" };
-  { name = "GPT-5.2-Codex (MELCHIOR)"; role = "Tool Use & Efficient Implementation"; bias = "Pragmatism" };
+  { name = "Gemini 3 Pro"; role = "1M Context & Web Search"; bias = "Innovation" };
+  { name = "Claude Opus 4.5"; role = "Ethics & 80.9% SWE-Score"; bias = "Caution" };
+  { name = "GPT-5.2-Codex"; role = "Tool Use & Efficient Implementation"; bias = "Pragmatism" };
 ]
 
 let vote_to_string = function
