@@ -1,0 +1,141 @@
+name: Deploy LLM-MCP to Cloud Run
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - '.github/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: asia-northeast3
+  SERVICE_NAME: llm-mcp
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev-$(date +%Y%m%d-%H%M%S)")
+          echo "version=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push container
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/ax-tf/${{ env.SERVICE_NAME }}:${{ steps.version.outputs.version }}-${{ github.sha }} .
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/ax-tf/${{ env.SERVICE_NAME }}:${{ steps.version.outputs.version }}-${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        run: |
+          # 배포 환경별 설정
+          if [ "${{ github.event.inputs.environment }}" = "staging" ]; then
+            INGRESS_SETTING="internal-and-cloud-load-balancing"
+            ALLOW_UNAUTHENTICATED=false
+            MIN_INSTANCES=0
+          else
+            INGRESS_SETTING="all"
+            ALLOW_UNAUTHENTICATED=true
+            MIN_INSTANCES=1
+          fi
+
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/ax-tf/${{ env.SERVICE_NAME }}:${{ steps.version.outputs.version }}-${{ github.sha }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --ingress=${INGRESS_SETTING} \
+            --allow-unauthenticated=${ALLOW_UNAUTHENTICATED} \
+            --port 8932 \
+            --memory 1Gi \
+            --cpu 1 \
+            --min-instances ${MIN_INSTANCES} \
+            --max-instances 10 \
+            --concurrency 80 \
+            --timeout 300 \
+            --set-env-vars "LLM_MCP_PUBLIC=1,LLM_MCP_CORS_MODE=permissive" \
+            --set-secrets "LLM_MCP_API_KEY=llm-mcp-api-key:latest" \
+            ${ALLOW_UNAUTHENTICATED} && \
+          echo " deployed with allow-unauthenticated" || \
+          echo " deployed with authentication"
+
+      - name: Get service URL
+        id: service_url
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.REGION }} \
+            --format 'value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Service URL: $URL"
+
+      - name: Update kidsnote-ax-tf configuration
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          # kidsnote-ax-tf 레포지토리에서 설정 업데이트
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/kidsnote/kidsnote-ax-tf/contents/src/ax_tf/core/config.py" \
+            -d '{
+              "message": "Update LLM-MCP URL: ${{ steps.service_url.outputs.url }}",
+              "content": "'$(echo "base64_encoded_config_file_content")'",
+              "sha": "existing_file_sha"
+            }'
+
+      - name: Notify Slack on success
+        if: success()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SERVICE_URL: ${{ steps.service_url.outputs.url }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then echo "No webhook URL, skipping"; exit 0; fi
+          jq -n \
+            --svc "${{ env.SERVICE_NAME }}" \
+            --url "$SERVICE_URL" \
+            --run_url "$RUN_URL" \
+            '{blocks:[
+              {type:"header",text:{type:"plain_text",text:"LLM-MCP 배포 완료"}},
+              {type:"section",fields:[
+                {type:"mrkdwn",text:("*Service:* " + $svc)},
+                {type:"mrkdwn",text:("*URL:* <" + $url + "|" + $url + ">")}
+              ]},
+              {type:"context",elements:[
+                {type:"mrkdwn",text:("<" + $run_url + "|Workflow Run>")}
+              ]}
+            ]}' | curl -s -X POST "$SLACK_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-

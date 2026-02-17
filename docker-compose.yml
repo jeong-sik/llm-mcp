@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  llm-mcp:
+    build: .
+    ports:
+      - "8932:8932"
+    environment:
+      - LLM_MCP_API_KEY=${LLM_MCP_API_KEY}
+      - LLM_MCP_PUBLIC=1
+      - LLM_MCP_CORS_MODE=permissive
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8932/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
