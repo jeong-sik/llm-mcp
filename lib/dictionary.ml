@@ -129,10 +129,10 @@ let detect_content_type (data : string) : content_type =
   if len < 10 then Mixed
   else
     let start = String.sub data 0 (min 100 len) in
-    if String.contains start '{' || String.contains start '[' then JSON
-    else if String.contains start '#' && String.contains start '\n' then Markdown
-    else if contains_substring start "def " || contains_substring start "function "
+    if contains_substring start "def " || contains_substring start "function "
          || contains_substring start "let " || contains_substring start "class " then Code
+    else if String.contains start '{' || String.contains start '[' then JSON
+    else if String.contains start '#' && String.contains start '\n' then Markdown
     else Mixed
 
 let string_of_content_type = function

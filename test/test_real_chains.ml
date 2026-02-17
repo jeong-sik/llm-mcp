@@ -119,9 +119,9 @@ let test_design_to_tasks () =
 let test_incident_response () =
   assert_roundtrip "data/chains/incident-response.json"
 
-(** 5.7 magi-code-review.json *)
-let test_magi_code_review () =
-  assert_roundtrip "data/chains/magi-code-review.json"
+(** 5.7 consensus-review.json *)
+let test_consensus_review () =
+  assert_roundtrip "data/chains/consensus-review.json"
 
 (** 5.8 mcts-mantra-explore.json *)
 let test_mcts_mantra_explore () =
@@ -170,7 +170,7 @@ let () =
       test_case "5.4 deep-research" `Quick test_deep_research;
       test_case "5.5 design_to_tasks" `Quick test_design_to_tasks;
       test_case "5.6 incident-response" `Quick test_incident_response;
-      test_case "5.7 magi-code-review" `Quick test_magi_code_review;
+      test_case "5.7 consensus-review" `Quick test_consensus_review;
       test_case "5.8 mcts-mantra-explore" `Quick test_mcts_mantra_explore;
       test_case "5.9 mcts-mantra-hybrid" `Quick test_mcts_mantra_hybrid;
       test_case "5.10 mcts-mantra-review" `Quick test_mcts_mantra_review;
