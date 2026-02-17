@@ -306,7 +306,7 @@ let parse_get_stream_delta_args (_json : Yojson.Safe.t) : tool_args =
   GetStreamDelta
 
 (** Parse JSON arguments for chain.run tool *)
-let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
+let parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let chain =
     match json |> member "chain" with
@@ -327,7 +327,7 @@ let[@warning "-32"] parse_chain_run_args (json : Yojson.Safe.t) : tool_args =
   ChainRun { chain; mermaid; chain_id; input; trace; checkpoint_enabled; timeout }
 
 (** Parse JSON arguments for chain.validate tool *)
-let[@warning "-32"] parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =
+let parse_chain_validate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let chain =
     match json |> member "chain" with
@@ -360,7 +360,7 @@ let parse_chain_convert_args (json : Yojson.Safe.t) : tool_args =
   ChainConvert { from_format; to_format; input; pretty }
 
 (** Parse JSON arguments for chain.orchestrate tool *)
-let[@warning "-32"] parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_args =
+let parse_chain_orchestrate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let goal = json |> member "goal" |> to_string in
   let chain =
