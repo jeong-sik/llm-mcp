@@ -924,7 +924,7 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
             })
         | _ ->
             Error (Printf.sprintf "Invalid MCTS format (expected policy:iterations or policy:param:iterations): %s" content))
-      else if String.length content > 10 && String.sub content 0 10 = "Evaluator:" then
+      else if String.length content >= 10 && String.sub content 0 10 = "Evaluator:" then
         (* {Evaluator:scoring_func:select_strategy:min_score} - e.g., {Evaluator:llm_judge:best:0.7} *)
         let rest = String.sub content 10 (String.length content - 10) in
         let parts = String.split_on_char ':' rest |> List.map trim in
@@ -1118,14 +1118,29 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
       else if String.length stripped >= 10 && String.sub (String.lowercase_ascii stripped) 0 10 = "masc:claim" then
         let task_id = if String.length stripped > 11 then Some (String.sub stripped 11 (String.length stripped - 11)) else None in
         Ok (Masc_claim { room = None; task_id })
-      else if String.contains content_lower 'b' && String.contains content_lower 'r' then
-        Ok (Masc_broadcast { room = None; message = content; mention = [] })
-      else if String.contains content_lower 'l' && String.contains content_lower 'i' then
-        Ok (Masc_listen { room = None; filter = None; timeout_sec = 30.0 })
-      else if String.contains content_lower 'c' && String.contains content_lower 'l' then
-        Ok (Masc_claim { room = None; task_id = None })
       else
-        Ok (Masc_broadcast { room = None; message = content; mention = [] })
+        (* keyword-based heuristic before character fallback *)
+        let has_word w =
+          let wl = String.length w and cl = String.length content_lower in
+          if wl > cl then false
+          else let found = ref false in
+            for i = 0 to cl - wl do
+              if not !found && String.sub content_lower i wl = w then found := true
+            done; !found
+        in
+        if has_word "wait" || has_word "listen" then
+          Ok (Masc_listen { room = None; filter = None; timeout_sec = 30.0 })
+        else if has_word "claim" || has_word "grab" then
+          Ok (Masc_claim { room = None; task_id = None })
+        (* character-based fallback *)
+        else if String.contains content_lower 'b' && String.contains content_lower 'r' then
+          Ok (Masc_broadcast { room = None; message = content; mention = [] })
+        else if String.contains content_lower 'l' && String.contains content_lower 'i' then
+          Ok (Masc_listen { room = None; filter = None; timeout_sec = 30.0 })
+        else if String.contains content_lower 'c' && String.contains content_lower 'l' then
+          Ok (Masc_claim { room = None; task_id = None })
+        else
+          Ok (Masc_broadcast { room = None; message = content; mention = [] })
 
 (** Parse edge line: A --> B or A & B --> C or A -->|label| B *)
 let parse_edge_line (line : string) : mermaid_edge list =

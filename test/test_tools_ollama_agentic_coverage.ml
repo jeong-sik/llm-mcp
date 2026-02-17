@@ -53,19 +53,22 @@ let test_build_chat_request () =
 
 let test_build_chat_request_with_tools () =
   let tools = [`Assoc [("type", `String "function")]] in
+  (* No tools: explicit ~tools:[] *)
   let json = Tools_ollama_agentic.build_chat_request
-    ~model:"glm-4.7-flash" ~temperature:0.0 ~tools [] in
+    ~model:"glm-4.7-flash" ~temperature:0.0 ~tools:[] [] in
   let open Yojson.Safe.Util in
   let tools_json = json |> member "tools" |> to_list in
   check int "no tools" 0 (List.length tools_json);
-  (* Now with tools *)
+  (* With tools: ~tools uses the variable in scope *)
   let json2 = Tools_ollama_agentic.build_chat_request
     ~model:"glm-4.7-flash" ~temperature:0.0 ~tools [] in
-  ignore json2;
+  let tools_json2 = json2 |> member "tools" |> to_list in
+  check int "with tools" 1 (List.length tools_json2);
+  (* Different model/temp with tools *)
   let json3 = Tools_ollama_agentic.build_chat_request
     ~model:"test" ~temperature:0.5 ~tools [] in
-  let _ = json3 |> member "tools" |> to_list in
-  ignore tools
+  let tools_json3 = json3 |> member "tools" |> to_list in
+  check int "other model tools" 1 (List.length tools_json3)
 
 (** {1 Parse Chat Response} *)
 

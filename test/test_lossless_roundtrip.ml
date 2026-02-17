@@ -854,7 +854,7 @@ let test_chain_figma_to_prototype = test_production_chain "figma-to-prototype.js
 let test_chain_figma_to_web_v2 = test_production_chain "figma-to-web-component-v2.json"
 let test_chain_figma_to_web = test_production_chain "figma-to-web-component.json"
 let test_chain_incident_response = test_production_chain "incident-response.json"
-let test_chain_magi_code_review = test_production_chain "magi-code-review.json"
+let test_chain_consensus_review = test_production_chain "consensus-review.json"
 let test_chain_mcts_explore = test_production_chain "mcts-mantra-explore.json"
 let test_chain_mcts_hybrid = test_production_chain "mcts-mantra-hybrid.json"
 let test_chain_mcts_review = test_production_chain "mcts-mantra-review.json"
@@ -2005,7 +2005,7 @@ let () =
       Alcotest.test_case "figma-to-web-component-v2.json" `Quick test_chain_figma_to_web_v2;
       Alcotest.test_case "figma-to-web-component.json" `Quick test_chain_figma_to_web;
       Alcotest.test_case "incident-response.json" `Quick test_chain_incident_response;
-      Alcotest.test_case "magi-code-review.json" `Quick test_chain_magi_code_review;
+      Alcotest.test_case "consensus-review.json" `Quick test_chain_consensus_review;
       Alcotest.test_case "mcts-mantra-explore.json" `Quick test_chain_mcts_explore;
       Alcotest.test_case "mcts-mantra-hybrid.json" `Quick test_chain_mcts_hybrid;
       Alcotest.test_case "mcts-mantra-review.json" `Quick test_chain_mcts_review;
