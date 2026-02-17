@@ -22,6 +22,7 @@
    rate_limit
    ; Pure OCaml - shared between Eio and Lwt
    safe_parse
+   streaming_json
    common
    ; Types domain separation (Phase 1)
    types_core      ; Foundation types

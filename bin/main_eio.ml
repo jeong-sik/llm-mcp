@@ -1361,11 +1361,6 @@ let send_sse_event body ~event ~data =
   Httpun.Body.Writer.write_string body msg;
   Httpun.Body.Writer.flush body ignore
 
-let[@warning "-32"] send_sse_event_with_id body ~id ~event ~data =
-  let msg = sprintf "id: %d\nevent: %s\ndata: %s\n\n" id event data in
-  Httpun.Body.Writer.write_string body msg;
-  Httpun.Body.Writer.flush body ignore
-
 (** ============== JSON-RPC Helpers ============== *)
 
 let json_rpc_error code message =

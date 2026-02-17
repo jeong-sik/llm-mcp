@@ -17,25 +17,22 @@ let test_glm_tool_type_to_string () =
 
 let test_glm_tool_type_of_string () =
   check bool "web_search" true
-    (Types_glm.glm_tool_type_of_string "web_search" = Types_glm.GlmWebSearch);
+    (Types_glm.glm_tool_type_of_string "web_search" = Ok Types_glm.GlmWebSearch);
   check bool "function" true
-    (Types_glm.glm_tool_type_of_string "function" = Types_glm.GlmFunction);
+    (Types_glm.glm_tool_type_of_string "function" = Ok Types_glm.GlmFunction);
   check bool "code_interpreter" true
-    (Types_glm.glm_tool_type_of_string "code_interpreter" = Types_glm.GlmCodeInterpreter)
+    (Types_glm.glm_tool_type_of_string "code_interpreter" = Ok Types_glm.GlmCodeInterpreter)
 
 let test_glm_tool_type_of_string_unknown () =
-  try
-    let _ = Types_glm.glm_tool_type_of_string "unknown" in
-    fail "should raise"
-  with Failure msg ->
-    check bool "error msg contains unknown" true
-      (String.length msg > 0)
+  match Types_glm.glm_tool_type_of_string "unknown" with
+  | Error (Types_glm.Unknown_tool_type _) -> ()  (* Expected *)
+  | _ -> failwith "should return Error for unknown type"
 
 let test_glm_tool_type_roundtrip () =
   let types = [Types_glm.GlmWebSearch; Types_glm.GlmFunction; Types_glm.GlmCodeInterpreter] in
   List.iter (fun t ->
     let s = Types_glm.string_of_glm_tool_type t in
-    let t' = Types_glm.glm_tool_type_of_string s in
+    let t' = Types_glm.glm_tool_type_of_string_unsafe s in
     check bool (Printf.sprintf "roundtrip %s" s) true (t = t')
   ) types
 
@@ -161,12 +158,14 @@ let test_glm_code_interpreter_tool_custom () =
 
 let test_glm_tool_to_json_web_search () =
   let tool = Types_glm.glm_web_search_tool () in
-  let json = Types_glm.glm_tool_to_json tool in
-  let open Yojson.Safe.Util in
-  check string "type" "web_search" (json |> member "type" |> to_string);
-  let ws = json |> member "web_search" in
-  check bool "enable" true (ws |> member "enable" |> to_bool);
-  check bool "search_result" true (ws |> member "search_result" |> to_bool)
+  match Types_glm.glm_tool_to_json tool with
+  | Error _ -> fail "should return Ok"
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check string "type" "web_search" (json |> member "type" |> to_string);
+      let ws = json |> member "web_search" in
+      check bool "enable" true (ws |> member "enable" |> to_bool);
+      check bool "search_result" true (ws |> member "search_result" |> to_bool)
 
 let test_glm_tool_to_json_web_search_no_config () =
   (* Web search with no config should default to true, true *)
@@ -176,9 +175,11 @@ let test_glm_tool_to_json_web_search_no_config () =
     web_search_config = None;
     code_interpreter_config = None;
   } in
-  let json = Types_glm.glm_tool_to_json tool in
-  let open Yojson.Safe.Util in
-  check bool "default enable" true (json |> member "web_search" |> member "enable" |> to_bool)
+  match Types_glm.glm_tool_to_json tool with
+  | Error _ -> fail "should return Ok"
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check bool "default enable" true (json |> member "web_search" |> member "enable" |> to_bool)
 
 let test_glm_tool_to_json_function () =
   let schema = Types_glm.{
@@ -191,9 +192,11 @@ let test_glm_tool_to_json_function () =
     ];
   } in
   let tool = Types_glm.glm_function_tool schema in
-  let json = Types_glm.glm_tool_to_json tool in
-  let open Yojson.Safe.Util in
-  check string "type" "function" (json |> member "type" |> to_string)
+  match Types_glm.glm_tool_to_json tool with
+  | Error _ -> fail "should return Ok"
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check string "type" "function" (json |> member "type" |> to_string)
 
 let test_glm_tool_to_json_function_no_schema () =
   let tool = Types_glm.{
@@ -202,19 +205,20 @@ let test_glm_tool_to_json_function_no_schema () =
     web_search_config = None;
     code_interpreter_config = None;
   } in
-  try
-    let _ = Types_glm.glm_tool_to_json tool in
-    fail "should raise"
-  with Failure msg ->
-    check bool "error msg" true (String.length msg > 0)
+  match Types_glm.glm_tool_to_json tool with
+  | Ok _ -> fail "should return Error"
+  | Error Types_glm.Missing_function_schema -> ()  (* Expected *)
+  | Error _ -> fail "wrong error type"
 
 let test_glm_tool_to_json_code_interpreter () =
   let tool = Types_glm.glm_code_interpreter_tool ~sandbox:"secure" () in
-  let json = Types_glm.glm_tool_to_json tool in
-  let open Yojson.Safe.Util in
-  check string "type" "code_interpreter" (json |> member "type" |> to_string);
-  check string "sandbox" "secure"
-    (json |> member "code_interpreter" |> member "sandbox" |> to_string)
+  match Types_glm.glm_tool_to_json tool with
+  | Error _ -> fail "should return Ok"
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check string "type" "code_interpreter" (json |> member "type" |> to_string);
+      check string "sandbox" "secure"
+        (json |> member "code_interpreter" |> member "sandbox" |> to_string)
 
 let test_glm_tool_to_json_code_interpreter_no_config () =
   let tool = Types_glm.{
@@ -223,10 +227,12 @@ let test_glm_tool_to_json_code_interpreter_no_config () =
     web_search_config = None;
     code_interpreter_config = None;
   } in
-  let json = Types_glm.glm_tool_to_json tool in
-  let open Yojson.Safe.Util in
-  check string "default sandbox" "auto"
-    (json |> member "code_interpreter" |> member "sandbox" |> to_string)
+  match Types_glm.glm_tool_to_json tool with
+  | Error _ -> fail "should return Ok"
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      check string "default sandbox" "auto"
+        (json |> member "code_interpreter" |> member "sandbox" |> to_string)
 
 (** {1 GLM Tools to JSON (list)} *)
 
@@ -235,10 +241,10 @@ let test_glm_tools_to_json () =
     Types_glm.glm_web_search_tool ();
     Types_glm.glm_code_interpreter_tool ();
   ] in
-  let json = Types_glm.glm_tools_to_json tools in
-  match json with
-  | `List items -> check int "2 tools" 2 (List.length items)
-  | _ -> fail "expected list"
+  match Types_glm.glm_tools_to_json tools with
+  | Error _ -> fail "should return Ok"
+  | Ok (`List items) -> check int "2 tools" 2 (List.length items)
+  | Ok _ -> fail "expected list"
 
 (** {1 Parse GLM Tool Calls} *)
 
@@ -319,24 +325,22 @@ let test_translation_strategy_to_string () =
 
 let test_translation_strategy_of_string () =
   check bool "general" true
-    (Types_glm.translation_strategy_of_string "general" = Types_glm.TransGeneral);
+    (Types_glm.translation_strategy_of_string "general" = Ok Types_glm.TransGeneral);
   check bool "paraphrased" true
-    (Types_glm.translation_strategy_of_string "paraphrased" = Types_glm.TransParaphrased);
+    (Types_glm.translation_strategy_of_string "paraphrased" = Ok Types_glm.TransParaphrased);
   check bool "two_step" true
-    (Types_glm.translation_strategy_of_string "two_step" = Types_glm.TransTwoStep);
+    (Types_glm.translation_strategy_of_string "two_step" = Ok Types_glm.TransTwoStep);
   check bool "three_stage" true
-    (Types_glm.translation_strategy_of_string "three_stage" = Types_glm.TransThreeStage);
+    (Types_glm.translation_strategy_of_string "three_stage" = Ok Types_glm.TransThreeStage);
   check bool "reflective" true
-    (Types_glm.translation_strategy_of_string "reflective" = Types_glm.TransReflective);
+    (Types_glm.translation_strategy_of_string "reflective" = Ok Types_glm.TransReflective);
   check bool "chain_of_thought" true
-    (Types_glm.translation_strategy_of_string "chain_of_thought" = Types_glm.TransChainOfThought)
+    (Types_glm.translation_strategy_of_string "chain_of_thought" = Ok Types_glm.TransChainOfThought)
 
 let test_translation_strategy_of_string_unknown () =
-  try
-    let _ = Types_glm.translation_strategy_of_string "unknown" in
-    fail "should raise"
-  with Failure msg ->
-    check bool "error msg" true (String.length msg > 0)
+  match Types_glm.translation_strategy_of_string "unknown" with
+  | Error (Types_glm.Unknown_translation_strategy _) -> ()  (* Expected *)
+  | _ -> failwith "should return Error for unknown strategy"
 
 let test_translation_strategy_roundtrip () =
   let strategies = [
@@ -346,7 +350,7 @@ let test_translation_strategy_roundtrip () =
   ] in
   List.iter (fun s ->
     let str = Types_glm.string_of_translation_strategy s in
-    let s' = Types_glm.translation_strategy_of_string str in
+    let s' = Types_glm.translation_strategy_of_string_unsafe str in
     check bool (Printf.sprintf "roundtrip %s" str) true (s = s')
   ) strategies
 

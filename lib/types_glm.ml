@@ -7,6 +7,12 @@
    - code_interpreter: Execute Python code in sandbox
    ============================================================================ *)
 
+(** GLM parsing errors *)
+type glm_parse_error =
+  | Unknown_tool_type of string
+  | Missing_function_schema
+  | Unknown_translation_strategy of string
+
 (** GLM Tool type - discriminated union for tool kinds *)
 type glm_tool_type =
   | GlmWebSearch      (** Web search for real-time information *)
@@ -20,10 +26,17 @@ let string_of_glm_tool_type = function
   | GlmCodeInterpreter -> "code_interpreter"
 
 let glm_tool_type_of_string = function
+  | "web_search" -> Ok GlmWebSearch
+  | "function" -> Ok GlmFunction
+  | "code_interpreter" -> Ok GlmCodeInterpreter
+  | s -> Error (Unknown_tool_type s)
+
+(** [glm_tool_type_of_string_unsafe] is legacy - returns default on error *)
+let glm_tool_type_of_string_unsafe = function
   | "web_search" -> GlmWebSearch
   | "function" -> GlmFunction
   | "code_interpreter" -> GlmCodeInterpreter
-  | s -> failwith (Printf.sprintf "Unknown GLM tool type: %s" s)
+  | _ -> GlmFunction  (* Default fallback *)
 
 (** JSON Schema for function parameters *)
 type json_schema_type =
@@ -136,32 +149,41 @@ let glm_tool_to_json tool =
         | Some (e, r) -> (e, r)
         | None -> (true, true)
       in
-      `Assoc [
+      Ok (`Assoc [
         ("type", `String "web_search");
         ("web_search", `Assoc [
           ("enable", `Bool enable);
           ("search_result", `Bool search_result);
         ])
-      ]
+      ])
   | GlmFunction ->
       (match tool.function_schema with
-       | Some schema -> glm_function_schema_to_json schema
-       | None -> failwith "GlmFunction requires function_schema")
+       | Some schema -> Ok (glm_function_schema_to_json schema)
+       | None -> Error Missing_function_schema)
   | GlmCodeInterpreter ->
       let sandbox = match tool.code_interpreter_config with
         | Some s -> s
         | None -> "auto"
       in
-      `Assoc [
+      Ok (`Assoc [
         ("type", `String "code_interpreter");
         ("code_interpreter", `Assoc [
           ("sandbox", `String sandbox);
         ])
-      ]
+      ])
 
 (** Convert list of glm_tools to JSON *)
 let glm_tools_to_json tools =
-  `List (List.map glm_tool_to_json tools)
+  let rec loop acc errors = function
+    | [] -> (match List.rev errors, List.rev acc with
+        | [], ok -> Ok (`List ok)
+        | err :: _, _ -> Error err)
+    | x :: xs ->
+        (match glm_tool_to_json x with
+         | Ok json -> loop (json :: acc) errors xs
+         | Error err -> loop acc (err :: errors) xs)
+  in
+  loop [] [] tools
 
 (** Tool call result from GLM response *)
 type glm_tool_call = {
@@ -212,11 +234,21 @@ let string_of_translation_strategy = function
   | TransChainOfThought -> "chain_of_thought"
 
 let translation_strategy_of_string = function
+  | "general" -> Ok TransGeneral
+  | "paraphrased" -> Ok TransParaphrased
+  | "two_step" -> Ok TransTwoStep
+  | "three_stage" -> Ok TransThreeStage
+  | "reflective" -> Ok TransReflective
+  | "chain_of_thought" -> Ok TransChainOfThought
+  | s -> Error (Unknown_translation_strategy s)
+
+(** [translation_strategy_of_string_unsafe] is legacy - returns default on error *)
+let translation_strategy_of_string_unsafe = function
   | "general" -> TransGeneral
   | "paraphrased" -> TransParaphrased
   | "two_step" -> TransTwoStep
   | "three_stage" -> TransThreeStage
   | "reflective" -> TransReflective
   | "chain_of_thought" -> TransChainOfThought
-  | s -> failwith (Printf.sprintf "Unknown translation strategy: %s" s)
+  | _ -> TransGeneral  (* Default fallback *)
 
