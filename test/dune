@@ -447,3 +447,23 @@
 (test
  (name test_time_compat)
  (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Handler_utils tests (gh_pr_diff, slack_post — Eio-based tool handlers)
+(test
+ (name test_handler_utils)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Handler_codex tests (OpenAI API handler — response parsing, error paths)
+(test
+ (name test_handler_codex)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Binary integration tests (subprocess calls to CLI binaries)
+(test
+ (name test_binaries)
+ (libraries alcotest str unix))
+
+; Parse chain files tests (JSON → chain parsing)
+(executable
+ (name test_parse_chains)
+ (libraries llm_mcp.common yojson))

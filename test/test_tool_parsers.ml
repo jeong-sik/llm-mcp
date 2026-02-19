@@ -17,7 +17,7 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
-(** {1 Parse Gemini Args Tests} *)
+(* {1Parse Gemini Args Tests} *)
 
 let test_parse_gemini_defaults () =
   let json = `Assoc [("prompt", `String "Hello world")] in
@@ -100,7 +100,7 @@ let test_parse_gemini_use_cli_default_prefers_api_key () =
           check bool "use_cli defaults to false when GOOGLE_AI_API_KEY is set" false g.use_cli
       | _ -> fail "Expected Gemini variant"))
 
-(** {1 Parse Gemini List Args Tests} *)
+(* {1Parse Gemini List Args Tests} *)
 
 let test_parse_gemini_list_defaults () =
   let json = `Assoc [] in
@@ -121,7 +121,7 @@ let test_parse_gemini_list_custom_values () =
       check bool "include_all true" true g.include_all
   | _ -> fail "Expected GeminiList variant"
 
-(** {1 Parse Chain Run Args Tests} *)
+(* {1Parse Chain Run Args Tests} *)
 
 let test_parse_chain_run_chain_id_only () =
   let json = `Assoc [
@@ -139,7 +139,7 @@ let test_parse_chain_run_chain_id_only () =
       check (option int) "timeout default none" None r.timeout
   | _ -> fail "Expected ChainRun variant"
 
-(** {1 Parse Claude Args Tests} *)
+(* {1Parse Claude Args Tests} *)
 
 let test_parse_claude_defaults () =
   let json = `Assoc [("prompt", `String "Hello Claude")] in
@@ -194,7 +194,7 @@ let test_parse_claude_output_formats () =
   test_format "json" "json";
   test_format "stream-json" "stream-json"
 
-(** {1 Parse Codex Args Tests} *)
+(* {1Parse Codex Args Tests} *)
 
 let test_parse_codex_defaults () =
   let json = `Assoc [("prompt", `String "Hello Codex")] in
@@ -252,7 +252,7 @@ let test_parse_codex_sandbox_modes () =
   test_sandbox "workspace-write" "workspace-write";
   test_sandbox "danger-full-access" "danger-full-access"
 
-(** {1 Parse Ollama Args Tests} *)
+(* {1Parse Ollama Args Tests} *)
 
 let test_parse_ollama_defaults () =
   let json = `Assoc [("prompt", `String "Hello Ollama")] in
@@ -282,7 +282,7 @@ let test_parse_ollama_custom_values () =
       check bool "stream true" true o.stream
   | _ -> fail "Expected Ollama variant"
 
-(** {1 Budget Mode Tests} *)
+(* {1Budget Mode Tests} *)
 
 let test_budget_mode_true () =
   let json = `Assoc [("budget_mode", `Bool true)] in
@@ -299,7 +299,7 @@ let test_budget_mode_default () =
   (* Just check it doesn't crash *)
   ()
 
-(** {1 Build Command Tests} *)
+(* {1Build Command Tests} *)
 
 let test_build_gemini_cmd () =
   let args = Gemini {
@@ -425,7 +425,7 @@ let test_build_ollama_curl_cmd () =
           String.sub s 0 21 = "http://localhost:1143") cmd_list)
   | Error e -> fail ("build_ollama_curl_cmd failed: " ^ e)
 
-(** {1 Thinking Prompt Prefix Test} *)
+(* {1Thinking Prompt Prefix Test} *)
 
 let test_thinking_prompt_prefix () =
   (* High thinking level should have a non-empty prefix *)
@@ -435,7 +435,7 @@ let test_thinking_prompt_prefix () =
   let prefix_low = Tool_parsers.thinking_prompt_prefix Low in
   check bool "Low prefix is empty" true (String.length prefix_low = 0)
 
-(** {1 Clean Codex Output Tests} *)
+(* {1Clean Codex Output Tests} *)
 
 let test_clean_codex_output_simple () =
   let output = Tool_parsers.clean_codex_output "Hello world" in
@@ -453,7 +453,7 @@ let test_clean_codex_output_multiline () =
   let output = Tool_parsers.clean_codex_output input in
   check bool "multiline processed" true (String.length output > 0)
 
-(** {1 Tool Schema Conversion Tests} *)
+(* {1Tool Schema Conversion Tests} *)
 
 let test_tool_schema_to_ollama_tool () =
   let schema : tool_schema = {
@@ -473,7 +473,7 @@ let test_tool_schema_to_ollama_tool () =
       check bool "has function" true (List.mem_assoc "function" items)
   | _ -> fail "Expected Assoc"
 
-(** {1 Test Suite} *)
+(* {1Test Suite} *)
 
 let () =
   Alcotest.run "Tool_parsers" [
@@ -546,5 +546,682 @@ let () =
 
     "tool_schema_conversion", [
       test_case "to ollama tool" `Quick test_tool_schema_to_ollama_tool;
+    ];
+
+    (* {1Resolve model aliases} *)
+
+    "resolve_claude_model", [
+      test_case "claude alias" `Quick (fun () ->
+        check string "claude" "claude-3-5-sonnet-20241022" (Tool_parsers.resolve_claude_model "claude"));
+      test_case "sonnet alias" `Quick (fun () ->
+        check string "sonnet" "claude-3-5-sonnet-20241022" (Tool_parsers.resolve_claude_model "sonnet"));
+      test_case "haiku alias" `Quick (fun () ->
+        check string "haiku" "claude-3-5-haiku-20241022" (Tool_parsers.resolve_claude_model "haiku"));
+      test_case "opus alias" `Quick (fun () ->
+        check string "opus" "claude-opus-4-20250514" (Tool_parsers.resolve_claude_model "opus"));
+      test_case "opus-4 alias" `Quick (fun () ->
+        check string "opus-4" "claude-opus-4-20250514" (Tool_parsers.resolve_claude_model "opus-4"));
+      test_case "passthrough" `Quick (fun () ->
+        check string "custom" "custom-model" (Tool_parsers.resolve_claude_model "custom-model"));
+      test_case "case insensitive" `Quick (fun () ->
+        check string "SONNET" "claude-3-5-sonnet-20241022" (Tool_parsers.resolve_claude_model "SONNET"));
+    ];
+
+    "resolve_gemini_model", [
+      test_case "gemini alias" `Quick (fun () ->
+        check string "gemini" "gemini-3-pro-preview" (Tool_parsers.resolve_gemini_model "gemini"));
+      test_case "pro alias" `Quick (fun () ->
+        check string "pro" "gemini-2.5-pro" (Tool_parsers.resolve_gemini_model "pro"));
+      test_case "flash alias" `Quick (fun () ->
+        check string "flash" "gemini-2.5-flash" (Tool_parsers.resolve_gemini_model "flash"));
+      test_case "flash-lite alias" `Quick (fun () ->
+        check string "flash-lite" "gemini-2.5-flash-lite" (Tool_parsers.resolve_gemini_model "flash-lite"));
+      test_case "3-pro alias" `Quick (fun () ->
+        check string "3-pro" "gemini-3-pro-preview" (Tool_parsers.resolve_gemini_model "3-pro"));
+      test_case "3-flash alias" `Quick (fun () ->
+        check string "3-flash" "gemini-3-flash-preview" (Tool_parsers.resolve_gemini_model "3-flash"));
+      test_case "passthrough" `Quick (fun () ->
+        check string "custom" "some-model" (Tool_parsers.resolve_gemini_model "some-model"));
+    ];
+
+    (* {1GLM args parsing} *)
+
+    "parse_glm_args", [
+      test_case "defaults" `Quick (fun () ->
+        let json = `Assoc [("prompt", `String "Hello GLM")] in
+        match Tool_parsers.parse_glm_args json with
+        | Glm g ->
+          check string "default model" "glm-5" g.model;
+          check (option string) "no system_prompt" None g.system_prompt;
+          check bool "default thinking" false g.thinking;
+          check bool "default do_sample" true g.do_sample;
+          check bool "default web_search" false g.web_search;
+          check int "tools empty" 0 (List.length g.tools);
+          check string "prompt" "Hello GLM" g.prompt
+        | _ -> fail "Expected Glm variant");
+      test_case "custom values" `Quick (fun () ->
+        let json = `Assoc [
+          ("prompt", `String "Test");
+          ("model", `String "glm-4v-plus-0111");
+          ("system_prompt", `String "Be helpful");
+          ("temperature", `Float 0.5);
+          ("max_tokens", `Int 1024);
+          ("thinking", `Bool true);
+          ("do_sample", `Bool false);
+          ("web_search", `Bool true);
+          ("timeout", `Int 60);
+          ("stream", `Bool false);
+        ] in
+        match Tool_parsers.parse_glm_args json with
+        | Glm g ->
+          check string "model" "glm-4v-plus-0111" g.model;
+          check (option string) "system" (Some "Be helpful") g.system_prompt;
+          check bool "thinking" true g.thinking;
+          check bool "do_sample" false g.do_sample;
+          check bool "web_search" true g.web_search;
+          check int "timeout" 60 g.timeout;
+          check bool "stream" false g.stream
+        | _ -> fail "Expected Glm variant");
+    ];
+
+    (* {1GLM translate args} *)
+
+    "parse_glm_translate_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [
+          ("text", `String "Hello");
+          ("source_lang", `String "en");
+          ("target_lang", `String "ko");
+        ] in
+        match Tool_parsers.parse_glm_translate_args json with
+        | GlmTranslate g ->
+          check string "text" "Hello" g.text;
+          check string "source" "en" g.source_lang;
+          check string "target" "ko" g.target_lang;
+          check string "default model" "glm-5" g.model;
+          check int "default timeout" 120 g.timeout
+        | _ -> fail "Expected GlmTranslate variant");
+      test_case "custom strategy" `Quick (fun () ->
+        let json = `Assoc [
+          ("text", `String "code");
+          ("source_lang", `String "ko");
+          ("target_lang", `String "en");
+          ("strategy", `String "technical");
+          ("model", `String "glm-4");
+          ("timeout", `Int 60);
+        ] in
+        match Tool_parsers.parse_glm_translate_args json with
+        | GlmTranslate g ->
+          check string "model" "glm-4" g.model;
+          check int "timeout" 60 g.timeout
+        | _ -> fail "Expected GlmTranslate variant");
+    ];
+
+    (* {1GLM tool parsing} *)
+
+    "parse_glm_tool", [
+      test_case "web_search" `Quick (fun () ->
+        let json = `Assoc [
+          ("type", `String "web_search");
+          ("web_search", `Assoc [
+            ("enable", `Bool true);
+            ("search_result", `Bool false);
+          ]);
+        ] in
+        let tool = Tool_parsers.parse_glm_tool json in
+        check bool "web search type" true (tool.tool_type = Types.GlmWebSearch);
+        (match tool.web_search_config with
+         | Some (enable, search_result) ->
+           check bool "enable" true enable;
+           check bool "search_result" false search_result
+         | None -> fail "expected web_search_config"));
+      test_case "function" `Quick (fun () ->
+        let json = `Assoc [
+          ("type", `String "function");
+          ("function", `Assoc [
+            ("name", `String "get_weather");
+            ("description", `String "Get weather info");
+            ("parameters", `Assoc [
+              ("type", `String "object");
+              ("properties", `Assoc [
+                ("city", `Assoc [
+                  ("type", `String "string");
+                  ("description", `String "City name");
+                ]);
+                ("count", `Assoc [
+                  ("type", `String "integer");
+                ]);
+                ("temp", `Assoc [
+                  ("type", `String "number");
+                ]);
+                ("active", `Assoc [
+                  ("type", `String "boolean");
+                ]);
+                ("tags", `Assoc [
+                  ("type", `String "array");
+                ]);
+                ("data", `Assoc [
+                  ("type", `String "object");
+                ]);
+              ]);
+              ("required", `List [`String "city"]);
+            ]);
+          ]);
+        ] in
+        let tool = Tool_parsers.parse_glm_tool json in
+        check bool "function type" true (tool.tool_type = Types.GlmFunction);
+        (match tool.function_schema with
+         | Some schema ->
+           check string "func_name" "get_weather" schema.func_name;
+           check string "desc" "Get weather info" schema.func_description;
+           check int "params" 6 (List.length schema.func_parameters)
+         | None -> fail "expected function_schema"));
+      test_case "code_interpreter" `Quick (fun () ->
+        let json = `Assoc [
+          ("type", `String "code_interpreter");
+          ("code_interpreter", `Assoc [
+            ("sandbox", `String "none");
+          ]);
+        ] in
+        let tool = Tool_parsers.parse_glm_tool json in
+        check bool "code interpreter type" true (tool.tool_type = Types.GlmCodeInterpreter);
+        check (option string) "sandbox" (Some "none") tool.code_interpreter_config);
+    ];
+
+    (* {1GLM tools array parsing} *)
+
+    "parse_glm_tools", [
+      test_case "null tools" `Quick (fun () ->
+        let json = `Assoc [] in
+        let tools = Tool_parsers.parse_glm_tools json in
+        check int "empty" 0 (List.length tools));
+      test_case "list" `Quick (fun () ->
+        let json = `Assoc [
+          ("tools", `List [
+            `Assoc [("type", `String "web_search");
+                    ("web_search", `Assoc [("enable", `Bool true); ("search_result", `Bool true)])];
+          ]);
+        ] in
+        let tools = Tool_parsers.parse_glm_tools json in
+        check int "one tool" 1 (List.length tools));
+      test_case "non-list" `Quick (fun () ->
+        let json = `Assoc [("tools", `String "invalid")] in
+        let tools = Tool_parsers.parse_glm_tools json in
+        check int "empty for non-list" 0 (List.length tools));
+    ];
+
+    (* {1Stream delta args} *)
+
+    "parse_stream_delta_args", [
+      test_case "set enabled" `Quick (fun () ->
+        let json = `Assoc [("enabled", `Bool true)] in
+        match Tool_parsers.parse_set_stream_delta_args json with
+        | SetStreamDelta { enabled } -> check bool "enabled" true enabled
+        | _ -> fail "Expected SetStreamDelta");
+      test_case "set disabled" `Quick (fun () ->
+        let json = `Assoc [("enabled", `Bool false)] in
+        match Tool_parsers.parse_set_stream_delta_args json with
+        | SetStreamDelta { enabled } -> check bool "disabled" false enabled
+        | _ -> fail "Expected SetStreamDelta");
+      test_case "set default" `Quick (fun () ->
+        let json = `Assoc [] in
+        match Tool_parsers.parse_set_stream_delta_args json with
+        | SetStreamDelta { enabled } -> check bool "default true" true enabled
+        | _ -> fail "Expected SetStreamDelta");
+      test_case "get" `Quick (fun () ->
+        let json = `Assoc [] in
+        match Tool_parsers.parse_get_stream_delta_args json with
+        | GetStreamDelta -> ()
+        | _ -> fail "Expected GetStreamDelta");
+    ];
+
+    (* {1Chain validate args} *)
+
+    "parse_chain_validate_args", [
+      test_case "mermaid only" `Quick (fun () ->
+        let json = `Assoc [("mermaid", `String "graph LR\n a --> b")] in
+        match Tool_parsers.parse_chain_validate_args json with
+        | ChainValidate { chain; mermaid; strict } ->
+          check bool "no chain" true (chain = None);
+          check (option string) "mermaid" (Some "graph LR\n a --> b") mermaid;
+          check bool "strict default" true strict
+        | _ -> fail "Expected ChainValidate");
+      test_case "chain json" `Quick (fun () ->
+        let chain_json = `Assoc [("id", `String "test")] in
+        let json = `Assoc [("chain", chain_json); ("strict", `Bool false)] in
+        match Tool_parsers.parse_chain_validate_args json with
+        | ChainValidate { chain; strict; _ } ->
+          check bool "has chain" true (chain <> None);
+          check bool "not strict" false strict
+        | _ -> fail "Expected ChainValidate");
+    ];
+
+    (* {1Chain to_mermaid args} *)
+
+    "parse_chain_to_mermaid_args", [
+      test_case "basic" `Quick (fun () ->
+        let chain_json = `Assoc [("id", `String "c1")] in
+        let json = `Assoc [("chain", chain_json)] in
+        match Tool_parsers.parse_chain_to_mermaid_args json with
+        | ChainToMermaid { chain } ->
+          check bool "has chain" true (chain <> `Null)
+        | _ -> fail "Expected ChainToMermaid");
+    ];
+
+    (* {1Chain visualize args} *)
+
+    "parse_chain_visualize_args", [
+      test_case "basic" `Quick (fun () ->
+        let chain_json = `Assoc [("id", `String "c1")] in
+        let json = `Assoc [("chain", chain_json)] in
+        match Tool_parsers.parse_chain_visualize_args json with
+        | ChainVisualize { chain } ->
+          check bool "has chain" true (chain <> `Null)
+        | _ -> fail "Expected ChainVisualize");
+    ];
+
+    (* {1Chain convert args} *)
+
+    "parse_chain_convert_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [
+          ("from", `String "json");
+          ("to", `String "mermaid");
+          ("input", `Assoc [("id", `String "c1")]);
+        ] in
+        match Tool_parsers.parse_chain_convert_args json with
+        | ChainConvert { from_format; to_format; pretty; _ } ->
+          check string "from" "json" from_format;
+          check string "to" "mermaid" to_format;
+          check bool "pretty default" true pretty
+        | _ -> fail "Expected ChainConvert");
+      test_case "not pretty" `Quick (fun () ->
+        let json = `Assoc [
+          ("from", `String "mermaid");
+          ("to", `String "json");
+          ("input", `String "graph LR");
+          ("pretty", `Bool false);
+        ] in
+        match Tool_parsers.parse_chain_convert_args json with
+        | ChainConvert { pretty; _ } ->
+          check bool "not pretty" false pretty
+        | _ -> fail "Expected ChainConvert");
+    ];
+
+    (* {1Chain orchestrate args} *)
+
+    "parse_chain_orchestrate_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [
+          ("goal", `String "review code");
+        ] in
+        match Tool_parsers.parse_chain_orchestrate_args json with
+        | ChainOrchestrate { goal; chain; tasks; chain_id; max_replans; timeout;
+                             trace; verify_on_complete; orchestrator_model } ->
+          check string "goal" "review code" goal;
+          check bool "no chain" true (chain = None);
+          check bool "no tasks" true (tasks = None);
+          check (option string) "no chain_id" None chain_id;
+          check int "max_replans default" 3 max_replans;
+          check int "timeout default" 600 timeout;
+          check bool "trace default" false trace;
+          check bool "verify default" true verify_on_complete;
+          check string "orchestrator default" "gemini" orchestrator_model
+        | _ -> fail "Expected ChainOrchestrate");
+      test_case "custom" `Quick (fun () ->
+        let json = `Assoc [
+          ("goal", `String "migrate");
+          ("chain_id", `String "code-migration");
+          ("max_replans", `Int 5);
+          ("timeout", `Int 300);
+          ("trace", `Bool true);
+          ("verify_on_complete", `Bool false);
+          ("orchestrator_model", `String "claude");
+        ] in
+        match Tool_parsers.parse_chain_orchestrate_args json with
+        | ChainOrchestrate { goal; chain_id; max_replans; timeout; trace;
+                             verify_on_complete; orchestrator_model; _ } ->
+          check string "goal" "migrate" goal;
+          check (option string) "chain_id" (Some "code-migration") chain_id;
+          check int "max_replans" 5 max_replans;
+          check int "timeout" 300 timeout;
+          check bool "trace" true trace;
+          check bool "no verify" false verify_on_complete;
+          check string "orchestrator" "claude" orchestrator_model
+        | _ -> fail "Expected ChainOrchestrate");
+    ];
+
+    (* {1GH PR diff args} *)
+
+    "parse_gh_pr_diff_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [
+          ("repo", `String "owner/repo");
+          ("pr_number", `Int 123);
+        ] in
+        match Tool_parsers.parse_gh_pr_diff_args json with
+        | GhPrDiff { repo; pr_number } ->
+          check string "repo" "owner/repo" repo;
+          check int "pr" 123 pr_number
+        | _ -> fail "Expected GhPrDiff");
+    ];
+
+    (* {1Slack post args} *)
+
+    "parse_slack_post_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [
+          ("channel", `String "C123");
+          ("text", `String "Hello");
+        ] in
+        match Tool_parsers.parse_slack_post_args json with
+        | SlackPost { channel; text; thread_ts } ->
+          check string "channel" "C123" channel;
+          check string "text" "Hello" text;
+          check (option string) "no thread" None thread_ts
+        | _ -> fail "Expected SlackPost");
+      test_case "with thread" `Quick (fun () ->
+        let json = `Assoc [
+          ("channel", `String "C456");
+          ("text", `String "Reply");
+          ("thread_ts", `String "1234567890.123456");
+        ] in
+        match Tool_parsers.parse_slack_post_args json with
+        | SlackPost { thread_ts; _ } ->
+          check (option string) "thread" (Some "1234567890.123456") thread_ts
+        | _ -> fail "Expected SlackPost");
+    ];
+
+    (* {1Chain checkpoints args} *)
+
+    "parse_chain_checkpoints_args", [
+      test_case "defaults" `Quick (fun () ->
+        let json = `Assoc [] in
+        match Tool_parsers.parse_chain_checkpoints_args json with
+        | ChainCheckpoints { chain_id; max_age_hours; cleanup } ->
+          check (option string) "no chain_id" None chain_id;
+          check (option int) "no max_age" None max_age_hours;
+          check bool "no cleanup" false cleanup
+        | _ -> fail "Expected ChainCheckpoints");
+      test_case "custom" `Quick (fun () ->
+        let json = `Assoc [
+          ("chain_id", `String "my-chain");
+          ("max_age_hours", `Int 24);
+          ("cleanup", `Bool true);
+        ] in
+        match Tool_parsers.parse_chain_checkpoints_args json with
+        | ChainCheckpoints { chain_id; max_age_hours; cleanup } ->
+          check (option string) "chain_id" (Some "my-chain") chain_id;
+          check (option int) "max_age" (Some 24) max_age_hours;
+          check bool "cleanup" true cleanup
+        | _ -> fail "Expected ChainCheckpoints");
+    ];
+
+    (* {1Chain resume args} *)
+
+    "parse_chain_resume_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [("run_id", `String "abc-123")] in
+        match Tool_parsers.parse_chain_resume_args json with
+        | ChainResume { run_id; trace } ->
+          check string "run_id" "abc-123" run_id;
+          check bool "trace default" false trace
+        | _ -> fail "Expected ChainResume");
+      test_case "with trace" `Quick (fun () ->
+        let json = `Assoc [("run_id", `String "xyz"); ("trace", `Bool true)] in
+        match Tool_parsers.parse_chain_resume_args json with
+        | ChainResume { run_id; trace } ->
+          check string "run_id" "xyz" run_id;
+          check bool "trace" true trace
+        | _ -> fail "Expected ChainResume");
+    ];
+
+    (* {1Prompt register args} *)
+
+    "parse_prompt_register_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [
+          ("id", `String "my-prompt");
+          ("template", `String "Hello {{name}}");
+        ] in
+        match Tool_parsers.parse_prompt_register_args json with
+        | PromptRegister { id; template; version } ->
+          check string "id" "my-prompt" id;
+          check string "template" "Hello {{name}}" template;
+          check (option string) "no version" None version
+        | _ -> fail "Expected PromptRegister");
+      test_case "with version" `Quick (fun () ->
+        let json = `Assoc [
+          ("id", `String "v2-prompt");
+          ("template", `String "t");
+          ("version", `String "2.0.0");
+        ] in
+        match Tool_parsers.parse_prompt_register_args json with
+        | PromptRegister { version; _ } ->
+          check (option string) "version" (Some "2.0.0") version
+        | _ -> fail "Expected PromptRegister");
+    ];
+
+    (* {1Prompt get args} *)
+
+    "parse_prompt_get_args", [
+      test_case "basic" `Quick (fun () ->
+        let json = `Assoc [("id", `String "my-prompt")] in
+        match Tool_parsers.parse_prompt_get_args json with
+        | PromptGet { id; version } ->
+          check string "id" "my-prompt" id;
+          check (option string) "no version" None version
+        | _ -> fail "Expected PromptGet");
+      test_case "with version" `Quick (fun () ->
+        let json = `Assoc [("id", `String "p"); ("version", `String "1.0.0")] in
+        match Tool_parsers.parse_prompt_get_args json with
+        | PromptGet { id; version } ->
+          check string "id" "p" id;
+          check (option string) "version" (Some "1.0.0") version
+        | _ -> fail "Expected PromptGet");
+    ];
+
+    (* {1Ollama list args} *)
+
+    "parse_ollama_list_args", [
+      test_case "any input" `Quick (fun () ->
+        let json = `Assoc [("extra", `String "ignored")] in
+        match Tool_parsers.parse_ollama_list_args json with
+        | OllamaList -> ()
+        | _ -> fail "Expected OllamaList");
+    ];
+
+    (* {1Build ollama cmd with tools} *)
+
+    "build_ollama_curl_cmd_tools", [
+      test_case "with tools" `Quick (fun () ->
+        let tool : Types.tool_schema = {
+          name = "get_weather"; description = "Get weather";
+          input_schema = `Assoc [("type", `String "object")];
+        } in
+        let args = Ollama {
+          prompt = "What is the weather?";
+          model = "devstral";
+          system_prompt = Some "You are helpful";
+          temperature = 0.7;
+          timeout = 60;
+          stream = false;
+          tools = Some [tool];
+        } in
+        match Tool_parsers.build_ollama_curl_cmd args with
+        | Ok cmd_list ->
+          check bool "cmd starts with curl" true (List.hd cmd_list = "curl");
+          (* tools branch uses /api/chat endpoint *)
+          let url = List.find (fun s -> String.length s > 4 && String.sub s 0 4 = "http") cmd_list in
+          check bool "chat endpoint" true (String.length url > 0 &&
+            let suffix = "/api/chat" in
+            let slen = String.length suffix in
+            String.length url >= slen &&
+            String.sub url (String.length url - slen) slen = suffix)
+        | Error e -> fail ("build failed: " ^ e));
+      test_case "streaming" `Quick (fun () ->
+        let args = Ollama {
+          prompt = "Hi"; model = "devstral"; system_prompt = None;
+          temperature = 0.7; timeout = 60; stream = true; tools = None;
+        } in
+        match Tool_parsers.build_ollama_curl_cmd args with
+        | Ok cmd_list ->
+          check bool "has -sN flag" true (List.mem "-sN" cmd_list)
+        | Error e -> fail ("build failed: " ^ e));
+      test_case "with system_prompt no tools" `Quick (fun () ->
+        let args = Ollama {
+          prompt = "Hi"; model = "devstral";
+          system_prompt = Some "Be helpful";
+          temperature = 0.5; timeout = 60; stream = false; tools = None;
+        } in
+        match Tool_parsers.build_ollama_curl_cmd args with
+        | Ok cmd_list ->
+          (* No tools = /api/generate endpoint with system in JSON *)
+          let data = List.nth cmd_list (List.length cmd_list - 1) in
+          check bool "has system field" true
+            (let n = "\"system\"" in
+             let nlen = String.length n in
+             let dlen = String.length data in
+             if nlen > dlen then false
+             else let rec c i = if i > dlen - nlen then false
+               else if String.sub data i nlen = n then true else c (i+1)
+             in c 0)
+        | Error e -> fail ("build failed: " ^ e));
+    ];
+
+    (* {1Tool calls to JSON} *)
+
+    "tool_calls_to_json", [
+      test_case "basic" `Quick (fun () ->
+        let calls : Ollama_parser.tool_call list = [
+          { name = "get_weather"; arguments = "{\"city\":\"Seoul\"}" };
+          { name = "search"; arguments = "{\"q\":\"test\"}" };
+        ] in
+        let json_str = Tool_parsers.tool_calls_to_json calls in
+        check bool "is array" true (String.length json_str > 2 && String.get json_str 0 = '[');
+        check bool "has get_weather" true
+          (let n = "get_weather" in
+           let nlen = String.length n in
+           let slen = String.length json_str in
+           let rec c i = if i > slen - nlen then false
+             else if String.sub json_str i nlen = n then true else c (i+1)
+           in c 0));
+      test_case "empty" `Quick (fun () ->
+        let json_str = Tool_parsers.tool_calls_to_json [] in
+        check string "empty array" "[]" json_str);
+    ];
+
+    (* {1Clean codex output edge cases} *)
+
+    "clean_codex_output_extra", [
+      test_case "empty string" `Quick (fun () ->
+        let output = Tool_parsers.clean_codex_output "" in
+        check string "empty preserved" "" output);
+      test_case "no codex marker" `Quick (fun () ->
+        let output = Tool_parsers.clean_codex_output "just some text\nline 2" in
+        check string "unchanged" "just some text\nline 2" output);
+      test_case "tokens used line filtered" `Quick (fun () ->
+        let input = "codex\nActual output\n50 tokens used in total" in
+        let output = Tool_parsers.clean_codex_output input in
+        check string "tokens line removed" "Actual output" output);
+      test_case "multiple codex markers" `Quick (fun () ->
+        let input = "codex\nfirst\ncodex\nsecond content" in
+        let output = Tool_parsers.clean_codex_output input in
+        check string "after last marker" "second content" output);
+      test_case "codex in middle" `Quick (fun () ->
+        let input = "some text with codex mention\nreal content" in
+        let output = Tool_parsers.clean_codex_output input in
+        check string "after codex mention" "real content" output);
+    ];
+
+    (* {1Parse ollama args with tools} *)
+
+    "parse_ollama_args_tools", [
+      test_case "with tools list" `Quick (fun () ->
+        let json = `Assoc [
+          ("prompt", `String "test");
+          ("tools", `List [
+            `Assoc [
+              ("name", `String "my_tool");
+              ("description", `String "A tool");
+              ("input_schema", `Assoc [("type", `String "object")]);
+            ];
+          ]);
+        ] in
+        match Tool_parsers.parse_ollama_args json with
+        | Ollama { tools; _ } ->
+          (match tools with
+           | Some tl -> check int "one tool" 1 (List.length tl)
+           | None -> fail "expected tools")
+        | _ -> fail "Expected Ollama");
+      test_case "tools null" `Quick (fun () ->
+        let json = `Assoc [
+          ("prompt", `String "test");
+          ("tools", `Null);
+        ] in
+        match Tool_parsers.parse_ollama_args json with
+        | Ollama { tools; _ } ->
+          check bool "no tools" true (tools = None)
+        | _ -> fail "Expected Ollama");
+      test_case "tools invalid type" `Quick (fun () ->
+        let json = `Assoc [
+          ("prompt", `String "test");
+          ("tools", `String "invalid");
+        ] in
+        match Tool_parsers.parse_ollama_args json with
+        | Ollama { tools; _ } ->
+          check bool "no tools" true (tools = None)
+        | _ -> fail "Expected Ollama");
+    ];
+
+    (* {1Default env var functions} *)
+
+    "default_env_funcs", [
+      test_case "default_me_root" `Quick (fun () ->
+        let root = Tool_parsers.default_me_root () in
+        check bool "ends with me" true
+          (let suf = "me" in
+           let slen = String.length suf in
+           String.length root >= slen &&
+           String.sub root (String.length root - slen) slen = suf));
+      test_case "find_repo_root" `Quick (fun () ->
+        let root = Tool_parsers.find_repo_root "/nonexistent/path" in
+        check bool "returns string" true (String.length root > 0));
+    ];
+
+    (* {1Chain run with different input formats} *)
+
+    "parse_chain_run_args_extra", [
+      test_case "with mermaid" `Quick (fun () ->
+        let json = `Assoc [
+          ("mermaid", `String "graph LR\n a --> b");
+          ("trace", `Bool true);
+          ("checkpoint_enabled", `Bool true);
+          ("timeout", `Int 60);
+        ] in
+        match Tool_parsers.parse_chain_run_args json with
+        | ChainRun { mermaid; trace; checkpoint_enabled; timeout; _ } ->
+          check (option string) "mermaid" (Some "graph LR\n a --> b") mermaid;
+          check bool "trace" true trace;
+          check bool "checkpoint" true checkpoint_enabled;
+          check (option int) "timeout" (Some 60) timeout
+        | _ -> fail "Expected ChainRun");
+      test_case "string input" `Quick (fun () ->
+        let json = `Assoc [
+          ("input", `String "plain text input");
+        ] in
+        match Tool_parsers.parse_chain_run_args json with
+        | ChainRun { input; _ } ->
+          check (option string) "string input" (Some "plain text input") input
+        | _ -> fail "Expected ChainRun");
+      test_case "null input" `Quick (fun () ->
+        let json = `Assoc [] in
+        match Tool_parsers.parse_chain_run_args json with
+        | ChainRun { input; chain; mermaid; chain_id; _ } ->
+          check (option string) "no input" None input;
+          check bool "no chain" true (chain = None);
+          check (option string) "no mermaid" None mermaid;
+          check (option string) "no chain_id" None chain_id
+        | _ -> fail "Expected ChainRun");
     ];
   ]
