@@ -512,3 +512,28 @@
 (test
  (name test_chain_evaluator_coverage2)
  (libraries llm_mcp.common alcotest str unix))
+
+; Wave 7: chain_types additional coverage (direction, all node yojson, make_* full params)
+(test
+ (name test_chain_types_wave7)
+ (libraries llm_mcp.common alcotest))
+
+; Wave 7: chain_stats additional coverage (all cost branches, cascade, enable/disable)
+(test
+ (name test_chain_stats_wave7)
+ (libraries llm_mcp.common alcotest eio eio_main))
+
+; Wave 7: chain_evaluator additional coverage (parse edge cases, report generation)
+(test
+ (name test_chain_evaluator_wave7)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Wave 7: common additional coverage (timestamps, file I/O, format_result_output)
+(test
+ (name test_common_wave7)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Wave 7: dictionary additional coverage (all type conversions, save/load, decompress)
+(test
+ (name test_dictionary_wave7)
+ (libraries llm_mcp.common alcotest str unix))
