@@ -8,6 +8,7 @@
     - load_config: environment-based configuration
     - generation_to_json: output, usage, ended_at, status branches
     - span_to_json: ended_at branch
+    - All branch combinations for generation (output/usage/end/status)
 *)
 
 open Alcotest
@@ -39,6 +40,11 @@ let test_generate_id_hex_chars () =
   let all_valid = String.for_all is_hex_or_dash id in
   check bool "all hex or dash" true all_valid
 
+let test_generate_id_many_unique () =
+  let ids = List.init 50 (fun _ -> generate_id ()) in
+  let unique = List.sort_uniq String.compare ids in
+  check int "all 50 unique" 50 (List.length unique)
+
 (** {1 Timestamp Formatting Tests} *)
 
 let test_iso8601_of_float () =
@@ -56,6 +62,15 @@ let test_iso8601_with_milliseconds () =
   check bool "has digits" true (String.length formatted > 10);
   (* Format: YYYY-MM-DDTHH:MM:SS.mmmZ — should have dot for ms *)
   check bool "has ms dot" true (Common.contains ~substring:"." formatted)
+
+let test_iso8601_length () =
+  let formatted = iso8601_of_float 1704067200.0 in
+  (* YYYY-MM-DDTHH:MM:SS.mmmZ = 24 chars *)
+  check int "length" 24 (String.length formatted)
+
+let test_iso8601_zero_epoch () =
+  let formatted = iso8601_of_float 0.0 in
+  check bool "has 1970" true (Common.contains ~substring:"1970" formatted)
 
 (** {1 Metadata to JSON Tests} *)
 
@@ -82,6 +97,21 @@ let test_metadata_to_json_multiple () =
       check int "3 fields" 3 (List.length fields)
   | _ -> fail "expected object"
 
+let test_metadata_to_json_preserves_order () =
+  let json = metadata_to_json [("z", "last"); ("a", "first")] in
+  match json with
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    check (list string) "order preserved" ["z"; "a"] keys
+  | _ -> fail "expected object"
+
+let test_metadata_to_json_special_chars () =
+  let json = metadata_to_json [("key with spaces", "value\nwith\nnewlines")] in
+  match json with
+  | `Assoc fields ->
+    check int "1 field" 1 (List.length fields)
+  | _ -> fail "expected object"
+
 (** {1 Trace JSON Serialization Tests} *)
 
 let test_trace_to_json () =
@@ -104,6 +134,21 @@ let test_trace_to_json () =
       (match List.assoc "name" fields with
        | `String n -> check string "name" "test-trace" n
        | _ -> fail "expected string name")
+  | _ -> fail "expected object"
+
+let test_trace_to_json_empty_metadata () =
+  let trace = {
+    trace_id = "t1";
+    name = "empty-meta";
+    metadata = [];
+    started_at = 1704067200.0;
+  } in
+  let json = trace_to_json trace in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc "metadata" fields with
+     | `Assoc [] -> ()
+     | _ -> fail "expected empty metadata object")
   | _ -> fail "expected object"
 
 (** {1 Generation JSON Serialization Tests} *)
@@ -263,6 +308,86 @@ let test_generation_status_error () =
        | _ -> fail "expected string statusMessage")
   | _ -> fail "expected object"
 
+(** Full combination: output + usage + ended_at + success *)
+let test_generation_full_success () =
+  let gen = {
+    gen_id = "gen-full";
+    trace_id = "trace-full";
+    name = "complete-gen";
+    model = "gemini-2.5-pro";
+    input = "complex prompt";
+    output = Some "detailed response";
+    usage = Some (500, 1000, 1500);
+    started_at = 1704067200.0;
+    ended_at = Some 1704067300.0;
+    status = `Success;
+  } in
+  let json = generation_to_json gen in
+  match json with
+  | `Assoc fields ->
+    check bool "has output" true (List.mem_assoc "output" fields);
+    check bool "has usage" true (List.mem_assoc "usage" fields);
+    check bool "has endTime" true (List.mem_assoc "endTime" fields);
+    check bool "has level" true (List.mem_assoc "level" fields);
+    check bool "has startTime" true (List.mem_assoc "startTime" fields);
+    check bool "has input" true (List.mem_assoc "input" fields);
+    check bool "no statusMessage" false (List.mem_assoc "statusMessage" fields);
+    (match List.assoc "level" fields with
+     | `String l -> check string "DEFAULT" "DEFAULT" l
+     | _ -> fail "expected string level")
+  | _ -> fail "expected object"
+
+(** Full combination: output + usage + ended_at + error *)
+let test_generation_full_error () =
+  let gen = {
+    gen_id = "gen-full-err";
+    trace_id = "trace-err";
+    name = "failed-gen";
+    model = "claude-3";
+    input = "test";
+    output = Some "partial output";
+    usage = Some (100, 50, 150);
+    started_at = 1704067200.0;
+    ended_at = Some 1704067210.0;
+    status = `Error "rate limited";
+  } in
+  let json = generation_to_json gen in
+  match json with
+  | `Assoc fields ->
+    check bool "has output" true (List.mem_assoc "output" fields);
+    check bool "has usage" true (List.mem_assoc "usage" fields);
+    check bool "has endTime" true (List.mem_assoc "endTime" fields);
+    check bool "has statusMessage" true (List.mem_assoc "statusMessage" fields);
+    (match List.assoc "level" fields with
+     | `String l -> check string "ERROR" "ERROR" l
+     | _ -> fail "expected string level");
+    (match List.assoc "statusMessage" fields with
+     | `String msg -> check string "rate limited" "rate limited" msg
+     | _ -> fail "expected string statusMessage")
+  | _ -> fail "expected object"
+
+(** Output + usage, no ended_at *)
+let test_generation_output_usage_no_end () =
+  let gen = {
+    gen_id = "gen-ou";
+    trace_id = "trace-1";
+    name = "gen-ou";
+    model = "gemini";
+    input = "p";
+    output = Some "response";
+    usage = Some (10, 20, 30);
+    started_at = 1704067200.0;
+    ended_at = None;
+    status = `Running;
+  } in
+  let json = generation_to_json gen in
+  match json with
+  | `Assoc fields ->
+    check bool "has output" true (List.mem_assoc "output" fields);
+    check bool "has usage" true (List.mem_assoc "usage" fields);
+    check bool "no endTime" false (List.mem_assoc "endTime" fields)
+  | _ -> fail "expected object"
+
 (** {1 Span JSON Serialization Tests} *)
 
 let test_span_to_json_no_end () =
@@ -302,6 +427,33 @@ let test_span_to_json_with_end () =
       check bool "has metadata" true (List.mem_assoc "metadata" fields)
   | _ -> fail "expected object"
 
+let test_span_to_json_field_values () =
+  let s = {
+    span_id = "span-check";
+    trace_id = "trace-check";
+    name = "field-check-span";
+    metadata = [("env", "test"); ("version", "1.0")];
+    started_at = 1704067200.0;
+    ended_at = None;
+  } in
+  let json = span_to_json s in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc "id" fields with
+     | `String s -> check string "span_id" "span-check" s
+     | _ -> fail "expected string id");
+    (match List.assoc "traceId" fields with
+     | `String s -> check string "trace_id" "trace-check" s
+     | _ -> fail "expected string traceId");
+    (match List.assoc "name" fields with
+     | `String s -> check string "name" "field-check-span" s
+     | _ -> fail "expected string name");
+    (match List.assoc "metadata" fields with
+     | `Assoc meta_fields ->
+       check int "2 metadata fields" 2 (List.length meta_fields)
+     | _ -> fail "expected metadata object")
+  | _ -> fail "expected object"
+
 (** {1 Configuration Tests} *)
 
 let test_is_enabled_without_env () =
@@ -313,6 +465,11 @@ let test_status () =
   check bool "contains Langfuse" true (Common.contains ~substring:"Langfuse" st);
   check bool "is non-empty" true (String.length st > 0)
 
+let test_status_disabled () =
+  (* Without env vars, should report DISABLED *)
+  let st = status () in
+  check bool "has status text" true (String.length st > 5)
+
 (** {1 Test Suite} *)
 
 let () =
@@ -321,18 +478,24 @@ let () =
       test_case "uuid format" `Quick test_generate_id_format;
       test_case "uniqueness" `Quick test_generate_id_unique;
       test_case "hex chars" `Quick test_generate_id_hex_chars;
+      test_case "many unique" `Quick test_generate_id_many_unique;
     ]);
     ("timestamp", [
       test_case "iso8601 basic" `Quick test_iso8601_of_float;
       test_case "with milliseconds" `Quick test_iso8601_with_milliseconds;
+      test_case "expected length" `Quick test_iso8601_length;
+      test_case "zero epoch" `Quick test_iso8601_zero_epoch;
     ]);
     ("metadata_to_json", [
       test_case "empty" `Quick test_metadata_to_json_empty;
       test_case "single" `Quick test_metadata_to_json_single;
       test_case "multiple" `Quick test_metadata_to_json_multiple;
+      test_case "preserves order" `Quick test_metadata_to_json_preserves_order;
+      test_case "special chars" `Quick test_metadata_to_json_special_chars;
     ]);
     ("trace_json", [
       test_case "trace_to_json" `Quick test_trace_to_json;
+      test_case "empty metadata" `Quick test_trace_to_json_empty_metadata;
     ]);
     ("generation_json", [
       test_case "running (no output/usage/end)" `Quick test_generation_to_json_running;
@@ -341,13 +504,18 @@ let () =
       test_case "with ended_at" `Quick test_generation_with_ended_at;
       test_case "status success" `Quick test_generation_status_success;
       test_case "status error" `Quick test_generation_status_error;
+      test_case "full success" `Quick test_generation_full_success;
+      test_case "full error" `Quick test_generation_full_error;
+      test_case "output+usage no end" `Quick test_generation_output_usage_no_end;
     ]);
     ("span_json", [
       test_case "no end" `Quick test_span_to_json_no_end;
       test_case "with end" `Quick test_span_to_json_with_end;
+      test_case "field values" `Quick test_span_to_json_field_values;
     ]);
     ("config", [
       test_case "is_enabled" `Quick test_is_enabled_without_env;
       test_case "status" `Quick test_status;
+      test_case "status disabled" `Quick test_status_disabled;
     ]);
   ]

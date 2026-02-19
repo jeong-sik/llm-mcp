@@ -1,10 +1,25 @@
 (** Gemini API handler - Direct API + Retry with circuit breaker *)
 
+(** {1 Model Aliases} *)
+
+val gemini_model_aliases : (string * string) list
+(** Gemini model aliases used across tools. *)
+
+(** {1 Pure Functions (Testable)} *)
+
 val parse_models_response :
   include_all:bool ->
   filter:string option ->
   Yojson.Safe.t ->
   Yojson.Safe.t list
+
+val aliases_to_json : unit -> Yojson.Safe.t
+(** Convert model aliases to JSON object *)
+
+val static_models_to_json : filter:string option -> Yojson.Safe.t list
+(** Generate static model list with optional filter *)
+
+(** {1 Eio-based Functions} *)
 
 val list_models :
   sw:Eio.Switch.t ->
