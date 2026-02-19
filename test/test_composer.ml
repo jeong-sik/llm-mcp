@@ -259,6 +259,236 @@ let test_generate_summary () =
 
   Printf.printf "\n📊 Session Summary:\n%s\n" summary
 
+(** Test: build_replan_context all 5 reason variants *)
+let test_build_replan_context () =
+  let chain : Chain_types.chain = {
+    id = "replan-chain";
+    nodes = [
+      { id = "n1"; node_type = Llm { model = "gemini"; system = None; prompt = "test"; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+        input_mapping = []; output_key = None; depends_on = None };
+    ];
+    output = "n1";
+    config = Chain_types.default_config;
+    name = None;
+    description = None;
+    version = None;
+    input_schema = None;
+    output_schema = None;
+    metadata = None;
+  } in
+  let metrics : Chain_evaluator.chain_metrics = {
+    chain_id = "c1"; goal = "test"; started_at = 0.0; completed_at = Some 1.0;
+    total_duration_ms = 1000; total_nodes = 1; nodes_succeeded = 0;
+    nodes_failed = 1; nodes_skipped = 0; nodes_pending = 0;
+    parallel_groups = 1; max_depth = 1; success_rate = 0.0;
+    parallelization_efficiency = 1.0; estimation_accuracy = 1.0;
+    node_metrics = [
+      { node_id = "n1"; node_type = "llm"; status = Chain_evaluator.Failed;
+        started_at = Some 0.0; completed_at = Some 1.0; duration_ms = 1000;
+        estimated_duration_ms = None; retry_count = 0;
+        error_message = Some "API Error"; output_preview = None };
+    ];
+    verification = None;
+  } in
+  let reasons = [
+    Chain_composer.TaskFailed "n1";
+    Chain_composer.GoalNotAchieved;
+    Chain_composer.NewTaskAdded "n2";
+    Chain_composer.ContextChanged;
+    Chain_composer.TimeoutApproaching;
+  ] in
+  List.iter (fun reason ->
+    let ctx = Chain_composer.build_replan_context ~goal:"test goal" ~original_chain:chain ~reason ~metrics in
+    check bool "contains Re-Planning" true (contains_substring ctx "Re-Planning");
+    check bool "not empty" true (String.length ctx > 0)
+  ) reasons
+
+(** Test: determine_eval_triggers *)
+let test_determine_eval_triggers () =
+  let chain : Chain_types.chain = {
+    id = "eval-chain"; nodes = []; output = "x";
+    config = Chain_types.default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None;
+  } in
+  let triggers = Chain_composer.determine_eval_triggers ~_chain:chain ~critical_path:["n1"; "n2"] in
+  check bool "has OnChainComplete" true
+    (List.exists (fun t -> t = Chain_evaluator.OnChainComplete) triggers);
+  check bool "has OnFailure" true
+    (List.exists (fun t -> t = Chain_evaluator.OnFailure) triggers);
+  check bool "has critical node n1" true
+    (List.exists (fun t -> t = Chain_evaluator.OnNodeComplete "n1") triggers);
+  check bool "has critical node n2" true
+    (List.exists (fun t -> t = Chain_evaluator.OnNodeComplete "n2") triggers)
+
+(** Test: should_replan branches *)
+let test_should_replan () =
+  let tasks : Chain_composer.masc_task list = [
+    { task_id = "t1"; title = "Task 1"; description = None;
+      priority = 1; status = "done"; assignee = None; metadata = [] };
+  ] in
+
+  (* State at max replans - should return None *)
+  let state_at_max = Chain_composer.init_state
+    ~session_id:"s1" ~goal:"test" ~tasks ~max_replans:0 in
+  let empty_metrics : Chain_evaluator.chain_metrics = {
+    chain_id = "c1"; goal = "test"; started_at = 0.0; completed_at = None;
+    total_duration_ms = 0; total_nodes = 0; nodes_succeeded = 0;
+    nodes_failed = 0; nodes_skipped = 0; nodes_pending = 0;
+    parallel_groups = 0; max_depth = 0; success_rate = 0.0;
+    parallelization_efficiency = 0.0; estimation_accuracy = 0.0;
+    node_metrics = []; verification = None;
+  } in
+  let r1 = Chain_composer.should_replan ~state:state_at_max ~metrics:empty_metrics ~verification:None in
+  check (option string) "max replans => None" None (Option.map (fun _ -> "some") r1);
+
+  (* Failures present with room for replans *)
+  let state_ok = Chain_composer.init_state
+    ~session_id:"s2" ~goal:"test" ~tasks ~max_replans:3 in
+  let metrics_with_fail = { empty_metrics with
+    nodes_failed = 1;
+    node_metrics = [
+      { node_id = "n1"; node_type = "llm"; status = Chain_evaluator.Failed;
+        started_at = Some 0.0; completed_at = Some 1.0; duration_ms = 1000;
+        estimated_duration_ms = None; retry_count = 0;
+        error_message = Some "fail"; output_preview = None };
+    ];
+  } in
+  let r2 = Chain_composer.should_replan ~state:state_ok ~metrics:metrics_with_fail ~verification:None in
+  (match r2 with
+   | Some (Chain_composer.TaskFailed _) -> ()
+   | _ -> fail "expected TaskFailed");
+
+  (* GoalNotAchieved: complete, not verified *)
+  let verification_incomplete : Chain_evaluator.verification_result = {
+    is_complete = false; confidence = 0.3; reason = "not done";
+    missing_criteria = ["x"]; suggested_next_steps = [];
+  } in
+  let metrics_done = { empty_metrics with nodes_pending = 0; nodes_succeeded = 2 } in
+  let r3 = Chain_composer.should_replan ~state:state_ok ~metrics:metrics_done ~verification:(Some verification_incomplete) in
+  (match r3 with
+   | Some Chain_composer.GoalNotAchieved -> ()
+   | _ -> fail "expected GoalNotAchieved")
+
+(** Test: decide_next_action - Continue and Abort paths *)
+let test_decide_next_action_continue_and_abort () =
+  let tasks : Chain_composer.masc_task list = [
+    { task_id = "t1"; title = "Task 1"; description = None;
+      priority = 1; status = "done"; assignee = None; metadata = [] };
+  ] in
+  let state = Chain_composer.init_state
+    ~session_id:"s1" ~goal:"test" ~tasks ~max_replans:3 in
+  let empty_metrics : Chain_evaluator.chain_metrics = {
+    chain_id = "c1"; goal = "test"; started_at = 0.0; completed_at = None;
+    total_duration_ms = 0; total_nodes = 2; nodes_succeeded = 1;
+    nodes_failed = 0; nodes_skipped = 0; nodes_pending = 1;
+    parallel_groups = 1; max_depth = 1; success_rate = 0.5;
+    parallelization_efficiency = 1.0; estimation_accuracy = 1.0;
+    node_metrics = []; verification = None;
+  } in
+
+  (* Continue: pending nodes, no failures *)
+  let d1 = Chain_composer.decide_next_action ~state ~metrics:empty_metrics ~verification:None in
+  (match d1 with
+   | Chain_composer.Continue -> ()
+   | _ -> fail "expected Continue");
+
+  (* Abort: failures with max replans exceeded *)
+  let state_at_max = { state with replan_count = 3 } in
+  let metrics_fail = { empty_metrics with nodes_failed = 1; nodes_pending = 0;
+    node_metrics = [
+      { node_id = "n1"; node_type = "llm"; status = Chain_evaluator.Failed;
+        started_at = Some 0.0; completed_at = Some 1.0; duration_ms = 1000;
+        estimated_duration_ms = None; retry_count = 0;
+        error_message = Some "err"; output_preview = None };
+    ];
+  } in
+  let d2 = Chain_composer.decide_next_action ~state:state_at_max ~metrics:metrics_fail ~verification:None in
+  (match d2 with
+   | Chain_composer.Abort _ -> ()
+   | _ -> fail "expected Abort");
+
+  (* Complete with low confidence (all done, no failures, no replan needed) *)
+  let metrics_done = { empty_metrics with nodes_pending = 0; nodes_succeeded = 2; nodes_failed = 0 } in
+  let d3 = Chain_composer.decide_next_action ~state ~metrics:metrics_done ~verification:None in
+  (match d3 with
+   | Chain_composer.Complete _ -> ()
+   | _ -> fail "expected Complete for all-done-no-replan")
+
+(** Test: get_replan_context with None chain *)
+let test_get_replan_context_none () =
+  let tasks : Chain_composer.masc_task list = [
+    { task_id = "t1"; title = "Task 1"; description = None;
+      priority = 1; status = "done"; assignee = None; metadata = [] };
+  ] in
+  let state = Chain_composer.init_state
+    ~session_id:"s1" ~goal:"test" ~tasks ~max_replans:3 in
+  let empty_metrics : Chain_evaluator.chain_metrics = {
+    chain_id = "c1"; goal = "test"; started_at = 0.0; completed_at = None;
+    total_duration_ms = 0; total_nodes = 0; nodes_succeeded = 0;
+    nodes_failed = 0; nodes_skipped = 0; nodes_pending = 0;
+    parallel_groups = 0; max_depth = 0; success_rate = 0.0;
+    parallelization_efficiency = 0.0; estimation_accuracy = 0.0;
+    node_metrics = []; verification = None;
+  } in
+  let result = Chain_composer.get_replan_context state Chain_composer.GoalNotAchieved empty_metrics in
+  check (option string) "None chain => None context" None (Option.map (fun _ -> "some") result)
+
+(** Test: should_evaluate_now *)
+let test_should_evaluate_now () =
+  let tasks : Chain_composer.masc_task list = [] in
+  let state = Chain_composer.init_state
+    ~session_id:"s1" ~goal:"test" ~tasks ~max_replans:3 in
+  let empty_metrics : Chain_evaluator.chain_metrics = {
+    chain_id = "c1"; goal = "test"; started_at = 0.0; completed_at = None;
+    total_duration_ms = 0; total_nodes = 0; nodes_succeeded = 0;
+    nodes_failed = 0; nodes_skipped = 0; nodes_pending = 0;
+    parallel_groups = 0; max_depth = 0; success_rate = 0.0;
+    parallelization_efficiency = 0.0; estimation_accuracy = 0.0;
+    node_metrics = []; verification = None;
+  } in
+  let result = Chain_composer.should_evaluate_now ~_state:state ~trigger:Chain_evaluator.OnChainComplete ~metrics:empty_metrics in
+  check bool "should evaluate on chain complete" true result
+
+(** Test: generate_summary with checkpoints *)
+let test_generate_summary_with_checkpoints () =
+  let tasks : Chain_composer.masc_task list = [
+    { task_id = "t1"; title = "Task 1"; description = None;
+      priority = 1; status = "done"; assignee = None; metadata = [] };
+  ] in
+  let state = Chain_composer.init_state
+    ~session_id:"checkpoint-test"
+    ~goal:"Test with checkpoints"
+    ~tasks
+    ~max_replans:2
+  in
+  let analysis : Chain_composer.composition_analysis = {
+    goal = "Test with checkpoints";
+    tasks = [];
+    relations = [];
+    estimated_duration_ms = 1000;
+    critical_path = ["n1"; "n2"];
+    parallelizable_groups = [["n1"; "n2"]];
+  } in
+  let state = Chain_composer.set_analysis state analysis in
+  let empty_metrics : Chain_evaluator.chain_metrics = {
+    chain_id = "c1"; goal = "test"; started_at = 0.0; completed_at = None;
+    total_duration_ms = 0; total_nodes = 0; nodes_succeeded = 0;
+    nodes_failed = 0; nodes_skipped = 0; nodes_pending = 0;
+    parallel_groups = 0; max_depth = 0; success_rate = 0.0;
+    parallelization_efficiency = 0.0; estimation_accuracy = 0.0;
+    node_metrics = []; verification = None;
+  } in
+  let state = Chain_composer.add_checkpoint state
+    ~trigger:Chain_evaluator.OnChainComplete
+    ~metrics:empty_metrics
+    ~decision:`Complete
+    ~reason:"All done" in
+  let summary = Chain_composer.generate_summary state in
+  check bool "contains checkpoint-test" true (contains_substring summary "checkpoint-test");
+  check bool "contains analysis" true (contains_substring summary "Critical Path");
+  check bool "contains checkpoint count" true (contains_substring summary "CHECKPOINTS: 1")
+
 (** All tests *)
 let () =
   run "Chain Composer" [
@@ -273,11 +503,20 @@ let () =
     ];
     "decision", [
       test_case "decide_next_action" `Quick test_decide_next_action;
+      test_case "continue_and_abort" `Quick test_decide_next_action_continue_and_abort;
     ];
     "timing", [
       test_case "evaluation_timing" `Quick test_evaluation_timing;
+      test_case "should_evaluate_now" `Quick test_should_evaluate_now;
+    ];
+    "replan", [
+      test_case "build_replan_context" `Quick test_build_replan_context;
+      test_case "determine_eval_triggers" `Quick test_determine_eval_triggers;
+      test_case "should_replan" `Quick test_should_replan;
+      test_case "get_replan_context_none" `Quick test_get_replan_context_none;
     ];
     "summary", [
       test_case "generate_summary" `Quick test_generate_summary;
+      test_case "summary_with_checkpoints" `Quick test_generate_summary_with_checkpoints;
     ];
   ]

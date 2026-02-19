@@ -163,6 +163,51 @@ let test_retry_context () =
   check int "total retries" 1 ctx.total_retries;    (* 0 + 1 *)
   check bool "has error counts" true (Hashtbl.length ctx.error_counts > 0)
 
+(** {1 execute_with_retry_sync Tests} *)
+
+let test_execute_with_retry_sync_success () =
+  let policy = Chain_retry.{ default_policy with base_delay_ms = 0; jitter = false } in
+  let result = Chain_retry.execute_with_retry_sync ~policy (fun () -> Ok "ok") in
+  (match result.value with
+   | Ok v -> check string "sync success" "ok" v
+   | Error _ -> fail "expected success");
+  check int "attempts" 1 result.attempts
+
+let test_execute_with_retry_sync_recoverable () =
+  let call_count = ref 0 in
+  let policy = Chain_retry.{ default_policy with max_attempts = 3; base_delay_ms = 0; jitter = false } in
+  let result = Chain_retry.execute_with_retry_sync ~policy (fun () ->
+    incr call_count;
+    if !call_count < 3 then
+      Error (Error.Llm (Error.GeminiError Error.GeminiRateLimit))
+    else
+      Ok "recovered"
+  ) in
+  (match result.value with
+   | Ok v -> check string "recovered" "recovered" v
+   | Error _ -> fail "expected recovery");
+  check int "attempts" 3 result.attempts
+
+let test_execute_with_retry_sync_all_fail () =
+  let policy = Chain_retry.{ default_policy with max_attempts = 2; base_delay_ms = 0; jitter = false } in
+  let result = Chain_retry.execute_with_retry_sync ~policy (fun () ->
+    Error (Error.Llm (Error.GeminiError Error.GeminiRateLimit))
+  ) in
+  (match result.value with
+   | Ok _ -> fail "expected failure"
+   | Error _ -> ());
+  check int "attempts" 2 result.attempts;
+  check bool "has errors" true (List.length result.errors > 0)
+
+(** {1 aggressive_policy Tests} *)
+
+let test_aggressive_policy () =
+  let p = Chain_retry.aggressive_policy in
+  check int "max_attempts" 5 p.max_attempts;
+  check int "base_delay_ms" 500 p.base_delay_ms;
+  check int "max_delay_ms" 60000 p.max_delay_ms;
+  check bool "jitter" true p.jitter
+
 let () =
   run "Chain_retry" [
     "delay", [
@@ -179,5 +224,13 @@ let () =
       test_case "with_timeout" `Quick test_execute_with_timeout;
       test_case "with_filter" `Quick test_execute_with_filter;
       test_case "retry_context" `Quick test_retry_context;
+    ];
+    "sync_execution", [
+      test_case "sync success" `Quick test_execute_with_retry_sync_success;
+      test_case "sync recoverable" `Quick test_execute_with_retry_sync_recoverable;
+      test_case "sync all fail" `Quick test_execute_with_retry_sync_all_fail;
+    ];
+    "config", [
+      test_case "aggressive_policy" `Quick test_aggressive_policy;
     ];
   ]

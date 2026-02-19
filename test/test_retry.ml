@@ -90,6 +90,63 @@ let test_map () =
   let mapped_fail = Retry.map (fun x -> x * 2) failure in
   check (result int string) "mapped failure" (Error "err") (Retry.to_result mapped_fail)
 
+let test_bind () =
+  (* bind on Success: apply f *)
+  let success : int Retry.retry_result = Retry.Success 10 in
+  let bound = Retry.bind (fun x -> Retry.Success (x + 5)) success in
+  check (result int string) "bind success" (Ok 15) (Retry.to_result bound);
+
+  (* bind on Success where f returns failure *)
+  let bound_fail = Retry.bind (fun _ ->
+    Retry.AllAttemptsFailed { attempts = 1; last_error = "inner fail"; errors = ["inner fail"] }
+  ) success in
+  check (result int string) "bind success->fail" (Error "inner fail") (Retry.to_result bound_fail);
+
+  (* bind on failure: propagate *)
+  let failure : int Retry.retry_result = Retry.AllAttemptsFailed {
+    attempts = 2;
+    last_error = "outer fail";
+    errors = ["e1"; "outer fail"];
+  } in
+  let bound_skip = Retry.bind (fun x -> Retry.Success (x * 100)) failure in
+  check (result int string) "bind failure" (Error "outer fail") (Retry.to_result bound_skip)
+
+let test_string_of_retry_result () =
+  let success_str = Retry.string_of_retry_result string_of_int (Retry.Success 42) in
+  check string "success str" "Success: 42" success_str;
+
+  let failure_str = Retry.string_of_retry_result string_of_int
+    (Retry.AllAttemptsFailed { attempts = 3; last_error = "timeout"; errors = ["e1"; "e2"; "timeout"] }) in
+  check bool "failure str contains attempts" true (Str.string_match (Str.regexp ".*3 attempts.*") failure_str 0);
+  check bool "failure str contains last error" true (Str.string_match (Str.regexp ".*timeout.*") failure_str 0)
+
+let test_aggressive_config () =
+  let cfg = Retry.aggressive_config in
+  check int "max_attempts" 5 cfg.max_attempts;
+  check int "initial_delay_ms" 500 cfg.initial_delay_ms;
+  check int "max_delay_ms" 60000 cfg.max_delay_ms;
+  check bool "jitter" true cfg.jitter
+
+let test_quick_config () =
+  let cfg = Retry.quick_config in
+  check int "max_attempts" 2 cfg.max_attempts;
+  check int "initial_delay_ms" 200 cfg.initial_delay_ms;
+  check int "max_delay_ms" 2000 cfg.max_delay_ms;
+  check bool "jitter" false cfg.jitter
+
+let test_parse_retry_after_openai () =
+  (* OpenAI style: JSON with error.message containing "retry after X seconds" *)
+  let json_input = {|{"error": {"message": "Rate limit exceeded. Please retry after 5 seconds."}}|} in
+  check (option int) "openai style" (Some 5000)
+    (Retry.parse_retry_after json_input);
+  (* GLM style: JSON with error.retry_after *)
+  let glm_input = {|{"error": {"retry_after": 3}}|} in
+  check (option int) "glm style" (Some 3000)
+    (Retry.parse_retry_after glm_input);
+  (* Non-JSON input returns None *)
+  check (option int) "non-json" None
+    (Retry.parse_retry_after "Please retry after 5 seconds")
+
 let () =
   run "Retry" [
     "calculate_delay", [
@@ -105,7 +162,14 @@ let () =
     ];
     "utilities", [
       test_case "parse_retry_after" `Quick test_parse_retry_after;
+      test_case "parse_retry_after_openai" `Quick test_parse_retry_after_openai;
       test_case "to_result" `Quick test_to_result;
       test_case "map" `Quick test_map;
+      test_case "bind" `Quick test_bind;
+      test_case "string_of_retry_result" `Quick test_string_of_retry_result;
+    ];
+    "configs", [
+      test_case "aggressive_config" `Quick test_aggressive_config;
+      test_case "quick_config" `Quick test_quick_config;
     ];
   ]

@@ -1140,6 +1140,263 @@ graph LR
       check string "output" "b" chain.output
   | Error e -> fail e
 
+(** {1 Advanced Integration Tests} *)
+
+let test_mermaid_to_chain_goaldriven () =
+  let mermaid = {|
+graph LR
+    gen["LLM:gemini 'Generate code'"]
+    goal{GoalDriven:coverage:gte:0.90:10}
+    gen --> goal
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "goal" in
+      (match node.node_type with
+       | CT.GoalDriven { goal_metric; goal_operator; goal_value; max_iterations; _ } ->
+           check string "metric" "coverage" goal_metric;
+           check bool "operator gte" true (goal_operator = CT.Gte);
+           check (float 0.01) "value" 0.90 goal_value;
+           check int "max_iter" 10 max_iterations
+       | _ -> fail "expected GoalDriven")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_mcts () =
+  let mermaid = {|
+graph LR
+    expand["LLM:gemini 'Generate candidates'"]
+    search{MCTS:ucb1:1.41:20}
+    expand --> search
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "search" in
+      (match node.node_type with
+       | CT.Mcts { policy; max_iterations; _ } ->
+           (match policy with
+            | CT.UCB1 c -> check (float 0.01) "exploration" 1.41 c
+            | _ -> fail "expected UCB1 policy");
+           check int "iterations" 20 max_iterations
+       | _ -> fail "expected Mcts")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_feedback_loop () =
+  let mermaid = {|
+graph LR
+    gen["LLM:claude 'Generate code'"]
+    loop[["FeedbackLoop:code_quality,5,>=0.85"]]
+    gen --> loop
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "loop" in
+      (match node.node_type with
+       | CT.FeedbackLoop { max_iterations; score_threshold; score_operator; _ } ->
+           check int "max_iter" 5 max_iterations;
+           check (float 0.01) "threshold" 0.85 score_threshold;
+           check bool "operator gte" true (score_operator = CT.Gte)
+       | _ -> fail "expected FeedbackLoop")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_batch () =
+  let mermaid = {|
+graph LR
+    data["LLM:gemini 'Load data'"]
+    batch[["Batch:10,true,processor"]]
+    data --> batch
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "batch" in
+      (match node.node_type with
+       | CT.Batch { batch_size; parallel; _ } ->
+           check int "batch_size" 10 batch_size;
+           check bool "parallel" true parallel
+       | _ -> fail "expected Batch")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_spawn () =
+  let mermaid = {|
+graph LR
+    prep["LLM:gemini 'Prepare'"]
+    sp[["Spawn:clean,worker"]]
+    prep --> sp
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "sp" in
+      (match node.node_type with
+       | CT.Spawn { clean; _ } ->
+           check bool "clean" true clean
+       | _ -> fail "expected Spawn")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_cache () =
+  let mermaid = {|
+graph LR
+    fetch["LLM:gemini 'Fetch data'"]
+    c[["Cache:user_key,300,processor"]]
+    fetch --> c
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "c" in
+      (match node.node_type with
+       | CT.Cache { key_expr; ttl_seconds; _ } ->
+           check string "key" "user_key" key_expr;
+           check int "ttl" 300 ttl_seconds
+       | _ -> fail "expected Cache")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_masc_broadcast () =
+  (* Test Circle parse_node_content directly for MASC broadcast with message+mention *)
+  match CMP.parse_node_content `Circle "MASC:broadcast @gemini check this" with
+  | Ok (CT.Masc_broadcast { message; mention; _ }) ->
+      check bool "has message" true (String.length message > 0);
+      ignore mention
+  | Ok _ -> fail "expected Masc_broadcast"
+  | Error e -> fail e
+
+let test_mermaid_to_chain_masc_listen () =
+  (* Test Circle parse_node_content for MASC listen with filter *)
+  match CMP.parse_node_content `Circle "MASC:listen complete|done" with
+  | Ok (CT.Masc_listen { filter; _ }) ->
+      check bool "has filter" true (filter <> None)
+  | Ok _ -> fail "expected Masc_listen"
+  | Error e -> fail e
+
+let test_mermaid_to_chain_masc_claim () =
+  (* Test Circle parse_node_content for MASC claim with task_id *)
+  match CMP.parse_node_content `Circle "MASC:claim task-123" with
+  | Ok (CT.Masc_claim { task_id; _ }) ->
+      check bool "has task_id" true (task_id <> None)
+  | Ok _ -> fail "expected Masc_claim"
+  | Error e -> fail e
+
+let test_mermaid_to_chain_map () =
+  let mermaid = {|
+graph LR
+    data["LLM:gemini 'Load items'"]
+    m[["Map:transform,processor"]]
+    data --> m
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "m" in
+      (match node.node_type with
+       | CT.Map { func; _ } -> check string "func" "transform" func
+       | _ -> fail "expected Map")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_bind () =
+  let mermaid = {|
+graph LR
+    data["LLM:gemini 'Parse request'"]
+    b[["Bind:route,handler"]]
+    data --> b
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "b" in
+      (match node.node_type with
+       | CT.Bind { func; _ } -> check string "func" "route" func
+       | _ -> fail "expected Bind")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_adapter () =
+  let mermaid = {|
+graph LR
+    a["LLM:gemini 'Analyze'"]
+    adapt>/"Transform data"/]
+    a --> adapt
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "adapt" in
+      (match node.node_type with
+       | CT.Adapter _ -> ()
+       | _ -> fail "expected Adapter")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_gate () =
+  let mermaid = {|
+graph LR
+    check["LLM:gemini 'Check condition'"]
+    g{Gate:score > 0.8}
+    yes["LLM:claude 'High quality'"]
+    check --> g
+    g --> yes
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "g" in
+      (match node.node_type with
+       | CT.Gate { condition; _ } ->
+           check bool "has condition" true (String.length condition > 0)
+       | _ -> fail "expected Gate")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_threshold () =
+  let mermaid = {|
+graph LR
+    gen["LLM:gemini 'Generate'"]
+    t{Threshold:>=0.8}
+    gen --> t
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "t" in
+      (match node.node_type with
+       | CT.Threshold _ -> ()
+       | _ -> fail "expected Threshold")
+  | Error e -> fail e
+
+let test_mermaid_to_chain_tool_b64 () =
+  let mermaid = {|
+graph LR
+    t["Tool:eslint {}"]
+    out["LLM:gemini 'Review {{t}}'"]
+    t --> out
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "t" in
+      (match node.node_type with
+       | CT.Tool { name; _ } -> check string "tool name" "eslint" name
+       | _ -> fail "expected Tool")
+  | Error e -> fail e
+
+let test_infer_goal_id_integration () =
+  let mermaid = {|
+graph LR
+    gen["LLM:gemini 'Generate'"]
+    goal_coverage{gte:0.90:10}
+    gen --> goal_coverage
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "goal_coverage" in
+      (match node.node_type with
+       | CT.GoalDriven { goal_metric; _ } ->
+           check string "metric from id" "coverage" goal_metric
+       | _ -> fail "expected GoalDriven from goal_ prefix")
+  | Error e -> fail e
+
+let test_infer_eval_id_integration () =
+  let mermaid = {|
+graph LR
+    gen["LLM:gemini 'Generate'"]
+    eval_quality{judge this}
+    gen --> eval_quality
+|} in
+  match CMP.parse_mermaid_to_chain mermaid with
+  | Ok chain ->
+      let node = find_node chain "eval_quality" in
+      (match node.node_type with
+       | CT.Evaluator _ -> ()
+       | _ -> fail "expected Evaluator from eval_ prefix")
+  | Error e -> fail e
+
 (** {1 Test Suite} *)
 
 let () =
@@ -1326,5 +1583,24 @@ let () =
       test_case "fallback filling" `Quick test_mermaid_to_chain_fallback_filling;
       test_case "stream_merge filling" `Quick test_mermaid_to_chain_stream_merge_filling;
       test_case "output detection" `Quick test_mermaid_to_chain_output_detection;
+    ]);
+    ("integration_advanced", [
+      test_case "goaldriven chain" `Quick test_mermaid_to_chain_goaldriven;
+      test_case "mcts chain" `Quick test_mermaid_to_chain_mcts;
+      test_case "feedback_loop chain" `Quick test_mermaid_to_chain_feedback_loop;
+      test_case "batch chain" `Quick test_mermaid_to_chain_batch;
+      test_case "spawn chain" `Quick test_mermaid_to_chain_spawn;
+      test_case "cache chain" `Quick test_mermaid_to_chain_cache;
+      test_case "masc broadcast chain" `Quick test_mermaid_to_chain_masc_broadcast;
+      test_case "masc listen chain" `Quick test_mermaid_to_chain_masc_listen;
+      test_case "masc claim chain" `Quick test_mermaid_to_chain_masc_claim;
+      test_case "map chain" `Quick test_mermaid_to_chain_map;
+      test_case "bind chain" `Quick test_mermaid_to_chain_bind;
+      test_case "adapter chain" `Quick test_mermaid_to_chain_adapter;
+      test_case "gate chain" `Quick test_mermaid_to_chain_gate;
+      test_case "threshold chain" `Quick test_mermaid_to_chain_threshold;
+      test_case "tool b64 chain" `Quick test_mermaid_to_chain_tool_b64;
+      test_case "infer goal id" `Quick test_infer_goal_id_integration;
+      test_case "infer eval id" `Quick test_infer_eval_id_integration;
     ]);
   ]

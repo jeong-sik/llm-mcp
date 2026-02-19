@@ -301,14 +301,106 @@ let string_tests = [
   test_case "invalid" `Quick test_event_string_invalid;
 ]
 
+let test_string_of_event_node_start () =
+  let event = node_start ~node_id:"n1" ~node_type:"llm" () in
+  let str = string_of_event event in
+  check bool "contains NODE_START" true (Common.contains ~substring:"NODE_START" str);
+  check bool "contains node_id" true (Common.contains ~substring:"n1" str);
+  (* Test with parent *)
+  let event2 = node_start ~node_id:"n2" ~node_type:"tool" ~parent:"n1" () in
+  let str2 = string_of_event event2 in
+  check bool "contains parent" true (Common.contains ~substring:"parent:" str2)
+
+let test_string_of_event_node_complete () =
+  let event = node_complete ~node_id:"n1" ~duration_ms:150 ~tokens:{ prompt_tokens = 10; completion_tokens = 20; total_tokens = 30; estimated_cost_usd = 0.0 }
+    ~verdict:(Pass "good") ~confidence:0.95 () in
+  let str = string_of_event event in
+  check bool "contains NODE_COMPLETE" true (Common.contains ~substring:"NODE_COMPLETE" str);
+  check bool "contains PASS" true (Common.contains ~substring:"PASS" str);
+  check bool "contains duration" true (Common.contains ~substring:"150ms" str)
+
+let test_string_of_event_chain_complete () =
+  let event = chain_complete ~chain_id:"c1" ~duration_ms:500
+    ~tokens:{ prompt_tokens = 100; completion_tokens = 200; total_tokens = 300; estimated_cost_usd = 0.0 }
+    ~executed:3 ~skipped:1 in
+  let str = string_of_event event in
+  check bool "contains CHAIN_COMPLETE" true (Common.contains ~substring:"CHAIN_COMPLETE" str);
+  check bool "contains nodes" true (Common.contains ~substring:"3/4" str)
+
+(** {1 Event Logging Tests} *)
+
+let test_logging_lifecycle () =
+  (* Start fresh *)
+  disable_logging ();
+  clear_log ();
+  (* Enable logging *)
+  enable_logging ~max_size:100 ();
+  (* Emit some events *)
+  emit (chain_start ~chain_id:"log-test" ~nodes:2 ());
+  emit (node_start ~node_id:"ln1" ~node_type:"llm" ());
+  (* Get recent events *)
+  let events = get_recent_events ~limit:10 () in
+  check bool "events logged" true (List.length events >= 2);
+  (* Enable again (should be idempotent) *)
+  enable_logging ();
+  (* Clear log *)
+  clear_log ();
+  let events2 = get_recent_events () in
+  check int "cleared" 0 (List.length events2);
+  (* Disable logging *)
+  disable_logging ();
+  (* Disable again (idempotent) *)
+  disable_logging ()
+
+(** {1 subscribe_filtered Tests} *)
+
+let test_subscribe_filtered () =
+  let received = ref [] in
+  let sub = subscribe_filtered ~filter:errors_only (fun ev -> received := ev :: !received) in
+  emit (chain_start ~chain_id:"filtered-test" ~nodes:1 ());
+  emit (error ~node_id:"err1" ~message:"bad" ~retries:0);
+  emit (node_start ~node_id:"n1" ~node_type:"llm" ());
+  check int "only error" 1 (List.length !received);
+  unsubscribe sub
+
+(** {1 for_node Filter Tests} *)
+
+let test_for_node_filter () =
+  let filter = for_node "target-node" in
+  let event_ns = node_start ~node_id:"target-node" ~node_type:"llm" () in
+  let event_nc = node_complete ~node_id:"target-node" ~duration_ms:100
+    ~tokens:{ prompt_tokens = 5; completion_tokens = 10; total_tokens = 15; estimated_cost_usd = 0.0 }
+    ~verdict:(Pass "ok") ~confidence:0.9 () in
+  let event_err = error ~node_id:"target-node" ~message:"err" ~retries:0 in
+  let event_other = node_start ~node_id:"other-node" ~node_type:"llm" () in
+  let event_chain = chain_start ~chain_id:"c1" ~nodes:1 () in
+  check bool "accepts matching node_start" true (filter event_ns);
+  check bool "accepts matching node_complete" true (filter event_nc);
+  check bool "accepts matching error" true (filter event_err);
+  check bool "rejects other node" false (filter event_other);
+  check bool "rejects chain event" false (filter event_chain)
+
+(** {1 Console Handler Tests} *)
+
+let test_console_handler () =
+  (* console_handler just prints, verify it does not raise *)
+  let event = chain_start ~chain_id:"console-test" ~nodes:1 () in
+  console_handler event;
+  console_handler ~prefix:"[TEST]" event;
+  ()
+
 let pretty_print_tests = [
   test_case "ChainStart" `Quick test_string_of_event_chain_start;
+  test_case "NodeStart" `Quick test_string_of_event_node_start;
+  test_case "NodeComplete" `Quick test_string_of_event_node_complete;
+  test_case "ChainComplete" `Quick test_string_of_event_chain_complete;
   test_case "Error" `Quick test_string_of_event_error;
 ]
 
 let subscription_tests = [
   test_case "subscribe and emit" `Quick test_subscribe_and_emit;
   test_case "multiple subscribers" `Quick test_multiple_subscribers;
+  test_case "subscribe_filtered" `Quick test_subscribe_filtered;
 ]
 
 let filter_tests = [
@@ -316,6 +408,15 @@ let filter_tests = [
   test_case "node_events_only" `Quick test_node_events_filter;
   test_case "errors_only" `Quick test_errors_only_filter;
   test_case "for_chain" `Quick test_for_chain_filter;
+  test_case "for_node" `Quick test_for_node_filter;
+]
+
+let logging_tests = [
+  test_case "logging lifecycle" `Quick test_logging_lifecycle;
+]
+
+let console_tests = [
+  test_case "console_handler" `Quick test_console_handler;
 ]
 
 let tracking_tests = [
@@ -330,5 +431,7 @@ let () =
     ("pretty_print", pretty_print_tests);
     ("subscription", subscription_tests);
     ("filters", filter_tests);
+    ("logging", logging_tests);
+    ("console", console_tests);
     ("tracking", tracking_tests);
   ]

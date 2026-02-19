@@ -23,7 +23,7 @@
 open Alcotest
 open Chain_types
 
-(** {1 Helper Functions} *)
+(* {1Helper Functions} *)
 
 let parse_json str =
   try Yojson.Safe.from_string str
@@ -37,7 +37,7 @@ let expect_error msg = function
   | Ok _ -> fail (Printf.sprintf "Expected error for: %s" msg)
   | Error _ -> ()
 
-(** {1 Parse Chain Tests} *)
+(* {1Parse Chain Tests} *)
 
 let test_parse_chain_minimal () =
   let json = parse_json {|{
@@ -113,7 +113,7 @@ let test_parse_chain_missing_nodes () =
   | Error _ -> ()  (* Expected *)
   | Ok chain -> check int "empty nodes" 0 (List.length chain.nodes)
 
-(** {1 Parse Node Tests - LLM} *)
+(* {1Parse Node Tests - LLM} *)
 
 let test_parse_llm_node_basic () =
   let json = parse_json {|{
@@ -183,7 +183,7 @@ let test_parse_llm_node_missing_prompt () =
   }|} in
   expect_error "missing prompt" (Chain_parser.parse_node json)
 
-(** {1 Parse Node Tests - Tool} *)
+(* {1Parse Node Tests - Tool} *)
 
 let test_parse_tool_node_basic () =
   let json = parse_json {|{
@@ -227,7 +227,7 @@ let test_parse_tool_node_no_args () =
       check bool "empty args" true (args = `Assoc [])
   | _ -> fail "Expected Tool node type"
 
-(** {1 Parse Node Tests - Pipeline/Fanout} *)
+(* {1Parse Node Tests - Pipeline/Fanout} *)
 
 let test_parse_pipeline_node () =
   let json = parse_json {|{
@@ -272,7 +272,7 @@ let test_parse_fanout_with_nodes_field () =
   | Fanout nodes -> check int "fanout nodes" 1 (List.length nodes)
   | _ -> fail "Expected Fanout"
 
-(** {1 Parse Node Tests - Quorum} *)
+(* {1Parse Node Tests - Quorum} *)
 
 let test_parse_quorum_node () =
   let json = parse_json {|{
@@ -306,7 +306,7 @@ let test_parse_quorum_with_inputs () =
   | Quorum { nodes; _ } -> check int "nodes from inputs" 1 (List.length nodes)
   | _ -> fail "Expected Quorum"
 
-(** {1 Parse Node Tests - Gate} *)
+(* {1Parse Node Tests - Gate} *)
 
 let test_parse_gate_node_embedded () =
   let json = parse_json {|{
@@ -358,7 +358,7 @@ let test_parse_gate_no_else () =
   | Gate { else_node; _ } -> check bool "no else" true (else_node = None)
   | _ -> fail "Expected Gate"
 
-(** {1 Parse Node Tests - Merge} *)
+(* {1Parse Node Tests - Merge} *)
 
 let test_parse_merge_node () =
   let json = parse_json {|{
@@ -390,7 +390,7 @@ let test_parse_merge_strategies () =
     ()
   ) strategies
 
-(** {1 Parse Node Tests - Threshold} *)
+(* {1Parse Node Tests - Threshold} *)
 
 let test_parse_threshold_node () =
   let json = parse_json {|{
@@ -424,7 +424,7 @@ let test_parse_threshold_operators () =
     | Error _ -> fail (Printf.sprintf "Failed to parse operator: %s" op_str)
   ) ops
 
-(** {1 Parse Node Tests - GoalDriven} *)
+(* {1Parse Node Tests - GoalDriven} *)
 
 let test_parse_goal_driven_node () =
   let json = parse_json {|{
@@ -450,7 +450,7 @@ let test_parse_goal_driven_node () =
       check int "relay_models" 2 (List.length relay_models)
   | _ -> fail "Expected GoalDriven"
 
-(** {1 Parse Node Tests - Evaluator} *)
+(* {1Parse Node Tests - Evaluator} *)
 
 let test_parse_evaluator_node () =
   let json = parse_json {|{
@@ -487,7 +487,7 @@ let test_parse_select_strategies () =
     | Error e -> fail (Printf.sprintf "Failed: %s" e)
   ) tests
 
-(** {1 Parse Node Tests - Retry/Fallback/Race} *)
+(* {1Parse Node Tests - Retry/Fallback/Race} *)
 
 let test_parse_retry_node () =
   let json = parse_json {|{
@@ -540,7 +540,7 @@ let test_parse_race_node () =
       check (option (float 0.01)) "timeout" (Some 30.0) timeout
   | _ -> fail "Expected Race"
 
-(** {1 Parse Node Tests - ChainRef/Subgraph/ChainExec} *)
+(* {1Parse Node Tests - ChainRef/Subgraph/ChainExec} *)
 
 let test_parse_chain_ref_node () =
   let json = parse_json {|{
@@ -592,7 +592,7 @@ let test_parse_chain_exec_node () =
       check bool "sandbox" true sandbox
   | _ -> fail "Expected ChainExec"
 
-(** {1 Parse Node Tests - Adapter} *)
+(* {1Parse Node Tests - Adapter} *)
 
 let test_parse_adapter_node () =
   let json = parse_json {|{
@@ -631,7 +631,7 @@ let test_parse_adapter_transforms () =
     | Error e -> fail (Printf.sprintf "Transform %s failed: %s" t e)
   ) transforms
 
-(** {1 Parse Node Tests - Cache/Batch/Spawn} *)
+(* {1Parse Node Tests - Cache/Batch/Spawn} *)
 
 let test_parse_cache_node () =
   let json = parse_json {|{
@@ -682,7 +682,7 @@ let test_parse_spawn_node () =
       check bool "inherit_cache" false inherit_cache
   | _ -> fail "Expected Spawn"
 
-(** {1 Parse Node Tests - MCTS} *)
+(* {1Parse Node Tests - MCTS} *)
 
 let test_parse_mcts_node () =
   let json = parse_json {|{
@@ -713,7 +713,7 @@ let test_parse_mcts_node () =
       check (option (float 0.01)) "early_stop" (Some 0.95) early_stop
   | _ -> fail "Expected Mcts"
 
-(** {1 Parse Node Tests - StreamMerge} *)
+(* {1Parse Node Tests - StreamMerge} *)
 
 let test_parse_stream_merge_node () =
   let json = parse_json {|{
@@ -737,7 +737,7 @@ let test_parse_stream_merge_node () =
       check (option (float 0.01)) "timeout" (Some 60.0) timeout
   | _ -> fail "Expected StreamMerge"
 
-(** {1 Parse Node Tests - FeedbackLoop} *)
+(* {1Parse Node Tests - FeedbackLoop} *)
 
 let test_parse_feedback_loop_node () =
   let json = parse_json {|{
@@ -766,7 +766,7 @@ let test_parse_feedback_loop_node () =
       check string "scoring_func" "llm_judge" evaluator_config.scoring_func
   | _ -> fail "Expected FeedbackLoop"
 
-(** {1 Parse Node Tests - MASC Nodes} *)
+(* {1Parse Node Tests - MASC Nodes} *)
 
 let test_parse_masc_broadcast_node () =
   let json = parse_json {|{
@@ -814,7 +814,7 @@ let test_parse_masc_claim_node () =
       check (option string) "room" (Some "work") room
   | _ -> fail "Expected Masc_claim"
 
-(** {1 Parse Node Tests - Map/Bind} *)
+(* {1Parse Node Tests - Map/Bind} *)
 
 let test_parse_map_node () =
   let json = parse_json {|{
@@ -840,7 +840,7 @@ let test_parse_bind_node () =
   | Bind { func; _ } -> check string "func" "chain_items" func
   | _ -> fail "Expected Bind"
 
-(** {1 Input Mapping Tests} *)
+(* {1Input Mapping Tests} *)
 
 let test_parse_input_mapping_list_format () =
   let json = parse_json {|{
@@ -888,7 +888,7 @@ let test_parse_depends_on () =
   let node = expect_ok "depends_on" (Chain_parser.parse_node json) in
   check (option (list string)) "depends_on" (Some ["step1"; "step2"]) node.depends_on
 
-(** {1 Backoff Strategy Tests} *)
+(* {1Backoff Strategy Tests} *)
 
 let test_parse_backoff_strategies () =
   let tests = [
@@ -904,7 +904,7 @@ let test_parse_backoff_strategies () =
     check bool (Printf.sprintf "backoff %s" json_str) true (check_fn backoff)
   ) tests
 
-(** {1 Validation Tests} *)
+(* {1Validation Tests} *)
 
 let test_validate_chain_missing_output_node () =
   let chain = {
@@ -964,7 +964,7 @@ let test_validate_chain_valid () =
   | Ok () -> ()
   | Error e -> fail (Printf.sprintf "Validation failed: %s" e)
 
-(** {1 Serialization Tests} *)
+(* {1Serialization Tests} *)
 
 let test_chain_to_json_roundtrip () =
   let json = parse_json {|{
@@ -1023,7 +1023,7 @@ let test_threshold_op_to_string () =
     check string "op string" expected s
   ) tests
 
-(** {1 Extract Input Mappings Tests} *)
+(* {1Extract Input Mappings Tests} *)
 
 let test_extract_input_mappings () =
   let prompt = "Analyze {{code}} with {{context.file}} and {{result}}" in
@@ -1041,7 +1041,7 @@ let test_extract_json_mappings () =
   let mappings = Chain_parser.extract_json_mappings json in
   check int "json mapping count" 3 (List.length mappings)
 
-(** {1 Error Handling Tests} *)
+(* {1Error Handling Tests} *)
 
 let test_unknown_node_type () =
   let json = parse_json {|{
@@ -1072,7 +1072,7 @@ let test_invalid_json_type () =
   | Error _ -> ()  (* Expected for strict parsing *)
   | Ok _ -> ()     (* May accept if lenient *)
 
-(** {1 has_placeholder_node Tests} *)
+(* {1has_placeholder_node Tests} *)
 
 let test_has_placeholder_node () =
   let placeholder = {
@@ -1095,7 +1095,7 @@ let test_has_placeholder_node () =
   } in
   check bool "normal not placeholder" false (Chain_parser.has_placeholder_node normal)
 
-(** {1 Test Suite} *)
+(* {1Test Suite} *)
 
 let parse_chain_tests = [
   "minimal chain", `Quick, test_parse_chain_minimal;
@@ -1228,6 +1228,833 @@ let error_tests = [
   "has_placeholder_node", `Quick, test_has_placeholder_node;
 ]
 
+(* ============================================================================
+   Wave 3: Additional Coverage Tests
+   ============================================================================ *)
+
+(* {1Cascade Node Parsing} *)
+
+let test_parse_cascade_node () =
+  let json = parse_json {|{
+    "id": "cas1", "type": "cascade",
+    "tiers": [
+      {"tier_node": {"id": "t0", "type": "llm", "model": "glm", "prompt": "fast"},
+       "tier_index": 0, "confidence_threshold": 0.5, "cost_weight": 0.1, "pass_context": true},
+      {"tier_node": {"id": "t1", "type": "llm", "model": "gemini", "prompt": "medium"},
+       "tier_index": 1, "confidence_threshold": 0.7, "cost_weight": 0.5, "pass_context": true}
+    ],
+    "default_threshold": 0.6,
+    "max_escalations": 3,
+    "context_mode": "full",
+    "confidence_prompt": "Rate confidence"
+  }|} in
+  let n = expect_ok "cascade" (Chain_parser.parse_node json) in
+  match n.node_type with
+  | Cascade { tiers; max_escalations; context_mode; confidence_prompt; default_threshold; _ } ->
+      check int "tier count" 2 (List.length tiers);
+      check int "max_escalations" 3 max_escalations;
+      check string "context_mode" "full" (Chain_types.context_mode_to_string context_mode);
+      check (option string) "confidence_prompt" (Some "Rate confidence") confidence_prompt;
+      check (float 0.01) "default_threshold" 0.6 default_threshold
+  | _ -> fail "expected Cascade"
+
+let test_parse_cascade_with_task_hint () =
+  let json = parse_json {|{
+    "id": "cas2", "type": "cascade",
+    "tiers": [
+      {"tier_node": {"id": "t0", "type": "llm", "model": "glm", "prompt": "x"},
+       "tier_index": 0, "confidence_threshold": 0.7, "cost_weight": 0.0, "pass_context": true}
+    ],
+    "task_hint": "code review"
+  }|} in
+  let n = expect_ok "cascade hint" (Chain_parser.parse_node json) in
+  match n.node_type with
+  | Cascade { task_hint; _ } ->
+      check (option string) "task_hint" (Some "code review") task_hint
+  | _ -> fail "expected Cascade"
+
+(* {1ChainExec Node Parsing} *)
+
+let test_parse_chain_exec_node () =
+  let json = parse_json {|{
+    "id": "ce", "type": "chain_exec",
+    "chain_source": "{{generator}}",
+    "validate": false,
+    "max_depth": 5,
+    "sandbox": false,
+    "context_inject": {"child_input": "parent_output"},
+    "pass_outputs": false
+  }|} in
+  let node = expect_ok "chain_exec" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | ChainExec { chain_source; validate; max_depth; sandbox; context_inject; pass_outputs } ->
+      check string "chain_source" "{{generator}}" chain_source;
+      check bool "validate" false validate;
+      check int "max_depth" 5 max_depth;
+      check bool "sandbox" false sandbox;
+      check int "context_inject len" 1 (List.length context_inject);
+      check bool "pass_outputs" false pass_outputs
+  | _ -> fail "expected ChainExec"
+
+let test_parse_chain_exec_meta_alias () =
+  let json = parse_json {|{
+    "id": "m", "type": "meta",
+    "source": "{{gen}}"
+  }|} in
+  let node = expect_ok "meta" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | ChainExec { chain_source; _ } ->
+      check string "source" "{{gen}}" chain_source
+  | _ -> fail "expected ChainExec from meta"
+
+(* {1Spawn Node Parsing} *)
+
+let test_parse_spawn_node () =
+  let json = parse_json {|{
+    "id": "sp", "type": "spawn",
+    "clean": false,
+    "inner": {"id": "inner", "type": "llm", "model": "gemini", "prompt": "go"},
+    "pass_vars": ["input", "config"],
+    "inherit_cache": false
+  }|} in
+  let node = expect_ok "spawn" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | Spawn { clean; inner; pass_vars; inherit_cache } ->
+      check bool "clean" false clean;
+      check string "inner id" "inner" inner.id;
+      check int "pass_vars len" 2 (List.length pass_vars);
+      check bool "inherit_cache" false inherit_cache
+  | _ -> fail "expected Spawn"
+
+(* {1Batch Node Parsing} *)
+
+let test_parse_batch_node () =
+  let json = parse_json {|{
+    "id": "bat", "type": "batch",
+    "batch_size": 5,
+    "parallel": true,
+    "inner": {"id": "proc", "type": "llm", "model": "gemini", "prompt": "process"},
+    "collect_strategy": "concat"
+  }|} in
+  let node = expect_ok "batch" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | Batch { batch_size; parallel; collect_strategy; _ } ->
+      check int "batch_size" 5 batch_size;
+      check bool "parallel" true parallel;
+      check bool "collect concat" true (collect_strategy = `Concat)
+  | _ -> fail "expected Batch"
+
+let test_parse_batch_collect_strategies () =
+  let test_strategy strat expected =
+    let json = parse_json (Printf.sprintf {|{
+      "id": "b", "type": "batch", "batch_size": 10,
+      "inner": {"id": "i", "type": "llm", "model": "x", "prompt": "y"},
+      "collect_strategy": "%s"
+    }|} strat) in
+    let node = expect_ok strat (Chain_parser.parse_node json) in
+    match node.node_type with
+    | Batch { collect_strategy; _ } ->
+        check bool (Printf.sprintf "strategy %s" strat) true (collect_strategy = expected)
+    | _ -> fail "expected Batch"
+  in
+  test_strategy "first" `First;
+  test_strategy "last" `Last;
+  test_strategy "concat" `Concat;
+  test_strategy "list" `List
+
+(* {1StreamMerge Node Parsing} *)
+
+let test_parse_stream_merge_node () =
+  let json = parse_json {|{
+    "id": "sm", "type": "stream_merge",
+    "nodes": [
+      {"id": "n1", "type": "llm", "model": "gemini", "prompt": "fast"},
+      {"id": "n2", "type": "llm", "model": "claude", "prompt": "slow"}
+    ],
+    "reducer": "concat",
+    "initial": "[]",
+    "min_results": 1,
+    "timeout": 30.0
+  }|} in
+  let node = expect_ok "stream_merge" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | StreamMerge { nodes; reducer; initial; min_results; timeout } ->
+      check int "nodes" 2 (List.length nodes);
+      check bool "reducer concat" true (reducer = Concat);
+      check string "initial" "[]" initial;
+      check (option int) "min_results" (Some 1) min_results;
+      check (option (float 0.01)) "timeout" (Some 30.0) timeout
+  | _ -> fail "expected StreamMerge"
+
+let test_parse_stream_merge_custom_reducer () =
+  let json = parse_json {|{
+    "id": "sm2", "type": "stream_merge",
+    "nodes": [{"id": "n1", "type": "llm", "model": "x", "prompt": "y"}],
+    "reducer": "my_reducer"
+  }|} in
+  let node = expect_ok "custom reducer" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | StreamMerge { reducer; _ } ->
+      (match reducer with Custom s -> check string "name" "my_reducer" s | _ -> fail "expected Custom")
+  | _ -> fail "expected StreamMerge"
+
+let test_parse_stream_merge_assoc_reducer () =
+  let json = parse_json {|{
+    "id": "sm3", "type": "stream_merge",
+    "nodes": [{"id": "n1", "type": "llm", "model": "x", "prompt": "y"}],
+    "reducer": {"name": "my_custom"}
+  }|} in
+  let node = expect_ok "assoc reducer" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | StreamMerge { reducer; _ } ->
+      (match reducer with Custom s -> check string "name" "my_custom" s | _ -> fail "expected Custom from assoc")
+  | _ -> fail "expected StreamMerge"
+
+(* {1FeedbackLoop Node Parsing} *)
+
+let test_parse_feedback_loop_full () =
+  let json = parse_json {|{
+    "id": "fl", "type": "feedback_loop",
+    "generator": {"id": "gen", "type": "llm", "model": "gemini", "prompt": "generate"},
+    "evaluator_config": {
+      "scoring_func": "anti_fake",
+      "scoring_prompt": "Score quality",
+      "select_strategy": "worst"
+    },
+    "improver_prompt": "Fix: {{feedback}}",
+    "max_iterations": 5,
+    "score_threshold": 0.9,
+    "score_operator": "gt",
+    "conversational": true,
+    "relay_models": ["gemini", "claude"]
+  }|} in
+  let node = expect_ok "feedback_loop" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | FeedbackLoop { evaluator_config; max_iterations; score_threshold; score_operator;
+                   conversational; relay_models; _ } ->
+      check string "scoring_func" "anti_fake" evaluator_config.scoring_func;
+      check (option string) "scoring_prompt" (Some "Score quality") evaluator_config.scoring_prompt;
+      check int "max_iterations" 5 max_iterations;
+      check (float 0.01) "score_threshold" 0.9 score_threshold;
+      check bool "operator gt" true (score_operator = Gt);
+      check bool "conversational" true conversational;
+      check int "relay_models" 2 (List.length relay_models)
+  | _ -> fail "expected FeedbackLoop"
+
+let test_parse_feedback_loop_select_above_threshold () =
+  let json = parse_json {|{
+    "id": "fl2", "type": "feedback_loop",
+    "generator": {"id": "gen", "type": "llm", "model": "gemini", "prompt": "gen"},
+    "evaluator_config": {
+      "scoring_func": "llm_judge",
+      "select_strategy": ["above_threshold", 0.8]
+    }
+  }|} in
+  let node = expect_ok "fl above_threshold" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | FeedbackLoop { evaluator_config; _ } ->
+      (match evaluator_config.select_strategy with
+       | AboveThreshold t -> check (float 0.01) "threshold" 0.8 t
+       | _ -> fail "expected AboveThreshold")
+  | _ -> fail "expected FeedbackLoop"
+
+(* {1Select Strategy Edge Cases} *)
+
+let test_parse_select_strategy_above_threshold_string () =
+  let json = `String "above_threshold:0.75" in
+  let s = expect_ok "above_threshold string" (Chain_parser.parse_select_strategy json) in
+  match s with AboveThreshold t -> check (float 0.01) "threshold" 0.75 t | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_strategy_abovethreshold_default () =
+  let json = `String "abovethreshold" in
+  let s = expect_ok "abovethreshold default" (Chain_parser.parse_select_strategy json) in
+  match s with AboveThreshold t -> check (float 0.01) "default" 0.5 t | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_strategy_assoc_int () =
+  let json = `Assoc [("above_threshold", `Int 1)] in
+  let s = expect_ok "assoc int" (Chain_parser.parse_select_strategy json) in
+  match s with AboveThreshold t -> check (float 0.01) "val" 1.0 t | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_strategy_assoc_cap () =
+  let json = `Assoc [("AboveThreshold", `Float 0.9)] in
+  let s = expect_ok "assoc cap" (Chain_parser.parse_select_strategy json) in
+  match s with AboveThreshold t -> check (float 0.01) "val" 0.9 t | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_strategy_assoc_cap_int () =
+  let json = `Assoc [("AboveThreshold", `Int 1)] in
+  let s = expect_ok "assoc cap int" (Chain_parser.parse_select_strategy json) in
+  match s with AboveThreshold t -> check (float 0.01) "val" 1.0 t | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_strategy_weighted_random () =
+  let json = `String "weightedrandom" in
+  let s = expect_ok "weightedrandom" (Chain_parser.parse_select_strategy json) in
+  check bool "is WeightedRandom" true (s = WeightedRandom)
+
+let test_parse_select_strategy_unknown () =
+  let json = `String "foobar" in
+  expect_error "unknown strategy" (Chain_parser.parse_select_strategy json)
+
+let test_parse_select_strategy_invalid_json () =
+  let json = `Bool true in
+  expect_error "bool json" (Chain_parser.parse_select_strategy json)
+
+(* {1Adapter Transform Object Format} *)
+
+let test_parse_adapter_transform_regex () =
+  let json = parse_json {|{"type": "regex", "pattern": "\\d+", "replacement": "NUM"}|} in
+  let t = expect_ok "regex" (Chain_parser.parse_adapter_transform json) in
+  match t with
+  | Regex (p, r) -> check string "pattern" "\\d+" p; check string "replacement" "NUM" r
+  | _ -> fail "expected Regex"
+
+let test_parse_adapter_transform_validate_schema () =
+  let json = parse_json {|{"type": "validate_schema", "schema": "my_schema"}|} in
+  let t = expect_ok "validate_schema" (Chain_parser.parse_adapter_transform json) in
+  match t with ValidateSchema s -> check string "schema" "my_schema" s | _ -> fail "expected ValidateSchema"
+
+let test_parse_adapter_transform_conditional () =
+  let json = parse_json {|{
+    "type": "conditional",
+    "condition": "length > 100",
+    "on_true": "truncate:100",
+    "on_false": "stringify"
+  }|} in
+  let t = expect_ok "conditional" (Chain_parser.parse_adapter_transform json) in
+  match t with
+  | Conditional { condition; on_true; on_false } ->
+      check string "condition" "length > 100" condition;
+      (match on_true with Truncate n -> check int "truncate" 100 n | _ -> fail "expected Truncate");
+      (match on_false with Stringify -> () | _ -> fail "expected Stringify")
+  | _ -> fail "expected Conditional"
+
+let test_parse_adapter_transform_chain () =
+  let json = parse_json {|{
+    "type": "chain",
+    "transforms": ["parse_json", "extract:data", "stringify"]
+  }|} in
+  let t = expect_ok "chain" (Chain_parser.parse_adapter_transform json) in
+  match t with Chain ts -> check int "count" 3 (List.length ts) | _ -> fail "expected Chain"
+
+let test_parse_adapter_transform_unknown_type () =
+  let json = parse_json {|{"type": "foobar"}|} in
+  expect_error "unknown type" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_no_type_object () =
+  let json = parse_json {|{"key": "value", "other": 42}|} in
+  let t = expect_ok "no type" (Chain_parser.parse_adapter_transform json) in
+  match t with Template _ -> () | _ -> fail "expected Template from unknown"
+
+let test_parse_adapter_transform_string_simple () =
+  let json = `String "parse_json" in
+  let t = expect_ok "simple parse_json" (Chain_parser.parse_adapter_transform json) in
+  check bool "is ParseJson" true (t = ParseJson)
+
+let test_parse_adapter_transform_string_stringify () =
+  let json = `String "stringify" in
+  let t = expect_ok "simple stringify" (Chain_parser.parse_adapter_transform json) in
+  check bool "is Stringify" true (t = Stringify)
+
+let test_parse_adapter_transform_string_unknown_simple () =
+  let json = `String "foobar" in
+  expect_error "unknown simple" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_non_string_non_object () =
+  let json = `Int 42 in
+  expect_error "int json" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_conditional_missing_condition () =
+  let json = parse_json {|{
+    "type": "conditional",
+    "on_true": "stringify",
+    "on_false": "parse_json"
+  }|} in
+  expect_error "missing condition" (Chain_parser.parse_adapter_transform json)
+
+(* {1Adapter on_error Variants} *)
+
+let test_parse_adapter_on_error_passthrough () =
+  let json = parse_json {|{
+    "id": "a", "type": "adapter",
+    "input_ref": "node1",
+    "transform": "extract:data",
+    "on_error": "passthrough"
+  }|} in
+  let node = expect_ok "passthrough" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | Adapter { on_error = `Passthrough; _ } -> ()
+  | _ -> fail "expected Passthrough"
+
+let test_parse_adapter_on_error_default () =
+  let json = parse_json {|{
+    "id": "a", "type": "adapter",
+    "input_ref": "node1",
+    "transform": "extract:data",
+    "on_error": "default:fallback_value"
+  }|} in
+  let node = expect_ok "default" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | Adapter { on_error = `Default s; _ } -> check string "default val" "fallback_value" s
+  | _ -> fail "expected Default"
+
+let test_parse_adapter_on_error_assoc_default () =
+  let json = parse_json {|{
+    "id": "a", "type": "adapter",
+    "input_ref": "node1",
+    "transform": "extract:data",
+    "on_error": {"default": "N/A"}
+  }|} in
+  let node = expect_ok "assoc default" (Chain_parser.parse_node json) in
+  match node.node_type with
+  | Adapter { on_error = `Default s; _ } -> check string "val" "N/A" s
+  | _ -> fail "expected Default from assoc"
+
+(* {1Backoff Strategy Edge Cases} *)
+
+let test_parse_backoff_strategy_string_constant () =
+  let json = parse_json {|{"backoff": "constant:2.5"}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Constant f -> check (float 0.01) "val" 2.5 f | _ -> fail "expected Constant"
+
+let test_parse_backoff_strategy_string_linear () =
+  let json = parse_json {|{"backoff": "linear:1.5"}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Linear f -> check (float 0.01) "val" 1.5 f | _ -> fail "expected Linear"
+
+let test_parse_backoff_strategy_float () =
+  let json = parse_json {|{"backoff": 3.0}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Exponential f -> check (float 0.01) "val" 3.0 f | _ -> fail "expected Exponential"
+
+let test_parse_backoff_strategy_int () =
+  let json = parse_json {|{"backoff": 2}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Exponential f -> check (float 0.01) "val" 2.0 f | _ -> fail "expected Exponential"
+
+let test_parse_backoff_strategy_assoc_jitter () =
+  let json = parse_json {|{"backoff": {"type": "jitter", "min": 0.3, "max": 1.5}}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Jitter (mn, mx) -> check (float 0.01) "min" 0.3 mn; check (float 0.01) "max" 1.5 mx | _ -> fail "expected Jitter"
+
+let test_parse_backoff_strategy_assoc_constant () =
+  let json = parse_json {|{"backoff": {"type": "constant", "seconds": 5.0}}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Constant f -> check (float 0.01) "val" 5.0 f | _ -> fail "expected Constant"
+
+let test_parse_backoff_strategy_assoc_linear () =
+  let json = parse_json {|{"backoff": {"type": "linear", "base": 0.5}}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Linear f -> check (float 0.01) "val" 0.5 f | _ -> fail "expected Linear"
+
+let test_parse_backoff_strategy_assoc_unknown () =
+  let json = parse_json {|{"backoff": {"type": "unknown_type"}}|} in
+  let b = Chain_parser.parse_backoff_strategy json in
+  match b with Exponential f -> check (float 0.01) "default" 2.0 f | _ -> fail "expected Exponential default"
+
+(* {1Serialization Coverage} *)
+
+let test_select_strategy_to_json () =
+  check string "best" {|"best"|} (Yojson.Safe.to_string (Chain_parser.select_strategy_to_json Best));
+  check string "worst" {|"worst"|} (Yojson.Safe.to_string (Chain_parser.select_strategy_to_json Worst));
+  check string "weighted_random" {|"weighted_random"|}
+    (Yojson.Safe.to_string (Chain_parser.select_strategy_to_json WeightedRandom));
+  let at_json = Chain_parser.select_strategy_to_json (AboveThreshold 0.8) in
+  match at_json with
+  | `Assoc [("above_threshold", `Float f)] -> check (float 0.01) "threshold" 0.8 f
+  | _ -> fail "expected assoc for AboveThreshold"
+
+let test_backoff_to_json () =
+  let check_type name b expected_type =
+    match Chain_parser.backoff_to_json b with
+    | `Assoc fields ->
+        let typ = List.assoc "type" fields in
+        check string name expected_type (Yojson.Safe.Util.to_string typ)
+    | _ -> fail (Printf.sprintf "expected assoc for %s" name)
+  in
+  check_type "constant" (Constant 1.0) "constant";
+  check_type "exponential" (Exponential 2.0) "exponential";
+  check_type "linear" (Linear 1.0) "linear";
+  check_type "jitter" (Jitter (0.5, 2.0)) "jitter"
+
+let test_adapter_transform_to_json_all () =
+  let check_roundtrip name transform =
+    let json = Chain_parser.adapter_transform_to_json transform in
+    let result = Chain_parser.parse_adapter_transform json in
+    let _ = expect_ok name result in ()
+  in
+  check_roundtrip "extract" (Extract "data.items");
+  check_roundtrip "template" (Template "Result: {{value}}");
+  check_roundtrip "summarize" (Summarize 500);
+  check_roundtrip "truncate" (Truncate 1000);
+  check_roundtrip "jsonpath" (JsonPath "$.data");
+  check_roundtrip "regex" (Regex ("\\d+", "NUM"));
+  check_roundtrip "validate_schema" (ValidateSchema "my_schema");
+  check_roundtrip "parse_json" ParseJson;
+  check_roundtrip "stringify" Stringify;
+  check_roundtrip "chain" (Chain [ParseJson; Extract "data"; Stringify]);
+  check_roundtrip "conditional" (Conditional { condition = "x > 0"; on_true = Stringify; on_false = ParseJson });
+  check_roundtrip "custom" (Custom "my_func")
+
+let test_config_to_json () =
+  let cfg = { max_depth = 10; max_concurrency = 5; timeout = 60; trace = true; direction = TB } in
+  let json = Chain_parser.config_to_json cfg in
+  match json with
+  | `Assoc fields ->
+      check int "max_depth" 10 (Yojson.Safe.Util.to_int (List.assoc "max_depth" fields));
+      check int "timeout" 60 (Yojson.Safe.Util.to_int (List.assoc "timeout" fields));
+      check bool "trace" true (Yojson.Safe.Util.to_bool (List.assoc "trace" fields))
+  | _ -> fail "expected assoc"
+
+let test_merge_strategy_to_string_all () =
+  check string "first" "first" (Chain_parser.merge_strategy_to_string First);
+  check string "last" "last" (Chain_parser.merge_strategy_to_string Last);
+  check string "concat" "concat" (Chain_parser.merge_strategy_to_string Concat);
+  check string "weighted_avg" "weighted_average" (Chain_parser.merge_strategy_to_string WeightedAvg);
+  check string "custom" "custom:my_fn" (Chain_parser.merge_strategy_to_string (Custom "my_fn"))
+
+let test_threshold_op_to_string_all () =
+  check string "gt" "gt" (Chain_parser.threshold_op_to_string Gt);
+  check string "gte" "gte" (Chain_parser.threshold_op_to_string Gte);
+  check string "lt" "lt" (Chain_parser.threshold_op_to_string Lt);
+  check string "lte" "lte" (Chain_parser.threshold_op_to_string Lte);
+  check string "eq" "eq" (Chain_parser.threshold_op_to_string Eq);
+  check string "neq" "neq" (Chain_parser.threshold_op_to_string Neq)
+
+(* {1Node Serialization for Uncovered Types} *)
+
+let test_node_to_json_tool_with_server () =
+  let node = { id = "t"; node_type = Tool { name = "figma:parse_url"; args = `Assoc [("url", `String "x")] };
+               input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "tool" fields with
+       | Some (`Assoc tf) ->
+           check string "server" "figma" (Yojson.Safe.Util.to_string (List.assoc "server" tf));
+           check string "name" "parse_url" (Yojson.Safe.Util.to_string (List.assoc "name" tf))
+       | _ -> fail "expected nested tool")
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_chain_exec () =
+  let node = { id = "ce"; node_type = ChainExec {
+    chain_source = "{{gen}}"; validate = true; max_depth = 3;
+    sandbox = true; context_inject = [("a", "b")]; pass_outputs = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check string "type" "chain_exec" (Yojson.Safe.Util.to_string (List.assoc "type" fields));
+      check bool "pass_outputs" false (Yojson.Safe.Util.to_bool (List.assoc "pass_outputs" fields))
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_spawn () =
+  let inner = { id = "i"; node_type = Llm { model = "x"; system = None; prompt = "y";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let node = { id = "s"; node_type = Spawn { clean = true; inner; pass_vars = ["input"]; inherit_cache = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check string "type" "spawn" (Yojson.Safe.Util.to_string (List.assoc "type" fields))
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_cascade () =
+  let tier_node = { id = "t0"; node_type = Llm { model = "glm"; system = None; prompt = "p";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let tier = { tier_node; tier_index = 0; confidence_threshold = 0.7; cost_weight = 0.1; pass_context = true } in
+  let node = { id = "c"; node_type = Cascade {
+    tiers = [tier]; confidence_prompt = Some "rate"; max_escalations = 2;
+    context_mode = CM_Summary; task_hint = Some "review"; default_threshold = 0.7 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check string "type" "cascade" (Yojson.Safe.Util.to_string (List.assoc "type" fields))
+  | _ -> fail "expected assoc"
+
+(* {1Strict Validation Edge Cases} *)
+
+let test_validate_chain_strict_empty_chain_id () =
+  let chain = { id = ""; nodes = []; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "empty chain id" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_no_nodes () =
+  let chain = { id = "test"; nodes = []; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "no nodes" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_bad_config () =
+  let bad_config = { max_depth = 0; max_concurrency = 0; timeout = 0; trace = false; direction = LR } in
+  let node = { id = "a"; node_type = Llm { model = "x"; system = None; prompt = "p";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = bad_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "bad config" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_empty_model () =
+  let node = { id = "a"; node_type = Llm { model = ""; system = None; prompt = "p";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "empty model" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_empty_prompt () =
+  let node = { id = "a"; node_type = Llm { model = "gemini"; system = None; prompt = "";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "empty prompt" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_empty_tool_name () =
+  let node = { id = "a"; node_type = Tool { name = ""; args = `Assoc [] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "empty tool name" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_empty_pipeline () =
+  let node = { id = "a"; node_type = Pipeline [];
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "empty pipeline" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_empty_fanout () =
+  let node = { id = "a"; node_type = Fanout [];
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "empty fanout" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_bad_quorum_count () =
+  let inner = { id = "i"; node_type = Llm { model = "x"; system = None; prompt = "p";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let node = { id = "a"; node_type = Quorum { consensus = Count 0; nodes = [inner]; weights = [] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "quorum count 0" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_chain_strict_quorum_count_exceeds () =
+  let inner = { id = "i"; node_type = Llm { model = "x"; system = None; prompt = "p";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let node = { id = "a"; node_type = Quorum { consensus = Count 5; nodes = [inner]; weights = [] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let chain = { id = "test"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "quorum count exceeds" (Chain_parser.validate_chain_strict chain)
+
+(* {1Merge Strategy Parse Edge Cases} *)
+
+let test_parse_merge_strategy_weighted_avg () =
+  let s = expect_ok "weighted_average" (Chain_parser.parse_merge_strategy "weighted_average") in
+  check bool "is WeightedAvg" true (s = WeightedAvg)
+
+let test_parse_merge_strategy_weighted_avg_alias () =
+  let s = expect_ok "weighted_avg" (Chain_parser.parse_merge_strategy "weighted_avg") in
+  check bool "is WeightedAvg" true (s = WeightedAvg)
+
+let test_parse_merge_strategy_custom () =
+  let s = expect_ok "custom" (Chain_parser.parse_merge_strategy "custom:my_fn") in
+  match s with Custom f -> check string "name" "my_fn" f | _ -> fail "expected Custom"
+
+let test_parse_merge_strategy_unknown () =
+  expect_error "unknown" (Chain_parser.parse_merge_strategy "foobar")
+
+(* {1Threshold Op Parse Edge Cases} *)
+
+let test_parse_threshold_op_aliases () =
+  let check_op name input expected =
+    let op = expect_ok name (Chain_parser.parse_threshold_op input) in
+    check bool name true (op = expected)
+  in
+  check_op ">" ">" Gt;
+  check_op ">=" ">=" Gte;
+  check_op "<" "<" Lt;
+  check_op "<=" "<=" Lte;
+  check_op "==" "==" Eq;
+  check_op "<>" "<>" Neq;
+  check_op "!=" "!=" Neq;
+  check_op "eq" "eq" Eq;
+  check_op "neq" "neq" Neq
+
+let test_parse_threshold_op_unknown () =
+  expect_error "unknown op" (Chain_parser.parse_threshold_op "foobar")
+
+(* {1Require Helpers} *)
+
+let test_require_string_missing () =
+  let json = parse_json {|{"other": 42}|} in
+  expect_error "missing" (Chain_parser.require_string json "name")
+
+let test_require_string_non_string () =
+  let json = parse_json {|{"name": 42}|} in
+  expect_error "non-string" (Chain_parser.require_string json "name")
+
+let test_require_float_missing () =
+  let json = parse_json {|{"other": 42}|} in
+  expect_error "missing" (Chain_parser.require_float json "val")
+
+let test_require_float_non_number () =
+  let json = parse_json {|{"val": "hello"}|} in
+  expect_error "non-number" (Chain_parser.require_float json "val")
+
+let test_require_float_int () =
+  let json = parse_json {|{"val": 5}|} in
+  let f = expect_ok "int as float" (Chain_parser.require_float json "val") in
+  check (float 0.01) "val" 5.0 f
+
+(* {1Parse Config Security Limits} *)
+
+let test_parse_config_clamped () =
+  let json = parse_json {|{"max_depth": 999, "max_concurrency": 999}|} in
+  let cfg = Chain_parser.parse_config json in
+  (* Should be clamped to security limits *)
+  check bool "depth clamped" true (cfg.max_depth <= 20);
+  check bool "concurrency clamped" true (cfg.max_concurrency <= 10)
+
+(* {1Test Lists} *)
+
+let cascade_tests = [
+  "cascade node", `Quick, test_parse_cascade_node;
+  "cascade with task_hint", `Quick, test_parse_cascade_with_task_hint;
+]
+
+let chain_exec_tests = [
+  "chain_exec node", `Quick, test_parse_chain_exec_node;
+  "meta alias", `Quick, test_parse_chain_exec_meta_alias;
+]
+
+let spawn_tests = [
+  "spawn node", `Quick, test_parse_spawn_node;
+]
+
+let batch_tests = [
+  "batch node", `Quick, test_parse_batch_node;
+  "batch collect strategies", `Quick, test_parse_batch_collect_strategies;
+]
+
+let stream_merge_tests = [
+  "stream_merge node", `Quick, test_parse_stream_merge_node;
+  "custom reducer", `Quick, test_parse_stream_merge_custom_reducer;
+  "assoc reducer", `Quick, test_parse_stream_merge_assoc_reducer;
+]
+
+let feedback_loop_tests = [
+  "feedback_loop full", `Quick, test_parse_feedback_loop_full;
+  "above_threshold select", `Quick, test_parse_feedback_loop_select_above_threshold;
+]
+
+let select_strategy_tests = [
+  "above_threshold string", `Quick, test_parse_select_strategy_above_threshold_string;
+  "abovethreshold default", `Quick, test_parse_select_strategy_abovethreshold_default;
+  "assoc int", `Quick, test_parse_select_strategy_assoc_int;
+  "assoc cap", `Quick, test_parse_select_strategy_assoc_cap;
+  "assoc cap int", `Quick, test_parse_select_strategy_assoc_cap_int;
+  "weighted_random", `Quick, test_parse_select_strategy_weighted_random;
+  "unknown", `Quick, test_parse_select_strategy_unknown;
+  "invalid json", `Quick, test_parse_select_strategy_invalid_json;
+]
+
+let adapter_transform_tests = [
+  "regex", `Quick, test_parse_adapter_transform_regex;
+  "validate_schema", `Quick, test_parse_adapter_transform_validate_schema;
+  "conditional", `Quick, test_parse_adapter_transform_conditional;
+  "chain", `Quick, test_parse_adapter_transform_chain;
+  "unknown type", `Quick, test_parse_adapter_transform_unknown_type;
+  "no type object", `Quick, test_parse_adapter_transform_no_type_object;
+  "string simple", `Quick, test_parse_adapter_transform_string_simple;
+  "string stringify", `Quick, test_parse_adapter_transform_string_stringify;
+  "string unknown", `Quick, test_parse_adapter_transform_string_unknown_simple;
+  "non string non object", `Quick, test_parse_adapter_transform_non_string_non_object;
+  "conditional missing condition", `Quick, test_parse_adapter_transform_conditional_missing_condition;
+]
+
+let adapter_on_error_tests = [
+  "passthrough", `Quick, test_parse_adapter_on_error_passthrough;
+  "default string", `Quick, test_parse_adapter_on_error_default;
+  "default assoc", `Quick, test_parse_adapter_on_error_assoc_default;
+]
+
+let backoff_extra_tests = [
+  "string constant", `Quick, test_parse_backoff_strategy_string_constant;
+  "string linear", `Quick, test_parse_backoff_strategy_string_linear;
+  "float", `Quick, test_parse_backoff_strategy_float;
+  "int", `Quick, test_parse_backoff_strategy_int;
+  "assoc jitter", `Quick, test_parse_backoff_strategy_assoc_jitter;
+  "assoc constant", `Quick, test_parse_backoff_strategy_assoc_constant;
+  "assoc linear", `Quick, test_parse_backoff_strategy_assoc_linear;
+  "assoc unknown", `Quick, test_parse_backoff_strategy_assoc_unknown;
+]
+
+let serialization_extra_tests = [
+  "select_strategy_to_json", `Quick, test_select_strategy_to_json;
+  "backoff_to_json", `Quick, test_backoff_to_json;
+  "adapter_transform_to_json all", `Quick, test_adapter_transform_to_json_all;
+  "config_to_json", `Quick, test_config_to_json;
+  "merge_strategy_to_string all", `Quick, test_merge_strategy_to_string_all;
+  "threshold_op_to_string all", `Quick, test_threshold_op_to_string_all;
+  "node_to_json tool server", `Quick, test_node_to_json_tool_with_server;
+  "node_to_json chain_exec", `Quick, test_node_to_json_chain_exec;
+  "node_to_json spawn", `Quick, test_node_to_json_spawn;
+  "node_to_json cascade", `Quick, test_node_to_json_cascade;
+]
+
+let strict_validation_tests = [
+  "empty chain id", `Quick, test_validate_chain_strict_empty_chain_id;
+  "no nodes", `Quick, test_validate_chain_strict_no_nodes;
+  "bad config", `Quick, test_validate_chain_strict_bad_config;
+  "empty model", `Quick, test_validate_chain_strict_empty_model;
+  "empty prompt", `Quick, test_validate_chain_strict_empty_prompt;
+  "empty tool name", `Quick, test_validate_chain_strict_empty_tool_name;
+  "empty pipeline", `Quick, test_validate_chain_strict_empty_pipeline;
+  "empty fanout", `Quick, test_validate_chain_strict_empty_fanout;
+  "bad quorum count", `Quick, test_validate_chain_strict_bad_quorum_count;
+  "quorum count exceeds", `Quick, test_validate_chain_strict_quorum_count_exceeds;
+]
+
+let merge_strategy_extra_tests = [
+  "weighted_average", `Quick, test_parse_merge_strategy_weighted_avg;
+  "weighted_avg alias", `Quick, test_parse_merge_strategy_weighted_avg_alias;
+  "custom", `Quick, test_parse_merge_strategy_custom;
+  "unknown", `Quick, test_parse_merge_strategy_unknown;
+]
+
+let threshold_op_extra_tests = [
+  "aliases", `Quick, test_parse_threshold_op_aliases;
+  "unknown", `Quick, test_parse_threshold_op_unknown;
+]
+
+
+let require_tests = [
+  "require_string missing", `Quick, test_require_string_missing;
+  "require_string non_string", `Quick, test_require_string_non_string;
+  "require_float missing", `Quick, test_require_float_missing;
+  "require_float non_number", `Quick, test_require_float_non_number;
+  "require_float int", `Quick, test_require_float_int;
+]
+
+let config_tests = [
+  "config clamped", `Quick, test_parse_config_clamped;
+]
+
 let () =
   run "Chain Parser Coverage" [
     "parse_chain", parse_chain_tests;
@@ -1252,4 +2079,21 @@ let () =
     "serialization", serialization_tests;
     "extract", extract_tests;
     "error", error_tests;
+    (* Wave 3 *)
+    "cascade", cascade_tests;
+    "chain_exec", chain_exec_tests;
+    "spawn", spawn_tests;
+    "batch_node", batch_tests;
+    "stream_merge", stream_merge_tests;
+    "feedback_loop", feedback_loop_tests;
+    "select_strategy", select_strategy_tests;
+    "adapter_transform", adapter_transform_tests;
+    "adapter_on_error", adapter_on_error_tests;
+    "backoff_extra", backoff_extra_tests;
+    "serialization_extra", serialization_extra_tests;
+    "strict_validation", strict_validation_tests;
+    "merge_strategy_extra", merge_strategy_extra_tests;
+    "threshold_op_extra", threshold_op_extra_tests;
+    "require_helpers", require_tests;
+    "config", config_tests;
   ]

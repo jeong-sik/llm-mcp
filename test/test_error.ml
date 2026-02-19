@@ -343,11 +343,179 @@ let json_tests = [
   test_case "process errors" `Quick test_process_error_json_roundtrip;
 ]
 
+(** {1 Additional Coverage Tests} *)
+
+(** Test codex-specific to_string variants *)
+let test_codex_all_to_string () =
+  let cases = [
+    (CodexError CodexRateLimit, "rate limit");
+    (CodexError CodexAuth, "authentication");
+    (CodexError CodexTimeout, "timed out");
+    (CodexError (CodexUnknown "detail"), "detail");
+  ] in
+  List.iter (fun (e, keyword) ->
+    let msg = to_string (Llm e) in
+    check bool (Printf.sprintf "codex %s" keyword)
+      true (Common.contains ~substring:keyword msg)
+  ) cases
+
+(** Test ollama-specific to_string variants *)
+let test_ollama_all_to_string () =
+  let cases = [
+    (OllamaError OllamaNotRunning, "not running");
+    (OllamaError OllamaTimeout, "timed out");
+    (OllamaError (OllamaUnknown "xyz"), "xyz");
+  ] in
+  List.iter (fun (e, keyword) ->
+    let msg = to_string (Llm e) in
+    check bool (Printf.sprintf "ollama %s" keyword)
+      true (Common.contains ~substring:keyword msg)
+  ) cases
+
+(** Test process-specific to_string variants *)
+let test_process_all_to_string () =
+  let timeout_msg = to_string (Process (ProcessTimeout 45)) in
+  check bool "timeout seconds" true (Common.contains ~substring:"45" timeout_msg);
+  let spawn_msg = to_string (Process (ProcessSpawnError "no binary")) in
+  check bool "spawn error" true (Common.contains ~substring:"no binary" spawn_msg);
+  let killed_msg = to_string (Process ProcessKilled) in
+  check bool "killed" true (Common.contains ~substring:"killed" killed_msg)
+
+(** Test severity for previously uncovered branches *)
+let test_severity_llm_others () =
+  (* Claude errors are Error severity *)
+  let claude_auth = Llm (ClaudeError ClaudeAuth) in
+  check bool "claude auth is Error" true (severity_of_error claude_auth = Error);
+  let codex_sandbox = Llm (CodexError CodexSandboxViolation) in
+  check bool "codex sandbox is Error" true (severity_of_error codex_sandbox = Error);
+  let ollama_nr = Llm (OllamaError OllamaNotRunning) in
+  check bool "ollama not running is Error" true (severity_of_error ollama_nr = Error);
+  (* Gemini unknown is Error *)
+  let gemini_unknown = Llm (GeminiError (GeminiUnknown "x")) in
+  check bool "gemini unknown is Error" true (severity_of_error gemini_unknown = Error)
+
+let test_severity_mcp_others () =
+  let mcp_parse = Mcp (McpParseError "bad") in
+  check bool "mcp parse is Error" true (severity_of_error mcp_parse = Error);
+  let mcp_auth = Mcp (McpAuthError "no token") in
+  check bool "mcp auth is Error" true (severity_of_error mcp_auth = Error)
+
+let test_severity_process_others () =
+  let spawn = Process (ProcessSpawnError "not found") in
+  check bool "spawn is Error" true (severity_of_error spawn = Error);
+  let killed = Process ProcessKilled in
+  check bool "killed is Error" true (severity_of_error killed = Error);
+  let exitcode = Process (ProcessExitCode (1, "fail")) in
+  check bool "exit code is Error" true (severity_of_error exitcode = Error)
+
+let test_severity_chain_others () =
+  let compile = Chain (ChainCompileError "bad") in
+  check bool "compile is Error" true (severity_of_error compile = Error);
+  let timeout = Chain (ChainTimeoutError 5000) in
+  check bool "chain timeout is Error" true (severity_of_error timeout = Error);
+  let cycle = Chain ChainCycleDetected in
+  check bool "cycle is Error" true (severity_of_error cycle = Error)
+
+(** Test JSON roundtrip for all remaining error variants *)
+let test_full_coverage_json_roundtrip () =
+  let all_errors = [
+    Llm (GeminiError GeminiContextTooLong);
+    Llm (GeminiError GeminiAuth);
+    Llm (ClaudeError ClaudeContextTooLong);
+    Llm (ClaudeError ClaudeRateLimit);
+    Llm (ClaudeError ClaudeAuth);
+    Llm (ClaudeError (ClaudeUnknown "test"));
+    Llm (CodexError CodexRateLimit);
+    Llm (CodexError CodexAuth);
+    Llm (CodexError CodexTimeout);
+    Llm (CodexError (CodexUnknown "codex-err"));
+    Llm (OllamaError OllamaNotRunning);
+    Llm (OllamaError OllamaTimeout);
+    Llm (OllamaError (OllamaUnknown "olm-err"));
+    Chain (ChainCompileError "comp");
+    Chain (ChainExecutionError "exec");
+    Chain (ChainValidationError "val");
+    Mcp (McpParseError "p");
+    Mcp (McpInvalidParams "inv");
+    Mcp (McpAuthError "auth");
+    Mcp (McpInternalError "int");
+    Internal "full-test";
+  ] in
+  List.iter (fun err ->
+    let json = to_yojson err in
+    match of_yojson json with
+    | Ok err2 -> check string "roundtrip" (to_string err) (to_string err2)
+    | Error e -> Alcotest.fail (Printf.sprintf "roundtrip failed: %s" e)
+  ) all_errors
+
+(** Test is_recoverable for all non-recoverable variants *)
+let test_all_non_recoverable () =
+  let non_recoverables = [
+    Llm (GeminiError GeminiContextTooLong);
+    Llm (GeminiError GeminiAuth);
+    Llm (GeminiError (GeminiUnknown "x"));
+    Llm (ClaudeError ClaudeContextTooLong);
+    Llm (ClaudeError ClaudeAuth);
+    Llm (ClaudeError ClaudeTimeout);
+    Llm (ClaudeError (ClaudeUnknown "x"));
+    Llm (CodexError CodexAuth);
+    Llm (CodexError CodexSandboxViolation);
+    Llm (CodexError CodexTimeout);
+    Llm (CodexError (CodexUnknown "x"));
+    Llm (OllamaError OllamaNotRunning);
+    Llm (OllamaError (OllamaModelNotFound "x"));
+    Llm (OllamaError (OllamaUnknown "x"));
+    Chain (ChainParseError "x");
+    Chain (ChainCompileError "x");
+    Chain (ChainExecutionError "x");
+    Chain (ChainTimeoutError 100);
+    Chain ChainCycleDetected;
+    Chain (ChainNodeNotFound "x");
+    Chain (ChainValidationError "x");
+    Mcp (McpParseError "x");
+    Mcp (McpMethodNotFound "x");
+    Mcp (McpInvalidParams "x");
+    Mcp (McpAuthError "x");
+    Mcp (McpInternalError "x");
+    Process (ProcessExitCode (1, "x"));
+    Process (ProcessSpawnError "x");
+    Process ProcessKilled;
+    Io (FileNotFound "x");
+    Io (PermissionDenied "x");
+    Io (JsonParseError "x");
+    Io (EncodingError "x");
+  ] in
+  List.iter (fun err ->
+    check bool (Printf.sprintf "not recoverable: %s" (to_string err))
+      false (is_recoverable err)
+  ) non_recoverables
+
+let additional_coverage_tests = [
+  test_case "codex all to_string" `Quick test_codex_all_to_string;
+  test_case "ollama all to_string" `Quick test_ollama_all_to_string;
+  test_case "process all to_string" `Quick test_process_all_to_string;
+]
+
+let additional_severity_tests = [
+  test_case "llm others" `Quick test_severity_llm_others;
+  test_case "mcp others" `Quick test_severity_mcp_others;
+  test_case "process others" `Quick test_severity_process_others;
+  test_case "chain others" `Quick test_severity_chain_others;
+]
+
+let additional_json_tests = [
+  test_case "full coverage roundtrip" `Quick test_full_coverage_json_roundtrip;
+]
+
+let additional_recoverable_tests = [
+  test_case "all non-recoverable" `Quick test_all_non_recoverable;
+]
+
 let () =
   run "error" [
-    ("is_recoverable", recoverable_tests);
-    ("to_string", to_string_tests);
-    ("severity", severity_tests);
+    ("is_recoverable", recoverable_tests @ additional_recoverable_tests);
+    ("to_string", to_string_tests @ additional_coverage_tests);
+    ("severity", severity_tests @ additional_severity_tests);
     ("result_helpers", result_tests);
-    ("json_roundtrip", json_tests);
+    ("json_roundtrip", json_tests @ additional_json_tests);
   ]

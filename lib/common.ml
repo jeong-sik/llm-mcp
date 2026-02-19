@@ -194,14 +194,14 @@ let read_lines path =
   try
     In_channel.with_open_text path (fun ic ->
       let lines = ref [] in
-      begin
-        try
-          while true do
-            lines := In_channel.input_line ic :: !lines
-          done
-        with End_of_file -> ()
-      end;
-      List.filter_map Fun.id !lines |> List.rev
+      (try
+        while true do
+          match In_channel.input_line ic with
+          | Some line -> lines := line :: !lines
+          | None -> raise Exit
+        done
+      with Exit -> ());
+      List.rev !lines
     )
   with Sys_error _ -> []
 

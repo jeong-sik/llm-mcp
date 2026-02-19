@@ -442,3 +442,63 @@
 (test
  (name test_mermaid_parser_coverage)
  (libraries llm_mcp.common alcotest str))
+
+; Time_compat tests (Eio clock + Unix fallback)
+(test
+ (name test_time_compat)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Handler_utils tests (gh_pr_diff, slack_post — Eio-based tool handlers)
+(test
+ (name test_handler_utils)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Handler_codex tests (OpenAI API handler — response parsing, error paths)
+(test
+ (name test_handler_codex)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Binary integration tests (subprocess calls to CLI binaries)
+(test
+ (name test_binaries)
+ (libraries alcotest str unix))
+
+; Parse chain files tests (JSON → chain parsing)
+(executable
+ (name test_parse_chains)
+ (libraries llm_mcp.common yojson))
+
+; Chain_utils tests (safe list/string helpers, empty response, prompt analysis)
+(test
+ (name test_chain_utils)
+ (libraries llm_mcp.common alcotest str))
+
+; Chain_conversation tests (token estimation, context management, summarization)
+(test
+ (name test_chain_conversation)
+ (libraries llm_mcp.common alcotest))
+
+; Handler_gemini extended coverage (parse_models_response edge cases)
+(test
+ (name test_handler_gemini_coverage)
+ (libraries llm_mcp.eio llm_mcp.common alcotest))
+
+; Chain Executor helpers tests (pure functions: confidence, context, plan_to_steps)
+(test
+ (name test_chain_executor_helpers)
+ (libraries llm_mcp.common llm_mcp.eio alcotest str))
+
+; MCP Server helpers tests (make_error, health_response, session store edges)
+(test
+ (name test_mcp_server_helpers)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
+
+; Tools_eio helpers tests (env_truthy, chain_llm_args branches, validate_chain)
+(test
+ (name test_tools_eio_helpers)
+ (libraries llm_mcp.eio llm_mcp.common alcotest str unix))
+
+; Spawn_registry tests (parse_int, latency, try_start/finish, JSON, Prometheus)
+(test
+ (name test_spawn_registry)
+ (libraries llm_mcp.eio llm_mcp.common alcotest str eio eio_main))

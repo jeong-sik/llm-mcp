@@ -218,6 +218,81 @@ let test_compress_auto_small () =
 
 (** {1 Test Suite} *)
 
+(** {1 dict_dir Tests} *)
+
+let test_dict_dir_env_override () =
+  let old = Sys.getenv_opt "LLM_MCP_DICTS_DIR" in
+  Unix.putenv "LLM_MCP_DICTS_DIR" "/tmp/test-dicts";
+  let dir = D.dict_dir () in
+  check string "env override" "/tmp/test-dicts" dir;
+  (* Restore *)
+  (match old with
+   | Some v -> Unix.putenv "LLM_MCP_DICTS_DIR" v
+   | None ->
+       (* Remove env var by setting empty — OCaml has no unsetenv *)
+       let _ = Sys.command "unset LLM_MCP_DICTS_DIR 2>/dev/null" in
+       ())
+
+let test_dict_dir_returns_string () =
+  (* Without override, should return some path ending with data/dicts *)
+  let old = Sys.getenv_opt "LLM_MCP_DICTS_DIR" in
+  (match old with Some _ -> () | None ->
+    let dir = D.dict_dir () in
+    check bool "is a path" true (String.length dir > 0));
+  (* Restore if needed *)
+  match old with Some v -> Unix.putenv "LLM_MCP_DICTS_DIR" v | None -> ()
+
+(** {1 run_process_silent Tests} *)
+
+let test_run_process_silent_success () =
+  match D.run_process_silent "true" [] with
+  | Ok code -> check int "exit 0" 0 code
+  | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
+
+let test_run_process_silent_failure () =
+  match D.run_process_silent "false" [] with
+  | Ok code -> check bool "nonzero exit" true (code <> 0)
+  | Error _ -> () (* acceptable *)
+
+let test_run_process_silent_missing () =
+  match D.run_process_silent "/nonexistent/binary/xyz" [] with
+  | Error msg -> check bool "error message" true (String.length msg > 0)
+  | Ok _ -> () (* on some systems might return nonzero instead *)
+
+(** {1 detect_model_type additional patterns} *)
+
+let test_detect_model_type_gemini_answer () =
+  let text = "The answer is clear from the data analysis provided here." in
+  check bool "gemini the_answer_is" true (D.detect_model_type text = D.Gemini)
+
+let test_detect_model_type_gpt_certainly () =
+  let text = "Certainly! I can provide you with the detailed information here." in
+  check bool "gpt certainly" true (D.detect_model_type text = D.GPT)
+
+let test_detect_model_type_gpt_happy () =
+  let text = "I'd be happy to assist you with this task. Here is an explanation." in
+  check bool "gpt id_be_happy" true (D.detect_model_type text = D.GPT)
+
+(** {1 content_type string conversion} *)
+
+let test_string_of_content_type_all () =
+  check string "code" "code" (D.string_of_content_type D.Code);
+  check string "json" "json" (D.string_of_content_type D.JSON);
+  check string "markdown" "markdown" (D.string_of_content_type D.Markdown);
+  check string "mixed" "mixed" (D.string_of_content_type D.Mixed)
+
+(** {1 load_for_type / load_default Tests} *)
+
+let test_load_for_type_missing () =
+  (* Without real dict files, load_for_type returns None *)
+  let old = Sys.getenv_opt "LLM_MCP_DICTS_DIR" in
+  Unix.putenv "LLM_MCP_DICTS_DIR" "/tmp/nonexistent-dict-dir";
+  let result = D.load_for_type D.JSON in
+  check (option pass) "no dict" None result;
+  let result2 = D.load_default () in
+  check (option pass) "no default" None result2;
+  (match old with Some v -> Unix.putenv "LLM_MCP_DICTS_DIR" v | None -> ())
+
 let () =
   run "dictionary_coverage" [
     ("model_type", [
@@ -232,6 +307,7 @@ let () =
       test_case "let" `Quick test_detect_content_type_code_let;
       test_case "class" `Quick test_detect_content_type_code_class;
       test_case "of_string defaults" `Quick test_content_type_of_string_extra;
+      test_case "all to_string" `Quick test_string_of_content_type_all;
     ]);
     ("detect_model_type", [
       test_case "short" `Quick test_detect_model_type_short;
@@ -240,7 +316,10 @@ let () =
       test_case "claude let_me" `Quick test_detect_model_type_claude_let_me;
       test_case "gpt" `Quick test_detect_model_type_gpt;
       test_case "gpt heres_what" `Quick test_detect_model_type_gpt_heres_what;
+      test_case "gpt certainly" `Quick test_detect_model_type_gpt_certainly;
+      test_case "gpt happy" `Quick test_detect_model_type_gpt_happy;
       test_case "gemini" `Quick test_detect_model_type_gemini;
+      test_case "gemini answer" `Quick test_detect_model_type_gemini_answer;
       test_case "universal" `Quick test_detect_model_type_universal;
     ]);
     ("constants", [
@@ -270,5 +349,22 @@ let () =
     ]);
     ("compress_auto", [
       test_case "small" `Quick test_compress_auto_small;
+    ]);
+    ("dict_dir", [
+      test_case "env override" `Quick test_dict_dir_env_override;
+      test_case "returns string" `Quick test_dict_dir_returns_string;
+    ]);
+    ("run_process_silent", [
+      test_case "success" `Quick test_run_process_silent_success;
+      test_case "failure" `Quick test_run_process_silent_failure;
+      test_case "missing binary" `Quick test_run_process_silent_missing;
+    ]);
+    ("detect_model_type_extra", [
+      test_case "gemini answer" `Quick test_detect_model_type_gemini_answer;
+      test_case "gpt certainly" `Quick test_detect_model_type_gpt_certainly;
+      test_case "gpt happy" `Quick test_detect_model_type_gpt_happy;
+    ]);
+    ("load_for_type", [
+      test_case "missing" `Quick test_load_for_type_missing;
     ]);
   ]

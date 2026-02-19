@@ -24,6 +24,19 @@ type output_format = Text | Json | StreamJson [@@deriving yojson]
 val output_format_of_string : string -> output_format
 val string_of_output_format : output_format -> string
 
+(** Response format for tool output - Standardized on Verbose (JSON) *)
+type response_format =
+  | Verbose
+  | Compact
+  | Binary
+  | Base85
+  | Compressed
+  | ZstdDict
+  | Auto
+
+val response_format_of_string : string -> response_format
+val string_of_response_format : response_format -> string
+
 (** MCP Tool schema *)
 type tool_schema = {
   name : string;

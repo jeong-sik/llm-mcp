@@ -350,10 +350,261 @@ let registry_tests = [
   test_case "render registered" `Quick test_render_registered;
 ]
 
+(** {1 Deprecate Tests} *)
+
+let test_deprecate () =
+  setup ();
+  let entry : prompt_entry = {
+    id = "dep-test";
+    template = "{{x}}";
+    version = "1.0.0";
+    variables = ["x"];
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  register entry;
+  check bool "not deprecated initially" false
+    (match get ~id:"dep-test" () with Some e -> e.deprecated | None -> true);
+  let ok = deprecate ~id:"dep-test" ~version:"1.0.0" () in
+  check bool "deprecate success" true ok;
+  check bool "deprecated after" true
+    (match get ~id:"dep-test" ~version:"1.0.0" () with Some e -> e.deprecated | None -> false);
+  let fail_ok = deprecate ~id:"nonexistent" ~version:"1.0.0" () in
+  check bool "deprecate missing" false fail_ok
+
+(** {1 Update Metrics Tests} *)
+
+let test_update_metrics_new () =
+  setup ();
+  let entry : prompt_entry = {
+    id = "metrics-test";
+    template = "{{x}}";
+    version = "1.0.0";
+    variables = ["x"];
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  register entry;
+  update_metrics ~id:"metrics-test" ~version:"1.0.0" ~score:0.8 ();
+  (match get ~id:"metrics-test" () with
+   | Some e ->
+       (match e.metrics with
+        | Some m ->
+            check int "usage count 1" 1 m.usage_count;
+            check (float 0.01) "avg score" 0.8 m.avg_score
+        | None -> fail "metrics should exist")
+   | None -> fail "entry should exist")
+
+let test_update_metrics_accumulate () =
+  setup ();
+  let entry : prompt_entry = {
+    id = "metrics-acc";
+    template = "{{x}}";
+    version = "1.0.0";
+    variables = ["x"];
+    metrics = None;
+    created_at = Unix.gettimeofday ();
+    deprecated = false;
+  } in
+  register entry;
+  update_metrics ~id:"metrics-acc" ~version:"1.0.0" ~score:0.8 ();
+  update_metrics ~id:"metrics-acc" ~version:"1.0.0" ~score:0.6 ();
+  (match get ~id:"metrics-acc" () with
+   | Some e ->
+       (match e.metrics with
+        | Some m ->
+            check int "usage count 2" 2 m.usage_count;
+            check (float 0.01) "avg score" 0.7 m.avg_score
+        | None -> fail "metrics should exist")
+   | None -> fail "entry should exist")
+
+let test_update_metrics_nonexistent () =
+  setup ();
+  (* Should not crash *)
+  update_metrics ~id:"nonexistent" ~version:"1.0.0" ~score:0.5 ()
+
+(** {1 Stats Tests} *)
+
+let test_stats_empty () =
+  setup ();
+  let s = stats () in
+  check int "total 0" 0 s.total_prompts;
+  check int "active 0" 0 s.active_prompts;
+  check int "deprecated 0" 0 s.deprecated_prompts;
+  check (option string) "most used none" None s.most_used;
+  check (float 0.01) "avg usage 0" 0.0 s.avg_usage
+
+let test_stats_with_data () =
+  setup ();
+  let entry1 : prompt_entry = {
+    id = "s1"; template = "{{x}}"; version = "1.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  let entry2 : prompt_entry = {
+    id = "s2"; template = "{{y}}"; version = "1.0.0";
+    variables = ["y"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = true;
+  } in
+  register entry1;
+  register entry2;
+  update_metrics ~id:"s1" ~version:"1.0.0" ~score:0.9 ();
+  update_metrics ~id:"s1" ~version:"1.0.0" ~score:0.8 ();
+  let s = stats () in
+  check int "total 2" 2 s.total_prompts;
+  check int "active 1" 1 s.active_prompts;
+  check int "deprecated 1" 1 s.deprecated_prompts;
+  check (option string) "most used" (Some "s1") s.most_used;
+  check bool "avg usage > 0" true (s.avg_usage > 0.0)
+
+(** {1 Unregister All Versions} *)
+
+let test_unregister_all_versions () =
+  setup ();
+  let entry1 : prompt_entry = {
+    id = "multi-ver"; template = "v1 {{x}}"; version = "1.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  let entry2 : prompt_entry = {
+    id = "multi-ver"; template = "v2 {{x}}"; version = "2.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  register entry1;
+  register entry2;
+  check int "2 versions" 2 (List.length (get_versions ~id:"multi-ver" ()));
+  let ok = unregister ~id:"multi-ver" () in
+  check bool "unregister all ok" true ok;
+  check bool "all gone" false (exists ~id:"multi-ver" ());
+  let fail_ok = unregister ~id:"multi-ver" () in
+  check bool "unregister missing" false fail_ok
+
+(** {1 List IDs Tests} *)
+
+let test_list_ids () =
+  setup ();
+  check int "empty list" 0 (List.length (list_ids ()));
+  let e1 : prompt_entry = {
+    id = "id-a"; template = "{{x}}"; version = "1.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  let e2 : prompt_entry = {
+    id = "id-b"; template = "{{y}}"; version = "1.0.0";
+    variables = ["y"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  register e1;
+  register e2;
+  let ids = list_ids () |> List.sort String.compare in
+  check (list string) "ids" ["id-a"; "id-b"] ids
+
+(** {1 Count Unique Tests} *)
+
+let test_count_unique () =
+  setup ();
+  check int "empty" 0 (count_unique ());
+  let e1 : prompt_entry = {
+    id = "cu-a"; template = "{{x}}"; version = "1.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  let e2 : prompt_entry = {
+    id = "cu-a"; template = "{{x}} v2"; version = "2.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  let e3 : prompt_entry = {
+    id = "cu-b"; template = "{{y}}"; version = "1.0.0";
+    variables = ["y"]; metrics = None;
+    created_at = Unix.gettimeofday (); deprecated = false;
+  } in
+  register e1; register e2; register e3;
+  check int "unique 2 (cu-a and cu-b)" 2 (count_unique ());
+  check int "total 3" 3 (count ())
+
+(** {1 to_json / of_json Tests} *)
+
+let test_to_json_of_json () =
+  setup ();
+  let e1 : prompt_entry = {
+    id = "json-test"; template = "Hello {{name}}"; version = "1.0.0";
+    variables = ["name"]; metrics = None;
+    created_at = 1000.0; deprecated = false;
+  } in
+  register e1;
+  let json = to_json () in
+  setup ();  (* clear *)
+  (match of_json json with
+   | Ok n ->
+       check int "imported 1" 1 n;
+       (match get ~id:"json-test" () with
+        | Some e -> check string "template" "Hello {{name}}" e.template
+        | None -> fail "not found after import")
+   | Error e -> fail e)
+
+let test_of_json_invalid () =
+  setup ();
+  (match of_json (`String "not a list") with
+   | Ok _ -> fail "expected error for non-list"
+   | Error _ -> ())
+
+let test_of_json_partial () =
+  setup ();
+  (* List with one valid and one invalid entry *)
+  let e1 : prompt_entry = {
+    id = "partial-test"; template = "{{x}}"; version = "1.0.0";
+    variables = ["x"]; metrics = None;
+    created_at = 1000.0; deprecated = false;
+  } in
+  let valid_json = prompt_entry_to_yojson e1 in
+  let invalid_json = `Assoc [("bad", `String "data")] in
+  let json = `List [valid_json; invalid_json] in
+  (match of_json json with
+   | Ok n -> check int "imported 1 of 2" 1 n
+   | Error e -> fail e)
+
+(** {1 Test Suite} *)
+
+let deprecate_tests = [
+  test_case "deprecate" `Quick test_deprecate;
+]
+
+let metrics_tests = [
+  test_case "new metrics" `Quick test_update_metrics_new;
+  test_case "accumulate metrics" `Quick test_update_metrics_accumulate;
+  test_case "nonexistent metrics" `Quick test_update_metrics_nonexistent;
+]
+
+let stats_tests = [
+  test_case "empty stats" `Quick test_stats_empty;
+  test_case "stats with data" `Quick test_stats_with_data;
+]
+
+let advanced_registry_tests = [
+  test_case "unregister all versions" `Quick test_unregister_all_versions;
+  test_case "list ids" `Quick test_list_ids;
+  test_case "count unique" `Quick test_count_unique;
+]
+
+let json_io_tests = [
+  test_case "to/of json roundtrip" `Quick test_to_json_of_json;
+  test_case "of_json invalid" `Quick test_of_json_invalid;
+  test_case "of_json partial" `Quick test_of_json_partial;
+]
+
 let () =
   run "prompt_registry" [
     ("extract_variables", extract_tests);
     ("render_template", render_tests);
     ("json_roundtrip", json_tests);
     ("registry", registry_tests);
+    ("deprecate", deprecate_tests);
+    ("metrics", metrics_tests);
+    ("stats", stats_tests);
+    ("advanced_registry", advanced_registry_tests);
+    ("json_io", json_io_tests);
   ]
