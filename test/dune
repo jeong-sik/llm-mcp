@@ -442,3 +442,8 @@
 (test
  (name test_mermaid_parser_coverage)
  (libraries llm_mcp.common alcotest str))
+
+; Time_compat tests (Eio clock + Unix fallback)
+(test
+ (name test_time_compat)
+ (libraries llm_mcp.eio llm_mcp.common alcotest eio eio_main unix))
