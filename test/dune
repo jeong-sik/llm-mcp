@@ -537,3 +537,28 @@
 (test
  (name test_dictionary_wave7)
  (libraries llm_mcp.common alcotest str unix))
+
+; Wave 8: chain_adapter_eio coverage (all adapter_transform variants - pure function)
+(test
+ (name test_chain_adapter_wave8)
+ (libraries llm_mcp.common llm_mcp.eio alcotest str))
+
+; Wave 8: chain_stats additional coverage (handler events, model tracking, formatting)
+(test
+ (name test_chain_stats_wave8)
+ (libraries llm_mcp.common alcotest eio eio_main))
+
+; Wave 8: chain_types additional coverage (batch types, cascade_tier, trace_entry, execution_plan)
+(test
+ (name test_chain_types_wave8)
+ (libraries llm_mcp.common alcotest))
+
+; Wave 8: notification_sse coverage (persist/cleanup/load, format_event, buffer, clients)
+(test
+ (name test_notification_sse_wave8)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Wave 8: chain_trace_types coverage (trace_to_entry, traces_to_entries)
+(test
+ (name test_chain_trace_types_wave8)
+ (libraries llm_mcp.common alcotest))
