@@ -502,3 +502,13 @@
 (test
  (name test_spawn_registry)
  (libraries llm_mcp.eio llm_mcp.common alcotest str eio eio_main))
+
+; Common module coverage (env_true, rm_rf, ensure_dir, file_io, utility functions)
+(test
+ (name test_common_coverage)
+ (libraries llm_mcp.common alcotest str unix))
+
+; Chain Evaluator coverage2 (metrics, should_evaluate, parse_verification, generate_report)
+(test
+ (name test_chain_evaluator_coverage2)
+ (libraries llm_mcp.common alcotest str unix))
