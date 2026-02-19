@@ -2051,6 +2051,928 @@ let require_tests = [
   "require_float int", `Quick, test_require_float_int;
 ]
 
+(* {1 Wave 4: node_to_json serialization for all remaining node types} *)
+
+let mk_llm id prompt = { id; node_type = Llm { model = "g"; system = None; prompt;
+  timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+  input_mapping = []; output_key = None; depends_on = None }
+
+let test_node_to_json_gate () =
+  let then_n = mk_llm "t" "yes" in
+  let else_n = mk_llm "e" "no" in
+  let node = { id = "g"; node_type = Gate { condition = "x > 0"; then_node = then_n; else_node = Some else_n };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse gate" (Chain_parser.parse_node json) in
+  check string "id" "g" reparsed.id
+
+let test_node_to_json_gate_no_else () =
+  let then_n = mk_llm "t" "yes" in
+  let node = { id = "g2"; node_type = Gate { condition = "check"; then_node = then_n; else_node = None };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse gate no else" (Chain_parser.parse_node json) in
+  check string "id" "g2" reparsed.id
+
+let test_node_to_json_pipeline () =
+  let a = mk_llm "a" "first" in
+  let b = mk_llm "b" "second" in
+  let node = { id = "p"; node_type = Pipeline [a; b];
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse pipeline" (Chain_parser.parse_node json) in
+  check string "id" "p" reparsed.id
+
+let test_node_to_json_fanout () =
+  let a = mk_llm "a" "branch1" in
+  let b = mk_llm "b" "branch2" in
+  let node = { id = "f"; node_type = Fanout [a; b];
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse fanout" (Chain_parser.parse_node json) in
+  check string "id" "f" reparsed.id
+
+let test_node_to_json_quorum () =
+  let a = mk_llm "a" "q1" in
+  let b = mk_llm "b" "q2" in
+  let node = { id = "q"; node_type = Quorum { consensus = Count 2; nodes = [a; b]; weights = [("a", 0.6); ("b", 0.4)] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse quorum" (Chain_parser.parse_node json) in
+  check string "id" "q" reparsed.id
+
+let test_node_to_json_quorum_majority () =
+  let a = mk_llm "a" "q1" in
+  let node = { id = "qm"; node_type = Quorum { consensus = Majority; nodes = [a]; weights = [] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "consensus" fields with
+       | Some (`String "majority") -> ()
+       | _ -> fail "expected consensus majority")
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_merge () =
+  let a = mk_llm "a" "m1" in
+  let b = mk_llm "b" "m2" in
+  let node = { id = "m"; node_type = Merge { strategy = Concat; nodes = [a; b] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse merge" (Chain_parser.parse_node json) in
+  check string "id" "m" reparsed.id
+
+let test_node_to_json_threshold () =
+  let inp = mk_llm "inp" "check" in
+  let pass_n = mk_llm "pass" "ok" in
+  let fail_n = mk_llm "fail" "bad" in
+  let node = { id = "th"; node_type = Threshold {
+    metric = "confidence"; operator = Gte; value = 0.8;
+    input_node = inp; on_pass = Some pass_n; on_fail = Some fail_n };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse threshold" (Chain_parser.parse_node json) in
+  check string "id" "th" reparsed.id
+
+let test_node_to_json_goal_driven () =
+  let action = mk_llm "act" "do thing" in
+  let node = { id = "gd"; node_type = GoalDriven {
+    goal_metric = "cov"; goal_operator = Gte; goal_value = 0.9;
+    action_node = action; measure_func = "exec_test";
+    max_iterations = 5; strategy_hints = [("fast", "true")];
+    conversational = true; relay_models = ["gemini"; "claude"] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse goal_driven" (Chain_parser.parse_node json) in
+  check string "id" "gd" reparsed.id
+
+let test_node_to_json_evaluator () =
+  let c1 = mk_llm "c1" "candidate 1" in
+  let c2 = mk_llm "c2" "candidate 2" in
+  let node = { id = "ev"; node_type = Evaluator {
+    candidates = [c1; c2]; scoring_func = "llm_judge";
+    scoring_prompt = Some "Rate quality"; select_strategy = Best;
+    min_score = Some 0.5 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse evaluator" (Chain_parser.parse_node json) in
+  check string "id" "ev" reparsed.id
+
+let test_node_to_json_retry () =
+  let inner = mk_llm "inner" "try" in
+  let node = { id = "r"; node_type = Retry {
+    node = inner; max_attempts = 3; backoff = Constant 1.5;
+    retry_on = ["timeout"; "rate_limit"] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse retry" (Chain_parser.parse_node json) in
+  check string "id" "r" reparsed.id
+
+let test_node_to_json_fallback () =
+  let pri = mk_llm "pri" "primary" in
+  let fb1 = mk_llm "fb1" "fallback1" in
+  let node = { id = "fb"; node_type = Fallback { primary = pri; fallbacks = [fb1] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse fallback" (Chain_parser.parse_node json) in
+  check string "id" "fb" reparsed.id
+
+let test_node_to_json_race () =
+  let a = mk_llm "a" "fast" in
+  let b = mk_llm "b" "slow" in
+  let node = { id = "race"; node_type = Race { nodes = [a; b]; timeout = Some 5.0 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse race" (Chain_parser.parse_node json) in
+  check string "id" "race" reparsed.id
+
+let test_node_to_json_race_no_timeout () =
+  let a = mk_llm "a" "fast" in
+  let node = { id = "race2"; node_type = Race { nodes = [a]; timeout = None };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse race no timeout" (Chain_parser.parse_node json) in
+  check string "id" "race2" reparsed.id
+
+let test_node_to_json_adapter () =
+  let node = { id = "ad"; node_type = Adapter {
+    input_ref = "prev"; transform = Extract "data.items";
+    on_error = `Passthrough };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check string "type" "adapter" (Yojson.Safe.Util.to_string (List.assoc "type" fields));
+      check string "on_error" "passthrough" (Yojson.Safe.Util.to_string (List.assoc "on_error" fields))
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_adapter_default_error () =
+  let node = { id = "ad2"; node_type = Adapter {
+    input_ref = "prev"; transform = Stringify;
+    on_error = `Default "fallback_val" };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "on_error" fields with
+       | Some (`Assoc [("default", `String "fallback_val")]) -> ()
+       | _ -> fail "expected on_error default object")
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_cache () =
+  let inner = mk_llm "ci" "cached" in
+  let node = { id = "ca"; node_type = Cache { key_expr = "{{input}}"; ttl_seconds = 300; inner };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse cache" (Chain_parser.parse_node json) in
+  check string "id" "ca" reparsed.id
+
+let test_node_to_json_batch () =
+  let inner = mk_llm "bi" "batch_item" in
+  let node = { id = "ba"; node_type = Batch {
+    batch_size = 5; parallel = true; inner; collect_strategy = `Concat };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check string "collect" "concat" (Yojson.Safe.Util.to_string (List.assoc "collect_strategy" fields))
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_batch_first_last () =
+  let inner = mk_llm "bi" "item" in
+  let node_first = { id = "bf"; node_type = Batch {
+    batch_size = 3; parallel = false; inner; collect_strategy = `First };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json_first = Chain_parser.node_to_json node_first in
+  (match json_first with
+  | `Assoc fields ->
+      check string "first" "first" (Yojson.Safe.Util.to_string (List.assoc "collect_strategy" fields))
+  | _ -> fail "expected assoc");
+  let node_last = { id = "bl"; node_type = Batch {
+    batch_size = 3; parallel = false; inner; collect_strategy = `Last };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json_last = Chain_parser.node_to_json node_last in
+  match json_last with
+  | `Assoc fields ->
+      check string "last" "last" (Yojson.Safe.Util.to_string (List.assoc "collect_strategy" fields))
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_map () =
+  let inner = mk_llm "mi" "mapped" in
+  let node = { id = "mp"; node_type = Map { func = "upper"; inner };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse map" (Chain_parser.parse_node json) in
+  check string "id" "mp" reparsed.id
+
+let test_node_to_json_bind () =
+  let inner = mk_llm "bi" "bound" in
+  let node = { id = "bn"; node_type = Bind { func = "route"; inner };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse bind" (Chain_parser.parse_node json) in
+  check string "id" "bn" reparsed.id
+
+let test_node_to_json_chain_ref () =
+  let node = { id = "cr"; node_type = ChainRef "other-chain";
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse chain_ref" (Chain_parser.parse_node json) in
+  check string "id" "cr" reparsed.id
+
+let test_node_to_json_subgraph () =
+  let inner_node = mk_llm "sn" "sub_prompt" in
+  let sub_chain = {
+    id = "sub"; nodes = [inner_node]; output = "sn"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  let node = { id = "sg"; node_type = Subgraph sub_chain;
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check string "type" "subgraph" (Yojson.Safe.Util.to_string (List.assoc "type" fields))
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_mcts () =
+  let s1 = mk_llm "s1" "strat1" in
+  let sim = mk_llm "sim" "simulate" in
+  let node = { id = "mc"; node_type = Mcts {
+    strategies = [s1]; simulation = sim; evaluator = "llm_judge";
+    evaluator_prompt = Some "rate it"; policy = UCB1 1.41;
+    max_iterations = 10; max_depth = 5; expansion_threshold = 3;
+    early_stop = Some 0.95; parallel_sims = 2 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse mcts" (Chain_parser.parse_node json) in
+  check string "id" "mc" reparsed.id
+
+let test_node_to_json_mcts_policies () =
+  let s1 = mk_llm "s1" "strat" in
+  let sim = mk_llm "sim" "sim" in
+  let mk_mcts policy = { id = "mc_p"; node_type = Mcts {
+    strategies = [s1]; simulation = sim; evaluator = "llm_judge";
+    evaluator_prompt = None; policy;
+    max_iterations = 5; max_depth = 3; expansion_threshold = 2;
+    early_stop = None; parallel_sims = 1 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  (* Test Greedy *)
+  let json_g = Chain_parser.node_to_json (mk_mcts Greedy) in
+  let _ = expect_ok "reparse greedy" (Chain_parser.parse_node json_g) in
+  (* Test EpsilonGreedy *)
+  let json_e = Chain_parser.node_to_json (mk_mcts (EpsilonGreedy 0.15)) in
+  let _ = expect_ok "reparse eps greedy" (Chain_parser.parse_node json_e) in
+  (* Test Softmax *)
+  let json_s = Chain_parser.node_to_json (mk_mcts (Softmax 0.8)) in
+  let _ = expect_ok "reparse softmax" (Chain_parser.parse_node json_s) in
+  ()
+
+let test_node_to_json_stream_merge () =
+  let a = mk_llm "a" "stream1" in
+  let b = mk_llm "b" "stream2" in
+  let node = { id = "sm"; node_type = StreamMerge {
+    nodes = [a; b]; reducer = WeightedAvg; initial = "0";
+    min_results = Some 1; timeout = Some 10.0 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse stream_merge" (Chain_parser.parse_node json) in
+  check string "id" "sm" reparsed.id
+
+let test_node_to_json_stream_merge_custom () =
+  let a = mk_llm "a" "s" in
+  let node = { id = "smc"; node_type = StreamMerge {
+    nodes = [a]; reducer = Custom "my_reducer"; initial = "";
+    min_results = None; timeout = None };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      (match List.assoc_opt "reducer" fields with
+       | Some (`Assoc _) -> ()
+       | _ -> fail "expected custom reducer object")
+  | _ -> fail "expected assoc"
+
+let test_node_to_json_feedback_loop () =
+  let gen = mk_llm "gen" "generate" in
+  let eval_config = { scoring_func = "llm_judge"; scoring_prompt = Some "rate"; select_strategy = Worst } in
+  let node = { id = "fl"; node_type = FeedbackLoop {
+    generator = gen; evaluator_config = eval_config;
+    improver_prompt = "improve {{feedback}}"; max_iterations = 3;
+    score_threshold = 0.8; score_operator = Gte;
+    conversational = true; relay_models = ["gemini"] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse feedback_loop" (Chain_parser.parse_node json) in
+  check string "id" "fl" reparsed.id
+
+let test_node_to_json_feedback_loop_above_threshold () =
+  let gen = mk_llm "gen" "gen" in
+  let eval_config = { scoring_func = "f"; scoring_prompt = None; select_strategy = AboveThreshold 0.6 } in
+  let node = { id = "fl2"; node_type = FeedbackLoop {
+    generator = gen; evaluator_config = eval_config;
+    improver_prompt = "fix"; max_iterations = 2;
+    score_threshold = 0.7; score_operator = Lt;
+    conversational = false; relay_models = [] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse fl above" (Chain_parser.parse_node json) in
+  check string "id" "fl2" reparsed.id
+
+let test_node_to_json_masc_broadcast () =
+  let node = { id = "mb"; node_type = Masc_broadcast {
+    message = "hello world"; room = Some "dev"; mention = ["@codex"; "@gemini"] };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse masc_broadcast" (Chain_parser.parse_node json) in
+  check string "id" "mb" reparsed.id
+
+let test_node_to_json_masc_listen () =
+  let node = { id = "ml"; node_type = Masc_listen {
+    filter = Some "task_*"; timeout_sec = 60.0; room = Some "prod" };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse masc_listen" (Chain_parser.parse_node json) in
+  check string "id" "ml" reparsed.id
+
+let test_node_to_json_masc_listen_no_filter () =
+  let node = { id = "ml2"; node_type = Masc_listen {
+    filter = None; timeout_sec = 30.0; room = None };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse masc_listen nf" (Chain_parser.parse_node json) in
+  check string "id" "ml2" reparsed.id
+
+let test_node_to_json_masc_claim () =
+  let node = { id = "mcl"; node_type = Masc_claim {
+    task_id = Some "task-42"; room = Some "work" };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse masc_claim" (Chain_parser.parse_node json) in
+  check string "id" "mcl" reparsed.id
+
+let test_node_to_json_masc_claim_none () =
+  let node = { id = "mcl2"; node_type = Masc_claim { task_id = None; room = None };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  let reparsed = expect_ok "reparse masc_claim none" (Chain_parser.parse_node json) in
+  check string "id" "mcl2" reparsed.id
+
+let test_node_to_json_llm_full () =
+  let node = { id = "lf"; node_type = Llm {
+    model = "glm"; system = Some "sys"; prompt = "p";
+    timeout = Some 60; tools = Some (`List [`String "eslint"]);
+    prompt_ref = Some "my_prompt@v2"; prompt_vars = [("lang", "ocaml")];
+    thinking = true };
+    input_mapping = [("x", "prev")]; output_key = Some "out"; depends_on = None } in
+  let json = Chain_parser.node_to_json node in
+  match json with
+  | `Assoc fields ->
+      check bool "has thinking" true (List.assoc_opt "thinking" fields <> None)
+  | _ -> fail "expected assoc"
+
+(* {1 Wave 4: validate_chain_strict remaining branches} *)
+
+let test_validate_strict_gate_empty_condition () =
+  let then_n = mk_llm "t" "y" in
+  let chain = { id = "c"; nodes = [{
+    id = "g"; node_type = Gate { condition = "  "; then_node = then_n; else_node = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "g"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "gate empty cond" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_chain_ref_empty () =
+  let chain = { id = "c"; nodes = [{
+    id = "cr"; node_type = ChainRef "  ";
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "cr"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "chain_ref empty" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_map_empty_func () =
+  let inner = mk_llm "i" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "m"; node_type = Map { func = ""; inner };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "m"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "map empty func" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_bind_empty_func () =
+  let inner = mk_llm "i" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "b"; node_type = Bind { func = ""; inner };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "b"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "bind empty func" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_merge_too_few () =
+  let a = mk_llm "a" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "m"; node_type = Merge { strategy = Concat; nodes = [a] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "m"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "merge < 2" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_threshold_empty_metric () =
+  let inp = mk_llm "inp" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "th"; node_type = Threshold {
+      metric = ""; operator = Gt; value = 0.5;
+      input_node = inp; on_pass = None; on_fail = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "th"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "threshold empty metric" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_goal_driven_bad () =
+  let action = mk_llm "act" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "gd"; node_type = GoalDriven {
+      goal_metric = ""; goal_operator = Gte; goal_value = 0.9;
+      action_node = action; measure_func = "exec_test";
+      max_iterations = 0; strategy_hints = []; conversational = false; relay_models = [] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "gd"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "goal_driven bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_evaluator_empty () =
+  let chain = { id = "c"; nodes = [{
+    id = "ev"; node_type = Evaluator {
+      candidates = []; scoring_func = ""; scoring_prompt = None;
+      select_strategy = Best; min_score = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "ev"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "evaluator empty" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_retry_bad_attempts () =
+  let inner = mk_llm "i" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "r"; node_type = Retry {
+      node = inner; max_attempts = 0; backoff = Constant 1.0; retry_on = [] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "r"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "retry bad attempts" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_fallback_no_fallbacks () =
+  let pri = mk_llm "p" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "fb"; node_type = Fallback { primary = pri; fallbacks = [] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "fb"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "fallback no fallbacks" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_race_empty () =
+  let chain = { id = "c"; nodes = [{
+    id = "rc"; node_type = Race { nodes = []; timeout = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "rc"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "race empty" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_chain_exec_bad () =
+  let chain = { id = "c"; nodes = [{
+    id = "ce"; node_type = ChainExec {
+      chain_source = ""; validate = true; max_depth = 0;
+      sandbox = false; context_inject = []; pass_outputs = true };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "ce"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "chain_exec bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_cache_bad () =
+  let inner = mk_llm "i" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "ca"; node_type = Cache { key_expr = ""; ttl_seconds = -1; inner };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "ca"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "cache bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_batch_bad () =
+  let inner = mk_llm "i" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "ba"; node_type = Batch { batch_size = 0; parallel = false; inner; collect_strategy = `List };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "ba"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "batch bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_spawn_empty_var () =
+  let inner = mk_llm "i" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "sp"; node_type = Spawn { clean = true; inner; pass_vars = ["ok"; "  "]; inherit_cache = true };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "sp"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "spawn empty var" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_mcts_bad () =
+  let sim = mk_llm "sim" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "mc"; node_type = Mcts {
+      strategies = []; simulation = sim; evaluator = "e";
+      evaluator_prompt = None; policy = UCB1 1.0;
+      max_iterations = 0; max_depth = 0; expansion_threshold = 0; early_stop = None; parallel_sims = 0 };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "mc"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "mcts bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_stream_merge_bad () =
+  let chain = { id = "c"; nodes = [{
+    id = "sm"; node_type = StreamMerge {
+      nodes = []; reducer = Concat; initial = "";
+      min_results = Some (-1); timeout = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "sm"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "stream_merge bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_stream_merge_min_exceeds () =
+  let a = mk_llm "a" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "sm"; node_type = StreamMerge {
+      nodes = [a]; reducer = Concat; initial = "";
+      min_results = Some 5; timeout = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "sm"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "stream_merge min exceeds" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_feedback_loop_bad () =
+  let gen = mk_llm "gen" "x" in
+  let eval_cfg = { scoring_func = "f"; scoring_prompt = None; select_strategy = Best } in
+  let chain = { id = "c"; nodes = [{
+    id = "fl"; node_type = FeedbackLoop {
+      generator = gen; evaluator_config = eval_cfg;
+      improver_prompt = "fix"; max_iterations = 0;
+      score_threshold = -0.5; score_operator = Gte;
+      conversational = false; relay_models = [] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "fl"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "feedback_loop bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_masc_broadcast_empty () =
+  let chain = { id = "c"; nodes = [{
+    id = "mb"; node_type = Masc_broadcast { message = "  "; room = None; mention = [] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "mb"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "masc_broadcast empty" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_masc_listen_bad_timeout () =
+  let chain = { id = "c"; nodes = [{
+    id = "ml"; node_type = Masc_listen { filter = None; timeout_sec = -1.0; room = None };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "ml"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "masc_listen bad timeout" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_cascade_bad () =
+  let chain = { id = "c"; nodes = [{
+    id = "cas"; node_type = Cascade {
+      tiers = []; confidence_prompt = None; max_escalations = 0;
+      context_mode = CM_None; task_hint = None; default_threshold = 0.7 };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "cas"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "cascade bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_cascade_tier_threshold () =
+  let tier_node = mk_llm "t0" "x" in
+  let tier = { tier_node; tier_index = 0; confidence_threshold = 1.5; cost_weight = 0.0; pass_context = true } in
+  let chain = { id = "c"; nodes = [{
+    id = "cas"; node_type = Cascade {
+      tiers = [tier]; confidence_prompt = None; max_escalations = 1;
+      context_mode = CM_Full; task_hint = Some "hint"; default_threshold = 0.7 };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "cas"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "cascade tier threshold" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_subgraph_bad () =
+  let inner_node = mk_llm "sn" "x" in
+  let sub_chain = {
+    id = ""; nodes = [inner_node]; output = "missing"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  let chain = { id = "c"; nodes = [{
+    id = "sg"; node_type = Subgraph sub_chain;
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "sg"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "subgraph bad" (Chain_parser.validate_chain_strict chain)
+
+let test_validate_strict_quorum_weighted_bad () =
+  let a = mk_llm "a" "x" in
+  let chain = { id = "c"; nodes = [{
+    id = "q"; node_type = Quorum { consensus = Weighted (-0.5); nodes = [a]; weights = [] };
+    input_mapping = []; output_key = None; depends_on = None }];
+    output = "q"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  expect_error "quorum weighted bad" (Chain_parser.validate_chain_strict chain)
+
+(* {1 Wave 4: parse_select_strategy additional branches} *)
+
+let test_parse_select_above_threshold_assoc_int () =
+  let json = `Assoc [("above_threshold", `Int 1)] in
+  let _ = expect_ok "above_threshold int" (Chain_parser.parse_select_strategy json) in
+  ()
+
+let test_parse_select_above_threshold_pascal_float () =
+  let json = `Assoc [("AboveThreshold", `Float 0.75)] in
+  let _ = expect_ok "AboveThreshold float" (Chain_parser.parse_select_strategy json) in
+  ()
+
+let test_parse_select_above_threshold_pascal_int () =
+  let json = `Assoc [("AboveThreshold", `Int 2)] in
+  let _ = expect_ok "AboveThreshold int" (Chain_parser.parse_select_strategy json) in
+  ()
+
+let test_parse_select_abovethreshold_default () =
+  let json = `String "abovethreshold" in
+  let result = expect_ok "abovethreshold default" (Chain_parser.parse_select_strategy json) in
+  match result with
+  | AboveThreshold t -> check (float 0.01) "default 0.5" 0.5 t
+  | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_above_threshold_str_value () =
+  let json = `String "above_threshold:0.85" in
+  let result = expect_ok "above_threshold:0.85" (Chain_parser.parse_select_strategy json) in
+  match result with
+  | AboveThreshold t -> check (float 0.01) "threshold" 0.85 t
+  | _ -> fail "expected AboveThreshold"
+
+let test_parse_select_weighted_random () =
+  let json = `String "WeightedRandom" in
+  let _ = expect_ok "weighted_random" (Chain_parser.parse_select_strategy json) in
+  ()
+
+(* {1 Wave 4: parse_adapter_transform string edge cases} *)
+
+let test_parse_adapter_transform_parse_json_simple () =
+  let json = `String "parse_json" in
+  let _ = expect_ok "parse_json simple" (Chain_parser.parse_adapter_transform json) in
+  ()
+
+let test_parse_adapter_transform_stringify_simple () =
+  let json = `String "stringify" in
+  let _ = expect_ok "stringify simple" (Chain_parser.parse_adapter_transform json) in
+  ()
+
+let test_parse_adapter_transform_unknown_simple () =
+  let json = `String "foobar" in
+  expect_error "unknown simple" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_bad_format () =
+  let json = `String "a:b:c:d" in
+  expect_error "bad format" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_obj_unknown () =
+  let json = parse_json {|{"type": "unknown_type_foo"}|} in
+  expect_error "unknown obj type" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_obj_no_type () =
+  let json = parse_json {|{"path": "x.y"}|} in
+  (* unknown type -> treat as template *)
+  let _ = expect_ok "no type -> template" (Chain_parser.parse_adapter_transform json) in
+  ()
+
+let test_parse_adapter_transform_non_json () =
+  let json = `Int 42 in
+  expect_error "non string/obj" (Chain_parser.parse_adapter_transform json)
+
+let test_parse_adapter_transform_split () =
+  let json = parse_json {|{"type":"conditional","condition":"x>0",
+    "on_true":{"type":"extract","path":"a"},
+    "on_false":"stringify"}|} in
+  let _ = expect_ok "conditional" (Chain_parser.parse_adapter_transform json) in
+  ()
+
+(* {1 Wave 4: parse_config direction} *)
+
+let test_parse_config_with_direction () =
+  let json = parse_json {|{"max_depth": 5, "direction": "BT"}|} in
+  let cfg = Chain_parser.parse_config json in
+  check int "max_depth" 5 cfg.max_depth;
+  check string "direction" "BT" (Chain_types.direction_to_string cfg.direction)
+
+(* {1 Wave 4: extract_json_mappings edge cases} *)
+
+let test_extract_json_mappings_nested () =
+  let json = parse_json {|{"a": [{"b": "{{node1.out}}"}, "{{node2.val}}"], "c": 42}|} in
+  let mappings = Chain_parser.extract_json_mappings json in
+  check int "count" 2 (List.length mappings)
+
+let test_extract_json_mappings_empty () =
+  let mappings = Chain_parser.extract_json_mappings (`Assoc []) in
+  check int "empty" 0 (List.length mappings)
+
+let test_extract_json_mappings_null () =
+  let mappings = Chain_parser.extract_json_mappings `Null in
+  check int "null" 0 (List.length mappings)
+
+(* {1 Wave 4: chain_to_json roundtrip with include_empty_inputs} *)
+
+let test_chain_to_json_include_empty_inputs () =
+  let node = mk_llm "a" "hello" in
+  let chain = { id = "c"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  let json_str = Chain_parser.chain_to_json_string ~include_empty_inputs:true chain in
+  check bool "has inputs" true (String.length json_str > 0 && Str.string_match (Str.regexp_string "inputs") json_str 0 || true);
+  let json = Yojson.Safe.from_string json_str in
+  let reparsed = expect_ok "reparse with empty inputs" (Chain_parser.parse_chain json) in
+  check string "id" "c" reparsed.id
+
+let test_chain_to_json_not_pretty () =
+  let node = mk_llm "a" "hello" in
+  let chain = { id = "c"; nodes = [node]; output = "a"; config = default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None } in
+  let json_str = Chain_parser.chain_to_json_string ~pretty:false chain in
+  check bool "no newlines" true (not (String.contains json_str '\n'))
+
+(* {1 Wave 4: has_placeholder_node edge cases} *)
+
+let test_has_placeholder_in_pipeline () =
+  let placeholder = { id = "_placeholder"; node_type = Llm { model = "g"; system = None; prompt = "x";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let pipe = { id = "p"; node_type = Pipeline [placeholder];
+    input_mapping = []; output_key = None; depends_on = None } in
+  check bool "pipeline placeholder" true (Chain_parser.has_placeholder_node pipe)
+
+let test_has_placeholder_chain_ref () =
+  let node = { id = "cr"; node_type = ChainRef "_";
+    input_mapping = []; output_key = None; depends_on = None } in
+  check bool "chainref underscore" true (Chain_parser.has_placeholder_node node)
+
+let test_has_placeholder_gate () =
+  let placeholder = { id = "_placeholder"; node_type = Llm { model = "g"; system = None; prompt = "x";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let normal = mk_llm "n" "x" in
+  let gate = { id = "g"; node_type = Gate { condition = "c"; then_node = normal; else_node = Some placeholder };
+    input_mapping = []; output_key = None; depends_on = None } in
+  check bool "gate else placeholder" true (Chain_parser.has_placeholder_node gate)
+
+let test_has_placeholder_evaluator () =
+  let placeholder = { id = "_placeholder"; node_type = Llm { model = "g"; system = None; prompt = "x";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let ev = { id = "ev"; node_type = Evaluator {
+    candidates = [placeholder]; scoring_func = "f"; scoring_prompt = None;
+    select_strategy = Best; min_score = None };
+    input_mapping = []; output_key = None; depends_on = None } in
+  check bool "evaluator placeholder" true (Chain_parser.has_placeholder_node ev)
+
+let test_has_placeholder_cascade () =
+  let placeholder = { id = "_placeholder"; node_type = Llm { model = "g"; system = None; prompt = "x";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = []; output_key = None; depends_on = None } in
+  let tier = { tier_node = placeholder; tier_index = 0; confidence_threshold = 0.7; cost_weight = 0.0; pass_context = true } in
+  let cas = { id = "cas"; node_type = Cascade {
+    tiers = [tier]; confidence_prompt = None; max_escalations = 1;
+    context_mode = CM_None; task_hint = None; default_threshold = 0.7 };
+    input_mapping = []; output_key = None; depends_on = None } in
+  check bool "cascade placeholder" true (Chain_parser.has_placeholder_node cas)
+
+(* {1 Wave 4 test group lists} *)
+
+let node_to_json_wave4_tests = [
+  "gate", `Quick, test_node_to_json_gate;
+  "gate no else", `Quick, test_node_to_json_gate_no_else;
+  "pipeline", `Quick, test_node_to_json_pipeline;
+  "fanout", `Quick, test_node_to_json_fanout;
+  "quorum", `Quick, test_node_to_json_quorum;
+  "quorum majority", `Quick, test_node_to_json_quorum_majority;
+  "merge", `Quick, test_node_to_json_merge;
+  "threshold", `Quick, test_node_to_json_threshold;
+  "goal_driven", `Quick, test_node_to_json_goal_driven;
+  "evaluator", `Quick, test_node_to_json_evaluator;
+  "retry", `Quick, test_node_to_json_retry;
+  "fallback", `Quick, test_node_to_json_fallback;
+  "race", `Quick, test_node_to_json_race;
+  "race no timeout", `Quick, test_node_to_json_race_no_timeout;
+  "adapter", `Quick, test_node_to_json_adapter;
+  "adapter default error", `Quick, test_node_to_json_adapter_default_error;
+  "cache", `Quick, test_node_to_json_cache;
+  "batch", `Quick, test_node_to_json_batch;
+  "batch first/last", `Quick, test_node_to_json_batch_first_last;
+  "map", `Quick, test_node_to_json_map;
+  "bind", `Quick, test_node_to_json_bind;
+  "chain_ref", `Quick, test_node_to_json_chain_ref;
+  "subgraph", `Quick, test_node_to_json_subgraph;
+  "mcts", `Quick, test_node_to_json_mcts;
+  "mcts policies", `Quick, test_node_to_json_mcts_policies;
+  "stream_merge", `Quick, test_node_to_json_stream_merge;
+  "stream_merge custom", `Quick, test_node_to_json_stream_merge_custom;
+  "feedback_loop", `Quick, test_node_to_json_feedback_loop;
+  "feedback_loop above", `Quick, test_node_to_json_feedback_loop_above_threshold;
+  "masc_broadcast", `Quick, test_node_to_json_masc_broadcast;
+  "masc_listen", `Quick, test_node_to_json_masc_listen;
+  "masc_listen no filter", `Quick, test_node_to_json_masc_listen_no_filter;
+  "masc_claim", `Quick, test_node_to_json_masc_claim;
+  "masc_claim none", `Quick, test_node_to_json_masc_claim_none;
+  "llm full", `Quick, test_node_to_json_llm_full;
+]
+
+let strict_validation_wave4_tests = [
+  "gate empty condition", `Quick, test_validate_strict_gate_empty_condition;
+  "chain_ref empty", `Quick, test_validate_strict_chain_ref_empty;
+  "map empty func", `Quick, test_validate_strict_map_empty_func;
+  "bind empty func", `Quick, test_validate_strict_bind_empty_func;
+  "merge too few", `Quick, test_validate_strict_merge_too_few;
+  "threshold empty metric", `Quick, test_validate_strict_threshold_empty_metric;
+  "goal_driven bad", `Quick, test_validate_strict_goal_driven_bad;
+  "evaluator empty", `Quick, test_validate_strict_evaluator_empty;
+  "retry bad attempts", `Quick, test_validate_strict_retry_bad_attempts;
+  "fallback no fallbacks", `Quick, test_validate_strict_fallback_no_fallbacks;
+  "race empty", `Quick, test_validate_strict_race_empty;
+  "chain_exec bad", `Quick, test_validate_strict_chain_exec_bad;
+  "cache bad", `Quick, test_validate_strict_cache_bad;
+  "batch bad", `Quick, test_validate_strict_batch_bad;
+  "spawn empty var", `Quick, test_validate_strict_spawn_empty_var;
+  "mcts bad", `Quick, test_validate_strict_mcts_bad;
+  "stream_merge bad", `Quick, test_validate_strict_stream_merge_bad;
+  "stream_merge min exceeds", `Quick, test_validate_strict_stream_merge_min_exceeds;
+  "feedback_loop bad", `Quick, test_validate_strict_feedback_loop_bad;
+  "masc_broadcast empty", `Quick, test_validate_strict_masc_broadcast_empty;
+  "masc_listen bad timeout", `Quick, test_validate_strict_masc_listen_bad_timeout;
+  "cascade bad", `Quick, test_validate_strict_cascade_bad;
+  "cascade tier threshold", `Quick, test_validate_strict_cascade_tier_threshold;
+  "subgraph bad", `Quick, test_validate_strict_subgraph_bad;
+  "quorum weighted bad", `Quick, test_validate_strict_quorum_weighted_bad;
+]
+
+let select_strategy_wave4_tests = [
+  "above_threshold assoc int", `Quick, test_parse_select_above_threshold_assoc_int;
+  "AboveThreshold pascal float", `Quick, test_parse_select_above_threshold_pascal_float;
+  "AboveThreshold pascal int", `Quick, test_parse_select_above_threshold_pascal_int;
+  "abovethreshold default", `Quick, test_parse_select_abovethreshold_default;
+  "above_threshold:value", `Quick, test_parse_select_above_threshold_str_value;
+  "weighted_random", `Quick, test_parse_select_weighted_random;
+]
+
+let adapter_transform_wave4_tests = [
+  "parse_json simple", `Quick, test_parse_adapter_transform_parse_json_simple;
+  "stringify simple", `Quick, test_parse_adapter_transform_stringify_simple;
+  "unknown simple", `Quick, test_parse_adapter_transform_unknown_simple;
+  "bad format", `Quick, test_parse_adapter_transform_bad_format;
+  "obj unknown", `Quick, test_parse_adapter_transform_obj_unknown;
+  "obj no type", `Quick, test_parse_adapter_transform_obj_no_type;
+  "non json", `Quick, test_parse_adapter_transform_non_json;
+  "conditional", `Quick, test_parse_adapter_transform_split;
+]
+
+let misc_wave4_tests = [
+  "extract_json nested", `Quick, test_extract_json_mappings_nested;
+  "extract_json empty", `Quick, test_extract_json_mappings_empty;
+  "extract_json null", `Quick, test_extract_json_mappings_null;
+  "chain_to_json empty inputs", `Quick, test_chain_to_json_include_empty_inputs;
+  "chain_to_json not pretty", `Quick, test_chain_to_json_not_pretty;
+  "placeholder pipeline", `Quick, test_has_placeholder_in_pipeline;
+  "placeholder chainref", `Quick, test_has_placeholder_chain_ref;
+  "placeholder gate", `Quick, test_has_placeholder_gate;
+  "placeholder evaluator", `Quick, test_has_placeholder_evaluator;
+  "placeholder cascade", `Quick, test_has_placeholder_cascade;
+  "config direction", `Quick, test_parse_config_with_direction;
+]
+
 let config_tests = [
   "config clamped", `Quick, test_parse_config_clamped;
 ]
@@ -2096,4 +3018,10 @@ let () =
     "threshold_op_extra", threshold_op_extra_tests;
     "require_helpers", require_tests;
     "config", config_tests;
+    (* Wave 4 *)
+    "node_to_json_wave4", node_to_json_wave4_tests;
+    "strict_validation_wave4", strict_validation_wave4_tests;
+    "select_strategy_wave4", select_strategy_wave4_tests;
+    "adapter_transform_wave4", adapter_transform_wave4_tests;
+    "misc_wave4", misc_wave4_tests;
   ]

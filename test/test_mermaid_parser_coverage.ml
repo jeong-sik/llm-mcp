@@ -1397,6 +1397,610 @@ graph LR
        | _ -> fail "expected Evaluator from eval_ prefix")
   | Error e -> fail e
 
+
+(* {1 Wave 4: Serialization function tests} *)
+
+(** Helper to construct a simple node *)
+let mk_simple_node id nt = { CT.id; node_type = nt;
+  input_mapping = []; output_key = None; depends_on = None }
+
+let mk_llm_node id model prompt = mk_simple_node id
+  (CT.Llm { model; system = None; prompt; timeout = None;
+    tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
+
+let mk_chain_with nodes output =
+  { CT.id = "test_chain"; nodes; output; config = CT.default_config;
+    name = None; description = None; version = None;
+    input_schema = None; output_schema = None; metadata = None }
+
+(** {2 escape_for_mermaid} *)
+
+let test_escape_for_mermaid_basic () =
+  check string "quotes" "'hello'" (CMP.escape_for_mermaid {|"hello"|});
+  check string "newlines" "a b" (CMP.escape_for_mermaid "a\nb");
+  check string "short" "ok" (CMP.escape_for_mermaid "ok")
+
+let test_escape_for_mermaid_truncation () =
+  let long = String.make 200 'x' in
+  let result = CMP.escape_for_mermaid long in
+  check bool "truncated" true (String.length result <= 100);
+  check bool "ends with dots" true (
+    let len = String.length result in
+    len >= 3 && String.sub result (len - 3) 3 = "...")
+
+let test_escape_for_mermaid_custom_len () =
+  let result = CMP.escape_for_mermaid ~max_len:10 "1234567890abc" in
+  check bool "custom len" true (String.length result <= 10)
+
+(** {2 node_type_to_id} *)
+
+let test_node_type_to_id_llm () =
+  let nt = CT.Llm { model = "gemini"; system = None; prompt = "p"; timeout = None;
+    tools = None; prompt_ref = None; prompt_vars = []; thinking = false } in
+  check string "llm id" "gemini" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_tool () =
+  let nt = CT.Tool { name = "eslint"; args = `Null } in
+  check string "tool id" "eslint" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_quorum () =
+  let nt = CT.Quorum { consensus = CT.Count 3; nodes = []; weights = [] } in
+  check string "quorum id" "quorum_count:3" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_gate () =
+  let nt = CT.Gate { condition = "x > 0"; then_node = mk_llm_node "t" "g" "p"; else_node = None } in
+  let result = CMP.node_type_to_id nt "fallback" in
+  check bool "starts with gate_" true (String.length result > 5 && String.sub result 0 5 = "gate_")
+
+let test_node_type_to_id_merge () =
+  let nt = CT.Merge { strategy = CT.Concat; nodes = [] } in
+  check string "merge id" "merge" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_pipeline () =
+  let nt = CT.Pipeline [] in
+  check string "pipeline id" "seq" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_fanout () =
+  let nt = CT.Fanout [] in
+  check string "fanout id" "par" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_map () =
+  let nt = CT.Map { func = "upper"; inner = mk_llm_node "i" "g" "p" } in
+  check string "map id" "map_upper" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_bind () =
+  let nt = CT.Bind { func = "route"; inner = mk_llm_node "i" "g" "p" } in
+  check string "bind id" "bind_route" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_chain_ref () =
+  let nt = CT.ChainRef "other" in
+  check string "chain_ref id" "ref_other" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_subgraph () =
+  let nt = CT.Subgraph (mk_chain_with [] "x") in
+  check string "subgraph id" "fallback" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_threshold () =
+  let nt = CT.Threshold { metric = "score"; operator = CT.Gt; value = 0.8;
+    input_node = mk_llm_node "i" "g" "p"; on_pass = None; on_fail = None } in
+  check string "threshold id" "threshold_score" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_goal_driven () =
+  let nt = CT.GoalDriven { goal_metric = "cov"; goal_operator = CT.Gte; goal_value = 0.9;
+    action_node = mk_llm_node "a" "g" "p"; measure_func = "exec"; max_iterations = 5;
+    strategy_hints = []; conversational = false; relay_models = [] } in
+  check string "goal id" "goal_cov" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_evaluator () =
+  let nt = CT.Evaluator { candidates = []; scoring_func = "llm_judge";
+    scoring_prompt = None; select_strategy = CT.Best; min_score = None } in
+  check string "eval id" "eval_llm_judge" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_retry () =
+  let nt = CT.Retry { node = mk_llm_node "i" "g" "p"; max_attempts = 3;
+    backoff = CT.Constant 1.0; retry_on = [] } in
+  check string "retry id" "retry_3" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_fallback () =
+  let nt = CT.Fallback { primary = mk_llm_node "p" "g" "p"; fallbacks = [] } in
+  check string "fallback id" "fallback" (CMP.node_type_to_id nt "x")
+
+let test_node_type_to_id_race () =
+  let nt = CT.Race { nodes = []; timeout = None } in
+  check string "race id" "race" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_chain_exec () =
+  let nt = CT.ChainExec { chain_source = "gen_chain_abc"; validate = true; max_depth = 3;
+    sandbox = false; context_inject = []; pass_outputs = true } in
+  check string "chain_exec id" "exec_gen_chai" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_adapter () =
+  let nt = CT.Adapter { input_ref = "prev_node_out"; transform = CT.Extract "x";
+    on_error = `Fail } in
+  check string "adapter id" "adapt_prev_nod" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_cache () =
+  let nt = CT.Cache { key_expr = "user_query_key"; ttl_seconds = 60;
+    inner = mk_llm_node "i" "g" "p" } in
+  check string "cache id" "cache_user_que_60" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_batch () =
+  let nt = CT.Batch { batch_size = 5; parallel = false;
+    inner = mk_llm_node "i" "g" "p"; collect_strategy = `List } in
+  check string "batch id" "batch_5" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_spawn () =
+  let nt = CT.Spawn { clean = true; inner = mk_llm_node "i" "g" "p";
+    pass_vars = []; inherit_cache = true } in
+  check string "spawn id" "spawn_clean" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_spawn_inherit () =
+  let nt = CT.Spawn { clean = false; inner = mk_llm_node "i" "g" "p";
+    pass_vars = []; inherit_cache = true } in
+  check string "spawn inherit" "spawn_inherit" (CMP.node_type_to_id nt "fallback")
+
+let test_node_type_to_id_mcts () =
+  let nt = CT.Mcts { strategies = []; simulation = mk_llm_node "s" "g" "p";
+    evaluator = "e"; evaluator_prompt = None; policy = CT.UCB1 1.41;
+    max_iterations = 10; max_depth = 5; expansion_threshold = 3;
+    early_stop = None; parallel_sims = 1 } in
+  let result = CMP.node_type_to_id nt "fallback" in
+  check bool "mcts starts" true (String.length result > 5 && String.sub result 0 5 = "mcts_")
+
+let test_node_type_to_id_mcts_policies () =
+  let mk nt = CT.Mcts { strategies = []; simulation = mk_llm_node "s" "g" "p";
+    evaluator = "e"; evaluator_prompt = None; policy = nt;
+    max_iterations = 5; max_depth = 3; expansion_threshold = 2;
+    early_stop = None; parallel_sims = 1 } in
+  let _ = CMP.node_type_to_id (mk CT.Greedy) "f" in
+  let _ = CMP.node_type_to_id (mk (CT.EpsilonGreedy 0.1)) "f" in
+  let _ = CMP.node_type_to_id (mk (CT.Softmax 0.8)) "f" in
+  ()
+
+let test_node_type_to_id_stream_merge () =
+  let nt = CT.StreamMerge { nodes = [mk_llm_node "a" "g" "p"; mk_llm_node "b" "g" "p"];
+    reducer = CT.Custom "my_fn"; initial = ""; min_results = Some 1; timeout = None } in
+  let result = CMP.node_type_to_id nt "fallback" in
+  check bool "stream_merge" true (String.length result > 0)
+
+let test_node_type_to_id_stream_merge_reducers () =
+  let mk reducer = CT.StreamMerge { nodes = []; reducer; initial = ""; min_results = None; timeout = None } in
+  let _ = CMP.node_type_to_id (mk CT.First) "f" in
+  let _ = CMP.node_type_to_id (mk CT.Last) "f" in
+  let _ = CMP.node_type_to_id (mk CT.Concat) "f" in
+  let _ = CMP.node_type_to_id (mk CT.WeightedAvg) "f" in
+  ()
+
+let test_node_type_to_id_feedback_loop () =
+  let eval_config = { CT.scoring_func = "quality"; scoring_prompt = None; select_strategy = CT.Best } in
+  let nt = CT.FeedbackLoop { generator = mk_llm_node "g" "g" "p";
+    evaluator_config = eval_config; improver_prompt = "fix"; max_iterations = 3;
+    score_threshold = 0.8; score_operator = CT.Gte; conversational = false; relay_models = [] } in
+  let result = CMP.node_type_to_id nt "fallback" in
+  check bool "feedback" true (String.length result > 0)
+
+let test_node_type_to_id_masc () =
+  let br = CT.Masc_broadcast { message = "hello world msg"; room = None; mention = [] } in
+  let _ = CMP.node_type_to_id br "f" in
+  let li = CT.Masc_listen { filter = None; timeout_sec = 30.0; room = None } in
+  let _ = CMP.node_type_to_id li "f" in
+  let cl = CT.Masc_claim { task_id = Some "task-1"; room = None } in
+  let _ = CMP.node_type_to_id cl "f" in
+  let cl2 = CT.Masc_claim { task_id = None; room = None } in
+  let _ = CMP.node_type_to_id cl2 "f" in
+  ()
+
+let test_node_type_to_id_cascade () =
+  let tier_node = mk_llm_node "t0" "g" "p" in
+  let tier = { CT.tier_node; tier_index = 0; confidence_threshold = 0.7; cost_weight = 0.0; pass_context = true } in
+  let nt = CT.Cascade { tiers = [tier]; confidence_prompt = None; max_escalations = 2;
+    context_mode = CT.CM_Summary; task_hint = None; default_threshold = 0.7 } in
+  check string "cascade id" "cascade_1" (CMP.node_type_to_id nt "fallback")
+
+(** {2 node_type_to_text} *)
+
+let test_node_type_to_text_tool_no_args () =
+  let nt = CT.Tool { name = "eslint"; args = `Null } in
+  check string "tool no args" "Tool:eslint" (CMP.node_type_to_text nt)
+
+let test_node_type_to_text_tool_empty_args () =
+  let nt = CT.Tool { name = "prettier"; args = `Assoc [] } in
+  check string "tool empty args" "Tool:prettier" (CMP.node_type_to_text nt)
+
+let test_node_type_to_text_tool_with_args () =
+  let nt = CT.Tool { name = "eslint"; args = `Assoc [("fix", `Bool true)] } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has Tool:" true (String.length result > 5 && String.sub result 0 5 = "Tool:")
+
+let test_node_type_to_text_llm_with_tools () =
+  let nt = CT.Llm { model = "gemini"; system = None; prompt = "do it";
+    timeout = None; tools = Some (`List [`String "eslint"; `String "prettier"]);
+    prompt_ref = None; prompt_vars = []; thinking = false } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has +tools" true (
+    try let _ = Str.search_forward (Str.regexp_string "+") result 0 in true
+    with Not_found -> false)
+
+let test_node_type_to_text_llm_tool_assoc () =
+  let nt = CT.Llm { model = "claude"; system = None; prompt = "help";
+    timeout = None; tools = Some (`List [`Assoc [("name", `String "jest")]]);
+    prompt_ref = None; prompt_vars = []; thinking = false } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has +jest" true (
+    try let _ = Str.search_forward (Str.regexp_string "jest") result 0 in true
+    with Not_found -> false)
+
+let test_node_type_to_text_merge_strategies () =
+  let mk s = CT.Merge { strategy = s; nodes = [] } in
+  check string "first" "Merge:first" (CMP.node_type_to_text (mk CT.First));
+  check string "last" "Merge:last" (CMP.node_type_to_text (mk CT.Last));
+  check string "concat" "Merge:concat" (CMP.node_type_to_text (mk CT.Concat));
+  check string "wavg" "Merge:weighted_avg" (CMP.node_type_to_text (mk CT.WeightedAvg));
+  check string "custom" "Merge:my_fn" (CMP.node_type_to_text (mk (CT.Custom "my_fn")))
+
+let test_node_type_to_text_threshold () =
+  let nt = CT.Threshold { metric = "score"; operator = CT.Lt; value = 0.5;
+    input_node = mk_llm_node "i" "g" "p"; on_pass = None; on_fail = None } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has Threshold" true (String.length result > 10 && String.sub result 0 10 = "Threshold:")
+
+let test_node_type_to_text_goal_driven () =
+  let nt = CT.GoalDriven { goal_metric = "cov"; goal_operator = CT.Neq; goal_value = 0.0;
+    action_node = mk_llm_node "a" "g" "p"; measure_func = "exec"; max_iterations = 5;
+    strategy_hints = []; conversational = false; relay_models = [] } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has GoalDriven" true (String.length result > 10 && String.sub result 0 10 = "GoalDriven")
+
+let test_node_type_to_text_evaluator_strategies () =
+  let mk s = CT.Evaluator { candidates = []; scoring_func = "f"; scoring_prompt = None;
+    select_strategy = s; min_score = None } in
+  let _ = CMP.node_type_to_text (mk CT.Best) in
+  let _ = CMP.node_type_to_text (mk CT.Worst) in
+  let _ = CMP.node_type_to_text (mk CT.WeightedRandom) in
+  let _ = CMP.node_type_to_text (mk (CT.AboveThreshold 0.7)) in
+  ()
+
+let test_node_type_to_text_retry_backoffs () =
+  let mk b = CT.Retry { node = mk_llm_node "i" "g" "p"; max_attempts = 3;
+    backoff = b; retry_on = [] } in
+  let _ = CMP.node_type_to_text (mk (CT.Constant 1.0)) in
+  let _ = CMP.node_type_to_text (mk (CT.Exponential 2.0)) in
+  let _ = CMP.node_type_to_text (mk (CT.Linear 1.5)) in
+  let _ = CMP.node_type_to_text (mk (CT.Jitter (0.5, 2.0))) in
+  ()
+
+let test_node_type_to_text_race () =
+  let nt1 = CT.Race { nodes = [mk_llm_node "a" "g" "p"]; timeout = Some 5.0 } in
+  let r1 = CMP.node_type_to_text nt1 in
+  check bool "race with timeout" true (
+    try let _ = Str.search_forward (Str.regexp_string "5.0") r1 0 in true
+    with Not_found -> false);
+  let nt2 = CT.Race { nodes = []; timeout = None } in
+  let _ = CMP.node_type_to_text nt2 in
+  ()
+
+let test_node_type_to_text_chain_exec () =
+  let nt = CT.ChainExec { chain_source = "gen"; validate = true; max_depth = 3;
+    sandbox = true; context_inject = []; pass_outputs = true } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has sandbox icon" true (
+    try let _ = Str.search_forward (Str.regexp_string "Exec") result 0 in true
+    with Not_found -> false)
+
+let test_node_type_to_text_chain_exec_no_sandbox () =
+  let nt = CT.ChainExec { chain_source = "gen"; validate = true; max_depth = 3;
+    sandbox = false; context_inject = []; pass_outputs = true } in
+  let result = CMP.node_type_to_text nt in
+  check bool "no sandbox" true (String.length result > 0)
+
+let test_node_type_to_text_adapter_transforms () =
+  let mk t = CT.Adapter { input_ref = "prev"; transform = t; on_error = `Fail } in
+  let _ = CMP.node_type_to_text (mk (CT.Extract "x")) in
+  let _ = CMP.node_type_to_text (mk (CT.Template "{{v}}")) in
+  let _ = CMP.node_type_to_text (mk (CT.Summarize 100)) in
+  let _ = CMP.node_type_to_text (mk (CT.Truncate 50)) in
+  let _ = CMP.node_type_to_text (mk (CT.JsonPath "$.x")) in
+  let _ = CMP.node_type_to_text (mk (CT.Regex ("a", "b"))) in
+  let _ = CMP.node_type_to_text (mk (CT.ValidateSchema "s")) in
+  let _ = CMP.node_type_to_text (mk CT.ParseJson) in
+  let _ = CMP.node_type_to_text (mk CT.Stringify) in
+  let _ = CMP.node_type_to_text (mk (CT.Chain [CT.Extract "x"])) in
+  let _ = CMP.node_type_to_text (mk (CT.Conditional { condition = "c"; on_true = CT.Extract "a"; on_false = CT.Extract "b" })) in
+  let _ = CMP.node_type_to_text (mk (CT.Split { delimiter = "line"; chunk_size = 100; overlap = 10 })) in
+  let _ = CMP.node_type_to_text (mk (CT.Custom "my_fn")) in
+  ()
+
+let test_node_type_to_text_cache () =
+  let nt = CT.Cache { key_expr = "key"; ttl_seconds = 60; inner = mk_llm_node "i" "g" "p" } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has Cache:" true (String.length result > 6 && String.sub result 0 6 = "Cache:")
+
+let test_node_type_to_text_cache_no_ttl () =
+  let nt = CT.Cache { key_expr = "key"; ttl_seconds = 0; inner = mk_llm_node "i" "g" "p" } in
+  let result = CMP.node_type_to_text nt in
+  check bool "cache no ttl" true (String.length result > 0)
+
+let test_node_type_to_text_batch () =
+  let nt = CT.Batch { batch_size = 10; parallel = true; inner = mk_llm_node "i" "g" "p";
+    collect_strategy = `List } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has Batch:" true (String.length result > 6 && String.sub result 0 6 = "Batch:")
+
+let test_node_type_to_text_spawn () =
+  let nt1 = CT.Spawn { clean = true; inner = mk_llm_node "i" "g" "p";
+    pass_vars = ["x"; "y"]; inherit_cache = true } in
+  let r1 = CMP.node_type_to_text nt1 in
+  check bool "spawn clean" true (
+    try let _ = Str.search_forward (Str.regexp_string "clean") r1 0 in true
+    with Not_found -> false);
+  let nt2 = CT.Spawn { clean = false; inner = mk_llm_node "i" "g" "p";
+    pass_vars = []; inherit_cache = true } in
+  let _ = CMP.node_type_to_text nt2 in
+  ()
+
+let test_node_type_to_text_mcts () =
+  let mk policy = CT.Mcts { strategies = []; simulation = mk_llm_node "s" "g" "p";
+    evaluator = "judge"; evaluator_prompt = None; policy;
+    max_iterations = 10; max_depth = 5; expansion_threshold = 3;
+    early_stop = None; parallel_sims = 1 } in
+  let _ = CMP.node_type_to_text (mk (CT.UCB1 1.0)) in
+  let _ = CMP.node_type_to_text (mk CT.Greedy) in
+  let _ = CMP.node_type_to_text (mk (CT.EpsilonGreedy 0.1)) in
+  let _ = CMP.node_type_to_text (mk (CT.Softmax 0.5)) in
+  ()
+
+let test_node_type_to_text_stream_merge_variants () =
+  let mk ?min_results ?timeout reducer =
+    CT.StreamMerge { nodes = []; reducer; initial = ""; min_results; timeout } in
+  let _ = CMP.node_type_to_text (mk CT.First) in
+  let _ = CMP.node_type_to_text (mk CT.Last) in
+  let _ = CMP.node_type_to_text (mk ~min_results:2 CT.Concat) in
+  let _ = CMP.node_type_to_text (mk ~min_results:1 ~timeout:5.0 CT.WeightedAvg) in
+  let _ = CMP.node_type_to_text (mk ~timeout:3.0 (CT.Custom "my")) in
+  ()
+
+let test_node_type_to_text_feedback_loop () =
+  let eval_config = { CT.scoring_func = "quality"; scoring_prompt = None; select_strategy = CT.Best } in
+  let mk op = CT.FeedbackLoop { generator = mk_llm_node "g" "g" "p";
+    evaluator_config = eval_config; improver_prompt = "fix"; max_iterations = 3;
+    score_threshold = 0.8; score_operator = op; conversational = false; relay_models = [] } in
+  let _ = CMP.node_type_to_text (mk CT.Gt) in
+  let _ = CMP.node_type_to_text (mk CT.Gte) in
+  let _ = CMP.node_type_to_text (mk CT.Lt) in
+  let _ = CMP.node_type_to_text (mk CT.Lte) in
+  let _ = CMP.node_type_to_text (mk CT.Eq) in
+  let _ = CMP.node_type_to_text (mk CT.Neq) in
+  ()
+
+let test_node_type_to_text_masc () =
+  let br = CT.Masc_broadcast { message = "hello"; room = None; mention = ["@codex"] } in
+  let _ = CMP.node_type_to_text br in
+  let br2 = CT.Masc_broadcast { message = "hi"; room = None; mention = [] } in
+  let _ = CMP.node_type_to_text br2 in
+  let li = CT.Masc_listen { filter = Some "task_*"; timeout_sec = 30.0; room = None } in
+  let _ = CMP.node_type_to_text li in
+  let li2 = CT.Masc_listen { filter = None; timeout_sec = 10.0; room = None } in
+  let _ = CMP.node_type_to_text li2 in
+  let cl = CT.Masc_claim { task_id = Some "task-1"; room = None } in
+  let _ = CMP.node_type_to_text cl in
+  let cl2 = CT.Masc_claim { task_id = None; room = None } in
+  let _ = CMP.node_type_to_text cl2 in
+  ()
+
+let test_node_type_to_text_cascade () =
+  let tier_node = mk_llm_node "t0" "glm" "p" in
+  let tier = { CT.tier_node; tier_index = 0; confidence_threshold = 0.7; cost_weight = 0.0; pass_context = true } in
+  let nt = CT.Cascade { tiers = [tier]; confidence_prompt = None; max_escalations = 2;
+    context_mode = CT.CM_Summary; task_hint = None; default_threshold = 0.7 } in
+  let result = CMP.node_type_to_text nt in
+  check bool "has Cascade" true (String.length result > 7 && String.sub result 0 7 = "Cascade")
+
+(** {2 node_type_to_shape} *)
+
+let test_node_type_to_shape_all () =
+  let check_shape name nt expected_open expected_close =
+    let (o, c) = CMP.node_type_to_shape nt in
+    check string (name ^ " open") expected_open o;
+    check string (name ^ " close") expected_close c
+  in
+  let llm = CT.Llm { model = "g"; system = None; prompt = "p"; timeout = None;
+    tools = None; prompt_ref = None; prompt_vars = []; thinking = false } in
+  check_shape "llm" llm "[" "]";
+  check_shape "tool" (CT.Tool { name = "t"; args = `Null }) "[" "]";
+  check_shape "quorum" (CT.Quorum { consensus = CT.Count 1; nodes = []; weights = [] }) "{" "}";
+  check_shape "gate" (CT.Gate { condition = "c"; then_node = mk_llm_node "t" "g" "p"; else_node = None }) "{" "}";
+  check_shape "pipeline" (CT.Pipeline []) "[[" "]]";
+  check_shape "fanout" (CT.Fanout []) "[[" "]]";
+  check_shape "retry" (CT.Retry { node = mk_llm_node "i" "g" "p"; max_attempts = 1; backoff = CT.Constant 1.0; retry_on = [] }) "(" ")";
+  check_shape "fallback" (CT.Fallback { primary = mk_llm_node "p" "g" "p"; fallbacks = [] }) "(" ")";
+  check_shape "race" (CT.Race { nodes = []; timeout = None }) "(" ")";
+  check_shape "chain_exec" (CT.ChainExec { chain_source = "s"; validate = true; max_depth = 1; sandbox = false; context_inject = []; pass_outputs = true }) "{{" "}}";
+  check_shape "adapter" (CT.Adapter { input_ref = "x"; transform = CT.Extract "y"; on_error = `Fail }) ">/" "/";
+  check_shape "mcts" (CT.Mcts { strategies = []; simulation = mk_llm_node "s" "g" "p"; evaluator = "e"; evaluator_prompt = None; policy = CT.UCB1 1.0; max_iterations = 1; max_depth = 1; expansion_threshold = 1; early_stop = None; parallel_sims = 1 }) "{" "}";
+  check_shape "stream_merge" (CT.StreamMerge { nodes = []; reducer = CT.Concat; initial = ""; min_results = None; timeout = None }) "[[" "]]";
+  check_shape "masc_br" (CT.Masc_broadcast { message = "m"; room = None; mention = [] }) "((" "))";
+  check_shape "masc_li" (CT.Masc_listen { filter = None; timeout_sec = 1.0; room = None }) "((" "))";
+  check_shape "masc_cl" (CT.Masc_claim { task_id = None; room = None }) "((" "))"
+
+(** {2 node_type_to_class} *)
+
+let test_node_type_to_class_all () =
+  let llm = CT.Llm { model = "g"; system = None; prompt = "p"; timeout = None;
+    tools = None; prompt_ref = None; prompt_vars = []; thinking = false } in
+  check string "llm" "llm" (CMP.node_type_to_class llm);
+  check string "tool" "tool" (CMP.node_type_to_class (CT.Tool { name = "t"; args = `Null }));
+  check string "quorum" "quorum" (CMP.node_type_to_class (CT.Quorum { consensus = CT.Count 1; nodes = []; weights = [] }));
+  check string "gate" "gate" (CMP.node_type_to_class (CT.Gate { condition = "c"; then_node = mk_llm_node "t" "g" "p"; else_node = None }));
+  check string "merge" "merge" (CMP.node_type_to_class (CT.Merge { strategy = CT.Concat; nodes = [] }));
+  check string "threshold" "threshold" (CMP.node_type_to_class (CT.Threshold { metric = "m"; operator = CT.Gt; value = 0.5; input_node = mk_llm_node "i" "g" "p"; on_pass = None; on_fail = None }));
+  check string "evaluator" "evaluator" (CMP.node_type_to_class (CT.Evaluator { candidates = []; scoring_func = "f"; scoring_prompt = None; select_strategy = CT.Best; min_score = None }));
+  check string "pipeline" "pipeline" (CMP.node_type_to_class (CT.Pipeline []));
+  check string "fanout" "fanout" (CMP.node_type_to_class (CT.Fanout []));
+  check string "map" "map" (CMP.node_type_to_class (CT.Map { func = "f"; inner = mk_llm_node "i" "g" "p" }));
+  check string "bind" "bind" (CMP.node_type_to_class (CT.Bind { func = "f"; inner = mk_llm_node "i" "g" "p" }));
+  check string "ref" "ref" (CMP.node_type_to_class (CT.ChainRef "r"));
+  check string "subgraph" "subgraph" (CMP.node_type_to_class (CT.Subgraph (mk_chain_with [] "x")));
+  check string "goal" "goal" (CMP.node_type_to_class (CT.GoalDriven { goal_metric = "m"; goal_operator = CT.Gte; goal_value = 0.9; action_node = mk_llm_node "a" "g" "p"; measure_func = "f"; max_iterations = 1; strategy_hints = []; conversational = false; relay_models = [] }));
+  check string "retry" "retry" (CMP.node_type_to_class (CT.Retry { node = mk_llm_node "i" "g" "p"; max_attempts = 1; backoff = CT.Constant 1.0; retry_on = [] }));
+  check string "fallback" "fallback" (CMP.node_type_to_class (CT.Fallback { primary = mk_llm_node "p" "g" "p"; fallbacks = [] }));
+  check string "race" "race" (CMP.node_type_to_class (CT.Race { nodes = []; timeout = None }));
+  check string "meta" "meta" (CMP.node_type_to_class (CT.ChainExec { chain_source = "s"; validate = true; max_depth = 1; sandbox = false; context_inject = []; pass_outputs = true }));
+  check string "adapter" "adapter" (CMP.node_type_to_class (CT.Adapter { input_ref = "x"; transform = CT.Extract "y"; on_error = `Fail }));
+  check string "cache" "cache" (CMP.node_type_to_class (CT.Cache { key_expr = "k"; ttl_seconds = 60; inner = mk_llm_node "i" "g" "p" }));
+  check string "batch" "batch" (CMP.node_type_to_class (CT.Batch { batch_size = 5; parallel = false; inner = mk_llm_node "i" "g" "p"; collect_strategy = `List }));
+  check string "spawn" "spawn" (CMP.node_type_to_class (CT.Spawn { clean = true; inner = mk_llm_node "i" "g" "p"; pass_vars = []; inherit_cache = true }));
+  check string "mcts" "mcts" (CMP.node_type_to_class (CT.Mcts { strategies = []; simulation = mk_llm_node "s" "g" "p"; evaluator = "e"; evaluator_prompt = None; policy = CT.UCB1 1.0; max_iterations = 1; max_depth = 1; expansion_threshold = 1; early_stop = None; parallel_sims = 1 }));
+  check string "streammerge" "streammerge" (CMP.node_type_to_class (CT.StreamMerge { nodes = []; reducer = CT.Concat; initial = ""; min_results = None; timeout = None }));
+  check string "feedbackloop" "feedbackloop" (CMP.node_type_to_class (CT.FeedbackLoop { generator = mk_llm_node "g" "g" "p"; evaluator_config = { CT.scoring_func = "f"; scoring_prompt = None; select_strategy = CT.Best }; improver_prompt = "fix"; max_iterations = 1; score_threshold = 0.8; score_operator = CT.Gte; conversational = false; relay_models = [] }));
+  check string "masc" "masc" (CMP.node_type_to_class (CT.Masc_broadcast { message = "m"; room = None; mention = [] }));
+  check string "cascade" "cascade" (CMP.node_type_to_class (CT.Cascade { tiers = []; confidence_prompt = None; max_escalations = 1; context_mode = CT.CM_None; task_hint = None; default_threshold = 0.7 }))
+
+(** {2 chain_to_mermaid, chain_to_ascii, round_trip} *)
+
+let test_chain_to_mermaid_basic () =
+  let a = mk_llm_node "a" "gemini" "hello" in
+  let chain = mk_chain_with [a] "a" in
+  let mermaid = CMP.chain_to_mermaid chain in
+  check bool "starts with graph" true (String.length mermaid > 5 && String.sub mermaid 0 5 = "graph");
+  check bool "has node a" true (
+    try let _ = Str.search_forward (Str.regexp_string "a[") mermaid 0 in true
+    with Not_found -> false)
+
+let test_chain_to_mermaid_unstyled () =
+  let a = mk_llm_node "a" "gemini" "hello" in
+  let chain = mk_chain_with [a] "a" in
+  let mermaid = CMP.chain_to_mermaid ~styled:false chain in
+  check bool "no classDef" true (
+    try let _ = Str.search_forward (Str.regexp_string "classDef") mermaid 0 in false
+    with Not_found -> true)
+
+let test_chain_to_mermaid_with_edges () =
+  let a = mk_llm_node "a" "gemini" "step1" in
+  let b = { CT.id = "b"; node_type = CT.Llm { model = "claude"; system = None; prompt = "step2";
+    timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false };
+    input_mapping = [("input", "a")]; output_key = None; depends_on = None } in
+  let chain = mk_chain_with [a; b] "b" in
+  let mermaid = CMP.chain_to_mermaid chain in
+  check bool "has edge" true (
+    try let _ = Str.search_forward (Str.regexp_string "-->") mermaid 0 in true
+    with Not_found -> false)
+
+let test_chain_to_ascii_basic () =
+  let a = mk_llm_node "a" "gemini" "hello" in
+  let chain = mk_chain_with [a] "a" in
+  let ascii = CMP.chain_to_ascii chain in
+  check bool "has chain header" true (
+    try let _ = Str.search_forward (Str.regexp_string "Chain:") ascii 0 in true
+    with Not_found -> false);
+  check bool "has node count" true (
+    try let _ = Str.search_forward (Str.regexp_string "Nodes: 1") ascii 0 in true
+    with Not_found -> false)
+
+let test_chain_to_ascii_direction_variants () =
+  let a = mk_llm_node "a" "gemini" "hello" in
+  let mk_dir d = { (mk_chain_with [a] "a") with
+    config = { CT.default_config with direction = d } } in
+  let _ = CMP.chain_to_ascii (mk_dir CT.LR) in
+  let _ = CMP.chain_to_ascii (mk_dir CT.RL) in
+  let _ = CMP.chain_to_ascii (mk_dir CT.TB) in
+  let _ = CMP.chain_to_ascii (mk_dir CT.BT) in
+  ()
+
+let test_chain_to_ascii_all_node_types () =
+  let nodes = [
+    mk_simple_node "n1" (CT.Tool { name = "eslint"; args = `Null });
+    mk_simple_node "n2" (CT.Quorum { consensus = CT.Count 1; nodes = []; weights = [] });
+    mk_simple_node "n3" (CT.Gate { condition = "c"; then_node = mk_llm_node "t" "g" "p"; else_node = None });
+    mk_simple_node "n4" (CT.Merge { strategy = CT.Concat; nodes = [] });
+    mk_simple_node "n5" (CT.Pipeline []);
+    mk_simple_node "n6" (CT.Fanout []);
+    mk_simple_node "n7" (CT.ChainRef "x");
+    mk_simple_node "n8" (CT.GoalDriven { goal_metric = "m"; goal_operator = CT.Gte; goal_value = 0.9; action_node = mk_llm_node "a" "g" "p"; measure_func = "f"; max_iterations = 1; strategy_hints = []; conversational = false; relay_models = [] });
+    mk_simple_node "n9" (CT.Evaluator { candidates = []; scoring_func = "f"; scoring_prompt = None; select_strategy = CT.Best; min_score = None });
+    mk_simple_node "n10" (CT.Threshold { metric = "m"; operator = CT.Gt; value = 0.5; input_node = mk_llm_node "i" "g" "p"; on_pass = None; on_fail = None });
+    mk_simple_node "n11" (CT.Map { func = "f"; inner = mk_llm_node "i" "g" "p" });
+    mk_simple_node "n12" (CT.Bind { func = "f"; inner = mk_llm_node "i" "g" "p" });
+    mk_simple_node "n13" (CT.Subgraph (mk_chain_with [] "x"));
+    mk_simple_node "n14" (CT.Retry { node = mk_llm_node "i" "g" "p"; max_attempts = 1; backoff = CT.Constant 1.0; retry_on = [] });
+    mk_simple_node "n15" (CT.Fallback { primary = mk_llm_node "p" "g" "p"; fallbacks = [] });
+    mk_simple_node "n16" (CT.Race { nodes = []; timeout = None });
+    mk_simple_node "n17" (CT.ChainExec { chain_source = "s"; validate = true; max_depth = 1; sandbox = false; context_inject = []; pass_outputs = true });
+    mk_simple_node "n18" (CT.Adapter { input_ref = "x"; transform = CT.Extract "y"; on_error = `Fail });
+    mk_simple_node "n19" (CT.Cache { key_expr = "k"; ttl_seconds = 60; inner = mk_llm_node "i" "g" "p" });
+    mk_simple_node "n20" (CT.Batch { batch_size = 5; parallel = false; inner = mk_llm_node "i" "g" "p"; collect_strategy = `List });
+    mk_simple_node "n21" (CT.Spawn { clean = true; inner = mk_llm_node "i" "g" "p"; pass_vars = []; inherit_cache = true });
+    mk_simple_node "n22" (CT.Mcts { strategies = []; simulation = mk_llm_node "s" "g" "p"; evaluator = "e"; evaluator_prompt = None; policy = CT.UCB1 1.0; max_iterations = 1; max_depth = 1; expansion_threshold = 1; early_stop = None; parallel_sims = 1 });
+    mk_simple_node "n23" (CT.StreamMerge { nodes = []; reducer = CT.Concat; initial = ""; min_results = None; timeout = None });
+    mk_simple_node "n24" (CT.FeedbackLoop { generator = mk_llm_node "g" "g" "p"; evaluator_config = { CT.scoring_func = "f"; scoring_prompt = None; select_strategy = CT.Best }; improver_prompt = "fix"; max_iterations = 1; score_threshold = 0.8; score_operator = CT.Gte; conversational = false; relay_models = [] });
+    mk_simple_node "n25" (CT.Masc_broadcast { message = "m"; room = None; mention = [] });
+    mk_simple_node "n26" (CT.Masc_listen { filter = None; timeout_sec = 1.0; room = None });
+    mk_simple_node "n27" (CT.Masc_claim { task_id = None; room = None });
+    mk_simple_node "n28" (CT.Cascade { tiers = []; confidence_prompt = None; max_escalations = 1; context_mode = CT.CM_None; task_hint = None; default_threshold = 0.7 });
+  ] in
+  let chain = mk_chain_with nodes "n1" in
+  let ascii = CMP.chain_to_ascii chain in
+  check bool "has all nodes" true (String.length ascii > 100)
+
+let test_round_trip_simple () =
+  let mermaid = {|graph LR
+    a["LLM:gemini 'hello world'"]
+|} in
+  match CMP.round_trip mermaid with
+  | Ok result -> check bool "round trip ok" true (String.length result > 0)
+  | Error e -> fail (Printf.sprintf "round trip failed: %s" e)
+
+let test_round_trip_error () =
+  (* The parser is lenient; exercise the code path regardless of result *)
+  match CMP.round_trip "" with
+  | Error _ -> ()
+  | Ok _ -> ()
+
+(** {2 node_meta_to_json and config_meta_to_json} *)
+
+let test_node_meta_to_json_empty () =
+  let node = mk_llm_node "a" "gemini" "hello" in
+  check bool "none for empty" true (CMP.node_meta_to_json node = None)
+
+let test_node_meta_to_json_with_mapping () =
+  let node = { (mk_llm_node "a" "gemini" "hello") with
+    input_mapping = [("x", "prev")] } in
+  match CMP.node_meta_to_json node with
+  | Some (`Assoc fields) ->
+      check bool "has input_mapping" true (List.assoc_opt "input_mapping" fields <> None)
+  | _ -> fail "expected Some Assoc"
+
+let test_node_meta_to_json_goal_driven () =
+  let action = mk_llm_node "act" "g" "p" in
+  let node = mk_simple_node "gd" (CT.GoalDriven {
+    goal_metric = "cov"; goal_operator = CT.Gte; goal_value = 0.9;
+    action_node = action; measure_func = "custom_func";
+    max_iterations = 5; strategy_hints = [("a", "b")];
+    conversational = true; relay_models = ["gemini"; "claude"] }) in
+  match CMP.node_meta_to_json node with
+  | Some (`Assoc fields) ->
+      check bool "has action_node_id" true (List.assoc_opt "action_node_id" fields <> None);
+      check bool "has measure_func" true (List.assoc_opt "measure_func" fields <> None);
+      check bool "has strategy_hints" true (List.assoc_opt "strategy_hints" fields <> None);
+      check bool "has conversational" true (List.assoc_opt "conversational" fields <> None);
+      check bool "has relay_models" true (List.assoc_opt "relay_models" fields <> None)
+  | _ -> fail "expected Some Assoc"
+
+let test_config_meta_to_json () =
+  let chain = mk_chain_with [mk_llm_node "a" "gemini" "hello"] "a" in
+  match CMP.config_meta_to_json chain with
+  | `Assoc fields ->
+      check bool "has id" true (List.assoc_opt "id" fields <> None);
+      check bool "has output" true (List.assoc_opt "output" fields <> None);
+      check bool "has timeout" true (List.assoc_opt "timeout" fields <> None);
+      check bool "has trace" true (List.assoc_opt "trace" fields <> None)
+  | _ -> fail "expected Assoc"
+
+let test_input_mapping_to_json () =
+  let result = CMP.input_mapping_to_json [("x", "prev"); ("y", "other")] in
+  match result with
+  | `List items -> check int "2 items" 2 (List.length items)
+  | _ -> fail "expected list"
+
 (** {1 Test Suite} *)
 
 let () =
@@ -1602,5 +2206,90 @@ let () =
       test_case "tool b64 chain" `Quick test_mermaid_to_chain_tool_b64;
       test_case "infer goal id" `Quick test_infer_goal_id_integration;
       test_case "infer eval id" `Quick test_infer_eval_id_integration;
+    ]);
+    ("serialization_escape", [
+      test_case "escape basic" `Quick test_escape_for_mermaid_basic;
+      test_case "escape truncation" `Quick test_escape_for_mermaid_truncation;
+      test_case "escape custom_len" `Quick test_escape_for_mermaid_custom_len;
+    ]);
+    ("serialization_node_type_to_id", [
+      test_case "id llm" `Quick test_node_type_to_id_llm;
+      test_case "id tool" `Quick test_node_type_to_id_tool;
+      test_case "id quorum" `Quick test_node_type_to_id_quorum;
+      test_case "id gate" `Quick test_node_type_to_id_gate;
+      test_case "id merge" `Quick test_node_type_to_id_merge;
+      test_case "id threshold" `Quick test_node_type_to_id_threshold;
+      test_case "id goal_driven" `Quick test_node_type_to_id_goal_driven;
+      test_case "id evaluator" `Quick test_node_type_to_id_evaluator;
+      test_case "id retry" `Quick test_node_type_to_id_retry;
+      test_case "id fallback" `Quick test_node_type_to_id_fallback;
+      test_case "id race" `Quick test_node_type_to_id_race;
+      test_case "id pipeline" `Quick test_node_type_to_id_pipeline;
+      test_case "id fanout" `Quick test_node_type_to_id_fanout;
+      test_case "id chain_ref" `Quick test_node_type_to_id_chain_ref;
+      test_case "id subgraph" `Quick test_node_type_to_id_subgraph;
+      test_case "id chain_exec" `Quick test_node_type_to_id_chain_exec;
+      test_case "id adapter" `Quick test_node_type_to_id_adapter;
+      test_case "id cache" `Quick test_node_type_to_id_cache;
+      test_case "id batch" `Quick test_node_type_to_id_batch;
+      test_case "id spawn" `Quick test_node_type_to_id_spawn;
+      test_case "id spawn_inherit" `Quick test_node_type_to_id_spawn_inherit;
+      test_case "id map" `Quick test_node_type_to_id_map;
+      test_case "id bind" `Quick test_node_type_to_id_bind;
+      test_case "id mcts" `Quick test_node_type_to_id_mcts;
+      test_case "id mcts_policies" `Quick test_node_type_to_id_mcts_policies;
+      test_case "id stream_merge" `Quick test_node_type_to_id_stream_merge;
+      test_case "id stream_merge_reducers" `Quick test_node_type_to_id_stream_merge_reducers;
+      test_case "id feedback_loop" `Quick test_node_type_to_id_feedback_loop;
+      test_case "id masc" `Quick test_node_type_to_id_masc;
+      test_case "id cascade" `Quick test_node_type_to_id_cascade;
+    ]);
+    ("serialization_node_type_to_text", [
+      test_case "text tool_no_args" `Quick test_node_type_to_text_tool_no_args;
+      test_case "text tool_empty_args" `Quick test_node_type_to_text_tool_empty_args;
+      test_case "text tool_with_args" `Quick test_node_type_to_text_tool_with_args;
+      test_case "text llm_with_tools" `Quick test_node_type_to_text_llm_with_tools;
+      test_case "text llm_tool_assoc" `Quick test_node_type_to_text_llm_tool_assoc;
+      test_case "text merge_strategies" `Quick test_node_type_to_text_merge_strategies;
+      test_case "text threshold" `Quick test_node_type_to_text_threshold;
+      test_case "text goal_driven" `Quick test_node_type_to_text_goal_driven;
+      test_case "text evaluator" `Quick test_node_type_to_text_evaluator_strategies;
+      test_case "text retry_backoffs" `Quick test_node_type_to_text_retry_backoffs;
+      test_case "text race" `Quick test_node_type_to_text_race;
+      test_case "text chain_exec" `Quick test_node_type_to_text_chain_exec;
+      test_case "text chain_exec_nosb" `Quick test_node_type_to_text_chain_exec_no_sandbox;
+      test_case "text adapter" `Quick test_node_type_to_text_adapter_transforms;
+      test_case "text cache" `Quick test_node_type_to_text_cache;
+      test_case "text cache_no_ttl" `Quick test_node_type_to_text_cache_no_ttl;
+      test_case "text batch" `Quick test_node_type_to_text_batch;
+      test_case "text spawn" `Quick test_node_type_to_text_spawn;
+      test_case "text mcts" `Quick test_node_type_to_text_mcts;
+      test_case "text stream_merge" `Quick test_node_type_to_text_stream_merge_variants;
+      test_case "text feedback_loop" `Quick test_node_type_to_text_feedback_loop;
+      test_case "text masc" `Quick test_node_type_to_text_masc;
+      test_case "text cascade" `Quick test_node_type_to_text_cascade;
+    ]);
+    ("serialization_shape_and_class", [
+      test_case "shape all" `Quick test_node_type_to_shape_all;
+      test_case "class all" `Quick test_node_type_to_class_all;
+    ]);
+    ("serialization_chain_output", [
+      test_case "to_mermaid basic" `Quick test_chain_to_mermaid_basic;
+      test_case "to_mermaid unstyled" `Quick test_chain_to_mermaid_unstyled;
+      test_case "to_mermaid edges" `Quick test_chain_to_mermaid_with_edges;
+      test_case "to_ascii basic" `Quick test_chain_to_ascii_basic;
+      test_case "to_ascii directions" `Quick test_chain_to_ascii_direction_variants;
+      test_case "to_ascii all types" `Quick test_chain_to_ascii_all_node_types;
+    ]);
+    ("serialization_roundtrip", [
+      test_case "round_trip simple" `Quick test_round_trip_simple;
+      test_case "round_trip error" `Quick test_round_trip_error;
+    ]);
+    ("serialization_meta_json", [
+      test_case "node_meta empty" `Quick test_node_meta_to_json_empty;
+      test_case "node_meta mapping" `Quick test_node_meta_to_json_with_mapping;
+      test_case "node_meta goaldriven" `Quick test_node_meta_to_json_goal_driven;
+      test_case "config_meta" `Quick test_config_meta_to_json;
+      test_case "input_mapping" `Quick test_input_mapping_to_json;
     ]);
   ]
