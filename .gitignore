@@ -42,3 +42,4 @@ data/telemetry.jsonl
 .gemini/state/cache/
 logs/gemini/
 data/compression_dashboard.json
+_coverage/
