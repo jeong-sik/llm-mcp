@@ -3,13 +3,15 @@
 OCaml 기반 MCP 서버. 여러 LLM CLI를 MCP 도구로 호출하고, **Chain Engine**으로 복잡한 LLM 파이프라인을 구성할 수 있습니다.
 
 > 개인 환경 기준 설계. 공개 서비스 용도로는 권장하지 않습니다.
+>
+> 이 프로젝트의 코드는 AI 에이전트(Claude, Gemini, Codex)가 작성했습니다.
 
 ## 주요 기능
 
 | 기능 | 설명 |
 |------|------|
-| Multi-LLM 호출 | Gemini, Claude, Codex, Ollama를 MCP 도구로 통합 |
-| Chain Engine | Mermaid/JSON DSL로 LLM 파이프라인 정의 |
+| Multi-LLM 호출 | Gemini, Claude, Codex, Ollama, GLM을 MCP 도구로 통합 |
+| Chain Engine | Mermaid/JSON DSL로 LLM 파이프라인 정의 (27 node types) |
 | Consensus 패턴 | 3-LLM 합의 (Quorum) 기반 의사결정 |
 | Cascade 라우팅 | 비용/품질 최적화 - confidence 기반 모델 에스컬레이션 |
 | 프리셋 | 코드 리뷰, 리서치, 장애 대응 등 사전 정의된 체인 |
@@ -34,6 +36,19 @@ OCaml 기반 MCP 서버. 여러 LLM CLI를 MCP 도구로 호출하고, **Chain E
 │  Eio Runtime (Fiber-based Concurrency)                      │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+## 사전 요구사항
+
+| 항목 | 버전 | 비고 |
+|------|------|------|
+| OCaml | >= 5.1 | `opam switch create 5.1.0` |
+| dune | >= 3.13 | 빌드 시스템 |
+| Gemini CLI | latest | `gemini` 도구용 |
+| Claude CLI | latest | `claude-cli` 도구용 |
+| Codex CLI | latest | `codex` 도구용 |
+| Ollama | latest | `ollama` 도구용 (로컬 모델) |
+
+외부 CLI가 없으면 해당 LLM 도구 호출 시 에러를 반환합니다.
 
 ## 빠른 시작
 
@@ -152,6 +167,10 @@ curl -X POST http://localhost:8932/mcp -d '{
 - `chain.run`: 체인 실행 (Mermaid/JSON)
 - `chain.orchestrate`: 프리셋 실행
 - `chain.validate`: 체인 문법 검증
+- `chain.list`: 등록된 체인 목록
+- `chain.to_mermaid`: JSON 체인을 Mermaid로 변환
+- `chain.convert`: 체인 포맷 변환
+- `chain.visualize`: 체인 구조 시각화
 - `chain.checkpoints`: 체크포인트 목록
 - `chain.resume`: 체크포인트에서 재개
 
@@ -159,6 +178,15 @@ curl -X POST http://localhost:8932/mcp -d '{
 - `prompt.register`: 프롬프트 템플릿 등록
 - `prompt.list`: 등록된 프롬프트 목록
 - `prompt.get`: 프롬프트 조회 (버전 지정 가능)
+
+### 유틸리티 도구
+- `glm`: GLM 모델 호출
+- `glm_translate`: GLM 번역
+- `gh_pr_diff`: GitHub PR diff 조회
+- `slack_post`: Slack 메시지 전송
+- `ollama_list`: Ollama 모델 목록
+- `gemini_list`: Gemini 모델 목록
+- `set_stream_delta` / `get_stream_delta`: 스트림 델타 설정/조회
 
 상세 인자는 `CLAUDE.md` 또는 `docs/`를 참고하세요.
 
