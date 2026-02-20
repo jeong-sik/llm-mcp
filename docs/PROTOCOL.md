@@ -21,7 +21,7 @@ All tools must return a structured JSON object with the following fields:
 
 ```json
 {
-  "model": "gemini-3-pro-preview",
+  "model": "gemini-3.1-pro-preview",
   "returncode": 0,
   "response": "The architectural analysis is complete...",
   "extra": {

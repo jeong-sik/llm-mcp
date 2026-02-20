@@ -23,7 +23,7 @@ let test_parse_gemini_defaults () =
   let json = `Assoc [("prompt", `String "Hello world")] in
   match Tool_parsers.parse_gemini_args json with
   | Gemini g ->
-      check string "default model" "gemini-3-pro-preview" g.model;
+      check string "default model" "gemini-3.1-pro-preview" g.model;
       check bool "default yolo" false g.yolo;
       check int "default timeout" 300 g.timeout;
       check bool "default stream" true g.stream;  (* default is true *)
@@ -324,7 +324,7 @@ let test_build_gemini_cmd () =
 let test_build_gemini_cmd_with_yolo () =
   let args = Gemini {
     prompt = "Test";
-    model = "gemini-3-pro-preview";
+    model = "gemini-3.1-pro-preview";
     thinking_level = High;
     yolo = true;
     output_format = Text;
@@ -569,7 +569,7 @@ let () =
 
     "resolve_gemini_model", [
       test_case "gemini alias" `Quick (fun () ->
-        check string "gemini" "gemini-3-pro-preview" (Tool_parsers.resolve_gemini_model "gemini"));
+        check string "gemini" "gemini-3.1-pro-preview" (Tool_parsers.resolve_gemini_model "gemini"));
       test_case "pro alias" `Quick (fun () ->
         check string "pro" "gemini-2.5-pro" (Tool_parsers.resolve_gemini_model "pro"));
       test_case "flash alias" `Quick (fun () ->
@@ -577,7 +577,7 @@ let () =
       test_case "flash-lite alias" `Quick (fun () ->
         check string "flash-lite" "gemini-2.5-flash-lite" (Tool_parsers.resolve_gemini_model "flash-lite"));
       test_case "3-pro alias" `Quick (fun () ->
-        check string "3-pro" "gemini-3-pro-preview" (Tool_parsers.resolve_gemini_model "3-pro"));
+        check string "3-pro" "gemini-3.1-pro-preview" (Tool_parsers.resolve_gemini_model "3-pro"));
       test_case "3-flash alias" `Quick (fun () ->
         check string "3-flash" "gemini-3-flash-preview" (Tool_parsers.resolve_gemini_model "3-flash"));
       test_case "passthrough" `Quick (fun () ->

@@ -163,10 +163,10 @@ let execute_chain_run
                     timeout = node_timeout;
                     stream = false;
                   }
-              | "gemini" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
+              | "gemini" | "gemini-3.1-pro-preview" | "gemini-3-pro-preview" | "gemini-2.5-pro" ->
                   Types.Gemini {
                     prompt;
-                    model = "gemini-3-pro-preview";
+                    model = "gemini-3.1-pro-preview";
                     thinking_level = Types.High;
                     yolo = false;
                     output_format = Types.Text;
@@ -219,7 +219,7 @@ let execute_chain_run
               | _ ->
                   Types.Gemini {
                     prompt;
-                    model = "gemini-3-pro-preview";
+                    model = "gemini-3.1-pro-preview";
                     thinking_level = Types.High;
                     yolo = false;
                     output_format = Types.Text;
@@ -544,7 +544,7 @@ This chain will execute the goal using a stub model.|}
     | "gemini" | _ ->
         let args = Types.Gemini {
           prompt;
-          model = "gemini-3-pro-preview";
+          model = "gemini-3.1-pro-preview";
           thinking_level = Types.High;
           yolo = false;
           output_format = Types.Text;

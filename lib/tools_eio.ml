@@ -665,7 +665,7 @@ let chain_llm_args
         (* Default to Gemini for unknown models *)
         Types.Gemini {
           prompt;
-          model = "gemini-3-pro-preview";
+          model = "gemini-3.1-pro-preview";
           thinking_level = Types.High;
           yolo = false;
           output_format = Types.Text;
@@ -1615,7 +1615,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       (* Default to Gemini for unknown models *)
                       Types.Gemini {
                         prompt;
-                        model = "gemini-3-pro-preview";
+                        model = "gemini-3.1-pro-preview";
                         thinking_level = Types.High;
                         yolo = false;
                         output_format = Types.Text;

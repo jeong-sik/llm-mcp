@@ -10,11 +10,12 @@ let gemini_breaker = Mcp_resilience.create_circuit_breaker ~name:"gemini_cli" ~f
 
 (** Gemini model aliases used across tools. *)
 let gemini_model_aliases : (string * string) list = [
-  ("gemini", "gemini-3-pro-preview");
+  ("gemini", "gemini-3.1-pro-preview");
   ("pro", "gemini-2.5-pro");
   ("flash", "gemini-2.5-flash");
   ("flash-lite", "gemini-2.5-flash-lite");
-  ("3-pro", "gemini-3-pro-preview");
+  ("3-pro", "gemini-3.1-pro-preview");
+  ("3.1-pro", "gemini-3.1-pro-preview");
   ("3-flash", "gemini-3-flash-preview");
 ]
 
@@ -241,14 +242,14 @@ let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~thinking_level ~time
 
     (* Map model alias to API model ID
        - Stable: gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite
-       - Preview: gemini-3-pro-preview, gemini-3-flash-preview
+       - Preview: gemini-3.1-pro-preview, gemini-3-flash-preview
        - Deprecated (2026/03/31): gemini-2.0-* *)
     let api_model = match model with
-      | "gemini" -> "gemini-3-pro-preview"
+      | "gemini" -> "gemini-3.1-pro-preview"
       | "pro" -> "gemini-2.5-pro"
       | "flash" -> "gemini-2.5-flash"
       | "flash-lite" -> "gemini-2.5-flash-lite"
-      | "3-pro" -> "gemini-3-pro-preview"
+      | "3-pro" | "3.1-pro" -> "gemini-3.1-pro-preview"
       | "3-flash" -> "gemini-3-flash-preview"
       | m -> m  (* Pass through exact model names like "gemini-2.5-pro" *)
     in

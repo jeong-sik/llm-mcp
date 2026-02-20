@@ -52,7 +52,7 @@ let resolve_gemini_model (model : string) : string =
   | "pro" -> "gemini-2.5-pro"
   | "flash" -> "gemini-2.5-flash"
   | "flash-lite" -> "gemini-2.5-flash-lite"
-  | "3-pro" -> "gemini-3-pro-preview"
+  | "3-pro" | "3.1-pro" -> "gemini-3.1-pro-preview"
   | "3-flash" -> "gemini-3-flash-preview"
   | m -> m
 
