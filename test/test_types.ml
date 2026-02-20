@@ -42,14 +42,14 @@ let test_sandbox_policy_of_string () =
 (** Test tool_result JSON serialization *)
 let test_tool_result_to_yojson () =
   let result = {
-    model = "gemini (gemini-3-pro)";
+    model = "gemini (gemini-3.1-pro)";
     returncode = 0;
     response = "Hello, world!";
     extra = [("key", "value")];
   } in
   let json = tool_result_to_yojson result in
   let open Yojson.Safe.Util in
-  check string "model" "gemini (gemini-3-pro)" (json |> member "model" |> to_string);
+  check string "model" "gemini (gemini-3.1-pro)" (json |> member "model" |> to_string);
   check int "returncode" 0 (json |> member "returncode" |> to_int);
   check string "response" "Hello, world!" (json |> member "response" |> to_string);
   (* extra fields are merged at top level, not nested *)

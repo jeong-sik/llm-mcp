@@ -29,7 +29,7 @@ Use cases:
 
 Parameters:
 - prompt: The prompt to send
-- model: Model name (default: gemini-3-pro-preview)
+- model: Model name (default: gemini-3.1-pro-preview)
 - thinking_level: Reasoning depth - "low" or "high" (default: high)
 - budget_mode: Token-saving defaults (optional)
 - yolo: Auto-approve all actions (default: false)
@@ -44,7 +44,7 @@ Parameters:
       ("model", `Assoc [
         ("type", `String "string");
         ("description", `String "Model name");
-        ("default", `String "gemini-3-pro-preview");
+        ("default", `String "gemini-3.1-pro-preview");
       ]);
       ("thinking_level", `Assoc [
         ("type", `String "string");

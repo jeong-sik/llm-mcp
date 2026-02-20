@@ -58,11 +58,11 @@ let resolve_claude_model (model : string) : string =
 (** Resolve Gemini model aliases to stable IDs (for CLI / API parity). *)
 let resolve_gemini_model (model : string) : string =
   match String.lowercase_ascii model with
-  | "gemini" -> "gemini-3-pro-preview"
+  | "gemini" -> "gemini-3.1-pro-preview"
   | "pro" -> "gemini-2.5-pro"
   | "flash" -> "gemini-2.5-flash"
   | "flash-lite" -> "gemini-2.5-flash-lite"
-  | "3-pro" -> "gemini-3-pro-preview"
+  | "3-pro" | "3.1-pro" -> "gemini-3.1-pro-preview"
   | "3-flash" -> "gemini-3-flash-preview"
   | _ -> model
 
@@ -72,7 +72,7 @@ let resolve_gemini_model (model : string) : string =
 let parse_gemini_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
   let prompt = json |> member "prompt" |> to_string in
-  let model = json |> member "model" |> to_string_option |> Option.value ~default:"gemini-3-pro-preview" in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"gemini-3.1-pro-preview" in
   let budget_mode = budget_mode_value json in
   let thinking_level =
     json |> member "thinking_level" |> to_string_option

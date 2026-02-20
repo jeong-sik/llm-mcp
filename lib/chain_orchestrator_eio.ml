@@ -342,7 +342,7 @@ let orchestrate
         | m when is_gemini_model m ->
             exec_with_retry "gemini" (("model", `String model) :: args)
         | _ ->
-            exec_with_retry "gemini" (("model", `String "gemini-3-pro-preview") :: args)
+            exec_with_retry "gemini" (("model", `String "gemini-3.1-pro-preview") :: args)
       in
 
       (* Create tool execution wrapper *)

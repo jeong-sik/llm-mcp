@@ -151,7 +151,7 @@ let test_cla_glm47 () =
 let test_cla_unknown () =
   match Tools_eio.chain_llm_args ~timeout:30 ~gemini_use_cli:false
     ~parsed_tools:None ~model:"xyz" ~prompt:"t" () with
-  | Types.Gemini g -> check string "model" "gemini-3-pro-preview" g.model
+  | Types.Gemini g -> check string "model" "gemini-3.1-pro-preview" g.model
   | _ -> fail "unknown->Gemini"
 
 let test_cla_with_system () =
