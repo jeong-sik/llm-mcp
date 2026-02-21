@@ -592,6 +592,10 @@ let () =
         match Tool_parsers.parse_glm_args json with
         | Glm g ->
           check string "default model" "glm-5" g.model;
+          check string "default modality" "text" g.modality;
+          check bool "default cascade" false g.cascade;
+          check (option int) "default min_context" None g.min_context_tokens;
+          check (option (list string)) "default cascade_models" None g.cascade_models;
           check (option string) "no system_prompt" None g.system_prompt;
           check bool "default thinking" false g.thinking;
           check bool "default do_sample" true g.do_sample;
@@ -611,10 +615,20 @@ let () =
           ("web_search", `Bool true);
           ("timeout", `Int 60);
           ("stream", `Bool false);
+          ("modality", `String "image");
+          ("cascade", `Bool true);
+          ("cascade_models", `List [`String "glm-image"; `String "cogview-4-250304"]);
+          ("min_context_tokens", `Int 150000);
         ] in
         match Tool_parsers.parse_glm_args json with
         | Glm g ->
           check string "model" "glm-4v-plus-0111" g.model;
+          check string "modality" "image" g.modality;
+          check bool "cascade true" true g.cascade;
+          check (option int) "min_context_tokens" (Some 150000) g.min_context_tokens;
+          check (option (list string)) "cascade models"
+            (Some ["glm-image"; "cogview-4-250304"])
+            g.cascade_models;
           check (option string) "system" (Some "Be helpful") g.system_prompt;
           check bool "thinking" true g.thinking;
           check bool "do_sample" false g.do_sample;

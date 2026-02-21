@@ -57,6 +57,7 @@ let test_wsp_ollama () =
 let test_wsp_glm () =
   let args = Types.Glm {
     prompt = "t"; model = "glm-5"; system_prompt = None;
+    modality = "text"; cascade = false; cascade_models = None; min_context_tokens = None;
     temperature = 0.7; max_tokens = Some 4096; timeout = 30;
     stream = false; thinking = false; do_sample = true;
     web_search = false; tools = []; api_key = None;
@@ -252,6 +253,50 @@ let test_cla_3pro () =
   | Types.Gemini _ -> check pass "3-pro->Gemini" () ()
   | _ -> fail "expected Gemini"
 
+(* --- glm cascade helpers --- *)
+
+let test_glm_alias_normalize () =
+  check (option string) "5-coder -> glm-5-code" (Some "glm-5-code")
+    (Tools_eio.normalize_glm_model_alias "5-coder");
+  check (option string) "glm -> glm-5" (Some "glm-5")
+    (Tools_eio.normalize_glm_model_alias "glm")
+
+let test_glm_resolve_no_cascade () =
+  let models =
+    Tools_eio.resolve_glm_models_for_call
+      ~model:"glm" ~modality:"text" ~cascade:false
+      ~cascade_models:None ~min_context_tokens:None
+  in
+  check (list string) "single model" [ "glm-5" ] models
+
+let test_glm_resolve_text_cascade_default () =
+  let models =
+    Tools_eio.resolve_glm_models_for_call
+      ~model:"glm-5" ~modality:"text" ~cascade:true
+      ~cascade_models:None ~min_context_tokens:(Some 200000)
+  in
+  check bool "has 4.7" true (List.mem "glm-4.7" models);
+  check bool "has 5-code" true (List.mem "glm-5-code" models);
+  check bool "filters out 4.5 (128k)" false (List.mem "glm-4.5" models)
+
+let test_glm_resolve_text_cascade_filter () =
+  let models =
+    Tools_eio.resolve_glm_models_for_call
+      ~model:"glm-5" ~modality:"text" ~cascade:true
+      ~cascade_models:(Some [ "glm-4.5"; "glm-4.7"; "glm-5" ])
+      ~min_context_tokens:(Some 200000)
+  in
+  check (list string) "200k filtered models" [ "glm-5"; "glm-4.7" ] models
+
+let test_glm_resolve_image_cascade () =
+  let models =
+    Tools_eio.resolve_glm_models_for_call
+      ~model:"glm-image" ~modality:"image" ~cascade:true
+      ~cascade_models:None ~min_context_tokens:(Some 200000)
+  in
+  check bool "keeps image model" true (List.mem "glm-image" models);
+  check bool "keeps cogview fallback" true (List.mem "cogview-4-250304" models)
+
 (* --- validate_chain --- *)
 
 let test_validate_valid () =
@@ -376,6 +421,13 @@ let () =
       test_case "haiku-4.5" `Quick test_cla_haiku45;
       test_case "opus-4" `Quick test_cla_opus4;
       test_case "3-pro" `Quick test_cla_3pro;
+    ]);
+    ("glm_cascade_helpers", [
+      test_case "alias normalize" `Quick test_glm_alias_normalize;
+      test_case "no cascade" `Quick test_glm_resolve_no_cascade;
+      test_case "text cascade default" `Quick test_glm_resolve_text_cascade_default;
+      test_case "text cascade filter" `Quick test_glm_resolve_text_cascade_filter;
+      test_case "image cascade" `Quick test_glm_resolve_image_cascade;
     ]);
     ("validate_chain", [
       test_case "valid" `Quick test_validate_valid;

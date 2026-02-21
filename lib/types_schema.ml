@@ -418,6 +418,10 @@ Models (lowercase required by Z.ai API):
 Parameters:
 - prompt: The prompt to send (required)
 - model: Model name (default: glm-5)
+- modality: text|image|video|stt|tts routing intent (default: text)
+- cascade: when true, sequentially tries model candidates until success
+- cascade_models: explicit candidate model list for cascade (optional)
+- min_context_tokens: text-only cascade filter threshold (default: 200000)
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - max_tokens: Max tokens to generate (default: 131072 = 128K full)
@@ -454,6 +458,27 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
         ("type", `String "string");
         ("description", `String "Model name: glm-5 (default), glm-5-code (coding), glm-4.7, glm-4.6, glm-4.5 (lowercase required)");
         ("default", `String "glm-5");
+      ]);
+      ("modality", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Routing intent: text | image | video | stt | tts");
+        ("enum", `List [`String "text"; `String "image"; `String "video"; `String "stt"; `String "tts"]);
+        ("default", `String "text");
+      ]);
+      ("cascade", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "When true, try model candidates in order until one succeeds");
+        ("default", `Bool false);
+      ]);
+      ("cascade_models", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Optional explicit model candidate list for cascade");
+        ("items", `Assoc [("type", `String "string")]);
+      ]);
+      ("min_context_tokens", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Text-only cascade context threshold (default: 200000)");
+        ("default", `Int 200000);
       ]);
       ("system_prompt", `Assoc [
         ("type", `String "string");

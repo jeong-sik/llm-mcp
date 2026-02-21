@@ -62,6 +62,118 @@ let env_truthy value =
   | "0" | "false" | "no" | "off" -> false
   | _ -> false
 
+let unique_preserve_order (items : string list) : string list =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | x :: xs ->
+        if List.mem x acc then loop acc xs else loop (x :: acc) xs
+  in
+  loop [] items
+
+let normalize_glm_model_alias (raw : string) : string option =
+  let s = raw |> String.trim |> String.lowercase_ascii in
+  match s with
+  | "" -> None
+  | "glm" | "5" -> Some "glm-5"
+  | "4.7" -> Some "glm-4.7"
+  | "4.7-flash" -> Some "glm-4.7-flash"
+  | "4.7-flashx" -> Some "glm-4.7-flashx"
+  | "4.6" -> Some "glm-4.6"
+  | "4.5" -> Some "glm-4.5"
+  | "4.5-flash" -> Some "glm-4.5-flash"
+  | "4.5-air" -> Some "glm-4.5-air"
+  | "4.5-airx" -> Some "glm-4.5-airx"
+  | "4.5v" -> Some "glm-4.5v"
+  | "5-code" | "5-coder" | "glm-5-coder" -> Some "glm-5-code"
+  | _ -> Some s
+
+let glm_default_min_context_tokens () =
+  match Sys.getenv_opt "LLM_MCP_GLM_MIN_CONTEXT_TOKENS" with
+  | None -> 200_000
+  | Some raw ->
+      let trimmed = String.trim raw in
+      (match int_of_string_opt trimmed with
+      | Some n when n > 0 -> n
+      | _ -> 200_000)
+
+let glm_text_context_tokens (model : string) : int option =
+  match String.lowercase_ascii (String.trim model) with
+  | "glm-5"
+  | "glm-5-code"
+  | "glm-4.7"
+  | "glm-4.7-flash"
+  | "glm-4.7-flashx"
+  | "glm-4.6"
+  | "glm-4.5-flash" -> Some 200_000
+  | "glm-4.6v"
+  | "glm-4.6v-flash"
+  | "glm-4.6v-flashx"
+  | "glm-4.5"
+  | "glm-4.5-air"
+  | "glm-4.5-airx"
+  | "glm-4.5v"
+  | "glm-4-32b-0414-128k" -> Some 128_000
+  | _ -> None
+
+let default_glm_cascade_for_modality (modality : string) : string list =
+  match String.lowercase_ascii (String.trim modality) with
+  | "text" ->
+      [ "glm-4.7"; "glm-4.7-flash"; "glm-4.7-flashx"; "glm-5"; "glm-5-code" ]
+  | "image" ->
+      [ "glm-image"; "cogview-4-250304" ]
+  | "video" ->
+      [
+        "viduq1-text";
+        "viduq1-image";
+        "viduq1-start-end";
+        "vidu2-image";
+        "vidu2-start-end";
+        "vidu2-reference";
+        "cogvideox-3";
+      ]
+  | "stt" ->
+      [ "glm-asr-2512" ]
+  | "tts" ->
+      [ "glm-4.5v"; "glm-4.6v" ]
+  | _ ->
+      [ "glm-5" ]
+
+let resolve_glm_models_for_call
+    ~(model : string)
+    ~(modality : string)
+    ~(cascade : bool)
+    ~(cascade_models : string list option)
+    ~(min_context_tokens : int option) : string list =
+  let normalized_primary =
+    normalize_glm_model_alias model |> Option.value ~default:"glm-5"
+  in
+  if not cascade then
+    [ normalized_primary ]
+  else
+    let candidates =
+      match cascade_models with
+      | Some models when models <> [] ->
+          models |> List.filter_map normalize_glm_model_alias
+      | _ ->
+          default_glm_cascade_for_modality modality
+    in
+    let ordered = unique_preserve_order (normalized_primary :: candidates) in
+    let modality_key = String.lowercase_ascii (String.trim modality) in
+    if modality_key = "text" then
+      let threshold =
+        match min_context_tokens with
+        | Some n when n > 0 -> n
+        | _ -> glm_default_min_context_tokens ()
+      in
+      List.filter
+        (fun m ->
+          match glm_text_context_tokens m with
+          | Some ctx -> ctx >= threshold
+          | None -> false)
+        ordered
+    else
+      ordered
+
 (* Ollama helpers *)
 let thinking_prompt_prefix = Tool_parsers.thinking_prompt_prefix
 let tool_schema_to_ollama_tool = Tool_parsers.tool_schema_to_ollama_tool
@@ -650,6 +762,10 @@ let chain_llm_args
         Types.Glm {
           prompt;
           model = glm_model;
+          modality = "text";
+          cascade = false;
+          cascade_models = None;
+          min_context_tokens = None;
           system_prompt = None;
           temperature = 0.7;
           max_tokens = Some 4096;
@@ -1009,7 +1125,108 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         ();
       result
 
-  | Glm { prompt; model; system_prompt; temperature; max_tokens; timeout; stream; thinking; do_sample; web_search; tools; api_key } ->
+  | Glm {
+      prompt;
+      model;
+      modality;
+      cascade;
+      cascade_models;
+      min_context_tokens;
+      system_prompt;
+      temperature;
+      max_tokens;
+      timeout;
+      stream;
+      thinking;
+      do_sample;
+      web_search;
+      tools;
+      api_key;
+    } ->
+      let modality = String.lowercase_ascii (String.trim modality) in
+      if cascade then
+        let selected_models =
+          resolve_glm_models_for_call
+            ~model
+            ~modality
+            ~cascade
+            ~cascade_models
+            ~min_context_tokens
+        in
+        if selected_models = [] then
+          {
+            model = "glm(cascade)";
+            returncode = -1;
+            response =
+              Printf.sprintf
+                "GLM cascade aborted: no models available for modality=%s (min_context=%d)"
+                modality
+                (match min_context_tokens with
+                | Some n when n > 0 -> n
+                | _ -> glm_default_min_context_tokens ());
+            extra = [ ("modality", modality); ("cascade", "true") ];
+          }
+        else
+          let rec try_models failures index = function
+            | [] ->
+                let summary =
+                  failures
+                  |> List.rev
+                  |> List.map (fun (m, msg) -> Printf.sprintf "%s: %s" m msg)
+                  |> String.concat " | "
+                in
+                {
+                  model = "glm(cascade)";
+                  returncode = -1;
+                  response = Printf.sprintf "GLM cascade failed (%s)" summary;
+                  extra =
+                    [
+                      ("modality", modality);
+                      ("cascade", "true");
+                      ("candidate_count", string_of_int (List.length selected_models));
+                    ];
+                }
+            | active_model :: rest ->
+                let attempt_result =
+                  execute ~sw ~proc_mgr ~clock
+                    (Glm {
+                      prompt;
+                      model = active_model;
+                      modality;
+                      cascade = false;
+                      cascade_models = None;
+                      min_context_tokens;
+                      system_prompt;
+                      temperature;
+                      max_tokens;
+                      timeout;
+                      stream;
+                      thinking;
+                      do_sample;
+                      web_search;
+                      tools;
+                      api_key;
+                    })
+                in
+                if attempt_result.returncode = 0 then
+                  {
+                    attempt_result with
+                    extra =
+                      attempt_result.extra
+                      @ [
+                          ("modality", modality);
+                          ("cascade", "true");
+                          ("candidate_count", string_of_int (List.length selected_models));
+                          ("cascade_index", string_of_int index);
+                          ("model_used", active_model);
+                        ];
+                  }
+                else
+                  try_models ((active_model, attempt_result.response) :: failures) (index + 1) rest
+          in
+          try_models [] 1 selected_models
+      else
+      let model = normalize_glm_model_alias model |> Option.value ~default:model in
       (* Z.ai GLM Cloud API - OpenAI-compatible with Function Calling *)
       let model_name = sprintf "glm (%s)" model in
       (* Resolve API key: explicit override > ZAI_API_KEY env var *)
@@ -1600,6 +1817,10 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       Types.Glm {
                         prompt;
                         model = glm_model;
+                        modality = "text";
+                        cascade = false;
+                        cascade_models = None;
+                        min_context_tokens = None;
                         system_prompt = None;
                         temperature = 0.7;
                         max_tokens = Some 4096;

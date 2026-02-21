@@ -127,6 +127,10 @@ type tool_args =
   | Glm of {
       prompt : string;
       model : string;  (* glm-4.7, glm-4.6, glm-4.5, glm-4.5-air *)
+      modality : string;  (* text | image | video | stt | tts *)
+      cascade : bool;  (* true=sequentially try model candidates *)
+      cascade_models : string list option;  (* explicit cascade override *)
+      min_context_tokens : int option;  (* text cascade filter threshold *)
       system_prompt : string option;
       temperature : float;
       max_tokens : int option;
