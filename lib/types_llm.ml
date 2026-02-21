@@ -127,6 +127,10 @@ type tool_args =
   | Glm of {
       prompt : string;
       model : string;  (* glm-4.7, glm-4.6, glm-4.5, glm-4.5-air *)
+      modality : string;  (* text only in runtime; retained for backward compatibility *)
+      cascade : bool;  (* true=sequentially try model candidates *)
+      cascade_models : string list option;  (* explicit cascade override *)
+      min_context_tokens : int option;  (* text cascade filter threshold *)
       system_prompt : string option;
       temperature : float;
       max_tokens : int option;
@@ -136,6 +140,42 @@ type tool_args =
       do_sample : bool;  (* true=diverse sampling, false=greedy deterministic *)
       web_search : bool;  (* DEPRECATED: Use tools instead. Kept for backward compat *)
       tools : glm_tool list;  (* Generic tool list: web_search, function, code_interpreter *)
+      api_key : string option;  (* Override ZAI_API_KEY env var *)
+    }
+  | GlmOcr of {
+      file : string;  (* URL of PDF/JPG/PNG file for OCR layout parsing *)
+      model : string;  (* default: glm-ocr *)
+      timeout : int;
+      api_key : string option;  (* Override ZAI_API_KEY env var *)
+    }
+  | GlmImage of {
+      prompt : string;  (* Text prompt for image generation *)
+      model : string;  (* default: glm-image *)
+      quality : string;  (* default: hd *)
+      size : string;  (* default: 1280x1280 *)
+      timeout : int;
+      api_key : string option;  (* Override ZAI_API_KEY env var *)
+    }
+  | GlmVideo of {
+      prompt : string;  (* Text prompt for video generation *)
+      model : string;  (* default: viduq1-text *)
+      quality : string;  (* quality | speed *)
+      with_audio : bool;
+      size : string;  (* e.g. 1920x1080 *)
+      fps : int;  (* 30 | 60 *)
+      duration : int;  (* 5 | 10 seconds *)
+      image_url : string option;  (* optional image-to-video source *)
+      timeout : int;
+      api_key : string option;  (* Override ZAI_API_KEY env var *)
+    }
+  | GlmStt of {
+      model : string;  (* default: glm-asr-2512 *)
+      file_path : string option;  (* local wav/mp3 path *)
+      file_base64 : string option;  (* base64 audio payload *)
+      prompt : string option;  (* optional context *)
+      hotwords : string list;  (* optional domain words *)
+      stream : bool;  (* currently synchronous mode only *)
+      timeout : int;
       api_key : string option;  (* Override ZAI_API_KEY env var *)
     }
   | GlmTranslate of {

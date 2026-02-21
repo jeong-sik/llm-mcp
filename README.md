@@ -181,7 +181,11 @@ curl -X POST http://localhost:8932/mcp -d '{
 
 ### 유틸리티 도구
 - `glm`: GLM 모델 호출
-- `glm_translate`: GLM 번역
+- `glm.ocr`: GLM OCR 레이아웃 파싱
+- `glm.image`: GLM 이미지 생성
+- `glm.video`: GLM 비디오 생성 태스크
+- `glm.stt`: GLM 음성 인식(STT)
+- `glm.translate`: GLM 번역
 - `gh_pr_diff`: GitHub PR diff 조회
 - `slack_post`: Slack 메시지 전송
 - `ollama_list`: Ollama 모델 목록
