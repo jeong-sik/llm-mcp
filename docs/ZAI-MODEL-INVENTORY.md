@@ -7,8 +7,8 @@ Updated: 2026-02-21
 This document is the operational inventory for Z.ai models used by `llm-mcp`.
 It separates:
 
-- `runtime-supported`: wired in current `glm` tool execution path
-- `inventory-only`: known/available in account docs or console, but not yet exposed as a dedicated runtime path in `glm`
+- `runtime-supported`: wired in current runtime tools (`glm`, `glm.ocr`, `glm.image`, `glm.video`, `glm.stt`)
+- `inventory-only`: known/available in account docs or console, but not yet exposed as a dedicated runtime tool
 
 ## Sources
 
@@ -68,32 +68,37 @@ It separates:
 ## Non-Text Inventory
 
 The following models are tracked for planned endpoint wiring.
-In current setup, OCR is served by dedicated `glm.ocr` tool. Other non-text models remain inventory-only.
+Current runtime support:
+
+- `glm.ocr` -> `layout_parsing`
+- `glm.image` -> `/images/generations`
+- `glm.video` -> `/videos/generations`
+- `glm.stt` -> `/audio/transcriptions`
 
 ### Image
 
 | Model | Concurrency (account snapshot) | Endpoint family | Status |
 |---|---:|---|---|
-| `glm-image` | 1 | `/images/generations` | inventory-only |
-| `cogview-4-250304` | 5 | `/images/generations` | inventory-only |
+| `glm-image` | 1 | `/images/generations` | runtime-supported (`glm.image`) |
+| `cogview-4-250304` | 5 | `/images/generations` | runtime-supported (`glm.image`) |
 
 ### Video
 
 | Model | Concurrency (account snapshot) | Endpoint family | Status |
 |---|---:|---|---|
-| `viduq1-text` | 5 | `/videos/generations` | inventory-only |
-| `viduq1-image` | 5 | `/videos/generations` | inventory-only |
-| `viduq1-start-end` | 5 | `/videos/generations` | inventory-only |
-| `vidu2-image` | 5 | `/videos/generations` | inventory-only |
-| `vidu2-start-end` | 5 | `/videos/generations` | inventory-only |
-| `vidu2-reference` | 5 | `/videos/generations` | inventory-only |
-| `cogvideox-3` | 1 | `/videos/generations` | inventory-only |
+| `viduq1-text` | 5 | `/videos/generations` | runtime-supported (`glm.video`) |
+| `viduq1-image` | 5 | `/videos/generations` | runtime-supported (`glm.video`) |
+| `viduq1-start-end` | 5 | `/videos/generations` | runtime-supported (`glm.video`) |
+| `vidu2-image` | 5 | `/videos/generations` | runtime-supported (`glm.video`) |
+| `vidu2-start-end` | 5 | `/videos/generations` | runtime-supported (`glm.video`) |
+| `vidu2-reference` | 5 | `/videos/generations` | runtime-supported (`glm.video`) |
+| `cogvideox-3` | 1 | `/videos/generations` | runtime-supported (`glm.video`) |
 
 ### Audio
 
 | Model | Concurrency (account snapshot) | Endpoint family | Status |
 |---|---:|---|---|
-| `glm-asr-2512` | 5 | `/audio/transcriptions` | inventory-only |
+| `glm-asr-2512` | 5 | `/audio/transcriptions` | runtime-supported (`glm.stt`) |
 
 `tts` model inventory is not finalized here due missing clear public endpoint mapping in current docs set. Keep as planned capability until endpoint contract is fixed.
 

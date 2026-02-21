@@ -5,6 +5,7 @@ MODE="mcp"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8939/mcp}"
 DIRECT_URL="${DIRECT_URL:-https://api.z.ai/api/coding/paas/v4/chat/completions}"
 TIMEOUT="${TIMEOUT:-45}"
+STT_FILE="${STT_FILE:-}"
 
 usage() {
   cat <<'EOF'
@@ -19,6 +20,7 @@ Env:
   MCP_URL     llm-mcp endpoint for mcp mode (default: http://127.0.0.1:8939/mcp)
   DIRECT_URL  Z.ai endpoint for direct mode
   TIMEOUT     per-call timeout seconds
+  STT_FILE    local audio file path for glm.stt smoke test (optional)
   ZAI_API_KEY required for direct mode
 
 Examples:
@@ -204,7 +206,7 @@ run_cascade_checks() {
         }
       }
     }')
-  resp=$(curl -sS --max-time 70 "$MCP_URL" -H 'Content-Type: application/json' -d "$req")
+  resp=$(curl -sS --max-time 70 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
   note=$(extract_note_from_mcp_response "$resp" | head -c 120)
   if printf '%s' "$resp" | rg -q '"isError":false'; then
     echo "cascade-fallback   : PASS | $note"
@@ -234,7 +236,7 @@ run_cascade_checks() {
         }
       }
     }')
-  resp=$(curl -sS --max-time 70 "$MCP_URL" -H 'Content-Type: application/json' -d "$req")
+  resp=$(curl -sS --max-time 70 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
   note=$(extract_note_from_mcp_response "$resp" | head -c 120)
   if printf '%s' "$resp" | rg -q '"isError":false'; then
     echo "cascade-200k-filter: PASS | $note"
@@ -261,7 +263,7 @@ run_cascade_checks() {
         }
       }
     }')
-  resp=$(curl -sS --max-time 70 "$MCP_URL" -H 'Content-Type: application/json' -d "$req")
+  resp=$(curl -sS --max-time 70 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
   note=$(extract_note_from_mcp_response "$resp" | head -c 120)
   if printf '%s' "$resp" | rg -q 'Unsupported modality=image'; then
     echo "non-text-guard     : PASS | $note"
@@ -284,12 +286,90 @@ run_cascade_checks() {
         }
       }
     }')
-  resp=$(curl -sS --max-time 90 "$MCP_URL" -H 'Content-Type: application/json' -d "$req")
+  resp=$(curl -sS --max-time 90 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
   note=$(extract_note_from_mcp_response "$resp" | head -c 120)
   if printf '%s' "$resp" | rg -q '"isError":false'; then
     echo "glm.ocr-layout     : PASS | ${note:-ocr success}"
   else
     echo "glm.ocr-layout     : FAIL | ${note:-ocr failed}"
+  fi
+}
+
+run_multimodal_checks_mcp() {
+  local req resp note
+  echo
+  echo "[Multimodal checks through llm-mcp]"
+
+  req=$(jq -nc \
+    '{
+      jsonrpc:"2.0",
+      id:21,
+      method:"tools/call",
+      params:{
+        name:"glm.image",
+        arguments:{
+          prompt:"A simple blue square icon",
+          model:"glm-image",
+          size:"1024x1024",
+          timeout:90
+        }
+      }
+    }')
+  resp=$(curl -sS --max-time 120 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
+  note=$(extract_note_from_mcp_response "$resp" | head -c 120)
+  if printf '%s' "$resp" | rg -q '"isError":false'; then
+    echo "glm.image          : PASS | ${note:-image success}"
+  else
+    echo "glm.image          : FAIL | ${note:-image failed}"
+  fi
+
+  req=$(jq -nc \
+    '{
+      jsonrpc:"2.0",
+      id:22,
+      method:"tools/call",
+      params:{
+        name:"glm.video",
+        arguments:{
+          prompt:"A red ball bouncing once on white background",
+          model:"viduq1-text",
+          timeout:90
+        }
+      }
+    }')
+  resp=$(curl -sS --max-time 120 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
+  note=$(extract_note_from_mcp_response "$resp" | head -c 120)
+  if printf '%s' "$resp" | rg -q '"isError":false'; then
+    echo "glm.video          : PASS | ${note:-video task success}"
+  else
+    echo "glm.video          : FAIL | ${note:-video failed}"
+  fi
+
+  if [[ -n "$STT_FILE" && -f "$STT_FILE" ]]; then
+    req=$(jq -nc \
+      --arg stt_file "$STT_FILE" \
+      '{
+        jsonrpc:"2.0",
+        id:23,
+        method:"tools/call",
+        params:{
+          name:"glm.stt",
+          arguments:{
+            model:"glm-asr-2512",
+            file_path:$stt_file,
+            timeout:90
+          }
+        }
+      }')
+    resp=$(curl -sS --max-time 120 "$MCP_URL" -H 'Content-Type: application/json' -d "$req" || true)
+    note=$(extract_note_from_mcp_response "$resp" | head -c 120)
+    if printf '%s' "$resp" | rg -q '"isError":false'; then
+      echo "glm.stt            : PASS | ${note:-stt success}"
+    else
+      echo "glm.stt            : FAIL | ${note:-stt failed}"
+    fi
+  else
+    echo "glm.stt            : SKIP | set STT_FILE=/path/to/audio.wav"
   fi
 }
 
@@ -300,13 +380,59 @@ run_ocr_check_direct() {
   resp=$(curl -sS --max-time 90 -X POST "${DIRECT_URL%/chat/completions}/layout_parsing" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer ${ZAI_API_KEY}" \
-    -d '{"model":"glm-ocr","file":"https://cdn.bigmodel.cn/static/logo/introduction.png"}')
+    -d '{"model":"glm-ocr","file":"https://cdn.bigmodel.cn/static/logo/introduction.png"}' || true)
   if printf '%s' "$resp" | jq -e '.model == "glm-ocr"' >/dev/null 2>&1; then
     note=$(printf '%s' "$resp" | jq -r '.request_id // "ok"' | head -c 120)
     echo "layout_parsing     : PASS | request_id=$note"
   else
     note=$(printf '%s' "$resp" | jq -r '.error.message // "unknown error"' 2>/dev/null | head -c 120)
     echo "layout_parsing     : FAIL | $note"
+  fi
+}
+
+run_multimodal_checks_direct() {
+  local resp note
+  echo
+  echo "[Multimodal checks direct endpoint]"
+
+  resp=$(curl -sS --max-time 120 -X POST "${DIRECT_URL%/chat/completions}/images/generations" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${ZAI_API_KEY}" \
+    -d '{"model":"glm-image","prompt":"A simple blue square icon","size":"1024x1024"}' || true)
+  if printf '%s' "$resp" | jq -e '.data[0].url != null' >/dev/null 2>&1; then
+    note=$(printf '%s' "$resp" | jq -r '.data[0].url' | head -c 120)
+    echo "images/generations : PASS | $note"
+  else
+    note=$(printf '%s' "$resp" | jq -r '.error.message // "unknown error"' 2>/dev/null | head -c 120)
+    echo "images/generations : FAIL | $note"
+  fi
+
+  resp=$(curl -sS --max-time 120 -X POST "${DIRECT_URL%/chat/completions}/videos/generations" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${ZAI_API_KEY}" \
+    -d '{"model":"viduq1-text","prompt":"A red ball bouncing once on white background"}' || true)
+  if printf '%s' "$resp" | jq -e '.id != null or .task_id != null' >/dev/null 2>&1; then
+    note=$(printf '%s' "$resp" | jq -r '.id // .task_id // "ok"' | head -c 120)
+    echo "videos/generations : PASS | task_id=$note"
+  else
+    note=$(printf '%s' "$resp" | jq -r '.error.message // "unknown error"' 2>/dev/null | head -c 120)
+    echo "videos/generations : FAIL | $note"
+  fi
+
+  if [[ -n "$STT_FILE" && -f "$STT_FILE" ]]; then
+    resp=$(curl -sS --max-time 120 -X POST "${DIRECT_URL%/chat/completions}/audio/transcriptions" \
+      -H "Authorization: Bearer ${ZAI_API_KEY}" \
+      -F model=glm-asr-2512 \
+      -F "file=@${STT_FILE}" || true)
+    if printf '%s' "$resp" | jq -e '.text != null' >/dev/null 2>&1; then
+      note=$(printf '%s' "$resp" | jq -r '.text' | tr '\n' ' ' | head -c 120)
+      echo "audio/transcriptions: PASS | ${note:-stt empty text}"
+    else
+      note=$(printf '%s' "$resp" | jq -r '.error.message // "unknown error"' 2>/dev/null | head -c 120)
+      echo "audio/transcriptions: FAIL | $note"
+    fi
+  else
+    echo "audio/transcriptions: SKIP | set STT_FILE=/path/to/audio.wav"
   fi
 }
 
@@ -328,6 +454,8 @@ echo "Summary: PASS=$pass_count FAIL=$fail_count"
 
 if [[ "$MODE" == "mcp" ]]; then
   run_cascade_checks
+  run_multimodal_checks_mcp
 else
   run_ocr_check_direct
+  run_multimodal_checks_direct
 fi

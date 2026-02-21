@@ -57,7 +57,7 @@ let test_tool_result_to_yojson () =
 
 (** Test all_schemas contains expected tools *)
 let test_all_schemas () =
-  check int "should have 25 schemas" 25 (List.length all_schemas);  (* gemini, gemini_list, claude, codex, ollama, ollama_list, glm, glm.ocr, glm.translate, set/get_stream_delta, chain_{run,validate,convert,list,checkpoints,resume,to_mermaid,visualize,orchestrate}, prompt_{register,list,get}, gh_pr_diff, slack_post *)
+  check int "should have 28 schemas" 28 (List.length all_schemas);  (* gemini, gemini_list, claude, codex, ollama, ollama_list, glm, glm.ocr, glm.image, glm.video, glm.stt, glm.translate, set/get_stream_delta, chain_{run,validate,convert,list,checkpoints,resume,to_mermaid,visualize,orchestrate}, prompt_{register,list,get}, gh_pr_diff, slack_post *)
   let names = List.map (fun (s : tool_schema) -> s.name) all_schemas in
   check bool "gemini exists" true (List.mem "gemini" names);
   check bool "gemini_list exists" true (List.mem "gemini_list" names);
@@ -66,6 +66,9 @@ let test_all_schemas () =
   check bool "ollama exists" true (List.mem "ollama" names);
   check bool "ollama_list exists" true (List.mem "ollama_list" names);
   check bool "glm.ocr exists" true (List.mem "glm.ocr" names);
+  check bool "glm.image exists" true (List.mem "glm.image" names);
+  check bool "glm.video exists" true (List.mem "glm.video" names);
+  check bool "glm.stt exists" true (List.mem "glm.stt" names);
   check bool "glm.translate exists" true (List.mem "glm.translate" names)
 
 (** Test gemini_schema structure *)

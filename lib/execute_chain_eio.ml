@@ -267,6 +267,15 @@ let execute_chain_run
                   | "glm.ocr" ->
                       let args = Tool_parsers.parse_glm_ocr_args args in
                       execute ~sw ~proc_mgr ~clock args
+                  | "glm.image" ->
+                      let args = Tool_parsers.parse_glm_image_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "glm.video" ->
+                      let args = Tool_parsers.parse_glm_video_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "glm.stt" ->
+                      let args = Tool_parsers.parse_glm_stt_args args in
+                      execute ~sw ~proc_mgr ~clock args
                   | "glm.translate" ->
                       let args = Tool_parsers.parse_glm_translate_args args in
                       execute ~sw ~proc_mgr ~clock args

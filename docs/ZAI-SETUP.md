@@ -127,6 +127,51 @@ OCR은 `glm` 텍스트 채팅 경로가 아니라 `layout_parsing` 엔드포인�
 }
 ```
 
+### 이미지 생성 (`glm.image`)
+
+이미지 생성은 `/images/generations` 엔드포인트를 사용합니다.
+
+```json
+{
+  "prompt": "A clean mascot icon for a kindergarten app",
+  "model": "glm-image",
+  "quality": "hd",
+  "size": "1280x1280",
+  "timeout": 120
+}
+```
+
+### 비디오 생성 (`glm.video`)
+
+비디오는 동기 완성본이 아니라 생성 태스크 ID를 먼저 반환합니다.
+
+```json
+{
+  "prompt": "A paper airplane flying through a classroom, cinematic",
+  "model": "viduq1-text",
+  "quality": "quality",
+  "with_audio": true,
+  "size": "1920x1080",
+  "fps": 30,
+  "duration": 5,
+  "timeout": 120
+}
+```
+
+### 음성 인식 (`glm.stt`)
+
+STT는 multipart 업로드 경로를 사용합니다. `file_path` 또는 `file_base64` 중 하나가 필요합니다.
+
+```json
+{
+  "model": "glm-asr-2512",
+  "file_path": "/tmp/sample.wav",
+  "hotwords": ["Kidsnote", "MASC"],
+  "stream": false,
+  "timeout": 120
+}
+```
+
 ### 로컬 모델 스모크 테스트
 
 `llm-mcp` 경유 전체 GLM 텍스트 계열 가용성 점검:

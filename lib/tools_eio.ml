@@ -28,6 +28,9 @@ let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
 let parse_glm_args = Tool_parsers.parse_glm_args
 let parse_glm_ocr_args = Tool_parsers.parse_glm_ocr_args
+let parse_glm_image_args = Tool_parsers.parse_glm_image_args
+let parse_glm_video_args = Tool_parsers.parse_glm_video_args
+let parse_glm_stt_args = Tool_parsers.parse_glm_stt_args
 let parse_glm_translate_args = Tool_parsers.parse_glm_translate_args
 let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
@@ -172,6 +175,27 @@ let resolve_glm_models_for_call
         ordered
     else
       ordered
+
+let resolve_zai_api_key ~(model_name : string) (api_key_override : string option) :
+    (string, tool_result) result =
+  match api_key_override with
+  | Some k -> Ok k
+  | None -> (
+      match
+        Tools_tracer.require_api_key
+          ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[]
+      with
+      | Some err -> Error err
+      | None -> Ok (Tools_tracer.get_api_key "ZAI_API_KEY"))
+
+let parse_zai_api_error (json : Yojson.Safe.t) : string option =
+  let open Yojson.Safe.Util in
+  let error = json |> member "error" in
+  if error = `Null then None
+  else
+    Some
+      (Safe_parse.json_string
+         ~context:"zai:error" ~default:"Unknown API error" error "message")
 
 (* Ollama helpers *)
 let thinking_prompt_prefix = Tool_parsers.thinking_prompt_prefix
@@ -804,6 +828,9 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
     | Codex { stream; _ } -> stream
     | Glm { stream; _ } -> stream
     | GlmOcr _ -> false
+    | GlmImage _ -> false
+    | GlmVideo _ -> false
+    | GlmStt _ -> false
     | _ -> false
   in
   let model_for_log = get_model_name_for_tracing args in
@@ -1719,6 +1746,359 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   extra = [ ("error", "parse_error") ];
                 }))
 
+  | GlmImage { prompt; model; quality; size; timeout; api_key } ->
+      let model = model |> String.trim |> String.lowercase_ascii in
+      let model_name = sprintf "glm.image (%s)" model in
+      (match resolve_zai_api_key ~model_name api_key with
+      | Error err -> err
+      | Ok resolved_key ->
+          let body =
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("model", `String model);
+                  ("prompt", `String prompt);
+                  ("quality", `String quality);
+                  ("size", `String size);
+                ])
+          in
+          let cmd_args =
+            [
+              "-s";
+              "-X";
+              "POST";
+              "https://api.z.ai/api/paas/v4/images/generations";
+              "-H";
+              "Content-Type: application/json";
+              "-H";
+              sprintf "Authorization: Bearer %s" resolved_key;
+              "-d";
+              body;
+              "--max-time";
+              string_of_int timeout;
+            ]
+          in
+          let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" cmd_args in
+          match result with
+          | Error (Timeout t) ->
+              {
+                model = model_name;
+                returncode = -1;
+                response = sprintf "Timeout after %ds" t;
+                extra = [ ("error", "timeout") ];
+              }
+          | Error (ProcessError msg) ->
+              {
+                model = model_name;
+                returncode = -1;
+                response = sprintf "Error: %s" msg;
+                extra = [ ("error", "process_error") ];
+              }
+          | Ok r -> (
+              try
+                let json = Yojson.Safe.from_string r.stdout in
+                (match parse_zai_api_error json with
+                | Some err_msg ->
+                    {
+                      model = model_name;
+                      returncode = -1;
+                      response = sprintf "API Error: %s" err_msg;
+                      extra = [ ("error", "api_error") ];
+                    }
+                | None ->
+                    let open Yojson.Safe.Util in
+                    let data = json |> member "data" |> to_list in
+                    let first = match data with x :: _ -> Some x | [] -> None in
+                    let image_url =
+                      match first with
+                      | Some item -> (
+                          match Safe_parse.json_string_opt item "url" with
+                          | Some u when String.trim u <> "" -> Some u
+                          | _ -> Safe_parse.json_string_opt item "b64_json")
+                      | None -> None
+                    in
+                    let response =
+                      match image_url with
+                      | Some v -> v
+                      | None -> Yojson.Safe.pretty_to_string json
+                    in
+                    {
+                      model = model_name;
+                      returncode = 0;
+                      response;
+                      extra =
+                        [
+                          ("cloud", "zai");
+                          ("endpoint", "images/generations");
+                          ("image_count", string_of_int (List.length data));
+                        ];
+                    })
+              with e ->
+                {
+                  model = model_name;
+                  returncode = -1;
+                  response =
+                    sprintf "Error parsing image response: %s. Raw: %s"
+                      (Printexc.to_string e) r.stdout;
+                  extra = [ ("error", "parse_error") ];
+                }))
+
+  | GlmVideo
+      {
+        prompt;
+        model;
+        quality;
+        with_audio;
+        size;
+        fps;
+        duration;
+        image_url;
+        timeout;
+        api_key;
+      } ->
+      let model = model |> String.trim |> String.lowercase_ascii in
+      let model_name = sprintf "glm.video (%s)" model in
+      (match resolve_zai_api_key ~model_name api_key with
+      | Error err -> err
+      | Ok resolved_key ->
+          let body_fields =
+            [
+              ("model", `String model);
+              ("prompt", `String prompt);
+              ("quality", `String quality);
+              ("with_audio", `Bool with_audio);
+              ("size", `String size);
+              ("fps", `Int fps);
+              ("duration", `Int duration);
+            ]
+          in
+          let body_fields =
+            match image_url with
+            | Some u when String.trim u <> "" ->
+                body_fields @ [ ("image_url", `String (String.trim u)) ]
+            | _ -> body_fields
+          in
+          let body = Yojson.Safe.to_string (`Assoc body_fields) in
+          let cmd_args =
+            [
+              "-s";
+              "-X";
+              "POST";
+              "https://api.z.ai/api/paas/v4/videos/generations";
+              "-H";
+              "Content-Type: application/json";
+              "-H";
+              sprintf "Authorization: Bearer %s" resolved_key;
+              "-d";
+              body;
+              "--max-time";
+              string_of_int timeout;
+            ]
+          in
+          let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" cmd_args in
+          match result with
+          | Error (Timeout t) ->
+              {
+                model = model_name;
+                returncode = -1;
+                response = sprintf "Timeout after %ds" t;
+                extra = [ ("error", "timeout") ];
+              }
+          | Error (ProcessError msg) ->
+              {
+                model = model_name;
+                returncode = -1;
+                response = sprintf "Error: %s" msg;
+                extra = [ ("error", "process_error") ];
+              }
+          | Ok r -> (
+              try
+                let json = Yojson.Safe.from_string r.stdout in
+                (match parse_zai_api_error json with
+                | Some err_msg ->
+                    {
+                      model = model_name;
+                      returncode = -1;
+                      response = sprintf "API Error: %s" err_msg;
+                      extra = [ ("error", "api_error") ];
+                    }
+                | None ->
+                    let task_id =
+                      match Safe_parse.json_string_opt json "id" with
+                      | Some id when String.trim id <> "" -> Some id
+                      | _ -> Safe_parse.json_string_opt json "task_id"
+                    in
+                    let response =
+                      match task_id with
+                      | Some id -> sprintf "Video generation task created: %s" id
+                      | None -> Yojson.Safe.pretty_to_string json
+                    in
+                    let extra =
+                      [ ("cloud", "zai"); ("endpoint", "videos/generations") ]
+                    in
+                    let extra =
+                      match task_id with
+                      | Some id -> extra @ [ ("task_id", id) ]
+                      | None -> extra
+                    in
+                    {
+                      model = model_name;
+                      returncode = 0;
+                      response;
+                      extra;
+                    })
+              with e ->
+                {
+                  model = model_name;
+                  returncode = -1;
+                  response =
+                    sprintf "Error parsing video response: %s. Raw: %s"
+                      (Printexc.to_string e) r.stdout;
+                  extra = [ ("error", "parse_error") ];
+                }))
+
+  | GlmStt { model; file_path; file_base64; prompt; hotwords; stream; timeout; api_key } ->
+      let model = model |> String.trim |> String.lowercase_ascii in
+      let model_name = sprintf "glm.stt (%s)" model in
+      if stream then
+        {
+          model = model_name;
+          returncode = -1;
+          response =
+            "Unsupported stream=true for glm.stt runtime. Use stream=false (synchronous transcription) for now.";
+          extra = [ ("error", "unsupported_stream_mode") ];
+        }
+      else
+        let source_choice =
+          match file_path, file_base64 with
+          | Some path, _ when String.trim path <> "" ->
+              let trimmed = String.trim path in
+              if Sys.file_exists trimmed then Ok (`Path trimmed)
+              else
+                Error
+                  {
+                    model = model_name;
+                    returncode = -1;
+                    response = sprintf "Error: file_path not found: %s" trimmed;
+                    extra = [ ("error", "missing_file") ];
+                  }
+          | _, Some payload when String.trim payload <> "" ->
+              Ok (`Base64 (String.trim payload))
+          | _ ->
+              Error
+                {
+                  model = model_name;
+                  returncode = -1;
+                  response =
+                    "Error: glm.stt requires one of file_path or file_base64";
+                  extra = [ ("error", "missing_audio_input") ];
+                }
+        in
+        (match source_choice with
+        | Error err -> err
+        | Ok source -> (
+            match resolve_zai_api_key ~model_name api_key with
+            | Error err -> err
+            | Ok resolved_key ->
+                let add_form value acc = acc @ [ "-F"; value ] in
+                let form_args =
+                  []
+                  |> add_form (sprintf "model=%s" model)
+                  |> add_form "stream=false"
+                in
+                let form_args =
+                  match prompt with
+                  | Some p when String.trim p <> "" ->
+                      add_form (sprintf "prompt=%s" (String.trim p)) form_args
+                  | _ -> form_args
+                in
+                let form_args =
+                  if hotwords = [] then form_args
+                  else
+                    let hotwords_json =
+                      `List (List.map (fun w -> `String w) hotwords)
+                      |> Yojson.Safe.to_string
+                    in
+                    add_form (sprintf "hotwords=%s" hotwords_json) form_args
+                in
+                let form_args =
+                  match source with
+                  | `Path p -> add_form (sprintf "file=@%s" p) form_args
+                  | `Base64 b -> add_form (sprintf "file_base64=%s" b) form_args
+                in
+                let cmd_args =
+                  [
+                    "-s";
+                    "-X";
+                    "POST";
+                    "https://api.z.ai/api/paas/v4/audio/transcriptions";
+                    "-H";
+                    sprintf "Authorization: Bearer %s" resolved_key;
+                  ]
+                  @ form_args @ [ "--max-time"; string_of_int timeout ]
+                in
+                let result =
+                  run_command ~sw ~proc_mgr ~clock ~timeout "curl" cmd_args
+                in
+                match result with
+                | Error (Timeout t) ->
+                    {
+                      model = model_name;
+                      returncode = -1;
+                      response = sprintf "Timeout after %ds" t;
+                      extra = [ ("error", "timeout") ];
+                    }
+                | Error (ProcessError msg) ->
+                    {
+                      model = model_name;
+                      returncode = -1;
+                      response = sprintf "Error: %s" msg;
+                      extra = [ ("error", "process_error") ];
+                    }
+                | Ok r -> (
+                    try
+                      let json = Yojson.Safe.from_string r.stdout in
+                      (match parse_zai_api_error json with
+                      | Some err_msg ->
+                          {
+                            model = model_name;
+                            returncode = -1;
+                            response = sprintf "API Error: %s" err_msg;
+                            extra = [ ("error", "api_error") ];
+                          }
+                      | None ->
+                          let text =
+                            Safe_parse.json_string_opt json "text"
+                            |> Option.value ~default:""
+                          in
+                          let response =
+                            if String.trim text <> "" then text
+                            else Yojson.Safe.pretty_to_string json
+                          in
+                          {
+                            model = model_name;
+                            returncode = 0;
+                            response;
+                            extra =
+                              [
+                                ("cloud", "zai");
+                                ("endpoint", "audio/transcriptions");
+                                ( "input_type",
+                                  match source with
+                                  | `Path _ -> "file_path"
+                                  | `Base64 _ -> "file_base64" );
+                              ];
+                          })
+                    with e ->
+                      {
+                        model = model_name;
+                        returncode = -1;
+                        response =
+                          sprintf "Error parsing stt response: %s. Raw: %s"
+                            (Printexc.to_string e) r.stdout;
+                        extra = [ ("error", "parse_error") ];
+                      })))
+
   | GeminiList { filter; include_all } ->
       Handler_gemini.list_models ~sw ~proc_mgr ~clock ~filter ~include_all ()
 
@@ -2020,6 +2400,15 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                           execute ~sw ~proc_mgr ~clock args
                       | "glm.ocr" ->
                           let args = parse_glm_ocr_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "glm.image" ->
+                          let args = parse_glm_image_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "glm.video" ->
+                          let args = parse_glm_video_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "glm.stt" ->
+                          let args = parse_glm_stt_args args in
                           execute ~sw ~proc_mgr ~clock args
                       | "glm.translate" ->
                           let args = parse_glm_translate_args args in

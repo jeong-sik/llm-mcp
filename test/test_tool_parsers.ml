@@ -664,6 +664,116 @@ let () =
         | _ -> fail "Expected GlmOcr variant");
     ];
 
+    "parse_glm_image_args", [
+      test_case "defaults" `Quick (fun () ->
+        let json = `Assoc [("prompt", `String "blue square")] in
+        match Tool_parsers.parse_glm_image_args json with
+        | GlmImage g ->
+          check string "prompt" "blue square" g.prompt;
+          check string "default model" "glm-image" g.model;
+          check string "default quality" "hd" g.quality;
+          check string "default size" "1280x1280" g.size;
+          check int "default timeout" 120 g.timeout;
+          check (option string) "api key none" None g.api_key
+        | _ -> fail "Expected GlmImage variant");
+      test_case "custom values" `Quick (fun () ->
+        let json = `Assoc [
+          ("prompt", `String "robot mascot");
+          ("model", `String "cogview-4-250304");
+          ("quality", `String "standard");
+          ("size", `String "1024x1024");
+          ("timeout", `Int 45);
+          ("api_key", `String "zai-test-key");
+        ] in
+        match Tool_parsers.parse_glm_image_args json with
+        | GlmImage g ->
+          check string "prompt" "robot mascot" g.prompt;
+          check string "model" "cogview-4-250304" g.model;
+          check string "quality" "standard" g.quality;
+          check string "size" "1024x1024" g.size;
+          check int "timeout" 45 g.timeout;
+          check (option string) "api key" (Some "zai-test-key") g.api_key
+        | _ -> fail "Expected GlmImage variant");
+    ];
+
+    "parse_glm_video_args", [
+      test_case "defaults" `Quick (fun () ->
+        let json = `Assoc [("prompt", `String "short loop animation")] in
+        match Tool_parsers.parse_glm_video_args json with
+        | GlmVideo g ->
+          check string "prompt" "short loop animation" g.prompt;
+          check string "default model" "viduq1-text" g.model;
+          check string "default quality" "quality" g.quality;
+          check bool "default with_audio" true g.with_audio;
+          check string "default size" "1920x1080" g.size;
+          check int "default fps" 30 g.fps;
+          check int "default duration" 5 g.duration;
+          check (option string) "default image_url" None g.image_url;
+          check int "default timeout" 120 g.timeout
+        | _ -> fail "Expected GlmVideo variant");
+      test_case "custom values" `Quick (fun () ->
+        let json = `Assoc [
+          ("prompt", `String "camera pan over city");
+          ("model", `String "vidu2-image");
+          ("quality", `String "speed");
+          ("with_audio", `Bool false);
+          ("size", `String "1280x720");
+          ("fps", `Int 60);
+          ("duration", `Int 10);
+          ("image_url", `String "https://example.com/frame.png");
+          ("timeout", `Int 90);
+          ("api_key", `String "zai-video-key");
+        ] in
+        match Tool_parsers.parse_glm_video_args json with
+        | GlmVideo g ->
+          check string "model" "vidu2-image" g.model;
+          check string "quality" "speed" g.quality;
+          check bool "with_audio" false g.with_audio;
+          check string "size" "1280x720" g.size;
+          check int "fps" 60 g.fps;
+          check int "duration" 10 g.duration;
+          check (option string) "image_url" (Some "https://example.com/frame.png") g.image_url;
+          check int "timeout" 90 g.timeout;
+          check (option string) "api key" (Some "zai-video-key") g.api_key
+        | _ -> fail "Expected GlmVideo variant");
+    ];
+
+    "parse_glm_stt_args", [
+      test_case "defaults" `Quick (fun () ->
+        let json = `Assoc [("file_path", `String "/tmp/sample.wav")] in
+        match Tool_parsers.parse_glm_stt_args json with
+        | GlmStt g ->
+          check string "default model" "glm-asr-2512" g.model;
+          check (option string) "file_path" (Some "/tmp/sample.wav") g.file_path;
+          check (option string) "file_base64 none" None g.file_base64;
+          check (option string) "prompt none" None g.prompt;
+          check (list string) "hotwords empty" [] g.hotwords;
+          check bool "stream default" false g.stream;
+          check int "timeout default" 120 g.timeout;
+          check (option string) "api key none" None g.api_key
+        | _ -> fail "Expected GlmStt variant");
+      test_case "custom values" `Quick (fun () ->
+        let json = `Assoc [
+          ("model", `String "glm-asr-2512");
+          ("file_base64", `String "UklGRiQAAABXQVZF");
+          ("prompt", `String "회의록 용어");
+          ("hotwords", `List [`String "Kidsnote"; `String "MASC"]);
+          ("stream", `Bool true);
+          ("timeout", `Int 80);
+          ("api_key", `String "zai-stt-key");
+        ] in
+        match Tool_parsers.parse_glm_stt_args json with
+        | GlmStt g ->
+          check (option string) "file_path none" None g.file_path;
+          check (option string) "file_base64" (Some "UklGRiQAAABXQVZF") g.file_base64;
+          check (option string) "prompt" (Some "회의록 용어") g.prompt;
+          check (list string) "hotwords" ["Kidsnote"; "MASC"] g.hotwords;
+          check bool "stream" true g.stream;
+          check int "timeout" 80 g.timeout;
+          check (option string) "api key" (Some "zai-stt-key") g.api_key
+        | _ -> fail "Expected GlmStt variant");
+    ];
+
     (* {1GLM translate args} *)
 
     "parse_glm_translate_args", [

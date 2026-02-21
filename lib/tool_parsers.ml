@@ -334,6 +334,65 @@ let parse_glm_ocr_args (json : Yojson.Safe.t) : tool_args =
   let api_key = json |> member "api_key" |> to_string_option in
   GlmOcr { file; model; timeout; api_key }
 
+(** Parse JSON arguments for glm.image tool *)
+let parse_glm_image_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let prompt = json |> member "prompt" |> to_string in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-image" in
+  let quality = json |> member "quality" |> to_string_option |> Option.value ~default:"hd" in
+  let size = json |> member "size" |> to_string_option |> Option.value ~default:"1280x1280" in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
+  let api_key = json |> member "api_key" |> to_string_option in
+  GlmImage { prompt; model; quality; size; timeout; api_key }
+
+(** Parse JSON arguments for glm.video tool *)
+let parse_glm_video_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let prompt = json |> member "prompt" |> to_string in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"viduq1-text" in
+  let quality = json |> member "quality" |> to_string_option |> Option.value ~default:"quality" in
+  let with_audio = json |> member "with_audio" |> to_bool_option |> Option.value ~default:true in
+  let size = json |> member "size" |> to_string_option |> Option.value ~default:"1920x1080" in
+  let fps = json |> member "fps" |> to_int_option |> Option.value ~default:30 in
+  let duration = json |> member "duration" |> to_int_option |> Option.value ~default:5 in
+  let image_url = json |> member "image_url" |> to_string_option in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
+  let api_key = json |> member "api_key" |> to_string_option in
+  GlmVideo {
+    prompt;
+    model;
+    quality;
+    with_audio;
+    size;
+    fps;
+    duration;
+    image_url;
+    timeout;
+    api_key;
+  }
+
+(** Parse JSON arguments for glm.stt tool *)
+let parse_glm_stt_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-asr-2512" in
+  let file_path = json |> member "file_path" |> to_string_option in
+  let file_base64 = json |> member "file_base64" |> to_string_option in
+  let prompt = json |> member "prompt" |> to_string_option in
+  let hotwords = parse_optional_string_list json "hotwords" |> Option.value ~default:[] in
+  let stream = json |> member "stream" |> to_bool_option |> Option.value ~default:false in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
+  let api_key = json |> member "api_key" |> to_string_option in
+  GlmStt {
+    model;
+    file_path;
+    file_base64;
+    prompt;
+    hotwords;
+    stream;
+    timeout;
+    api_key;
+  }
+
 (** Parse JSON arguments for glm.translate tool *)
 let parse_glm_translate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in
