@@ -21,7 +21,9 @@ let me_root () =
 
 (** Get PostgreSQL URL from environment *)
 let pg_url () =
-  Sys.getenv_opt "RAILWAY_PG_URL"
+  match Sys.getenv_opt "SUPABASE_DB_URL" with
+  | Some _ as url -> url
+  | None -> Sys.getenv_opt "SB_PG_URL"
 
 (** Get current timestamp in ISO format *)
 let iso_timestamp () =
@@ -53,7 +55,7 @@ let build_refinement_type ~confidence ~user_choice ~needs_refinement =
 let insert_refinement ~sw ~stdenv ~original ~refined ~refinement_type ~session_id =
   match pg_url () with
   | None ->
-      prerr_endline "[log-refinement] RAILWAY_PG_URL not set";
+      prerr_endline "[log-refinement] SUPABASE_DB_URL (or SB_PG_URL) not set";
       false
   | Some url ->
       let uri = Uri.of_string url in
@@ -81,7 +83,7 @@ let insert_refinement ~sw ~stdenv ~original ~refined ~refinement_type ~session_i
 let get_recent_refinements ~sw ~stdenv n =
   match pg_url () with
   | None ->
-      prerr_endline "[log-refinement] RAILWAY_PG_URL not set";
+      prerr_endline "[log-refinement] SUPABASE_DB_URL (or SB_PG_URL) not set";
       []
   | Some url ->
       let uri = Uri.of_string url in

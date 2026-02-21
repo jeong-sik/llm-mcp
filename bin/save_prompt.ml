@@ -68,10 +68,14 @@ let get_hostname () =
 (** Save prompt to PostgreSQL *)
 let save_prompt ~sw ~stdenv ~session_id ~prompt_text ~routing_category ~routing_confidence ~segment_number =
   (* Get PostgreSQL URL from environment *)
-  let pg_url = Sys.getenv_opt "RAILWAY_PG_URL" in
+  let pg_url =
+    match Sys.getenv_opt "SUPABASE_DB_URL" with
+    | Some _ as url -> url
+    | None -> Sys.getenv_opt "SB_PG_URL"
+  in
   match pg_url with
   | None ->
-      prerr_endline "Warning: RAILWAY_PG_URL not set";
+      prerr_endline "Warning: SUPABASE_DB_URL (or SB_PG_URL) not set";
       false
   | Some url ->
       (* Validate prompt *)
