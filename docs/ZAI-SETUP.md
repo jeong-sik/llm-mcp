@@ -115,6 +115,25 @@ graph LR
 }
 ```
 
+### 로컬 모델 스모크 테스트
+
+`llm-mcp` 경유 전체 GLM 텍스트 계열 가용성 점검:
+
+```bash
+# 1) 샌드박스 서버 실행
+./start-llm-mcp.sh --allow-no-auth --port 8939
+
+# 2) 다른 터미널에서 매트릭스 실행
+scripts/glm-smoke-matrix.sh --mode mcp
+```
+
+직접 Z.ai API 호출로 점검:
+
+```bash
+export ZAI_API_KEY="..."
+scripts/glm-smoke-matrix.sh --mode direct
+```
+
 ## 참고 문서
 
 - https://docs.z.ai/devpack/overview
