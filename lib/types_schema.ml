@@ -418,7 +418,7 @@ Models (lowercase required by Z.ai API):
 Parameters:
 - prompt: The prompt to send (required)
 - model: Model name (default: glm-5)
-- modality: text|image|video|stt|tts routing intent (default: text)
+- modality: inventory/routing class (default: text, runtime currently supports text only)
 - cascade: when true, sequentially tries model candidates until success
 - cascade_models: explicit candidate model list for cascade (optional)
 - min_context_tokens: text-only cascade filter threshold (default: 200000)
@@ -461,7 +461,7 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("modality", `Assoc [
         ("type", `String "string");
-        ("description", `String "Routing intent: text | image | video | stt | tts");
+        ("description", `String "Inventory/routing class: text | image | video | stt | tts (runtime currently supports text only)");
         ("enum", `List [`String "text"; `String "image"; `String "video"; `String "stt"; `String "tts"]);
         ("default", `String "text");
       ]);

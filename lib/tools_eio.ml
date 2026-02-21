@@ -118,7 +118,16 @@ let glm_text_context_tokens (model : string) : int option =
 let default_glm_cascade_for_modality (modality : string) : string list =
   match String.lowercase_ascii (String.trim modality) with
   | "text" ->
-      [ "glm-4.7"; "glm-4.7-flash"; "glm-4.7-flashx"; "glm-5"; "glm-5-code" ]
+      [
+        "glm-4.7";
+        "glm-4.7-flash";
+        "glm-4.5";
+        "glm-5";
+        "glm-5-code";
+        "glm-4.6";
+        "glm-4.5-flash";
+        "glm-4.7-flashx";
+      ]
   | "image" ->
       [ "glm-image"; "cogview-4-250304" ]
   | "video" ->
@@ -137,6 +146,11 @@ let default_glm_cascade_for_modality (modality : string) : string list =
       [ "glm-4.5v"; "glm-4.6v" ]
   | _ ->
       [ "glm-5" ]
+
+let glm_runtime_supports_modality (modality : string) : bool =
+  match String.lowercase_ascii (String.trim modality) with
+  | "text" -> true
+  | _ -> false
 
 let resolve_glm_models_for_call
     ~(model : string)
@@ -1144,7 +1158,22 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
       api_key;
     } ->
       let modality = String.lowercase_ascii (String.trim modality) in
-      if cascade then
+      if not (glm_runtime_supports_modality modality) then
+        {
+          model = sprintf "glm (%s)" model;
+          returncode = -1;
+          response =
+            Printf.sprintf
+              "Unsupported modality=%s for glm tool runtime. Supported: text only. Non-text model inventory is tracked in docs/ZAI-MODEL-INVENTORY.md."
+              modality;
+          extra =
+            [
+              ("error", "unsupported_modality");
+              ("requested_modality", modality);
+              ("supported_modality", "text");
+            ];
+        }
+      else if cascade then
         let selected_models =
           resolve_glm_models_for_call
             ~model

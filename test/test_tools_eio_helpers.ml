@@ -297,6 +297,14 @@ let test_glm_resolve_image_cascade () =
   check bool "keeps image model" true (List.mem "glm-image" models);
   check bool "keeps cogview fallback" true (List.mem "cogview-4-250304" models)
 
+let test_glm_runtime_modality_support () =
+  check bool "text is supported" true
+    (Tools_eio.glm_runtime_supports_modality "text");
+  check bool "image not yet supported" false
+    (Tools_eio.glm_runtime_supports_modality "image");
+  check bool "video not yet supported" false
+    (Tools_eio.glm_runtime_supports_modality "video")
+
 (* --- validate_chain --- *)
 
 let test_validate_valid () =
@@ -428,6 +436,7 @@ let () =
       test_case "text cascade default" `Quick test_glm_resolve_text_cascade_default;
       test_case "text cascade filter" `Quick test_glm_resolve_text_cascade_filter;
       test_case "image cascade" `Quick test_glm_resolve_image_cascade;
+      test_case "runtime modality support" `Quick test_glm_runtime_modality_support;
     ]);
     ("validate_chain", [
       test_case "valid" `Quick test_validate_valid;

@@ -22,6 +22,8 @@ export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 ## 사용 가능 모델
 
 > **중요:** Z.ai API는 **소문자** 모델 이름 필수
+>
+> 상세 모델/모달리티 인벤토리 및 계정별 동시성은 `docs/ZAI-MODEL-INVENTORY.md` 참고.
 
 ### GLM-5 (2026-02-11 출시)
 - `glm-5` - 최신, 745B MoE (44B active), 200K context, 128K output ($1/$3.2 per M tokens)
@@ -96,6 +98,21 @@ curl -X POST "http://localhost:8932/mcp" \
 # Chain DSL에서
 graph LR
     a["LLM:glm 'Your prompt here'"]
+```
+
+### GLM 캐스케이드 (200K 이상 텍스트 모델만)
+
+`glm` 도구는 현재 런타임 기준 `modality=text`를 지원합니다.
+텍스트 캐스케이드에서 기본 `min_context_tokens=200000` 필터가 적용됩니다.
+
+```json
+{
+  "prompt": "Analyze this code change.",
+  "model": "glm-4.7",
+  "modality": "text",
+  "cascade": true,
+  "min_context_tokens": 200000
+}
 ```
 
 ## 참고 문서
