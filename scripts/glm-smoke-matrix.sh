@@ -63,7 +63,6 @@ fi
 
 MODELS=(
   glm-5
-  glm-5-code
   glm-4.7
   glm-4.7-flash
   glm-4.7-flashx
@@ -195,10 +194,10 @@ run_cascade_checks() {
         name:"glm",
         arguments:{
           prompt:"Reply OK only",
-          model:"glm-5-code",
+          model:"glm-unavailable-model",
           modality:"text",
           cascade:true,
-          cascade_models:["glm-5-code","glm-4.7"],
+          cascade_models:["glm-unavailable-model","glm-4.7"],
           stream:false,
           thinking:false,
           max_tokens:16,

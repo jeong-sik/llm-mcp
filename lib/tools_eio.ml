@@ -88,7 +88,7 @@ let normalize_glm_model_alias (raw : string) : string option =
   | "4.5-air" -> Some "glm-4.5-air"
   | "4.5-airx" -> Some "glm-4.5-airx"
   | "4.5v" -> Some "glm-4.5v"
-  | "5-code" | "5-coder" | "glm-5-coder" -> Some "glm-5-code"
+  | "5-code" | "5-coder" | "glm-5-coder" -> Some "glm-5"
   | _ -> Some s
 
 let glm_default_min_context_tokens () =
@@ -103,7 +103,6 @@ let glm_default_min_context_tokens () =
 let glm_text_context_tokens (model : string) : int option =
   match String.lowercase_ascii (String.trim model) with
   | "glm-5"
-  | "glm-5-code"
   | "glm-4.7"
   | "glm-4.7-flash"
   | "glm-4.7-flashx"
@@ -127,7 +126,6 @@ let default_glm_cascade_for_modality (modality : string) : string list =
         "glm-4.7-flash";
         "glm-4.5";
         "glm-5";
-        "glm-5-code";
         "glm-4.6";
         "glm-4.5-flash";
         "glm-4.7-flashx";
@@ -780,7 +778,7 @@ let chain_llm_args
           stream = false;
           tools = parsed_tools;  (* Pass through tools from Chain DSL *)
         }
-    | "glm" | "glm-5" | "glm-5-code" | "glm-4.7" | "glm-4.6" | "glm-4.5" as m ->
+    | "glm" | "glm-5" | "glm-4.7" | "glm-4.6" | "glm-4.5" as m ->
         let glm_model = if m = "glm" then "glm-5" else m in
         Types.Glm {
           prompt;
@@ -2323,7 +2321,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         stream = false;
                         tools = parsed_tools;  (* Pass through tools from Chain DSL *)
                       }
-                  | "glm" | "glm-5" | "glm-5-code" | "glm-4.7" | "glm-4.6" | "glm-4.5" as m ->
+                  | "glm" | "glm-5" | "glm-4.7" | "glm-4.6" | "glm-4.5" as m ->
                       let glm_model = if m = "glm" then "glm-5" else m in
                       Types.Glm {
                         prompt;

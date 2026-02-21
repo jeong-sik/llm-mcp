@@ -33,7 +33,6 @@ It separates:
 | `glm-4.6` | 200K | 3 | runtime-supported |
 | `glm-4.5-flash` | 200K | 2 | runtime-supported |
 | `glm-5` | 200K | 3 | runtime-supported |
-| `glm-5-code` | 200K | (not shown in snapshot) | runtime-supported |
 
 ### < 200K context (excluded by default when `min_context_tokens=200000`)
 
@@ -56,7 +55,6 @@ It separates:
   - `glm-4.7-flash`
   - `glm-4.5`
   - `glm-5`
-  - `glm-5-code`
   - `glm-4.6`
   - `glm-4.5-flash`
   - `glm-4.7-flashx`

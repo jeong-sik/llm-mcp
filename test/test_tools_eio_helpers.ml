@@ -217,12 +217,6 @@ let test_cla_flash_lite () =
   | Types.Gemini _ -> check pass "flash-lite->Gemini" () ()
   | _ -> fail "expected Gemini"
 
-let test_cla_glm5_code () =
-  match Tools_eio.chain_llm_args ~timeout:30 ~gemini_use_cli:false
-    ~parsed_tools:None ~model:"glm-5-code" ~prompt:"t" () with
-  | Types.Glm g -> check string "model" "glm-5-code" g.model
-  | _ -> fail "expected Glm"
-
 let test_cla_glm45 () =
   match Tools_eio.chain_llm_args ~timeout:30 ~gemini_use_cli:false
     ~parsed_tools:None ~model:"glm-4.5" ~prompt:"t" () with
@@ -256,7 +250,7 @@ let test_cla_3pro () =
 (* --- glm cascade helpers --- *)
 
 let test_glm_alias_normalize () =
-  check (option string) "5-coder -> glm-5-code" (Some "glm-5-code")
+  check (option string) "5-coder -> glm-5" (Some "glm-5")
     (Tools_eio.normalize_glm_model_alias "5-coder");
   check (option string) "glm -> glm-5" (Some "glm-5")
     (Tools_eio.normalize_glm_model_alias "glm")
@@ -276,7 +270,7 @@ let test_glm_resolve_text_cascade_default () =
       ~cascade_models:None ~min_context_tokens:(Some 200000)
   in
   check bool "has 4.7" true (List.mem "glm-4.7" models);
-  check bool "has 5-code" true (List.mem "glm-5-code" models);
+  check bool "no 5-code in default cascade" false (List.mem "glm-5-code" models);
   check bool "filters out 4.5 (128k)" false (List.mem "glm-4.5" models)
 
 let test_glm_resolve_text_cascade_filter () =
@@ -422,7 +416,6 @@ let () =
       test_case "gpt-5.2" `Quick test_cla_gpt52;
       test_case "sonnet" `Quick test_cla_sonnet;
       test_case "flash-lite" `Quick test_cla_flash_lite;
-      test_case "glm-5-code" `Quick test_cla_glm5_code;
       test_case "glm-4.5" `Quick test_cla_glm45;
       test_case "glm-4.6" `Quick test_cla_glm46;
       test_case "haiku-4.5" `Quick test_cla_haiku45;

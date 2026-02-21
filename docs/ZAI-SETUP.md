@@ -27,7 +27,6 @@ export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 
 ### GLM-5 (2026-02-11 출시)
 - `glm-5` - 최신, 745B MoE (44B active), 200K context, 128K output ($1/$3.2 per M tokens)
-- `glm-5-code` - 코딩 특화 ($1.2/$5 per M tokens)
 
 ### GLM-4.x (이전 세대)
 - `glm-4.7` - 355B MoE (32B active), 200K context
