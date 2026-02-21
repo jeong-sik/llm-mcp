@@ -261,6 +261,15 @@ let execute_chain_run
                   | "ollama_list" ->
                       let args = Tool_parsers.parse_ollama_list_args args in
                       execute ~sw ~proc_mgr ~clock args
+                  | "glm" ->
+                      let args = Tool_parsers.parse_glm_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "glm.ocr" ->
+                      let args = Tool_parsers.parse_glm_ocr_args args in
+                      execute ~sw ~proc_mgr ~clock args
+                  | "glm.translate" ->
+                      let args = Tool_parsers.parse_glm_translate_args args in
+                      execute ~sw ~proc_mgr ~clock args
                   | "echo" ->
                       let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
                                   with _ -> Yojson.Safe.to_string args in

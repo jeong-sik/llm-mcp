@@ -418,7 +418,7 @@ Models (lowercase required by Z.ai API):
 Parameters:
 - prompt: The prompt to send (required)
 - model: Model name (default: glm-5)
-- modality: inventory/routing class (default: text, runtime currently supports text only)
+- modality: text only (reserved for backward compatibility, default: text)
 - cascade: when true, sequentially tries model candidates until success
 - cascade_models: explicit candidate model list for cascade (optional)
 - min_context_tokens: text-only cascade filter threshold (default: 200000)
@@ -461,8 +461,8 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("modality", `Assoc [
         ("type", `String "string");
-        ("description", `String "Inventory/routing class: text | image | video | stt | tts (runtime currently supports text only)");
-        ("enum", `List [`String "text"; `String "image"; `String "video"; `String "stt"; `String "tts"]);
+        ("description", `String "Text-only runtime selector (backward compatibility)");
+        ("enum", `List [`String "text"]);
         ("default", `String "text");
       ]);
       ("cascade", `Assoc [
@@ -565,6 +565,46 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       response_format_schema;
     ]);
     ("required", `List [`String "prompt"]);
+  ];
+}
+
+(** GLM OCR Tool Schema *)
+let glm_ocr_schema : tool_schema = {
+  name = "glm.ocr";
+  description = {|Run GLM OCR via Z.ai `layout_parsing` endpoint.
+
+Use this for document/image OCR extraction. This is separate from text chat/completions.
+
+Parameters:
+- file: URL to PDF/JPG/PNG file (required)
+- model: OCR model name (default: glm-ocr)
+- timeout: Timeout in seconds (default: 120)
+- api_key: Override ZAI_API_KEY (optional)
+|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("file", `Assoc [
+        ("type", `String "string");
+        ("description", `String "File URL for OCR input (PDF/JPG/PNG)");
+      ]);
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "OCR model name");
+        ("default", `String "glm-ocr");
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 120);
+      ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ZAI_API_KEY. Pass API key directly for multi-account rotation.");
+      ]);
+      response_format_schema;
+    ]);
+    ("required", `List [`String "file"]);
   ];
 }
 
@@ -1080,6 +1120,7 @@ let all_schemas = [
   ollama_schema;
   ollama_list_schema;
   glm_schema;
+  glm_ocr_schema;
   glm_translate_schema;
   set_stream_delta_schema;
   get_stream_delta_schema;

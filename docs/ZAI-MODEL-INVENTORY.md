@@ -68,7 +68,7 @@ It separates:
 ## Non-Text Inventory
 
 The following models are tracked for planned endpoint wiring.
-In current `glm` tool runtime, these are inventory-only.
+In current setup, OCR is served by dedicated `glm.ocr` tool. Other non-text models remain inventory-only.
 
 ### Image
 

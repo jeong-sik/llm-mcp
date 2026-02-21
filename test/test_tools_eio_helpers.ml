@@ -294,8 +294,7 @@ let test_glm_resolve_image_cascade () =
       ~model:"glm-image" ~modality:"image" ~cascade:true
       ~cascade_models:None ~min_context_tokens:(Some 200000)
   in
-  check bool "keeps image model" true (List.mem "glm-image" models);
-  check bool "keeps cogview fallback" true (List.mem "cogview-4-250304" models)
+  check (list string) "no implicit non-text fallback" [ "glm-image" ] models
 
 let test_glm_runtime_modality_support () =
   check bool "text is supported" true

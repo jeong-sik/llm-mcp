@@ -638,6 +638,32 @@ let () =
         | _ -> fail "Expected Glm variant");
     ];
 
+    "parse_glm_ocr_args", [
+      test_case "defaults" `Quick (fun () ->
+        let json = `Assoc [("file", `String "https://example.com/sample.png")] in
+        match Tool_parsers.parse_glm_ocr_args json with
+        | GlmOcr g ->
+          check string "file" "https://example.com/sample.png" g.file;
+          check string "default model" "glm-ocr" g.model;
+          check int "default timeout" 120 g.timeout;
+          check (option string) "api key none" None g.api_key
+        | _ -> fail "Expected GlmOcr variant");
+      test_case "custom values" `Quick (fun () ->
+        let json = `Assoc [
+          ("file", `String "https://example.com/doc.pdf");
+          ("model", `String "glm-ocr");
+          ("timeout", `Int 45);
+          ("api_key", `String "zai-test-key");
+        ] in
+        match Tool_parsers.parse_glm_ocr_args json with
+        | GlmOcr g ->
+          check string "file" "https://example.com/doc.pdf" g.file;
+          check string "model" "glm-ocr" g.model;
+          check int "timeout" 45 g.timeout;
+          check (option string) "api key" (Some "zai-test-key") g.api_key
+        | _ -> fail "Expected GlmOcr variant");
+    ];
+
     (* {1GLM translate args} *)
 
     "parse_glm_translate_args", [

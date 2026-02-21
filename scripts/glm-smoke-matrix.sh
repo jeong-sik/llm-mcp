@@ -76,7 +76,6 @@ MODELS=(
   glm-4.6v-flashx
   glm-4-plus
   glm-4-32b-0414-128k
-  glm-ocr
   autoglm-phone-multilingual
 )
 
@@ -269,6 +268,46 @@ run_cascade_checks() {
   else
     echo "non-text-guard     : FAIL | $note"
   fi
+
+  # 4) OCR should be called through glm.ocr (layout_parsing), not glm chat.
+  req=$(jq -nc \
+    '{
+      jsonrpc:"2.0",
+      id:14,
+      method:"tools/call",
+      params:{
+        name:"glm.ocr",
+        arguments:{
+          file:"https://cdn.bigmodel.cn/static/logo/introduction.png",
+          model:"glm-ocr",
+          timeout:60
+        }
+      }
+    }')
+  resp=$(curl -sS --max-time 90 "$MCP_URL" -H 'Content-Type: application/json' -d "$req")
+  note=$(extract_note_from_mcp_response "$resp" | head -c 120)
+  if printf '%s' "$resp" | rg -q '"isError":false'; then
+    echo "glm.ocr-layout     : PASS | ${note:-ocr success}"
+  else
+    echo "glm.ocr-layout     : FAIL | ${note:-ocr failed}"
+  fi
+}
+
+run_ocr_check_direct() {
+  local resp note
+  echo
+  echo "[OCR check direct layout_parsing]"
+  resp=$(curl -sS --max-time 90 -X POST "${DIRECT_URL%/chat/completions}/layout_parsing" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${ZAI_API_KEY}" \
+    -d '{"model":"glm-ocr","file":"https://cdn.bigmodel.cn/static/logo/introduction.png"}')
+  if printf '%s' "$resp" | jq -e '.model == "glm-ocr"' >/dev/null 2>&1; then
+    note=$(printf '%s' "$resp" | jq -r '.request_id // "ok"' | head -c 120)
+    echo "layout_parsing     : PASS | request_id=$note"
+  else
+    note=$(printf '%s' "$resp" | jq -r '.error.message // "unknown error"' 2>/dev/null | head -c 120)
+    echo "layout_parsing     : FAIL | $note"
+  fi
 }
 
 echo "mode: $MODE"
@@ -289,4 +328,6 @@ echo "Summary: PASS=$pass_count FAIL=$fail_count"
 
 if [[ "$MODE" == "mcp" ]]; then
   run_cascade_checks
+else
+  run_ocr_check_direct
 fi

@@ -115,6 +115,18 @@ graph LR
 }
 ```
 
+### OCR (`glm.ocr`)는 별도 툴
+
+OCR은 `glm` 텍스트 채팅 경로가 아니라 `layout_parsing` 엔드포인트를 사용합니다.
+
+```json
+{
+  "file": "https://cdn.bigmodel.cn/static/logo/introduction.png",
+  "model": "glm-ocr",
+  "timeout": 60
+}
+```
+
 ### 로컬 모델 스모크 테스트
 
 `llm-mcp` 경유 전체 GLM 텍스트 계열 가용성 점검:

@@ -142,6 +142,12 @@ type tool_args =
       tools : glm_tool list;  (* Generic tool list: web_search, function, code_interpreter *)
       api_key : string option;  (* Override ZAI_API_KEY env var *)
     }
+  | GlmOcr of {
+      file : string;  (* URL of PDF/JPG/PNG file for OCR layout parsing *)
+      model : string;  (* default: glm-ocr *)
+      timeout : int;
+      api_key : string option;  (* Override ZAI_API_KEY env var *)
+    }
   | GlmTranslate of {
       text : string;
       source_lang : string;

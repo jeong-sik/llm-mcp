@@ -27,6 +27,7 @@ let parse_codex_args = Tool_parsers.parse_codex_args
 let parse_ollama_args = Tool_parsers.parse_ollama_args
 let parse_ollama_list_args = Tool_parsers.parse_ollama_list_args
 let parse_glm_args = Tool_parsers.parse_glm_args
+let parse_glm_ocr_args = Tool_parsers.parse_glm_ocr_args
 let parse_glm_translate_args = Tool_parsers.parse_glm_translate_args
 let parse_chain_run_args = Tool_parsers.parse_chain_run_args
 let parse_chain_validate_args = Tool_parsers.parse_chain_validate_args
@@ -128,24 +129,8 @@ let default_glm_cascade_for_modality (modality : string) : string list =
         "glm-4.5-flash";
         "glm-4.7-flashx";
       ]
-  | "image" ->
-      [ "glm-image"; "cogview-4-250304" ]
-  | "video" ->
-      [
-        "viduq1-text";
-        "viduq1-image";
-        "viduq1-start-end";
-        "vidu2-image";
-        "vidu2-start-end";
-        "vidu2-reference";
-        "cogvideox-3";
-      ]
-  | "stt" ->
-      [ "glm-asr-2512" ]
-  | "tts" ->
-      [ "glm-4.5v"; "glm-4.6v" ]
   | _ ->
-      [ "glm-5" ]
+      []
 
 let glm_runtime_supports_modality (modality : string) : bool =
   match String.lowercase_ascii (String.trim modality) with
@@ -818,6 +803,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
     | Claude { stream; _ } -> stream
     | Codex { stream; _ } -> stream
     | Glm { stream; _ } -> stream
+    | GlmOcr _ -> false
     | _ -> false
   in
   let model_for_log = get_model_name_for_tracing args in
@@ -1617,6 +1603,122 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
         end  (* close else begin for non-streaming *)
         end)  (* close match require_api_key *)
 
+  | GlmOcr { file; model; timeout; api_key } ->
+      let model = model |> String.trim |> String.lowercase_ascii in
+      let model_name = sprintf "glm.ocr (%s)" model in
+      (* Resolve API key: explicit override > ZAI_API_KEY env var *)
+      let resolved_key =
+        match api_key with
+        | Some k -> Some k
+        | None ->
+            match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
+            | Some _err -> None
+            | None -> Some (Tools_tracer.get_api_key "ZAI_API_KEY")
+      in
+      (match resolved_key with
+      | None ->
+          (match Tools_tracer.require_api_key ~env_var:"ZAI_API_KEY" ~model:model_name ~extra:[] with
+          | Some err -> err
+          | None -> Tools_tracer.process_error_result ~model:model_name ~extra:[] "No API key")
+      | Some api_key ->
+          let body =
+            Yojson.Safe.to_string
+              (`Assoc
+                [
+                  ("model", `String model);
+                  ("file", `String file);
+                ])
+          in
+          let cmd = "curl" in
+          let cmd_args =
+            [
+              "-s";
+              "-X";
+              "POST";
+              "https://api.z.ai/api/coding/paas/v4/layout_parsing";
+              "-H";
+              "Content-Type: application/json";
+              "-H";
+              sprintf "Authorization: Bearer %s" api_key;
+              "-d";
+              body;
+              "--max-time";
+              string_of_int timeout;
+            ]
+          in
+          let result = run_command ~sw ~proc_mgr ~clock ~timeout cmd cmd_args in
+          match result with
+          | Error (Timeout t) ->
+              {
+                model = model_name;
+                returncode = -1;
+                response = sprintf "Timeout after %ds" t;
+                extra = [ ("error", "timeout") ];
+              }
+          | Error (ProcessError msg) ->
+              {
+                model = model_name;
+                returncode = -1;
+                response = sprintf "Error: %s" msg;
+                extra = [ ("error", "process_error") ];
+              }
+          | Ok r -> (
+              try
+                let json = Yojson.Safe.from_string r.stdout in
+                let open Yojson.Safe.Util in
+                let error = json |> member "error" in
+                if error <> `Null then
+                  let error_msg =
+                    Safe_parse.json_string
+                      ~context:"glm.ocr:error"
+                      ~default:"Unknown API error"
+                      error "message"
+                  in
+                  {
+                    model = model_name;
+                    returncode = -1;
+                    response = sprintf "API Error: %s" error_msg;
+                    extra = [ ("error", "api_error") ];
+                  }
+                else
+                  let md_results =
+                    Safe_parse.json_string_opt json "md_results"
+                    |> Option.value ~default:""
+                  in
+                  let response =
+                    if String.trim md_results <> "" then md_results
+                    else Yojson.Safe.pretty_to_string json
+                  in
+                  let extra =
+                    [ ("cloud", "zai"); ("endpoint", "layout_parsing") ]
+                  in
+                  let extra =
+                    match Safe_parse.json_string_opt json "request_id" with
+                    | Some rid when rid <> "" -> extra @ [ ("request_id", rid) ]
+                    | _ -> extra
+                  in
+                  let usage = json |> member "usage" in
+                  let extra =
+                    match Safe_parse.json_int_opt usage "total_tokens" with
+                    | Some n -> extra @ [ ("total_tokens", string_of_int n) ]
+                    | None -> extra
+                  in
+                  {
+                    model = model_name;
+                    returncode = 0;
+                    response;
+                    extra;
+                  }
+              with e ->
+                {
+                  model = model_name;
+                  returncode = -1;
+                  response =
+                    sprintf "Error parsing OCR response: %s. Raw: %s"
+                      (Printexc.to_string e) r.stdout;
+                  extra = [ ("error", "parse_error") ];
+                }))
+
   | GeminiList { filter; include_all } ->
       Handler_gemini.list_models ~sw ~proc_mgr ~clock ~filter ~include_all ()
 
@@ -1912,6 +2014,15 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                           execute ~sw ~proc_mgr ~clock args
                       | "ollama_list" ->
                           let args = parse_ollama_list_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "glm" ->
+                          let args = parse_glm_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "glm.ocr" ->
+                          let args = parse_glm_ocr_args args in
+                          execute ~sw ~proc_mgr ~clock args
+                      | "glm.translate" ->
+                          let args = parse_glm_translate_args args in
                           execute ~sw ~proc_mgr ~clock args
                       | "echo" ->
                           (* Simple echo tool for testing *)

@@ -325,6 +325,15 @@ let parse_glm_args (json : Yojson.Safe.t) : tool_args =
     api_key;
   }
 
+(** Parse JSON arguments for glm.ocr tool *)
+let parse_glm_ocr_args (json : Yojson.Safe.t) : tool_args =
+  let open Yojson.Safe.Util in
+  let file = json |> member "file" |> to_string in
+  let model = json |> member "model" |> to_string_option |> Option.value ~default:"glm-ocr" in
+  let timeout = json |> member "timeout" |> to_int_option |> Option.value ~default:120 in
+  let api_key = json |> member "api_key" |> to_string_option in
+  GlmOcr { file; model; timeout; api_key }
+
 (** Parse JSON arguments for glm.translate tool *)
 let parse_glm_translate_args (json : Yojson.Safe.t) : tool_args =
   let open Yojson.Safe.Util in

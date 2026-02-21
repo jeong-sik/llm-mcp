@@ -333,6 +333,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "ollama" -> Ok (Tools_eio.parse_ollama_args arguments)
     | "ollama_list" -> Ok (Tools_eio.parse_ollama_list_args arguments)
     | "glm" -> Ok (Tools_eio.parse_glm_args arguments)
+    | "glm.ocr" -> Ok (Tools_eio.parse_glm_ocr_args arguments)
     | "glm.translate" -> Ok (Tools_eio.parse_glm_translate_args arguments)
     | "chain.run" -> Ok (Tools_eio.parse_chain_run_args arguments)
     | "chain.validate" -> Ok (Tools_eio.parse_chain_validate_args arguments)
