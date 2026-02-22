@@ -1121,7 +1121,11 @@ and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
   in
   let difficulty = match difficulty_hint with
     | Some d -> d
-    | None -> Difficulty_classifier.classify input_text
+    | None ->
+      let classify_exec ~model ~system ~prompt =
+        exec_fn ~model ~system ~prompt ()
+      in
+      (Difficulty_classifier_llm.classify ~exec_fn:classify_exec input_text).difficulty
   in
   (* Limit tiers based on difficulty:
      Easy=1 tier, Medium=2 tiers, Hard=all tiers *)
