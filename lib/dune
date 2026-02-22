@@ -68,6 +68,8 @@
    tools_ollama_agentic
    ; Model Category Registry (LLM:reasoning → ollama:model)
    model_registry
+   ; Difficulty Classifier (heuristic query difficulty for cascade routing)
+   difficulty_classifier
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)
@@ -139,6 +141,8 @@
    run_log_eio
    server_metrics
    spawn_registry
+   ; Difficulty Classifier (LLM-based, uses exec_fn)
+   difficulty_classifier_llm
    ; Agent Loop (Eio)
    agent_loop_eio)
  (libraries

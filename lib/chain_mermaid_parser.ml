@@ -513,9 +513,9 @@ let infer_type_from_id (id : string) (shape : [ `Rect | `Diamond | `Subroutine |
         let ctx_mode = (match parts with
           | _ :: cm :: _ -> Chain_types.context_mode_of_string cm
           | _ -> Chain_types.CM_Summary) in
-        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = ctx_mode; task_hint = None; default_threshold = threshold })
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = ctx_mode; task_hint = None; default_threshold = threshold; difficulty_hint = None })
       else if text = "Cascade" then
-        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7 })
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7; difficulty_hint = None })
       else
         (* Unknown stadium text - treat as LLM with default model *)
         Ok (Llm { model = "gemini"; system = None; prompt = text; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
@@ -1092,9 +1092,9 @@ let parse_node_content (shape : [ `Rect | `Diamond | `Subroutine | `Trap | `Stad
         let ctx_mode = (match parts with
           | _ :: cm :: _ -> Chain_types.context_mode_of_string cm
           | _ -> Chain_types.CM_Summary) in
-        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = ctx_mode; task_hint = None; default_threshold = threshold })
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = ctx_mode; task_hint = None; default_threshold = threshold; difficulty_hint = None })
       else if content = "Cascade" then
-        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7 })
+        Ok (Cascade { tiers = []; confidence_prompt = None; max_escalations = 2; context_mode = Chain_types.CM_Summary; task_hint = None; default_threshold = 0.7; difficulty_hint = None })
       else
         Ok (Llm { model = "gemini"; system = None; prompt = content; timeout = None; tools = None; prompt_ref = None; prompt_vars = []; thinking = false })
 

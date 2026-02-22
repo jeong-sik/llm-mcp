@@ -975,7 +975,12 @@ and parse_node_type (json : Yojson.Safe.t) (type_str : string) : (node_type, str
         | None -> Chain_types.CM_Summary
       in
       let task_hint = parse_string_opt json "task_hint" in
-      Ok (Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold })
+      let difficulty_hint =
+        match parse_string_opt json "difficulty_hint" with
+        | Some s -> Some (Difficulty_classifier.difficulty_of_string s)
+        | None -> None
+      in
+      Ok (Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold; difficulty_hint })
 
   | unknown ->
       Error (Printf.sprintf "Unknown node type: %s" unknown)
@@ -1914,7 +1919,7 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
         let fields = [("type", `String "masc_claim")] in
         let fields = match task_id with Some t -> fields @ [("task_id", `String t)] | None -> fields in
         (match room with Some r -> fields @ [("room", `String r)] | None -> fields)
-    | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold } ->
+    | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold; difficulty_hint } ->
         let tier_json = `List (List.map Chain_types.cascade_tier_to_yojson tiers) in
         let fields = [
           ("type", `String "cascade");
@@ -1925,6 +1930,7 @@ let rec node_to_json_with (include_empty_inputs : bool) (n : node) : Yojson.Safe
         ] in
         let fields = match confidence_prompt with Some p -> ("confidence_prompt", `String p) :: fields | None -> fields in
         let fields = match task_hint with Some h -> ("task_hint", `String h) :: fields | None -> fields in
+        let fields = match difficulty_hint with Some d -> ("difficulty_hint", `String (Difficulty_classifier.difficulty_to_string d)) :: fields | None -> fields in
         fields
   in
   `Assoc (base @ type_fields @ input_mapping)

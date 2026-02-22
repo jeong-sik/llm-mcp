@@ -1100,15 +1100,48 @@ let rec execute_node ctx ~sw ~clock ~exec_fn ~tool_exec (node : node) : (string,
   | Masc_claim { task_id; room } ->
       execute_masc_claim ctx ~tool_exec node ~task_id ~room
   (* Cascade: tiered LLM execution with confidence-based escalation *)
-  | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold = _ } ->
-      execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec node tiers ~confidence_prompt max_escalations context_mode task_hint
+  | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold = _; difficulty_hint } ->
+      execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec node tiers ~confidence_prompt max_escalations context_mode task_hint ~difficulty_hint
 
-(** Execute Cascade node: tiered LLM execution with confidence-based escalation *)
+(** Execute Cascade node: tiered LLM execution with confidence-based escalation.
+    When [difficulty_hint] is provided, it overrides auto-classification.
+    Otherwise, the input text is classified to determine tier limits:
+    - Easy: 1 tier (local only)
+    - Medium: 2 tiers (local + 1 escalation)
+    - Hard: all tiers (existing behavior) *)
 and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
-    tiers ~confidence_prompt max_escalations context_mode task_hint =
+    tiers ~confidence_prompt max_escalations context_mode task_hint ~difficulty_hint =
   record_start ctx node.id ~node_type:"cascade";
   let start = Time_compat.now () in
   let sorted_tiers = List.sort (fun a b -> compare a.Chain_types.tier_index b.Chain_types.tier_index) tiers in
+  (* Determine difficulty: use hint if provided, otherwise classify input text *)
+  let input_text = match Hashtbl.find_opt ctx.outputs "input" with
+    | Some s -> s
+    | None -> ""
+  in
+  let difficulty = match difficulty_hint with
+    | Some d -> d
+    | None ->
+      let classify_exec ~model ~system ~prompt =
+        exec_fn ~model ~system ~prompt ()
+      in
+      (Difficulty_classifier_llm.classify ~exec_fn:classify_exec input_text).difficulty
+  in
+  (* Limit tiers based on difficulty:
+     Easy=1 tier, Medium=2 tiers, Hard=all tiers *)
+  let max_tiers = match difficulty with
+    | Difficulty_classifier.Easy -> 1
+    | Medium -> 2
+    | Hard -> List.length sorted_tiers
+  in
+  let limited_tiers = List.filteri (fun i _ -> i < max_tiers) sorted_tiers in
+  (* Also cap max_escalations for difficulty *)
+  let effective_max_escalations = match difficulty with
+    | Difficulty_classifier.Easy -> 0
+    | Medium -> min 1 max_escalations
+    | Hard -> max_escalations
+  in
+  Hashtbl.replace ctx.outputs "cascade_difficulty" (Difficulty_classifier.difficulty_to_string difficulty);
   let confidence_system = build_confidence_system_prompt ~confidence_prompt task_hint in
   let rec try_tier remaining escalations hard_failures prev_context =
     match remaining with
@@ -1118,18 +1151,18 @@ and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       Hashtbl.replace ctx.outputs "cascade_tier" "exhausted";
       Hashtbl.replace ctx.outputs "cascade_escalations" (string_of_int escalations);
       Hashtbl.replace ctx.outputs "cascade_hard_failures" (string_of_int hard_failures);
-      Chain_stats.track_cascade ~resolved_tier:(List.length sorted_tiers - 1) ~escalations ~hard_failures;
+      Chain_stats.track_cascade ~resolved_tier:(List.length limited_tiers - 1) ~escalations ~hard_failures ~difficulty;
       let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       record_complete ctx node.id ~duration_ms ~success:true ~node_type:"cascade";
       store_node_output ctx node last_output;
       Ok last_output
     | tier :: rest ->
-      if escalations >= max_escalations then begin
+      if escalations >= effective_max_escalations then begin
         let output = match prev_context with Some c -> c | None -> "Max escalations reached" in
         Hashtbl.replace ctx.outputs "cascade_tier" (string_of_int tier.Chain_types.tier_index);
         Hashtbl.replace ctx.outputs "cascade_escalations" (string_of_int escalations);
         Hashtbl.replace ctx.outputs "cascade_hard_failures" (string_of_int hard_failures);
-        Chain_stats.track_cascade ~resolved_tier:tier.tier_index ~escalations ~hard_failures;
+        Chain_stats.track_cascade ~resolved_tier:tier.tier_index ~escalations ~hard_failures ~difficulty;
         let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
         record_complete ctx node.id ~duration_ms ~success:true ~node_type:"cascade";
         store_node_output ctx node output;
@@ -1171,7 +1204,7 @@ and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
               Hashtbl.replace ctx.outputs "cascade_tier" (string_of_int tier.tier_index);
               Hashtbl.replace ctx.outputs "cascade_escalations" (string_of_int escalations);
               Hashtbl.replace ctx.outputs "cascade_hard_failures" (string_of_int hard_failures);
-              Chain_stats.track_cascade ~resolved_tier:tier.tier_index ~escalations ~hard_failures;
+              Chain_stats.track_cascade ~resolved_tier:tier.tier_index ~escalations ~hard_failures ~difficulty;
               let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
               record_complete ctx node.id ~duration_ms ~success:true ~node_type:"cascade";
               store_node_output ctx node cleaned;
@@ -1188,7 +1221,7 @@ and execute_cascade ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
           try_tier rest escalations (hard_failures + 1) prev_context
       end
   in
-  try_tier sorted_tiers 0 0 None
+  try_tier limited_tiers 0 0 None
 
 (** Execute Monte Carlo Tree Search node *)
 and execute_mcts ctx ~sw ~clock ~exec_fn ~tool_exec (parent : node)
