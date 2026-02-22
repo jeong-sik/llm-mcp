@@ -69,7 +69,7 @@ let test_make_cascade_defaults () =
   let node = make_cascade ~id:"test" ~tiers:[] () in
   check string "id" "test" node.id;
   match node.node_type with
-  | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold } ->
+  | Cascade { tiers; confidence_prompt; max_escalations; context_mode; task_hint; default_threshold; _ } ->
     check int "tiers empty" 0 (List.length tiers);
     check bool "no confidence_prompt" true (confidence_prompt = None);
     check int "max_escalations default" 2 max_escalations;
@@ -377,9 +377,9 @@ let test_single_tier () =
 let test_cascade_stats_tracking () =
   Eio_main.run @@ fun _env ->
   Chain_stats.reset ();
-  Chain_stats.track_cascade ~resolved_tier:0 ~escalations:0 ~hard_failures:0;
-  Chain_stats.track_cascade ~resolved_tier:1 ~escalations:1 ~hard_failures:0;
-  Chain_stats.track_cascade ~resolved_tier:2 ~escalations:2 ~hard_failures:1;
+  Chain_stats.track_cascade ~resolved_tier:0 ~escalations:0 ~hard_failures:0 ~difficulty:Difficulty_classifier.Hard;
+  Chain_stats.track_cascade ~resolved_tier:1 ~escalations:1 ~hard_failures:0 ~difficulty:Difficulty_classifier.Hard;
+  Chain_stats.track_cascade ~resolved_tier:2 ~escalations:2 ~hard_failures:1 ~difficulty:Difficulty_classifier.Hard;
   let stats = Chain_stats.cascade_snapshot () in
   check int "total_cascades" 3 stats.total_cascades;
   check int "tier0_resolved" 1 stats.tier0_resolved;
@@ -400,7 +400,7 @@ let test_cascade_stats_all_tier0 () =
   Eio_main.run @@ fun _env ->
   Chain_stats.reset ();
   for _ = 1 to 10 do
-    Chain_stats.track_cascade ~resolved_tier:0 ~escalations:0 ~hard_failures:0
+    Chain_stats.track_cascade ~resolved_tier:0 ~escalations:0 ~hard_failures:0 ~difficulty:Difficulty_classifier.Hard
   done;
   let stats = Chain_stats.cascade_snapshot () in
   check int "total" 10 stats.total_cascades;
@@ -411,9 +411,9 @@ let test_cascade_stats_all_tier0 () =
 let test_stats_yojson_roundtrip () =
   Eio_main.run @@ fun _env ->
   Chain_stats.reset ();
-  Chain_stats.track_cascade ~resolved_tier:0 ~escalations:0 ~hard_failures:0;
-  Chain_stats.track_cascade ~resolved_tier:1 ~escalations:1 ~hard_failures:0;
-  Chain_stats.track_cascade ~resolved_tier:2 ~escalations:2 ~hard_failures:1;
+  Chain_stats.track_cascade ~resolved_tier:0 ~escalations:0 ~hard_failures:0 ~difficulty:Difficulty_classifier.Hard;
+  Chain_stats.track_cascade ~resolved_tier:1 ~escalations:1 ~hard_failures:0 ~difficulty:Difficulty_classifier.Hard;
+  Chain_stats.track_cascade ~resolved_tier:2 ~escalations:2 ~hard_failures:1 ~difficulty:Difficulty_classifier.Hard;
   let stats = Chain_stats.cascade_snapshot () in
   let json = Chain_stats.cascade_stats_to_yojson stats in
   match Chain_stats.cascade_stats_of_yojson json with
@@ -433,7 +433,7 @@ let test_stats_high_volume () =
   (* Track 100 cascades with varying tiers *)
   for i = 0 to 99 do
     let tier = i mod 3 in
-    Chain_stats.track_cascade ~resolved_tier:tier ~escalations:tier ~hard_failures:0
+    Chain_stats.track_cascade ~resolved_tier:tier ~escalations:tier ~hard_failures:0 ~difficulty:Difficulty_classifier.Hard
   done;
   let stats = Chain_stats.cascade_snapshot () in
   check int "total 100" 100 stats.total_cascades;

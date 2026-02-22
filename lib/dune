@@ -68,6 +68,8 @@
    tools_ollama_agentic
    ; Model Category Registry (LLM:reasoning → ollama:model)
    model_registry
+   ; Difficulty Classifier (heuristic query difficulty for cascade routing)
+   difficulty_classifier
    ; Observability
    langfuse
    ; Session (Pure OCaml - moved from llm_mcp)

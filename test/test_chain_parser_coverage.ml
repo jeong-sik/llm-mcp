@@ -1765,7 +1765,8 @@ let test_node_to_json_cascade () =
   let tier = { tier_node; tier_index = 0; confidence_threshold = 0.7; cost_weight = 0.1; pass_context = true } in
   let node = { id = "c"; node_type = Cascade {
     tiers = [tier]; confidence_prompt = Some "rate"; max_escalations = 2;
-    context_mode = CM_Summary; task_hint = Some "review"; default_threshold = 0.7 };
+    context_mode = CM_Summary; task_hint = Some "review"; default_threshold = 0.7;
+    difficulty_hint = None };
     input_mapping = []; output_key = None; depends_on = None } in
   let json = Chain_parser.node_to_json node in
   match json with

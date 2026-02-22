@@ -266,6 +266,9 @@ type cascade_stats = {
   total_hard_failures: int;
   avg_tier: float;
   estimated_savings_pct: float;  (* % saved vs always using top tier *)
+  easy_count: int;     (* Queries classified as Easy *)
+  medium_count: int;   (* Queries classified as Medium *)
+  hard_count: int;     (* Queries classified as Hard *)
 } [@@deriving yojson]
 
 (** Raw cascade data *)
@@ -275,6 +278,9 @@ type cascade_raw = {
   mutable tier_resolution_count: int;  (* Track list length to avoid O(n) List.length *)
   mutable escalation_count: int;
   mutable hard_failure_count: int;
+  mutable easy_count: int;
+  mutable medium_count: int;
+  mutable hard_count: int;
 }
 
 (** Maximum tier history to retain (prevents unbounded memory growth) *)
@@ -295,6 +301,9 @@ let cascade_data : cascade_raw = {
   tier_resolution_count = 0;
   escalation_count = 0;
   hard_failure_count = 0;
+  easy_count = 0;
+  medium_count = 0;
+  hard_count = 0;
 }
 
 (** {1 Reset and Management} *)
@@ -320,7 +329,10 @@ let reset () =
     cascade_data.tier_resolutions <- [];
     cascade_data.tier_resolution_count <- 0;
     cascade_data.escalation_count <- 0;
-    cascade_data.hard_failure_count <- 0
+    cascade_data.hard_failure_count <- 0;
+    cascade_data.easy_count <- 0;
+    cascade_data.medium_count <- 0;
+    cascade_data.hard_count <- 0
   )
 
 (** {1 Subscription Management} *)
@@ -393,7 +405,7 @@ let model_statistics () : model_stats list =
 (** {1 Cascade Statistics} *)
 
 (** Track a cascade execution result *)
-let track_cascade ~resolved_tier ~escalations ~hard_failures =
+let track_cascade ~resolved_tier ~escalations ~hard_failures ~difficulty =
   with_mutex (fun () ->
     cascade_data.cascade_count <- cascade_data.cascade_count + 1;
     cascade_data.tier_resolutions <- resolved_tier :: cascade_data.tier_resolutions;
@@ -405,7 +417,14 @@ let track_cascade ~resolved_tier ~escalations ~hard_failures =
       cascade_data.tier_resolution_count <- max_tier_history
     end;
     cascade_data.escalation_count <- cascade_data.escalation_count + escalations;
-    cascade_data.hard_failure_count <- cascade_data.hard_failure_count + hard_failures
+    cascade_data.hard_failure_count <- cascade_data.hard_failure_count + hard_failures;
+    (match difficulty with
+     | Difficulty_classifier.Easy ->
+       cascade_data.easy_count <- cascade_data.easy_count + 1
+     | Medium ->
+       cascade_data.medium_count <- cascade_data.medium_count + 1
+     | Hard ->
+       cascade_data.hard_count <- cascade_data.hard_count + 1)
   )
 
 (** Compute cascade statistics snapshot *)
@@ -431,6 +450,9 @@ let cascade_snapshot () : cascade_stats =
       total_hard_failures = cascade_data.hard_failure_count;
       avg_tier = avg;
       estimated_savings_pct = savings;
+      easy_count = cascade_data.easy_count;
+      medium_count = cascade_data.medium_count;
+      hard_count = cascade_data.hard_count;
     }
   )
 

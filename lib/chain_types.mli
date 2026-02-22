@@ -310,6 +310,7 @@ type node_type =
       context_mode : context_mode;
       task_hint : string option;
       default_threshold : float;
+      difficulty_hint : Difficulty_classifier.difficulty option;
     }
 
 (** A single execution node *)
@@ -435,7 +436,7 @@ val make_retry : id:string -> node:node -> max_attempts:int -> ?backoff:backoff_
 val make_fallback : id:string -> primary:node -> fallbacks:node list -> node
 val make_race : id:string -> nodes:node list -> ?timeout:float -> unit -> node
 val make_feedback_loop : id:string -> generator:node -> evaluator_config:evaluator_config -> improver_prompt:string -> max_iterations:int -> score_threshold:float -> ?score_operator:threshold_op -> ?conversational:bool -> ?relay_models:string list -> unit -> node
-val make_cascade : id:string -> tiers:cascade_tier list -> ?confidence_prompt:string option -> ?max_escalations:int -> ?context_mode:context_mode -> ?task_hint:string -> ?default_threshold:float -> unit -> node
+val make_cascade : id:string -> tiers:cascade_tier list -> ?confidence_prompt:string option -> ?max_escalations:int -> ?context_mode:context_mode -> ?task_hint:string -> ?default_threshold:float -> ?difficulty_hint:Difficulty_classifier.difficulty -> unit -> node
 
 (** {1 Batch Execution Types} *)
 
