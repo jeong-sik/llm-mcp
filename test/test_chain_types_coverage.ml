@@ -146,7 +146,8 @@ let test_node_type_name_cascade () =
   check string "cascade" "cascade"
     (node_type_name (Cascade {
       tiers = []; confidence_prompt = None; max_escalations = 2;
-      context_mode = CM_Summary; task_hint = None; default_threshold = 0.7
+      context_mode = CM_Summary; task_hint = None; default_threshold = 0.7;
+      difficulty_hint = None
     }))
 
 (* {1Make Helper Tests — Additional} *)
@@ -867,7 +868,8 @@ let () =
                      cost_weight = 1.0; pass_context = true } in
         let node = { id = "cas"; node_type = Cascade {
           tiers = [tier]; confidence_prompt = None; max_escalations = 2;
-          context_mode = CM_Summary; task_hint = None; default_threshold = 0.7 };
+          context_mode = CM_Summary; task_hint = None; default_threshold = 0.7;
+          difficulty_hint = None };
           input_mapping = []; output_key = None; depends_on = None } in
         check int "cascade with no fanouts = 0" 0 (count_parallel_groups node));
       test_case "spawn" `Quick (fun () ->

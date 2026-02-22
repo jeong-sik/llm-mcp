@@ -9,6 +9,11 @@
  (name test_model_registry)
  (libraries llm_mcp.common alcotest))
 
+; Difficulty Classifier tests (heuristic query classification)
+(test
+ (name test_difficulty_classifier)
+ (libraries llm_mcp.common alcotest eio_main))
+
 ; Ollama integration test (requires OLLAMA_TEST=1)
 (executable
  (name test_ollama_integration)

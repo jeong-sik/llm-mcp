@@ -351,6 +351,7 @@ type node_type =
       context_mode : context_mode;
       task_hint : string option;
       default_threshold : float;
+      difficulty_hint : Difficulty_classifier.difficulty option; [@yojson.option]
     }
 [@@deriving yojson]
 
@@ -553,10 +554,10 @@ let make_feedback_loop ~id ~generator ~evaluator_config ~improver_prompt
     }; input_mapping = []; output_key = None; depends_on = None }
 
 let make_cascade ~id ~tiers ?(confidence_prompt=None) ?(max_escalations=2)
-    ?(context_mode=CM_Summary) ?task_hint ?(default_threshold=0.7) () =
+    ?(context_mode=CM_Summary) ?task_hint ?(default_threshold=0.7) ?difficulty_hint () =
   { id; node_type = Cascade {
       tiers; confidence_prompt; max_escalations; context_mode; task_hint;
-      default_threshold
+      default_threshold; difficulty_hint
     }; input_mapping = []; output_key = None; depends_on = None }
 
 (** {1 Batch Execution Types - Phase 5} *)
