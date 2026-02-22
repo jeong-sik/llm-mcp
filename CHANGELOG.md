@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-02-22
+
+### Added
+- Difficulty classifier for cascade routing — heuristic query classification (Easy/Medium/Hard) with category detection (Coding/Reasoning/General).
+- `difficulty_hint` field on Cascade node type for tier limiting (Easy=1, Medium=2, Hard=all).
+- Difficulty distribution tracking in cascade stats (easy_count, medium_count, hard_count).
+- 25 test cases for classification, roundtrip, boundary, and stats integration.
+
 ## [0.7.0] - 2026-02-19
 
 ### Added
