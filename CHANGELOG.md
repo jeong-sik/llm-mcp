@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-02-23
+
+### Changed
+- Default Gemini model migrated to `gemini-3.1-pro-preview`.
+
+### Docs
+- README preset catalog expanded from 5 to 27 entries.
+- CLAUDE.md preset names synchronized with README.
+- GLM tool documented in README.
+
+## [0.7.1] - 2026-02-19
+
+### Chore
+- Version bump to 0.7.1.
+
+### Tests
+- bisect_ppx coverage wave 3: 51.54% to 55.53%.
+
 ## [0.7.0] - 2026-02-19
 
 ### Added
