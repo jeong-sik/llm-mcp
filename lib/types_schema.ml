@@ -418,6 +418,10 @@ Models (lowercase required by Z.ai API):
 Parameters:
 - prompt: The prompt to send (required)
 - model: Model name (default: glm-5)
+- modality: text only (reserved for backward compatibility, default: text)
+- cascade: when true, sequentially tries model candidates until success
+- cascade_models: explicit candidate model list for cascade (optional)
+- min_context_tokens: text-only cascade filter threshold (default: 200000)
 - system_prompt: System prompt for context (optional)
 - temperature: Creativity level 0.0-2.0 (default: 0.7)
 - max_tokens: Max tokens to generate (default: 131072 = 128K full)
@@ -452,8 +456,29 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       ]);
       ("model", `Assoc [
         ("type", `String "string");
-        ("description", `String "Model name: glm-5 (default), glm-5-code (coding), glm-4.7, glm-4.6, glm-4.5 (lowercase required)");
+        ("description", `String "Model name: glm-5 (default), glm-4.7, glm-4.6, glm-4.5 (lowercase required)");
         ("default", `String "glm-5");
+      ]);
+      ("modality", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Text-only runtime selector (backward compatibility)");
+        ("enum", `List [`String "text"]);
+        ("default", `String "text");
+      ]);
+      ("cascade", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "When true, try model candidates in order until one succeeds");
+        ("default", `Bool false);
+      ]);
+      ("cascade_models", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Optional explicit model candidate list for cascade");
+        ("items", `Assoc [("type", `String "string")]);
+      ]);
+      ("min_context_tokens", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Text-only cascade context threshold (default: 200000)");
+        ("default", `Int 200000);
       ]);
       ("system_prompt", `Assoc [
         ("type", `String "string");
@@ -540,6 +565,236 @@ Coding Plan subscribers: Uses /api/coding/paas/v4 endpoint.|};
       response_format_schema;
     ]);
     ("required", `List [`String "prompt"]);
+  ];
+}
+
+(** GLM OCR Tool Schema *)
+let glm_ocr_schema : tool_schema = {
+  name = "glm.ocr";
+  description = {|Run GLM OCR via Z.ai `layout_parsing` endpoint.
+
+Use this for document/image OCR extraction. This is separate from text chat/completions.
+
+Parameters:
+- file: URL to PDF/JPG/PNG file (required)
+- model: OCR model name (default: glm-ocr)
+- timeout: Timeout in seconds (default: 120)
+- api_key: Override ZAI_API_KEY (optional)
+|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("file", `Assoc [
+        ("type", `String "string");
+        ("description", `String "File URL for OCR input (PDF/JPG/PNG)");
+      ]);
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "OCR model name");
+        ("default", `String "glm-ocr");
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 120);
+      ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ZAI_API_KEY. Pass API key directly for multi-account rotation.");
+      ]);
+      response_format_schema;
+    ]);
+    ("required", `List [`String "file"]);
+  ];
+}
+
+(** GLM Image Generation Tool Schema *)
+let glm_image_schema : tool_schema = {
+  name = "glm.image";
+  description = {|Generate images using Z.ai image generation endpoint.
+
+Uses `/api/paas/v4/images/generations` with GLM image-capable models.
+
+Parameters:
+- prompt: Image prompt text (required)
+- model: Image model name (default: glm-image)
+- quality: quality profile (default: hd)
+- size: image size (default: 1280x1280)
+- timeout: Timeout in seconds (default: 120)
+- api_key: Override ZAI_API_KEY (optional)
+|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("prompt", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Image generation prompt");
+      ]);
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Image model name");
+        ("default", `String "glm-image");
+      ]);
+      ("quality", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Image quality profile");
+        ("default", `String "hd");
+      ]);
+      ("size", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Image resolution, e.g. 1024x1024");
+        ("default", `String "1280x1280");
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 120);
+      ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ZAI_API_KEY. Pass API key directly for multi-account rotation.");
+      ]);
+      response_format_schema;
+    ]);
+    ("required", `List [`String "prompt"]);
+  ];
+}
+
+(** GLM Video Generation Tool Schema *)
+let glm_video_schema : tool_schema = {
+  name = "glm.video";
+  description = {|Create video generation tasks via Z.ai video endpoint.
+
+Uses `/api/paas/v4/videos/generations`. Response usually contains a task ID.
+
+Parameters:
+- prompt: Video prompt text (required)
+- model: Video model name (default: viduq1-text)
+- quality: quality profile (quality|speed, default: quality)
+- with_audio: Include generated audio track (default: true)
+- size: video resolution (default: 1920x1080)
+- fps: output frame rate (default: 30)
+- duration: duration in seconds (default: 5)
+- image_url: optional source image URL for image-to-video flows
+- timeout: Timeout in seconds (default: 120)
+- api_key: Override ZAI_API_KEY (optional)
+|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("prompt", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Video generation prompt");
+      ]);
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Video model name");
+        ("default", `String "viduq1-text");
+      ]);
+      ("quality", `Assoc [
+        ("type", `String "string");
+        ("description", `String "quality profile: quality or speed");
+        ("default", `String "quality");
+      ]);
+      ("with_audio", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Whether to include generated audio");
+        ("default", `Bool true);
+      ]);
+      ("size", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Video size, e.g. 1920x1080");
+        ("default", `String "1920x1080");
+      ]);
+      ("fps", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Frame rate");
+        ("default", `Int 30);
+      ]);
+      ("duration", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Duration in seconds");
+        ("default", `Int 5);
+      ]);
+      ("image_url", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Optional source image URL");
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 120);
+      ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ZAI_API_KEY. Pass API key directly for multi-account rotation.");
+      ]);
+      response_format_schema;
+    ]);
+    ("required", `List [`String "prompt"]);
+  ];
+}
+
+(** GLM STT Tool Schema *)
+let glm_stt_schema : tool_schema = {
+  name = "glm.stt";
+  description = {|Transcribe audio to text using Z.ai speech-to-text endpoint.
+
+Uses `/api/paas/v4/audio/transcriptions` (multipart/form-data).
+Provide one of `file_path` (local file) or `file_base64`.
+
+Parameters:
+- model: STT model name (default: glm-asr-2512)
+- file_path: local audio file path (.wav/.mp3/.m4a)
+- file_base64: base64 encoded audio payload
+- prompt: optional context prompt
+- hotwords: optional domain-specific hint words
+- stream: reserved (currently sync-only, default: false)
+- timeout: Timeout in seconds (default: 120)
+- api_key: Override ZAI_API_KEY (optional)
+|};
+  input_schema = `Assoc [
+    ("type", `String "object");
+    ("properties", `Assoc [
+      ("model", `Assoc [
+        ("type", `String "string");
+        ("description", `String "STT model name");
+        ("default", `String "glm-asr-2512");
+      ]);
+      ("file_path", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Local audio file path");
+      ]);
+      ("file_base64", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Base64 encoded audio payload");
+      ]);
+      ("prompt", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Optional context prompt");
+      ]);
+      ("hotwords", `Assoc [
+        ("type", `String "array");
+        ("description", `String "Optional hotword hints");
+        ("items", `Assoc [("type", `String "string")]);
+      ]);
+      ("stream", `Assoc [
+        ("type", `String "boolean");
+        ("description", `String "Reserved flag; current runtime supports sync mode only");
+        ("default", `Bool false);
+      ]);
+      ("timeout", `Assoc [
+        ("type", `String "integer");
+        ("description", `String "Timeout in seconds");
+        ("default", `Int 120);
+      ]);
+      ("api_key", `Assoc [
+        ("type", `String "string");
+        ("description", `String "Override ZAI_API_KEY. Pass API key directly for multi-account rotation.");
+      ]);
+      response_format_schema;
+    ]);
+    ("required", `List []);
   ];
 }
 
@@ -1055,6 +1310,10 @@ let all_schemas = [
   ollama_schema;
   ollama_list_schema;
   glm_schema;
+  glm_ocr_schema;
+  glm_image_schema;
+  glm_video_schema;
+  glm_stt_schema;
   glm_translate_schema;
   set_stream_delta_schema;
   get_stream_delta_schema;

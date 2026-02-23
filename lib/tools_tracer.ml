@@ -15,6 +15,10 @@ let get_model_name = function
   | OllamaList -> "ollama:list"
   | GeminiList _ -> "gemini:list"
   | Glm { model; _ } -> Printf.sprintf "glm:%s" model
+  | GlmOcr { model; _ } -> Printf.sprintf "glm.ocr:%s" model
+  | GlmImage { model; _ } -> Printf.sprintf "glm.image:%s" model
+  | GlmVideo { model; _ } -> Printf.sprintf "glm.video:%s" model
+  | GlmStt { model; _ } -> Printf.sprintf "glm.stt:%s" model
   | GlmTranslate { model; _ } -> Printf.sprintf "glm.translate:%s" model
   | ChainRun _ -> "chain:run"
   | ChainValidate _ -> "chain:validate"
@@ -42,6 +46,12 @@ let get_input = function
   | OllamaList -> "(list models)"
   | GeminiList _ -> "(list models)"
   | Glm { prompt; _ } -> prompt
+  | GlmOcr { file; _ } -> Printf.sprintf "(ocr: %s)" file
+  | GlmImage { prompt; _ } -> prompt
+  | GlmVideo { prompt; _ } -> prompt
+  | GlmStt { file_path; _ } ->
+      let source = match file_path with Some p -> p | None -> "(base64)" in
+      Printf.sprintf "(stt: %s)" source
   | GlmTranslate { text; _ } -> Printf.sprintf "(translate: %s)" (String.sub text 0 (min 50 (String.length text)))
   | ChainRun { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
   | ChainValidate { mermaid; _ } -> Option.value mermaid ~default:"(json chain)"
@@ -71,6 +81,10 @@ let get_tool_name = function
   | SlackPost _ -> "slack.post"
   | SetStreamDelta _ -> "config.set_stream_delta"
   | GetStreamDelta -> "config.get_stream_delta"
+  | GlmOcr _ -> "glm.ocr"
+  | GlmImage _ -> "glm.image"
+  | GlmVideo _ -> "glm.video"
+  | GlmStt _ -> "glm.stt"
   | _ -> "llm"
 
 (** Classify error type from tool result *)
