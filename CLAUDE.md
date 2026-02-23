@@ -17,7 +17,7 @@ prompt.list        - List all registered prompts
 prompt.get         - Get prompt by ID (with optional version)
 ```
 
-### Presets (data/chains/)
+### Presets (data/chains/) — 주요 프리셋
 | ID | Description | When to Use |
 |----|-------------|-------------|
 | consensus-review | 3-LLM consensus code review | 중요한 코드 변경 리뷰 |
@@ -26,7 +26,11 @@ prompt.get         - Get prompt by ID (with optional version)
 | pr-review-pipeline | Automated PR review | CI 통합 자동 리뷰 |
 | incident-response | Incident triage | 장애 초기 대응 |
 | code-migration | Code transform + verify | 대규모 코드 이전 |
-| figma-to-prototype | Figma → iOS/Android/Web | 디자인 → 코드 변환 |
+| figma-to-web-component-v2 | FeedbackLoop SSIM 0.95+ | 디자인 → 코드 변환 (반복 개선) |
+| cascade-default | GLM → Gemini → Claude | 비용 최적화 cascade |
+| coverage-generator | LLM + anti_fake quality gate | 테스트 커버리지 생성 |
+
+전체 27개 프리셋 목록: `chain.list` 또는 README.md 참고.
 
 > 📖 **Full Guide**: [docs/PRESETS.md](docs/PRESETS.md) - Mermaid 다이어그램 + 사용 예시
 

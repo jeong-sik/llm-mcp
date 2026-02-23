@@ -135,13 +135,64 @@ curl -X POST http://localhost:8932/mcp -H "Content-Type: application/json" -d '{
 
 ## 프리셋
 
-| ID | 용도 | 설명 |
-|----|------|------|
-| `consensus-review` | 코드 리뷰 | 3-LLM 합의 기반 |
-| `mcts-mantra-review` | 리팩토링 | MCTS + MANTRA 품질 보장 |
-| `deep-research` | 리서치 | 멀티소스 + 팩트체크 |
-| `cascade-default` | 비용 최적화 | GLM → Gemini → Claude |
-| `incident-response` | 장애 대응 | 초기 분석 + 트리아지 |
+27개의 체인 프리셋이 `data/chains/`에 정의되어 있습니다. `chain.orchestrate`로 실행합니다.
+
+### 코드 리뷰/품질
+
+| ID | 설명 |
+|----|------|
+| `consensus-review` | 3-LLM (Codex, Claude, Gemini) 합의 기반 코드 리뷰 |
+| `consensus-review-inline` | 인라인 코드 스니펫 합의 리뷰 |
+| `pr-review-pipeline` | PR 자동 리뷰 (diff 분석, 커버리지, 보안 스캔) |
+| `mcts-mantra-review` | MCTS + MANTRA 리팩토링 리뷰 |
+| `mcts-mantra-explore` | MCTS 다관점 이슈 탐색 |
+| `mcts-mantra-hybrid` | Explore → Prioritize → Fix 순차 수행 |
+
+### 테스트/커버리지
+
+| ID | 설명 |
+|----|------|
+| `coverage-generator` | LLM 분석 + anti_fake 품질 게이트 기반 테스트 생성 |
+| `coverage-generator-batch` | Fanout + MASC 연동 병렬 커버리지 생성 |
+| `walph-coverage` | 목표 커버리지 도달까지 반복 개선 루프 |
+
+### 리서치/분석
+
+| ID | 설명 |
+|----|------|
+| `deep-research` | 멀티소스 리서치 + 팩트체크 + 종합 |
+| `code-migration` | 코드 분석 → 마이그레이션 계획 → 변환 → 등가성 검증 |
+| `incident-response` | 로그 분석 → 근본 원인 → 런북 매칭 → 커뮤니케이션 초안 |
+
+### Figma/디자인
+
+| ID | 설명 |
+|----|------|
+| `figma-to-web-component-v2` | FeedbackLoop로 SSIM 0.95+ 달성까지 코드 반복 개선 |
+| `figma-to-web-component` | Vision-First Figma → React+Tailwind (SSIM 0.95+ 검증) |
+| `figma-to-prototype` | Figma → iOS/Android/Web 프로토타입 코드 생성 |
+| `figma-to-component-spec` | Figma summary → 컴포넌트 스펙(JSON) 생성 |
+| `figma-extract-deterministic` | LLM 없이 Figma 노드 DSL만 추출 (depth=2 고정) |
+| `figma-visual-regression` | Semantic 검증 → SSIM 비주얼 검증 (2단계 게이트) |
+| `design_to_tasks` | 디자인에서 구현 태스크 추출 (실험적) |
+
+### 비용 최적화/워크플로우
+
+| ID | 설명 |
+|----|------|
+| `cascade-default` | GLM → Gemini → Claude 3-tier cascade (신뢰도 기반 승격) |
+| `mermaid-to-chain` | Mermaid 다이어그램 → Chain JSON 변환 |
+| `walph-docs` | 문서 생성 + 품질 피드백 루프 |
+| `walph-refactor` | 리팩토링 + 품질 피드백 루프 |
+| `walph-figma` | Figma → 코드 + 시각적 충실도 피드백 루프 |
+
+### 내부/테스트용
+
+| ID | 설명 |
+|----|------|
+| `simple-test` | E2E 실행 검증용 최소 체인 |
+| `sonnet-test` | Sonnet 단독 실행 테스트 |
+| `test-feedback-ollama` | Ollama 피드백 루프 테스트 (실험적) |
 
 ```bash
 # 프리셋 실행
