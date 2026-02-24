@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+early_access: false
+
+reviews:
+  poem: false
+  path_filters:
+    - "!_build/**"
+    - "!node_modules/**"
+    - "!.worktrees/**"
+    - "!logs/**"
+    - "!**/*.min.js"
+  auto_review:
+    enabled: true
+    drafts: true
+    auto_incremental_review: true
+  path_instructions:
+    - path: "lib/**/*.{ml,mli}"
+      instructions: >
+        Focus on parser determinism, tool schema/contract consistency, robust provider fallback
+        handling, and explicit error mapping for malformed model/tool responses.
+    - path: "test/**/*.ml"
+      instructions: >
+        Check that tests cover parser edge cases and error paths without relying on brittle timing.
+    - path: "data/chains/**/*.json"
+      instructions: >
+        Verify chain JSON is internally consistent: model identifiers, provider ordering, fallback
+        intent, and key names are aligned with runtime expectations.
+    - path: "scripts/**/*.{sh,bash,zsh}"
+      instructions: >
+        Flag unsafe shell patterns (unquoted variables, brittle pipes, missing strict mode),
+        and portability issues.
+    - path: ".github/workflows/**/*.yml"
+      instructions: >
+        Validate workflow correctness, permission scope minimization, and cache/security risks.
