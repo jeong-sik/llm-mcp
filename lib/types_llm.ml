@@ -32,6 +32,8 @@ type tool_args =
       use_cli : bool;  (* true=CLI, false=direct Anthropic API *)
       fallback_to_api : bool;  (* true=fallback to API on CLI failure *)
       api_key : string option;  (* Override ANTHROPIC_API_KEY env var *)
+      cache_system_prompt : bool;  (* Enable caching for system prompt *)
+      cache_messages : bool;  (* Enable caching for conversation messages *)
     }
   | Codex of {
       prompt : string;

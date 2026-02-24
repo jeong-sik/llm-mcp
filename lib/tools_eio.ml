@@ -743,6 +743,8 @@ let chain_llm_args
           use_cli = true;
           fallback_to_api = true;
           api_key = None;
+          cache_system_prompt = true;  (* Enable caching by default *)
+          cache_messages = true;
         }
     | "codex" | "gpt-5.2" ->
         Types.Codex {
@@ -2286,6 +2288,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         use_cli = true;
                         fallback_to_api = true;
                         api_key = None;
+                        cache_system_prompt = true;
+                        cache_messages = true;
                       }
                   | "codex" | "gpt-5.2" ->
                       Types.Codex {
@@ -2660,6 +2664,8 @@ This chain will execute the goal using a stub model.|}
               use_cli = true;
               fallback_to_api = true;
               api_key = None;
+              cache_system_prompt = true;
+              cache_messages = true;
             } in
             let result = execute ~sw ~proc_mgr ~clock args in
             if result.returncode = 0 then result.response
@@ -3048,7 +3054,9 @@ This chain will execute the goal using a stub model.|}
                              prompt; model; long_context = false; system_prompt = system;
                              output_format = Text; allowed_tools = []; working_directory = "";
                              timeout = node_timeout; stream = false; use_cli = true; fallback_to_api = true;
-                             api_key = None
+                             api_key = None;
+                             cache_system_prompt = true;
+                             cache_messages = true;
                            })
                          else if starts_with ~prefix:"codex" model_name || starts_with ~prefix:"gpt" model_name then
                            execute ~sw ~proc_mgr ~clock (Codex {
@@ -3731,6 +3739,8 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   use_cli = true;
                   fallback_to_api = true;
                   api_key = None;
+                  cache_system_prompt = true;
+                  cache_messages = true;
                 } in
                 let result = execute ~sw ~proc_mgr ~clock args in
                 if result.returncode = 0 then Ok result.response else Error result.response

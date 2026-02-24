@@ -1,5 +1,6 @@
 (** handler_claude.ml - Claude/Anthropic API handler
-    Extracted from tools_eio.ml Phase 2 *)
+    Extracted from tools_eio.ml Phase 2
+    Updated 2026-02-20: Added Prompt Caching support *)
 
 open Printf
 open Types
@@ -7,8 +8,14 @@ open Cli_runner_eio
 
 (** Execute Claude via Direct Anthropic API (faster, no CLI overhead)
     @param api_key_override Optional API key override. When provided, skips
-    ANTHROPIC_API_KEY env var lookup. Used for multi-account rotation. *)
-let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream ?api_key_override () =
+    ANTHROPIC_API_KEY env var lookup. Used for multi-account rotation.
+    @param cache_system_prompt Enable caching for system prompt (default: true)
+    @param cache_messages Enable caching for user messages (default: true) *)
+let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeout ~stream
+    ?api_key_override
+    ?(cache_system_prompt = true)
+    ?(cache_messages = true)
+    () =
   let model_name = sprintf "claude-api (%s)" model in
   let extra_base = [("use_cli", "false")] in
 
@@ -30,28 +37,52 @@ let execute_direct_api ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~timeo
     begin (* Map model alias to API model ID *)
     let api_model = Tool_parsers.resolve_claude_model model in
 
-    (* Build API request body *)
-    let messages = `List [
-      `Assoc [("role", `String "user"); ("content", `String prompt)]
-    ] in
+    (* Build messages with optional cache_control *)
+    let user_message_content =
+      if cache_messages then
+        `Assoc [
+          ("role", `String "user");
+          ("content", `String prompt);
+          ("cache_control", `Assoc [("type", `String "ephemeral")])
+        ]
+      else
+        `Assoc [("role", `String "user"); ("content", `String prompt)]
+    in
+    let messages = `List [user_message_content] in
+
     let body_fields = [
       ("model", `String api_model);
       ("max_tokens", `Int 4096);
       ("messages", messages);
     ] in
+
+    (* Add system prompt with optional cache_control *)
     let body_fields = match system_prompt with
-      | Some sp -> ("system", `String sp) :: body_fields
+      | Some sp ->
+        let system_content =
+          if cache_system_prompt then
+            `Assoc [
+              ("type", `String "text");
+              ("text", `String sp);
+              ("cache_control", `Assoc [("type", `String "ephemeral")])
+            ]
+          else
+            `Assoc [("type", `String "text"); ("text", `String sp)]
+        in
+        ("system", `List [system_content]) :: body_fields
       | None -> body_fields
     in
+
     let body = `Assoc body_fields in
     let body_str = Yojson.Safe.to_string body in
 
-    (* Build curl command *)
+    (* Build curl command with prompt caching beta header *)
     let curl_args = [
       "-s"; "-S";
       "-H"; sprintf "x-api-key: %s" api_key;
       "-H"; "content-type: application/json";
       "-H"; "anthropic-version: 2023-06-01";
+      "-H"; "anthropic-beta: prompt-caching-2024-07-31";  (* Enable prompt caching *)
       "-d"; body_str;
       "https://api.anthropic.com/v1/messages"
     ] in

@@ -352,6 +352,8 @@ let test_build_claude_cmd () =
     use_cli = true;
     fallback_to_api = true;
     api_key = None;
+    cache_system_prompt = true;
+    cache_messages = true;
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->
@@ -378,6 +380,8 @@ let test_build_claude_cmd_with_long_context () =
     use_cli = true;
     fallback_to_api = true;
     api_key = None;
+    cache_system_prompt = true;
+    cache_messages = true;
   } in
   match Tool_parsers.build_claude_cmd args with
   | Ok cmd_list ->

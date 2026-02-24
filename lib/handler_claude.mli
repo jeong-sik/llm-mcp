@@ -1,4 +1,4 @@
-(** Claude/Anthropic API handler *)
+(** Claude/Anthropic API handler with Prompt Caching support *)
 
 val execute_direct_api :
   sw:Eio.Switch.t ->
@@ -10,5 +10,7 @@ val execute_direct_api :
   timeout:int ->
   stream:'a ->
   ?api_key_override:string ->
+  ?cache_system_prompt:bool ->
+  ?cache_messages:bool ->
   unit ->
   Types_core.tool_result
