@@ -82,6 +82,25 @@ let string_of_response_format = function
   | ZstdDict -> "zstd-dict"
   | Auto -> "auto"
 
+(** Prompt cache control for Anthropic API
+    @see https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching *)
+type cache_control =
+  | NoCache          (* No caching (default) *)
+  | Ephemeral        (* Cache for single conversation *)
+  [@@deriving yojson]
+
+let cache_control_of_string = function
+  | "ephemeral" -> Ephemeral
+  | "none" | _ -> NoCache
+
+let string_of_cache_control = function
+  | NoCache -> "none"
+  | Ephemeral -> "ephemeral"
+
+let cache_control_to_yojson = function
+  | NoCache -> `Null
+  | Ephemeral -> `Assoc [("type", `String "ephemeral")]
+
 (** MCP Tool schema - defined early for use in tool_args *)
 type tool_schema = {
   name : string;

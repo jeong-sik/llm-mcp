@@ -40,6 +40,7 @@ let test_wsp_claude () =
     system_prompt = None; output_format = Types.Text;
     allowed_tools = []; working_directory = "/tmp"; timeout = 30;
     stream = false; use_cli = false; fallback_to_api = false; api_key = None;
+    cache_system_prompt = true; cache_messages = true;
   } in
   match Tools_eio.with_system_prompt (Some "sys") args with
   | Types.Claude c -> check (option string) "set" (Some "sys") c.system_prompt

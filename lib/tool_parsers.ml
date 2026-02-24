@@ -125,7 +125,10 @@ let parse_claude_args (json : Yojson.Safe.t) : tool_args =
   let use_cli = json |> member "use_cli" |> to_bool_option |> Option.value ~default:(default_use_cli ()) in
   let fallback_to_api = json |> member "fallback_to_api" |> to_bool_option |> Option.value ~default:(default_fallback_to_api ()) in
   let api_key = json |> member "api_key" |> to_string_option in
-  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream; use_cli; fallback_to_api; api_key }
+  (* Prompt caching options - default to true for cost savings *)
+  let cache_system_prompt = json |> member "cache_system_prompt" |> to_bool_option |> Option.value ~default:true in
+  let cache_messages = json |> member "cache_messages" |> to_bool_option |> Option.value ~default:true in
+  Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; working_directory; timeout; stream; use_cli; fallback_to_api; api_key; cache_system_prompt; cache_messages }
 
 (** Parse JSON arguments for Codex tool *)
 let parse_codex_args (json : Yojson.Safe.t) : tool_args =
