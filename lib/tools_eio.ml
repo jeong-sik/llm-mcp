@@ -801,18 +801,7 @@ let chain_llm_args
           api_key = None;
         }
     | _ ->
-        (* Default to Gemini for unknown models *)
-        Types.Gemini {
-          prompt;
-          model = "gemini-3.1-pro-preview";
-          thinking_level = Types.High;
-          yolo = false;
-          output_format = Types.Text;
-          timeout;
-          stream = false;
-          use_cli = gemini_use_cli;
-          fallback_to_api = true;
-        }
+        failwith (Printf.sprintf "Unknown model: %s" model)
   in
   with_system_prompt system args
 
@@ -2345,19 +2334,8 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         tools = [];  (* No tools for chain execution by default *)
                         api_key = None;
                       }
-                  | _ ->
-                      (* Default to Gemini for unknown models *)
-                      Types.Gemini {
-                        prompt;
-                        model = "gemini-3.1-pro-preview";
-                        thinking_level = Types.High;
-                        yolo = false;
-                        output_format = Types.Text;
-                        timeout = timeout_int;
-                        stream = false;
-                        use_cli = gemini_use_cli_default;
-                        fallback_to_api = true;
-                      }
+              | m ->
+                  failwith (Printf.sprintf "Unknown model: %s" m)
                 in
                 let args = with_system_prompt system args in
                 match args with
@@ -2699,20 +2677,7 @@ This chain will execute the goal using a stub model.|}
             if result.returncode = 0 then result.response
             else failwith (Printf.sprintf "Ollama call failed: %s" result.response)
         | model ->
-            let args = Types.Gemini {
-              prompt;
-              model;
-              thinking_level = Types.High;
-              yolo = false;
-              output_format = Types.Text;
-              timeout = 120;
-              stream = false;
-              use_cli = false;  (* Avoid CLI exec issues in orchestration *)
-              fallback_to_api = false;
-            } in
-            let result = execute ~sw ~proc_mgr ~clock args in
-            if result.returncode = 0 then result.response
-            else failwith (Printf.sprintf "Gemini call failed: %s" result.response)
+            failwith (Printf.sprintf "Unknown orchestrator model: %s" model)
       in
 
       (* Helper: parse "server.tool" format *)
