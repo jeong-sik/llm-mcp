@@ -780,6 +780,76 @@ let test_execute_spawn_inherit_vars () =
         ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan in
       check bool "spawn with pass_vars succeeds" true result.success
 
+(** Test: spawn failure logs to stderr with [chain_executor] prefix and stores
+    the error sentinel in the node context (PR #155).
+    The mock exec_fn returns Error when the prompt contains '!'.
+    We verify:
+    1. stderr gets "[chain_executor] spawn failed for node ..." (the new logging added by PR #155)
+    2. The chain result is marked as failed
+    3. The error message propagates as result.output (execution stops on first error) *)
+let capture_stderr_exec f =
+  let buf = Buffer.create 256 in
+  let pipe_read, pipe_write = Unix.pipe () in
+  let old_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  let result = f () in
+  Unix.dup2 old_stderr Unix.stderr;
+  Unix.close old_stderr;
+  let tmp = Bytes.create 4096 in
+  let rec drain () =
+    match Unix.read pipe_read tmp 0 4096 with
+    | 0 -> ()
+    | n -> Buffer.add_subbytes buf tmp 0 n; drain ()
+    | exception Unix.Unix_error (Unix.EAGAIN, _, _) -> ()
+  in
+  drain ();
+  Unix.close pipe_read;
+  (result, Buffer.contents buf)
+
+let test_execute_spawn_error_sentinel () =
+  Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    Eio.Switch.run @@ fun sw ->
+      (* Inner node uses "fail!" prompt so mock exec_fn returns Error "forced failure" *)
+      let json = Yojson.Safe.from_string {|
+        {
+          "id": "spawn_error_sentinel",
+          "nodes": [
+            { "id": "s", "type": "spawn", "clean": true,
+              "inner": { "id": "fail_node", "type": "llm", "model": "gemini", "prompt": "fail!" }
+            }
+          ],
+          "output": "s"
+        }
+      |} in
+      let chain = parse_chain_exn json in
+      let plan = compile_exn chain in
+      let (result, stderr_output) = capture_stderr_exec (fun () ->
+        Chain_executor_eio.execute ~sw ~clock
+          ~timeout:30 ~trace:false ~exec_fn ~tool_exec plan
+      ) in
+      (* PR #155: spawn failure must be logged to stderr with [chain_executor] prefix *)
+      check bool "stderr not empty on spawn failure" true (String.length stderr_output > 0);
+      let has_executor_prefix =
+        try
+          let _ = Str.search_forward (Str.regexp_string "[chain_executor]") stderr_output 0 in
+          true
+        with Not_found -> false
+      in
+      check bool "stderr contains [chain_executor] prefix" true has_executor_prefix;
+      let has_spawn_keyword =
+        try
+          let _ = Str.search_forward (Str.regexp_string "spawn failed") stderr_output 0 in
+          true
+        with Not_found -> false
+      in
+      check bool "stderr contains 'spawn failed'" true has_spawn_keyword;
+      (* Chain must be marked as failed — spawn error propagates *)
+      check bool "chain result is failed" false result.Chain_types.success;
+      (* The error message is non-empty *)
+      check bool "output is non-empty" true (String.length result.Chain_types.output > 0)
+
 (** {1 Test: execute_tool_node} *)
 
 let test_execute_tool_node_success () =
@@ -1205,6 +1275,7 @@ let threshold_tests = [
 let spawn_tests = [
   "spawn clean context", `Quick, test_execute_spawn_clean_context;
   "spawn inherit vars", `Quick, test_execute_spawn_inherit_vars;
+  "spawn error sentinel", `Quick, test_execute_spawn_error_sentinel;
 ]
 
 let tool_tests = [

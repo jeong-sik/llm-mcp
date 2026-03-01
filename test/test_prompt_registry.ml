@@ -567,6 +567,94 @@ let test_of_json_partial () =
    | Ok n -> check int "imported 1 of 2" 1 n
    | Error e -> fail e)
 
+(** {1 Error Logging Tests (PR #155)} *)
+
+(** Capture stderr output during a thunk *)
+let capture_stderr f =
+  let buf = Buffer.create 256 in
+  let pipe_read, pipe_write = Unix.pipe () in
+  let old_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  (try f () with _ -> ());
+  Unix.dup2 old_stderr Unix.stderr;
+  Unix.close old_stderr;
+  let tmp = Bytes.create 4096 in
+  let rec drain () =
+    match Unix.read pipe_read tmp 0 4096 with
+    | 0 -> ()
+    | n -> Buffer.add_subbytes buf tmp 0 n; drain ()
+    | exception Unix.Unix_error (Unix.EAGAIN, _, _) -> ()
+  in
+  drain ();
+  Unix.close pipe_read;
+  Buffer.contents buf
+
+let test_init_corrupt_file_logs_stderr () =
+  setup ();
+  let dir = Printf.sprintf "/tmp/llm-mcp-pr-test-%d-%d"
+    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  Unix.mkdir dir 0o755;
+  let path = Filename.concat dir "corrupt.json" in
+  Out_channel.with_open_text path (fun oc ->
+    Out_channel.output_string oc "this is not valid json {{{");
+  let stderr_output = capture_stderr (fun () ->
+    init ~persist_dir:dir ()
+  ) in
+  (* Cleanup *)
+  (try Sys.remove path with _ -> ());
+  (try Unix.rmdir dir with _ -> ());
+  (* The corrupt file must produce a stderr message, not be silently ignored *)
+  check bool "stderr not empty on corrupt file" true (String.length stderr_output > 0);
+  let has_prefix = try
+    let _ = Str.search_forward (Str.regexp_string "[prompt_registry]") stderr_output 0 in
+    true
+  with Not_found -> false in
+  check bool "stderr contains [prompt_registry] prefix" true has_prefix
+
+let test_init_invalid_json_schema_logs_stderr () =
+  setup ();
+  let dir = Printf.sprintf "/tmp/llm-mcp-pr-schema-test-%d-%d"
+    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  Unix.mkdir dir 0o755;
+  (* Valid JSON but wrong schema — missing required fields *)
+  let path = Filename.concat dir "bad-schema.json" in
+  Out_channel.with_open_text path (fun oc ->
+    Out_channel.output_string oc {|{"not_a_prompt": true}|});
+  let stderr_output = capture_stderr (fun () ->
+    init ~persist_dir:dir ()
+  ) in
+  (try Sys.remove path with _ -> ());
+  (try Unix.rmdir dir with _ -> ());
+  check bool "stderr not empty on schema error" true (String.length stderr_output > 0);
+  let has_prefix = try
+    let _ = Str.search_forward (Str.regexp_string "[prompt_registry]") stderr_output 0 in
+    true
+  with Not_found -> false in
+  check bool "stderr contains [prompt_registry] prefix" true has_prefix
+
+let test_init_valid_file_no_stderr () =
+  setup ();
+  let dir = Printf.sprintf "/tmp/llm-mcp-pr-valid-test-%d-%d"
+    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  Unix.mkdir dir 0o755;
+  let entry : prompt_entry = {
+    id = "valid-prompt"; template = "Hello {{name}}"; version = "1.0.0";
+    variables = ["name"]; metrics = None;
+    created_at = 1000.0; deprecated = false;
+  } in
+  let json_str = prompt_entry_to_yojson entry |> Yojson.Safe.to_string in
+  let path = Filename.concat dir "valid.json" in
+  Out_channel.with_open_text path (fun oc ->
+    Out_channel.output_string oc json_str);
+  let stderr_output = capture_stderr (fun () ->
+    init ~persist_dir:dir ()
+  ) in
+  (try Sys.remove path with _ -> ());
+  (try Unix.rmdir dir with _ -> ());
+  check bool "no stderr for valid file" true (String.length stderr_output = 0);
+  check bool "valid prompt loaded" true (exists ~id:"valid-prompt" ())
+
 (** {1 Test Suite} *)
 
 let deprecate_tests = [
@@ -596,6 +684,12 @@ let json_io_tests = [
   test_case "of_json partial" `Quick test_of_json_partial;
 ]
 
+let error_logging_tests = [
+  test_case "corrupt file logs to stderr" `Quick test_init_corrupt_file_logs_stderr;
+  test_case "schema error logs to stderr" `Quick test_init_invalid_json_schema_logs_stderr;
+  test_case "valid file no stderr" `Quick test_init_valid_file_no_stderr;
+]
+
 let () =
   run "prompt_registry" [
     ("extract_variables", extract_tests);
@@ -607,4 +701,5 @@ let () =
     ("stats", stats_tests);
     ("advanced_registry", advanced_registry_tests);
     ("json_io", json_io_tests);
+    ("error_logging", error_logging_tests);
   ]
