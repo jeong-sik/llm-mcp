@@ -313,7 +313,8 @@ let of_json (json : Yojson.Safe.t) : (int, string) result =
               description;
             };
             incr count
-        | Error _ -> ()  (* Skip invalid entries *)
+        | Error msg ->
+            Printf.eprintf "[chain_registry] Failed to load entry: %s\n%!" msg
       ) entries;
       Ok !count
     with e ->

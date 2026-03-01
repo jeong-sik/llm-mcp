@@ -1652,7 +1652,9 @@ and execute_spawn ctx ~sw ~clock ~exec_fn ~tool_exec (node : node)
       | Ok output ->
           store_node_output ctx inner output;
           store_node_output ctx node output
-      | Error _ -> ());
+      | Error msg ->
+          Printf.eprintf "[chain_executor] spawn failed for node %s: %s\n%!" node.id msg;
+          store_node_output ctx node ("<spawn_error: " ^ msg ^ ">"));
 
       let duration_ms = int_of_float ((Time_compat.now () -. start) *. 1000.0) in
       let success = Result.is_ok result in
