@@ -354,7 +354,7 @@
 ; Chain_registry tests (storage, lookup, versioning)
 (test
  (name test_chain_registry)
- (libraries llm_mcp.common alcotest unix))
+ (libraries llm_mcp.common alcotest unix str))
 
 ; Chain_batch tests (delay calculation, token estimation, chunking)
 (test

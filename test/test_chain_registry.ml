@@ -236,6 +236,103 @@ let stats_tests = [
   test_case "tracks time" `Quick test_stats_tracks_oldest_newest;
 ]
 
+(** {1 Error Logging Tests (PR #155)} *)
+
+(** Redirect Unix stderr to a pipe and collect output *)
+let capture_stderr f =
+  let buf = Buffer.create 256 in
+  let pipe_read, pipe_write = Unix.pipe () in
+  let old_stderr = Unix.dup Unix.stderr in
+  Unix.dup2 pipe_write Unix.stderr;
+  Unix.close pipe_write;
+  (try f () with _ -> ());
+  Unix.dup2 old_stderr Unix.stderr;
+  Unix.close old_stderr;
+  let tmp = Bytes.create 4096 in
+  let rec drain () =
+    match Unix.read pipe_read tmp 0 4096 with
+    | 0 -> ()
+    | n -> Buffer.add_subbytes buf tmp 0 n; drain ()
+    | exception Unix.Unix_error (Unix.EAGAIN, _, _) -> ()
+  in
+  drain ();
+  Unix.close pipe_read;
+  Buffer.contents buf
+
+(** of_json: an entry whose "chain" field is missing/invalid must log to stderr.
+    The overall call returns Ok with skipped entry rather than failing entirely. *)
+let test_of_json_invalid_entry_logs_stderr () =
+  clear ();
+  (* Build a JSON list with one valid chain and one entry with a broken chain *)
+  let valid_chain = make_test_chain (make_unique_id "valid") in
+  let valid_json = Chain_types.chain_to_yojson valid_chain in
+  let valid_entry = `Assoc [
+    ("chain", valid_json);
+    ("version", `Int 1);
+    ("registered_at", `Float (Unix.gettimeofday ()));
+    ("description", `Null);
+  ] in
+  let invalid_entry = `Assoc [
+    ("chain", `Assoc [("id", `String ""); ("bad_field", `Bool true)]);
+    ("version", `Int 1);
+    ("registered_at", `Float (Unix.gettimeofday ()));
+    ("description", `Null);
+  ] in
+  let json = `List [valid_entry; invalid_entry] in
+  let stderr_output = capture_stderr (fun () ->
+    match of_json json with
+    | Ok _ -> ()
+    | Error _ -> ()
+  ) in
+  check bool "stderr not empty for invalid entry" true (String.length stderr_output > 0);
+  let has_prefix = try
+    let _ = Str.search_forward (Str.regexp_string "[chain_registry]") stderr_output 0 in
+    true
+  with Not_found -> false in
+  check bool "stderr contains [chain_registry] prefix" true has_prefix
+
+(** of_json: completely valid input must not write to stderr and must return the count *)
+let test_of_json_valid_no_stderr () =
+  clear ();
+  let chain = make_test_chain (make_unique_id "valid_nolog") in
+  let chain_json = Chain_types.chain_to_yojson chain in
+  let entry = `Assoc [
+    ("chain", chain_json);
+    ("version", `Int 1);
+    ("registered_at", `Float (Unix.gettimeofday ()));
+    ("description", `Null);
+  ] in
+  let json = `List [entry] in
+  let result = ref (Ok 0) in
+  let stderr_output = capture_stderr (fun () ->
+    result := of_json json
+  ) in
+  check bool "no stderr for valid input" true (String.length stderr_output = 0);
+  (match !result with
+   | Ok n -> check bool "loaded 1 entry" true (n >= 1)
+   | Error msg -> Alcotest.fail ("of_json failed: " ^ msg))
+
+(** load_from_dir: corrupt JSON file is captured as error, not silently lost *)
+let test_load_from_dir_corrupt_file_returns_error () =
+  clear ();
+  let dir = Printf.sprintf "/tmp/llm-mcp-cr-corrupt-%d-%d"
+    (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.0)) in
+  Unix.mkdir dir 0o755;
+  let path = Filename.concat dir "corrupt.json" in
+  Out_channel.with_open_text path (fun oc ->
+    Out_channel.output_string oc "not valid json {{{");
+  let loaded, errors = load_from_dir dir in
+  (try Sys.remove path with _ -> ());
+  (try Unix.rmdir dir with _ -> ());
+  check int "loaded 0 chains from corrupt dir" 0 loaded;
+  check bool "errors list is non-empty" true (List.length errors > 0)
+
+let error_logging_tests = [
+  test_case "of_json invalid entry logs stderr" `Quick test_of_json_invalid_entry_logs_stderr;
+  test_case "of_json valid no stderr" `Quick test_of_json_valid_no_stderr;
+  test_case "load_from_dir corrupt returns error" `Quick test_load_from_dir_corrupt_file_returns_error;
+]
+
 let () =
   Random.init 42;
   run "chain_registry" [
@@ -245,4 +342,5 @@ let () =
     ("version", version_tests);
     ("list", list_tests);
     ("stats", stats_tests);
+    ("error_logging", error_logging_tests);
   ]
