@@ -139,8 +139,10 @@ let init ?persist_dir () =
                     | None -> [entry.version]
                   in
                   Hashtbl.replace version_index entry.id versions
-              | Error _ -> ()  (* Skip invalid files *)
-            with _ -> ()  (* Skip unreadable files *)
+              | Error msg ->
+                Printf.eprintf "[prompt_registry] Failed to parse %s: %s\n%!" file msg
+            with exn ->
+              Printf.eprintf "[prompt_registry] Failed to parse %s: %s\n%!" file (Printexc.to_string exn)
           end
         ) files
       end
