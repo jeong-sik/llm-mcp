@@ -354,6 +354,8 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
     | "slack_post" -> Ok (Tools_eio.parse_slack_post_args arguments)
     | "set_stream_delta" -> Ok (Tools_eio.parse_set_stream_delta_args arguments)
     | "get_stream_delta" -> Ok (Tools_eio.parse_get_stream_delta_args arguments)
+    (* Strict tool dispatch by exact name. Unknown names are treated as explicit errors
+       and do not attempt heuristic/fuzzy recovery. *)
     | other -> Error (sprintf "Unknown tool: %s" other)
   in
 
