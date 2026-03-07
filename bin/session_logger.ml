@@ -155,10 +155,17 @@ let log_end host port user password database session_id summary =
 
 (** Main *)
 let main () =
-  let pg_url = try Sys.getenv "RAILWAY_PG_URL" with Not_found -> "" in
+  let pg_url =
+    match Sys.getenv_opt "SUPABASE_DB_URL" with
+    | Some url -> url
+    | None ->
+        match Sys.getenv_opt "SB_PG_URL" with
+        | Some url -> url
+        | None -> ""
+  in
 
   if String.length pg_url = 0 then begin
-    prerr_endline "❌ RAILWAY_PG_URL not set";
+    prerr_endline "❌ SUPABASE_DB_URL (or SB_PG_URL) not set";
     exit 1
   end;
 
