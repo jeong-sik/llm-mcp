@@ -316,10 +316,12 @@ let handle_initialize ~store id params =
 type tools_list_params = {
   include_hidden : bool;
   include_deprecated : bool;
+  include_usage : bool;
 }
 
 let parse_tools_list_params = function
-  | None -> Ok { include_hidden = false; include_deprecated = false }
+  | None ->
+      Ok { include_hidden = false; include_deprecated = false; include_usage = false }
   | Some (`Assoc _ as payload) ->
       let open Yojson.Safe.Util in
       let parse_bool key =
@@ -333,11 +335,18 @@ let parse_tools_list_params = function
       | Ok include_hidden -> (
           match parse_bool "include_deprecated" with
           | Error _ as err -> err
-          | Ok include_deprecated ->
-              Ok { include_hidden; include_deprecated }))
+          | Ok include_deprecated -> (
+              match parse_bool "include_usage" with
+              | Error _ as err -> err
+              | Ok include_usage ->
+                  Ok { include_hidden; include_deprecated; include_usage })))
   | Some _ -> Error "Invalid params: expected object"
 
-let handle_list_tools ?(include_hidden = false) ?(include_deprecated = false) id =
+let handle_list_tools ?(include_hidden = false) ?(include_deprecated = false)
+    ?(include_usage = false) id =
+  let usage_summary =
+    if include_usage then Some (Telemetry_jsonl.summarize_tool_usage ()) else None
+  in
   let tools =
     Tool_registry.list_entries ~include_hidden ~include_deprecated ()
     |> List.map (fun (entry : Tool_registry.entry) ->
@@ -347,9 +356,26 @@ let handle_list_tools ?(include_hidden = false) ?(include_deprecated = false) id
                 ("description", `String entry.schema.description);
                 ("inputSchema", entry.schema.input_schema);
               ]
+             @
+             (match usage_summary with
+             | Some summary ->
+                 Telemetry_jsonl.tool_usage_fields summary entry.schema.name
+             | None -> [])
              @ Tool_registry.metadata_fields entry))
   in
-  make_response ~id (`Assoc [("tools", `List tools)])
+  let result_fields =
+    [ ("tools", `List tools) ]
+    @
+    match usage_summary with
+    | Some summary ->
+        [
+          ("usageTelemetryAvailable", `Bool summary.telemetry_available);
+          ("usageTelemetryPath", `String summary.telemetry_path);
+          ("usageTotalCalls", `Int summary.total_calls);
+        ]
+    | None -> []
+  in
+  make_response ~id (`Assoc result_fields)
 
 (** Handle tools/call request - direct Eio execution *)
 let handle_call_tool ~sw ~proc_mgr ~clock id params =
@@ -494,9 +520,10 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
                 (session_id_opt, make_response ~id `Null)
             | "tools/list" -> (
                 match parse_tools_list_params req.params with
-                | Ok { include_hidden; include_deprecated } ->
+                | Ok { include_hidden; include_deprecated; include_usage } ->
                     (session_id_opt,
-                     handle_list_tools ~include_hidden ~include_deprecated id)
+                     handle_list_tools ~include_hidden ~include_deprecated
+                       ~include_usage id)
                 | Error msg -> (session_id_opt, make_error ~id (-32602) msg))
             | "tools/call" ->
                 (match req.params with

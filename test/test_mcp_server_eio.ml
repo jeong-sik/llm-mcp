@@ -14,6 +14,27 @@ let run_eio f =
   Eio_main.run @@ fun env ->
   f env
 
+let temp_jsonl_path prefix =
+  let path = Filename.temp_file prefix ".jsonl" in
+  Unix.unlink path;
+  path
+
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv key old
+      | None -> Unix.putenv key "")
+    f
+
 (** {1 Session Store Tests} *)
 
 (** Test session creation and retrieval *)
@@ -563,6 +584,51 @@ let test_tools_list_include_hidden_metadata () =
   check string "set_stream_delta lifecycle" "active"
     (tool_string_field stream_toggle "lifecycle")
 
+let test_tools_list_include_usage_metadata () =
+  let telemetry_path = temp_jsonl_path "llm_tool_usage_" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists telemetry_path then Unix.unlink telemetry_path)
+    (fun () ->
+      write_text_file telemetry_path
+        {|{"timestamp":100.0,"event":["Tool_called",{"tool_name":"gemini","success":true,"duration_ms":10,"agent_id":null,"url":"http://localhost","error":null}]}
+{"timestamp":125.0,"event":["Tool_called",{"tool_name":"gemini","success":false,"duration_ms":20,"agent_id":null,"url":"http://localhost","error":"boom"}]}
+{"timestamp":130.0,"event":["Tool_called",{"tool_name":"chain.run","success":true,"duration_ms":30,"agent_id":null,"url":"http://localhost","error":null}]}
+|}
+      ;
+      with_env "LLM_MCP_TELEMETRY_FILE" telemetry_path @@ fun () ->
+      let response =
+        tools_list_response
+          ~params:(`Assoc [ ("include_usage", `Bool true) ]) ()
+      in
+      let open Yojson.Safe.Util in
+      check bool "telemetry available" true
+        (response |> member "result" |> member "usageTelemetryAvailable" |> to_bool);
+      check string "telemetry path" telemetry_path
+        (response |> member "result" |> member "usageTelemetryPath" |> to_string);
+      check int "usage total calls" 3
+        (response |> member "result" |> member "usageTotalCalls" |> to_int);
+      let tools = tools_from_response response in
+      let gemini =
+        match find_tool tools "gemini" with
+        | Some tool -> tool
+        | None -> fail "gemini missing"
+      in
+      check int "gemini usageCount" 2
+        (gemini |> member "usageCount" |> to_int);
+      check int "gemini successCount" 1
+        (gemini |> member "usageSuccessCount" |> to_int);
+      check int "gemini failureCount" 1
+        (gemini |> member "usageFailureCount" |> to_int);
+      check (float 0.001) "gemini lastUsedAt" 125.0
+        (gemini |> member "usageLastUsedAt" |> to_float);
+      let prompt_register =
+        match find_tool tools "prompt.register" with
+        | Some tool -> tool
+        | None -> fail "prompt.register missing"
+      in
+      check int "unused tool usageCount" 0
+        (prompt_register |> member "usageCount" |> to_int))
+
 (** {1 Test Suite} *)
 
 let () =
@@ -604,5 +670,6 @@ let () =
     "tools_list", [
       test_case "default hidden utilities" `Quick test_tools_list_default_hidden_utilities;
       test_case "include hidden metadata" `Quick test_tools_list_include_hidden_metadata;
+      test_case "include usage metadata" `Quick test_tools_list_include_usage_metadata;
     ];
   ]
