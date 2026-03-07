@@ -231,7 +231,10 @@ let emit event =
   (* Call handlers outside of lock to avoid deadlocks *)
   List.iter (fun handler ->
     try handler event
-    with _ -> () (* Ignore handler errors *)
+    with exn ->
+      Printf.eprintf
+        "[chain_telemetry] subscriber handler failed: %s\n%!"
+        (Printexc.to_string exn)
   ) handlers
 
 (** {1 Subscription API} *)
