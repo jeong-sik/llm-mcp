@@ -14,6 +14,7 @@ open Printf
 
 module P = Mcp_protocol.Protocol
 module R = Mcp_protocol.Resources
+module Jsonrpc = Mcp_protocol.Jsonrpc
 module Http = Http_server_eio
 
 (** {1 JSON-RPC Types} *)
@@ -26,19 +27,35 @@ type jsonrpc_request = {
   params : Yojson.Safe.t option;
 }
 
+(** Convert raw JSON id into SDK id. *)
+let sdk_id_of_json = function
+  | Some json ->
+      (match Jsonrpc.id_of_yojson json with
+       | Ok id -> id
+       | Error _ -> Jsonrpc.Null)
+  | None -> Jsonrpc.Null
+
 (** Parse JSON-RPC request from JSON *)
 let jsonrpc_request_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let jsonrpc = json |> member "jsonrpc" |> to_string in
-    let id_json = json |> member "id" in
-    let id = match id_json with `Null -> None | x -> Some x in
-    let method_ = json |> member "method" |> to_string in
-    let params_json = json |> member "params" in
-    let params = match params_json with `Null -> None | x -> Some x in
-    Ok { jsonrpc; id; method_; params }
-  with exn ->
-    Error (Printexc.to_string exn)
+  match Jsonrpc.message_of_yojson json with
+  | Ok (Jsonrpc.Request req) ->
+      Ok {
+        jsonrpc = req.jsonrpc;
+        id = Some (Jsonrpc.id_to_yojson req.id);
+        method_ = req.method_;
+        params = req.params;
+      }
+  | Ok (Jsonrpc.Notification notification) ->
+      Ok {
+        jsonrpc = notification.jsonrpc;
+        id = None;
+        method_ = notification.method_;
+        params = notification.params;
+      }
+  | Ok (Jsonrpc.Response _) | Ok (Jsonrpc.Error _) ->
+      Error "Expected JSON-RPC request or notification"
+  | Error msg ->
+      Error msg
 
 (** {1 Session Management} *)
 
@@ -168,11 +185,8 @@ let cleanup_stale_sessions store =
 (** {1 JSON-RPC Response Helpers} *)
 
 let make_response ~id result =
-  `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", id);
-    ("result", result);
-  ]
+  Jsonrpc.make_response ~id:(sdk_id_of_json (Some id)) ~result
+  |> Jsonrpc.message_to_yojson
 
 let env_bool name ~default =
   match Sys.getenv_opt name with
@@ -182,14 +196,8 @@ let env_bool name ~default =
       v = "1" || v = "true" || v = "yes" || v = "y"
 
 let make_error ~id code message =
-  `Assoc [
-    ("jsonrpc", `String "2.0");
-    ("id", id);
-    ("error", `Assoc [
-      ("code", `Int code);
-      ("message", `String message);
-    ]);
-  ]
+  Jsonrpc.make_error ~id:(sdk_id_of_json (Some id)) ~code ~message ()
+  |> Jsonrpc.message_to_yojson
 
 (** Supported MCP protocol versions *)
 let supported_protocol_versions = [
@@ -210,13 +218,13 @@ let health_response () =
 
 (** {1 Server Info} *)
 
-let server_info = {
-  P.name = "llm-mcp-eio";
+let server_info : P.server_info = {
+  name = "llm-mcp-eio";
   version = Version.version;
 }
 
-let capabilities = {
-  P.tools = true;
+let capabilities : P.capabilities = {
+  tools = true;
   resources = true;
 }
 
@@ -406,7 +414,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
 
 (** Resources (static for now) *)
 let resources : P.resource list = [
-  { P.uri = "llm-mcp://info";
+  { uri = "llm-mcp://info";
     name = "Server Info";
     description = Some "LLM-MCP server information";
     mime_type = Some "application/json"; }
