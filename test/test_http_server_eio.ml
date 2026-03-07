@@ -8,6 +8,8 @@ let test_shutdown_notification_json_escapes_reason () =
   check string "jsonrpc" "2.0" (parsed |> member "jsonrpc" |> to_string);
   check string "method" "notifications/shutdown"
     (parsed |> member "method" |> to_string);
+  check string "message" "Server is shutting down, please reconnect"
+    (parsed |> member "params" |> member "message" |> to_string);
   check string "reason preserved" reason
     (parsed |> member "params" |> member "reason" |> to_string)
 
