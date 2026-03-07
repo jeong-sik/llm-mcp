@@ -33,7 +33,7 @@ The Chain Engine applies category theory principles to create mathematically sou
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      MCP Layer                               │
-│  chain.run, chain.validate, chain.register                  │
+│  chain.run, chain.validate, chain.convert                   │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼

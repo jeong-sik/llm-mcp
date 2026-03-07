@@ -474,6 +474,95 @@ let test_generate_session_id_unique () =
   let id2 = Server.generate_session_id () in
   check bool "ids are unique" true (id1 <> id2)
 
+(** {1 tools/list Tests} *)
+
+let tools_list_response ?(params = `Assoc []) () =
+  run_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let store = Server.create_session_store () in
+  let request =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("jsonrpc", `String "2.0");
+          ("id", `Int 1);
+          ("method", `String "tools/list");
+          ("params", params);
+        ])
+  in
+  let (_session_id, response) =
+    Server.handle_request ~sw ~proc_mgr ~clock ~store ~headers:[] request
+  in
+  response
+
+let tools_from_response response =
+  let open Yojson.Safe.Util in
+  response |> member "result" |> member "tools" |> to_list
+
+let find_tool tools name =
+  List.find_map
+    (function
+      | `Assoc fields as tool -> (
+          match List.assoc_opt "name" fields with
+          | Some (`String actual) when String.equal actual name -> Some tool
+          | _ -> None)
+      | _ -> None)
+    tools
+
+let tool_string_field tool field =
+  match tool with
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> value
+      | _ -> fail (Printf.sprintf "missing field %s" field))
+  | _ -> fail "tool entry is not an object"
+
+let test_tools_list_default_hidden_utilities () =
+  let tools = tools_from_response (tools_list_response ()) in
+  let names =
+    List.filter_map
+      (function
+        | `Assoc fields -> (
+            match List.assoc_opt "name" fields with
+            | Some (`String name) -> Some name
+            | _ -> None)
+        | _ -> None)
+      tools
+  in
+  check bool "gh_pr_diff hidden" false (List.mem "gh_pr_diff" names);
+  check bool "slack_post hidden" false (List.mem "slack_post" names);
+  check bool "set_stream_delta hidden" false (List.mem "set_stream_delta" names);
+  check bool "get_stream_delta hidden" false (List.mem "get_stream_delta" names);
+  check bool "gemini visible" true (List.mem "gemini" names);
+  check bool "chain.run visible" true (List.mem "chain.run" names);
+  check bool "prompt.register visible" true (List.mem "prompt.register" names)
+
+let test_tools_list_include_hidden_metadata () =
+  let tools =
+    tools_from_response
+      (tools_list_response ~params:(`Assoc [ ("include_hidden", `Bool true) ]) ())
+  in
+  let gh_pr_diff =
+    match find_tool tools "gh_pr_diff" with
+    | Some tool -> tool
+    | None -> fail "gh_pr_diff missing"
+  in
+  check string "gh_pr_diff visibility" "hidden"
+    (tool_string_field gh_pr_diff "visibility");
+  check string "gh_pr_diff lifecycle" "active"
+    (tool_string_field gh_pr_diff "lifecycle");
+  let stream_toggle =
+    match find_tool tools "set_stream_delta" with
+    | Some tool -> tool
+    | None -> fail "set_stream_delta missing"
+  in
+  check string "set_stream_delta visibility" "hidden"
+    (tool_string_field stream_toggle "visibility");
+  check string "set_stream_delta lifecycle" "active"
+    (tool_string_field stream_toggle "lifecycle")
+
 (** {1 Test Suite} *)
 
 let () =
@@ -510,5 +599,10 @@ let () =
     "session_id_generation", [
       test_case "format check" `Quick test_generate_session_id_format;
       test_case "uniqueness" `Quick test_generate_session_id_unique;
+    ];
+
+    "tools_list", [
+      test_case "default hidden utilities" `Quick test_tools_list_default_hidden_utilities;
+      test_case "include hidden metadata" `Quick test_tools_list_include_hidden_metadata;
     ];
   ]

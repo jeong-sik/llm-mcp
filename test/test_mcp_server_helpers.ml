@@ -9,6 +9,28 @@ open Alcotest
 
 module Server = Mcp_server_eio
 
+let tool_names_from_response json =
+  let open Yojson.Safe.Util in
+  json |> member "result" |> member "tools" |> to_list
+  |> List.filter_map (fun tool ->
+         match tool |> member "name" with
+         | `String name -> Some name
+         | _ -> None)
+
+let find_tool_exn json name =
+  let open Yojson.Safe.Util in
+  json |> member "result" |> member "tools" |> to_list
+  |> List.find (fun tool ->
+         match tool |> member "name" with
+         | `String tool_name -> String.equal tool_name name
+         | _ -> false)
+
+let tool_field_string tool key =
+  let open Yojson.Safe.Util in
+  match tool |> member key with
+  | `String value -> value
+  | _ -> failf "missing string field %s" key
+
 (* --- make_error --- *)
 
 let test_make_error_basic () =
@@ -142,6 +164,65 @@ let test_generate_session_id () =
   let id = Server.generate_session_id () in
   check bool "non-empty" true (String.length id > 0)
 
+let test_tools_list_default_surface () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let _, response =
+        Server.handle_request
+          ~sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~store:(Server.create_session_store ())
+          ~headers:[]
+          {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|}
+      in
+      let names = tool_names_from_response response in
+      check bool "gemini listed" true (List.mem "gemini" names);
+      check bool "chain.run listed" true (List.mem "chain.run" names);
+      check bool "prompt.register listed" true (List.mem "prompt.register" names);
+      check bool "gh_pr_diff hidden" false (List.mem "gh_pr_diff" names);
+      check bool "slack_post hidden" false (List.mem "slack_post" names);
+      check bool "set_stream_delta hidden" false (List.mem "set_stream_delta" names);
+      check bool "get_stream_delta hidden" false (List.mem "get_stream_delta" names);
+      let gemini = find_tool_exn response "gemini" in
+      check string "gemini visibility" "default" (tool_field_string gemini "visibility");
+      check string "gemini lifecycle" "active" (tool_field_string gemini "lifecycle")))
+
+let test_tools_list_include_hidden () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let _, response =
+        Server.handle_request
+          ~sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~store:(Server.create_session_store ())
+          ~headers:[]
+          {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"include_hidden":true}}|}
+      in
+      let names = tool_names_from_response response in
+      check bool "gh_pr_diff visible when include_hidden" true (List.mem "gh_pr_diff" names);
+      check bool "slack_post visible when include_hidden" true (List.mem "slack_post" names);
+      let gh = find_tool_exn response "gh_pr_diff" in
+      check string "gh visibility" "hidden" (tool_field_string gh "visibility");
+      check string "gh lifecycle" "active" (tool_field_string gh "lifecycle")))
+
+let test_hidden_tool_still_callable () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let _, response =
+        Server.handle_request
+          ~sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~store:(Server.create_session_store ())
+          ~headers:[]
+          {|{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_stream_delta","arguments":{}}}|}
+      in
+      let open Yojson.Safe.Util in
+      check bool "has result content" true
+        (response |> member "result" |> member "content" <> `Null)))
+
 (* --- auth_middleware --- *)
 
 let test_auth_no_env_no_allow () =
@@ -191,6 +272,11 @@ let () =
       test_case "touch nonexistent" `Quick test_session_touch_nonexistent;
       test_case "cleanup old" `Quick test_session_cleanup_old;
       test_case "generate id" `Quick test_generate_session_id;
+    ]);
+    ("tools_list", [
+      test_case "default surface" `Quick test_tools_list_default_surface;
+      test_case "include hidden" `Quick test_tools_list_include_hidden;
+      test_case "hidden tool still callable" `Quick test_hidden_tool_still_callable;
     ]);
     ("auth_middleware", [
       test_case "no env no allow" `Quick test_auth_no_env_no_allow;

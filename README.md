@@ -239,10 +239,13 @@ curl -X POST http://localhost:8932/mcp -d '{
 - `glm.video`: GLM 비디오 생성 태스크
 - `glm.stt`: GLM 음성 인식(STT)
 - `glm.translate`: GLM 번역
-- `gh_pr_diff`: GitHub PR diff 조회
-- `slack_post`: Slack 메시지 전송
 - `ollama_list`: Ollama 모델 목록
 - `gemini_list`: Gemini 모델 목록
+
+기본 `tools/list`는 LLM core surface만 노출합니다. 아래 유틸리티는 callable 호환성은 유지하지만 hidden-by-default 입니다.
+
+- `gh_pr_diff`: GitHub PR diff 조회
+- `slack_post`: Slack 메시지 전송
 - `set_stream_delta` / `get_stream_delta`: 스트림 델타 설정/조회
 
 상세 인자는 `CLAUDE.md` 또는 `docs/`를 참고하세요.

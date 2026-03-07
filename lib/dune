@@ -30,6 +30,7 @@
    types_gemini    ; Gemini error classification
    types_llm       ; tool_args discriminated union
    types_schema    ; Tool schemas
+   tool_registry   ; Tool visibility/default surface catalog
    types           ; Re-export hub (backward compat)
    dictionary
    ollama_parser

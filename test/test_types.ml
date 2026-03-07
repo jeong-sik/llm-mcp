@@ -71,6 +71,31 @@ let test_all_schemas () =
   check bool "glm.stt exists" true (List.mem "glm.stt" names);
   check bool "glm.translate exists" true (List.mem "glm.translate" names)
 
+let test_default_visible_schemas () =
+  let names =
+    Tool_registry.list_schemas ()
+    |> List.map (fun (schema : tool_schema) -> schema.name)
+  in
+  check int "default visible schemas" 24 (List.length names);
+  check bool "gh_pr_diff hidden by default" false (List.mem "gh_pr_diff" names);
+  check bool "slack_post hidden by default" false (List.mem "slack_post" names);
+  check bool "set_stream_delta hidden by default" false
+    (List.mem "set_stream_delta" names);
+  check bool "get_stream_delta hidden by default" false
+    (List.mem "get_stream_delta" names);
+  check bool "gemini remains visible" true (List.mem "gemini" names);
+  check bool "chain.run remains visible" true (List.mem "chain.run" names);
+  check bool "prompt.register remains visible" true
+    (List.mem "prompt.register" names)
+
+let test_registry_entries_have_unique_names () =
+  let names =
+    List.map (fun (entry : Tool_registry.entry) -> entry.schema.name)
+      Tool_registry.all_entries
+  in
+  let unique = List.sort_uniq String.compare names in
+  check int "registry names unique" (List.length unique) (List.length names)
+
 (** Test gemini_schema structure *)
 let test_gemini_schema () =
   check string "name" "gemini" gemini_schema.name;
@@ -255,6 +280,8 @@ let () =
     ];
     "schemas", [
       test_case "all_schemas count" `Quick test_all_schemas;
+      test_case "default visible schemas" `Quick test_default_visible_schemas;
+      test_case "registry unique names" `Quick test_registry_entries_have_unique_names;
       test_case "gemini_schema" `Quick test_gemini_schema;
       test_case "claude_schema" `Quick test_claude_schema;
       test_case "codex_schema" `Quick test_codex_schema;

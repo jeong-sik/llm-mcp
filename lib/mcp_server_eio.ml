@@ -315,14 +315,42 @@ let handle_initialize ~store id params =
   (Some session.id, make_response ~id result)
 
 (** Handle tools/list request *)
-let handle_list_tools id =
-  let tools = List.map (fun (schema : Types.tool_schema) ->
-    `Assoc [
-      ("name", `String schema.name);
-      ("description", `String schema.description);
-      ("inputSchema", schema.input_schema);
-    ]
-  ) Types.all_schemas in
+type tools_list_params = {
+  include_hidden : bool;
+  include_deprecated : bool;
+}
+
+let parse_tools_list_params = function
+  | None -> Ok { include_hidden = false; include_deprecated = false }
+  | Some (`Assoc _ as payload) ->
+      let open Yojson.Safe.Util in
+      let parse_bool key =
+        match payload |> member key with
+        | `Null -> Ok false
+        | `Bool value -> Ok value
+        | _ -> Error (Printf.sprintf "Invalid params: %s must be a boolean" key)
+      in
+      (match parse_bool "include_hidden" with
+      | Error _ as err -> err
+      | Ok include_hidden -> (
+          match parse_bool "include_deprecated" with
+          | Error _ as err -> err
+          | Ok include_deprecated ->
+              Ok { include_hidden; include_deprecated }))
+  | Some _ -> Error "Invalid params: expected object"
+
+let handle_list_tools ?(include_hidden = false) ?(include_deprecated = false) id =
+  let tools =
+    Tool_registry.list_entries ~include_hidden ~include_deprecated ()
+    |> List.map (fun (entry : Tool_registry.entry) ->
+           `Assoc
+             ([
+                ("name", `String entry.schema.name);
+                ("description", `String entry.schema.description);
+                ("inputSchema", entry.schema.input_schema);
+              ]
+             @ Tool_registry.metadata_fields entry))
+  in
   make_response ~id (`Assoc [("tools", `List tools)])
 
 (** Handle tools/call request - direct Eio execution *)
@@ -331,40 +359,10 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
   let name_opt = params |> member "name" |> to_string_option in
   let arguments = params |> member "arguments" in
 
-  (* Parse arguments based on tool *)
   let parse_args name : (Types.tool_args, string) result =
-    match name with
-    | "gemini" -> Ok (Tools_eio.parse_gemini_args arguments)
-    | "gemini_list" -> Ok (Tools_eio.parse_gemini_list_args arguments)
-    | "claude-cli" -> Ok (Tools_eio.parse_claude_args arguments)
-    | "codex" -> Ok (Tools_eio.parse_codex_args arguments)
-    | "ollama" -> Ok (Tools_eio.parse_ollama_args arguments)
-    | "ollama_list" -> Ok (Tools_eio.parse_ollama_list_args arguments)
-    | "glm" -> Ok (Tools_eio.parse_glm_args arguments)
-    | "glm.ocr" -> Ok (Tools_eio.parse_glm_ocr_args arguments)
-    | "glm.image" -> Ok (Tools_eio.parse_glm_image_args arguments)
-    | "glm.video" -> Ok (Tools_eio.parse_glm_video_args arguments)
-    | "glm.stt" -> Ok (Tools_eio.parse_glm_stt_args arguments)
-    | "glm.translate" -> Ok (Tools_eio.parse_glm_translate_args arguments)
-    | "chain.run" -> Ok (Tools_eio.parse_chain_run_args arguments)
-    | "chain.validate" -> Ok (Tools_eio.parse_chain_validate_args arguments)
-    | "chain.list" -> Ok Types.ChainList
-    | "chain.to_mermaid" -> Ok (Tools_eio.parse_chain_to_mermaid_args arguments)
-    | "chain.visualize" -> Ok (Tools_eio.parse_chain_visualize_args arguments)
-    | "chain.convert" -> Ok (Tools_eio.parse_chain_convert_args arguments)
-    | "chain.orchestrate" -> Ok (Tools_eio.parse_chain_orchestrate_args arguments)
-    | "chain.checkpoints" -> Ok (Tools_eio.parse_chain_checkpoints_args arguments)
-    | "chain.resume" -> Ok (Tools_eio.parse_chain_resume_args arguments)
-    | "prompt.register" -> Ok (Tools_eio.parse_prompt_register_args arguments)
-    | "prompt.list" -> Ok Types.PromptList
-    | "prompt.get" -> Ok (Tools_eio.parse_prompt_get_args arguments)
-    | "gh_pr_diff" -> Ok (Tools_eio.parse_gh_pr_diff_args arguments)
-    | "slack_post" -> Ok (Tools_eio.parse_slack_post_args arguments)
-    | "set_stream_delta" -> Ok (Tools_eio.parse_set_stream_delta_args arguments)
-    | "get_stream_delta" -> Ok (Tools_eio.parse_get_stream_delta_args arguments)
-    (* Strict tool dispatch by exact name. Unknown names are treated as explicit errors
-       and do not attempt heuristic/fuzzy recovery. *)
-    | other -> Error (sprintf "Unknown tool: %s" other)
+    match Tool_registry.find_entry name with
+    | None -> Error (sprintf "Unknown tool: %s" name)
+    | Some entry -> Ok (entry.parse arguments)
   in
 
   match name_opt with
@@ -435,7 +433,7 @@ let handle_read_resource id params =
         ("server", `String "llm-mcp-eio");
         ("version", `String Version.version);
         ("runtime", `String "Eio");
-        ("tools", `Int (List.length Types.all_schemas));
+        ("tools", `Int (List.length (Tool_registry.list_schemas ())));
       ] in
       make_response ~id (`Assoc [
         ("contents", `List [
@@ -496,8 +494,12 @@ let handle_request ~sw ~proc_mgr ~clock ~store ~headers request_str =
                 handle_initialize ~store id req.params
             | "initialized" ->
                 (session_id_opt, make_response ~id `Null)
-            | "tools/list" ->
-                (session_id_opt, handle_list_tools id)
+            | "tools/list" -> (
+                match parse_tools_list_params req.params with
+                | Ok { include_hidden; include_deprecated } ->
+                    (session_id_opt,
+                     handle_list_tools ~include_hidden ~include_deprecated id)
+                | Error msg -> (session_id_opt, make_error ~id (-32602) msg))
             | "tools/call" ->
                 (match req.params with
                  | Some params ->
@@ -912,7 +914,9 @@ let run ~sw ~env ?(config = Http.default_config) () =
   let socket = Eio.Net.listen net ~sw ~backlog:config.max_connections addr in
 
   eprintf "[llm-mcp-eio] Starting on http://%s:%d\n%!" config.host config.port;
-  eprintf "[llm-mcp-eio] Available tools: %d\n%!" (List.length Types.all_schemas);
+  eprintf "[llm-mcp-eio] Default visible tools: %d (all registered: %d)\n%!"
+    (List.length (Tool_registry.list_schemas ()))
+    (List.length Tool_registry.all_schemas);
   eprintf "[llm-mcp-eio] Multi-tenancy: Enabled (per-connection sessions)\n%!";
   (match expected_api_key () with
    | None -> eprintf "[llm-mcp-eio] Authentication: Disabled (development mode)\n%!"
