@@ -218,13 +218,13 @@ let health_response () =
 
 (** {1 Server Info} *)
 
-let server_info = {
-  P.name = "llm-mcp-eio";
+let server_info : P.server_info = {
+  name = "llm-mcp-eio";
   version = Version.version;
 }
 
-let capabilities = {
-  P.tools = true;
+let capabilities : P.capabilities = {
+  tools = true;
   resources = true;
 }
 
@@ -414,7 +414,7 @@ let handle_call_tool ~sw ~proc_mgr ~clock id params =
 
 (** Resources (static for now) *)
 let resources : P.resource list = [
-  { P.uri = "llm-mcp://info";
+  { uri = "llm-mcp://info";
     name = "Server Info";
     description = Some "LLM-MCP server information";
     mime_type = Some "application/json"; }
