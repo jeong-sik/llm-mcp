@@ -20,6 +20,11 @@
  (name test_agent_core_eio)
  (libraries llm_mcp.agent_core_eio alcotest eio eio_main))
 
+; HTTP Server Eio tests
+(test
+ (name test_http_server_eio)
+ (libraries llm_mcp.eio alcotest))
+
 ; Validator Eio tests
 (test
  (name test_validator_eio)

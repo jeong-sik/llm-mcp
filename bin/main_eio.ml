@@ -1328,10 +1328,7 @@ let unregister_sse_client id =
 let sse_client_count () = Hashtbl.length sse_clients
 
 let broadcast_sse_shutdown reason =
-  let data = sprintf
-    {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
-    reason
-  in
+  let data = Http.shutdown_notification_json reason in
   let msg = sprintf "event: notification\ndata: %s\n\n" data in
   Hashtbl.iter (fun _ client ->
     if client.connected then
