@@ -17,6 +17,16 @@ module TJ = Telemetry_jsonl
 
 let temp_dir = Sys.getenv_opt "TMPDIR" |> Option.value ~default:"/tmp"
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv key old
+      | None -> Unix.putenv key "")
+    f
+
 (** {1 expand_tilde Tests} *)
 
 let test_expand_tilde_with_home () =
@@ -82,43 +92,48 @@ let test_ensure_parent_dir () =
 (** {1 append_json Tests} *)
 
 let test_append_json_creates_file () =
-  (* We can't easily test append_json since it uses the global telemetry_file.
-     So we test indirectly via log_tool_called *)
-  (* Just verify the function doesn't crash *)
+  let file = Printf.sprintf "%s/telemetry_append_%d.jsonl" temp_dir (Random.int 100000) in
+  with_env "LLM_MCP_TELEMETRY_FILE" file @@ fun () ->
   TJ.append_json (`Assoc [("test", `Bool true)]);
-  ()
+  check bool "file created" true (Sys.file_exists file);
+  Common.rm_rf file
 
 (** {1 log_tool_called Tests} *)
 
 let test_log_tool_called_success () =
-  (* Just verify it doesn't crash *)
+  let file = Printf.sprintf "%s/telemetry_success_%d.jsonl" temp_dir (Random.int 100000) in
+  with_env "LLM_MCP_TELEMETRY_FILE" file @@ fun () ->
   TJ.log_tool_called
     ~tool_name:"test_tool"
     ~url:"http://localhost:8932"
     ~duration_ms:100
     ~success:true
     ~error:None;
-  ()
+  check bool "file created" true (Sys.file_exists file);
+  Common.rm_rf file
 
 let test_log_tool_called_with_error () =
+  let file = Printf.sprintf "%s/telemetry_error_%d.jsonl" temp_dir (Random.int 100000) in
+  with_env "LLM_MCP_TELEMETRY_FILE" file @@ fun () ->
   TJ.log_tool_called
     ~tool_name:"failing_tool"
     ~url:"http://localhost:8932"
     ~duration_ms:50
     ~success:false
     ~error:(Some "Connection refused");
-  ()
+  check bool "file created" true (Sys.file_exists file);
+  Common.rm_rf file
 
 (** {1 telemetry_file Tests} *)
 
 let test_telemetry_file_default () =
   (* If no env var, should use default *)
-  let file = TJ.telemetry_file in
+  let file = TJ.telemetry_file () in
   check bool "non-empty" true (String.length file > 0)
 
 let test_telemetry_file_expanded () =
   (* Should not contain ~ (would be expanded) *)
-  let file = TJ.telemetry_file in
+  let file = TJ.telemetry_file () in
   check bool "no tilde" true (String.length file = 0 || file.[0] <> '~')
 
 (** {1 Test Suite} *)

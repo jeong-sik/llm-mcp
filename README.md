@@ -244,6 +244,8 @@ curl -X POST http://localhost:8932/mcp -d '{
 
 기본 `tools/list`는 LLM core surface만 노출합니다. 아래 유틸리티는 callable 호환성은 유지하지만 hidden-by-default 입니다.
 
+`tools/list`는 `include_hidden`, `include_deprecated`, `include_usage`를 지원합니다. `include_usage=true`이면 local telemetry(`LLM_MCP_TELEMETRY_FILE` 또는 `data/telemetry.jsonl`) 기준 usage count/success/failure/lastUsedAt 메타가 같이 반환됩니다.
+
 - `gh_pr_diff`: GitHub PR diff 조회
 - `slack_post`: Slack 메시지 전송
 - `set_stream_delta` / `get_stream_delta`: 스트림 델타 설정/조회
