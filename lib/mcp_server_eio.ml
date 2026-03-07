@@ -185,8 +185,7 @@ let cleanup_stale_sessions store =
 (** {1 JSON-RPC Response Helpers} *)
 
 let make_response ~id result =
-  Jsonrpc.make_response ~id:(sdk_id_of_json (Some id)) ~result
-  |> Jsonrpc.message_to_yojson
+  Jsonrpc.make_response_json ~id:(sdk_id_of_json (Some id)) ~result
 
 let env_bool name ~default =
   match Sys.getenv_opt name with
@@ -196,8 +195,7 @@ let env_bool name ~default =
       v = "1" || v = "true" || v = "yes" || v = "y"
 
 let make_error ~id code message =
-  Jsonrpc.make_error ~id:(sdk_id_of_json (Some id)) ~code ~message ()
-  |> Jsonrpc.message_to_yojson
+  Jsonrpc.make_error_json ~id:(sdk_id_of_json (Some id)) ~code ~message ()
 
 (** Supported MCP protocol versions *)
 let supported_protocol_versions = [

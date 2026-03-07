@@ -10,6 +10,7 @@
 
 open Printf
 module Http = Http_server_eio
+module Jsonrpc = Mcp_protocol.Jsonrpc
 
 (** ============== Configuration ============== *)
 
@@ -1328,9 +1329,15 @@ let unregister_sse_client id =
 let sse_client_count () = Hashtbl.length sse_clients
 
 let broadcast_sse_shutdown reason =
-  let data = sprintf
-    {|{"jsonrpc":"2.0","method":"notifications/shutdown","params":{"reason":"%s","message":"Server is shutting down, please reconnect"}}|}
-    reason
+  let data =
+    Jsonrpc.make_notification_json
+      ~method_:"notifications/shutdown"
+      ~params:(`Assoc [
+        ("reason", `String reason);
+        ("message", `String "Server is shutting down, please reconnect");
+      ])
+      ()
+    |> Yojson.Safe.to_string
   in
   let msg = sprintf "event: notification\ndata: %s\n\n" data in
   Hashtbl.iter (fun _ client ->
