@@ -360,17 +360,18 @@ let unregister_sse_client id =
 
 let sse_client_count () = Hashtbl.length sse_clients
 
+let shutdown_notification_json reason =
+  Jsonrpc.make_notification_json
+    ~method_:"notifications/shutdown"
+    ~params:(`Assoc [
+      ("reason", `String reason);
+      ("message", `String "Server is shutting down, please reconnect");
+    ])
+    ()
+  |> Yojson.Safe.to_string
+
 let broadcast_sse_shutdown reason =
-  let data =
-    Jsonrpc.make_notification_json
-      ~method_:"notifications/shutdown"
-      ~params:(`Assoc [
-        ("reason", `String reason);
-        ("message", `String "Server is shutting down, please reconnect");
-      ])
-      ()
-    |> Yojson.Safe.to_string
-  in
+  let data = shutdown_notification_json reason in
   let msg = sprintf "event: notification\ndata: %s\n\n" data in
   Hashtbl.iter (fun client_id client ->
     if client.connected then
