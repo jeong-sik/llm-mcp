@@ -8,14 +8,17 @@
       pg-health --json     # JSON output with latency
 
     Environment:
-      RAILWAY_PG_URL - PostgreSQL connection URL (postgres://user:pass@host:port/db)
+      SUPABASE_DB_URL or SB_PG_URL - PostgreSQL connection URL (postgres://user:pass@host:port/db)
 *)
 
 (** Get PostgreSQL URL from environment *)
 let get_pg_url () =
-  match Sys.getenv_opt "RAILWAY_PG_URL" with
+  match Sys.getenv_opt "SUPABASE_DB_URL" with
   | Some url -> url
-  | None -> failwith "RAILWAY_PG_URL environment variable not set"
+  | None ->
+      match Sys.getenv_opt "SB_PG_URL" with
+      | Some url -> url
+      | None -> failwith "SUPABASE_DB_URL (or SB_PG_URL) environment variable not set"
 
 (** Parse URL to get host for display (hide password) *)
 let safe_url url =
