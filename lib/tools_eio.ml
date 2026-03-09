@@ -207,147 +207,16 @@ let string_of_gemini_error = Types.string_of_gemini_error
 
 (** {1 MCP Client Calls - Direct Style} *)
 
-(** Parse MCP HTTP response - from Tools_mcp_parse module *)
-let parse_mcp_http_response = Tools_mcp_parse.parse_http_response
-
-(** Call an external MCP tool via HTTP using curl subprocess *)
-let call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout =
-  match Tool_config.get_mcp_server_url server_name with
-  | None -> sprintf "Error: MCP server '%s' not found or not HTTP type" server_name
-  | Some url ->
-      let request_body = Tools_mcp_parse.build_tool_call_request ~tool_name ~arguments in
-      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
-        "-s"; "-X"; "POST"; url;
-        "-H"; "Content-Type: application/json";
-        "-H"; "Accept: application/json, text/event-stream";
-        "-d"; request_body
-      ] in
-      match result with
-      | Error (Timeout t) -> sprintf "Error: MCP call to %s/%s timed out after %ds" server_name tool_name t
-      | Error (ProcessError msg) -> sprintf "Error: MCP call failed: %s" msg
-      | Ok r ->
-          parse_mcp_http_response r.stdout |> Option.value ~default:r.stdout
-
-(** Call MCP via stdio subprocess - shell injection safe *)
-let call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command ~args ~tool_name ~arguments ~timeout =
-  let request_body = Tools_mcp_parse.build_tool_call_request ~tool_name ~arguments in
-  let effective_timeout = min timeout 60 in
-  let result = run_command_with_stdin ~sw ~proc_mgr ~clock
-    ~timeout:effective_timeout
-    ~stdin_data:request_body
-    command args
-  in
-  match result with
-  | Error (Timeout t) ->
-      sprintf "Error: stdio MCP call to %s/%s timed out after %ds" server_name tool_name t
-  | Error (ProcessError msg) ->
-      sprintf "Error: stdio MCP call failed: %s" msg
-  | Ok r ->
-      if r.exit_code <> 0 then
-        sprintf "Error: stdio MCP call exited with code %d: %s" r.exit_code r.stderr
-      else
-        try
-          let json = Yojson.Safe.from_string r.stdout in
-          let open Yojson.Safe.Util in
-          let result = json |> member "result" in
-          let error = json |> member "error" in
-          if error <> `Null then
-            let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
-            sprintf "Error: %s" msg
-          else
-            let content = result |> member "content" in
-            match content with
-            | `List items ->
-                let texts = List.filter_map (fun item ->
-                  match item |> member "type" |> to_string_option with
-                  | Some "text" -> item |> member "text" |> to_string_option
-                  | _ -> None
-                ) items in
-                String.concat "\n" texts
-            | _ ->
-                let result_str = result |> to_string_option in
-                Option.value result_str ~default:r.stdout
-        with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ -> r.stdout
-
-(** Unified MCP call dispatcher *)
-let call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout =
-  match Tool_config.get_mcp_server_config server_name with
-  | None -> sprintf "Error: MCP server '%s' not found in config" server_name
-  | Some config ->
-      match config.url, config.command with
-      | Some _, _ ->
-          call_external_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout
-      | None, Some cmd ->
-          call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command:cmd ~args:config.args ~tool_name ~arguments ~timeout
-      | None, None ->
-          sprintf "Error: MCP server '%s' has no valid URL or command" server_name
-
-let masc_enabled () =
-  match Sys.getenv_opt "LLM_MCP_MASC_HOOK" with
-  | Some v -> env_truthy v
-  | None -> false
-
-let masc_agent_base () =
-  Sys.getenv_opt "LLM_MCP_MASC_AGENT" |> Option.value ~default:"llm-mcp"
-
-let masc_heartbeat_interval () =
-  match Sys.getenv_opt "LLM_MCP_MASC_HEARTBEAT_SEC" with
-  | Some v -> int_of_string_opt v |> Option.value ~default:30
-  | None -> 30
-
-let masc_available () =
-  match get_mcp_server_config "masc" with
-  | Some cfg -> cfg.url <> None || cfg.command <> None
-  | None -> false
-
-let call_masc_tool ~sw ~proc_mgr ~clock ~tool_name ~arguments =
-  call_mcp ~sw ~proc_mgr ~clock ~server_name:"masc" ~tool_name ~arguments ~timeout:5
-
-let with_masc_hook ~sw ~proc_mgr ~clock ~label f =
-  if not (masc_enabled () && masc_available ()) then
-    f ()
-  else
-    let base = masc_agent_base () in
-    let ts = int_of_float (Time_compat.now ()) in
-    let agent =
-      let safe_label = String.map (fun c -> if c = '.' then '-' else c) label in
-      Printf.sprintf "%s-%s-%d" base safe_label ts
-    in
-    let join_args = `Assoc [
-      ("agent_name", `String agent);
-      ("capabilities", `List [`String "chain"]);
-    ] in
-    let heartbeat_args = `Assoc [("agent_name", `String agent)] in
-    let leave_args = `Assoc [("agent_name", `String agent)] in
-    (* Eio-idiomatic: use Switch.on_release for MASC session lifecycle *)
-    Eio.Switch.run (fun masc_sw ->
-      (* Register cleanup first, before join *)
-      Eio.Switch.on_release masc_sw (fun () ->
-        try
-          ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_leave" ~arguments:leave_args)
-        with ex ->
-          Log.warn "masc_hook" "masc_leave failed in on_release: %s"
-            (Printexc.to_string ex)
-      );
-      (* Now join *)
-      let _ = call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_join" ~arguments:join_args in
-      (* Heartbeat fiber in same switch - will be cancelled when switch exits *)
-      let interval = float_of_int (masc_heartbeat_interval ()) in
-      let _ =
-        Eio.Fiber.fork ~sw:masc_sw (fun () ->
-          let rec loop () =
-            (* Heartbeat must never crash the main request flow. *)
-            (try
-               ignore (call_masc_tool ~sw ~proc_mgr ~clock ~tool_name:"masc_heartbeat" ~arguments:heartbeat_args)
-             with exn ->
-               eprintf "[masc] heartbeat error: %s\n%!" (Printexc.to_string exn));
-            Eio.Time.sleep clock interval;
-            loop ()
-          in
-          loop ())
-      in
-      f ()
-    )
+let parse_mcp_http_response = Tools_mcp_bridge_eio.parse_mcp_http_response
+let call_external_mcp = Tools_mcp_bridge_eio.call_external_mcp
+let call_stdio_mcp = Tools_mcp_bridge_eio.call_stdio_mcp
+let call_mcp = Tools_mcp_bridge_eio.call_mcp
+let masc_enabled = Tools_mcp_bridge_eio.masc_enabled
+let masc_agent_base = Tools_mcp_bridge_eio.masc_agent_base
+let masc_heartbeat_interval = Tools_mcp_bridge_eio.masc_heartbeat_interval
+let masc_available = Tools_mcp_bridge_eio.masc_available
+let call_masc_tool = Tools_mcp_bridge_eio.call_masc_tool
+let with_masc_hook = Tools_mcp_bridge_eio.with_masc_hook
 
 (** {1 Streaming Execution} - Config from Tools_stream_config *)
 let stream_delta_enabled = Tools_stream_config.enabled
@@ -357,284 +226,8 @@ let stream_delta_max_events = Tools_stream_config.max_events
 let stream_delta_max_chars = Tools_stream_config.max_chars
 let generate_stream_id = Tools_stream_config.generate_id
 
-(** Execute Ollama with token streaming callback *)
-let execute_ollama_streaming ~sw ~proc_mgr ~clock ~on_token ?stream_id args =
-  let (cmd_result, model_name, extra_base, has_tools, err_msg) = match args with
-    | Ollama { model; temperature; tools; timeout = _; _ } ->
-        let has_tools = match tools with Some l when List.length l > 0 -> true | _ -> false in
-        (build_ollama_curl_cmd ~force_stream:(Some true) args,
-         sprintf "ollama (%s)" model,
-         [("temperature", sprintf "%.1f" temperature); ("local", "true")],
-         has_tools,
-         None)
-    | _ -> (Error "Invalid args for Ollama", "unknown", [], false, Some "Invalid args for Ollama")
-  in
-  let timeout = match args with
-    | Ollama { timeout; _ } -> timeout
-    | _ -> 300
-  in
-  let stream_id =
-    match stream_id with
-    | Some sid -> sid
-    | None -> generate_stream_id model_name
-  in
-  let delta_enabled = stream_delta_enabled () in
-  let delta_max_events = stream_delta_max_events () in
-  let delta_max_chars = stream_delta_max_chars () in
-  let delta_count = ref 0 in
-  let delta_truncated = ref false in
-  let total_chars = ref 0 in
-  let broadcast_delta json =
-    if delta_enabled then
-      try Notification_sse.broadcast json with exn ->
-        Printf.eprintf "[LLM] Delta broadcast failed: %s\n%!" (Printexc.to_string exn)
-    else
-      ()
-  in
-  let emit_start () =
-    broadcast_delta (`Assoc [
-      ("type", `String "llm_stream_start");
-      ("stream_id", `String stream_id);
-      ("model", `String model_name);
-      ("has_tools", `Bool has_tools);
-    ])
-  in
-  let emit_end ~success ?error () =
-    let base = [
-      ("type", `String "llm_stream_end");
-      ("stream_id", `String stream_id);
-      ("model", `String model_name);
-      ("success", `Bool success);
-      ("chunks", `Int !delta_count);
-      ("total_chars", `Int !total_chars);
-      ("truncated", `Bool !delta_truncated);
-    ] in
-    let fields = match error with
-      | Some msg -> base @ [("error", `String msg)]
-      | None -> base
-    in
-    broadcast_delta (`Assoc fields)
-  in
-  emit_start ();
-  match cmd_result with
-  | Error err ->
-      let response = Option.value err_msg ~default:err in
-      emit_end ~success:false ~error:response ();
-      { model = model_name; returncode = -1; response; extra = extra_base }
-  | Ok [] ->
-      let response = "Invalid args" in
-      emit_end ~success:false ~error:response ();
-      { model = model_name; returncode = -1; response; extra = extra_base }
-  | Ok (cmd :: cmd_args) ->
-      begin
-        let full_response = Buffer.create 1024 in
-        let accumulated_tool_calls = ref [] in
-        let truncated_notice_sent = ref false in
-        let on_line line =
-          if has_tools then
-            match Ollama_parser.parse_chat_chunk line with
-            | Ok (token, tool_calls, _done) ->
-                Buffer.add_string full_response token;
-                if tool_calls <> [] then accumulated_tool_calls := tool_calls;
-                total_chars := !total_chars + String.length token;
-                incr delta_count;
-                if !delta_count <= delta_max_events then begin
-                  let truncated = String.length token > delta_max_chars in
-                  let delta =
-                    if truncated then String.sub token 0 delta_max_chars else token
-                  in
-                  if truncated then delta_truncated := true;
-                  broadcast_delta (`Assoc [
-                    ("type", `String "llm_delta");
-                    ("stream_id", `String stream_id);
-                    ("index", `Int !delta_count);
-                    ("delta", `String delta);
-                    ("truncated", `Bool truncated);
-                    ("orig_len", `Int (String.length token));
-                  ])
-                end else if not !truncated_notice_sent then begin
-                  truncated_notice_sent := true;
-                  delta_truncated := true;
-                  broadcast_delta (`Assoc [
-                    ("type", `String "llm_delta_truncated");
-                    ("stream_id", `String stream_id);
-                    ("max_events", `Int delta_max_events);
-                  ])
-                end;
-                on_token token
-            | Error _ -> ()
-          else
-            match Tool_parsers.parse_ollama_chunk line with
-            | Ok (token, _done) ->
-                Buffer.add_string full_response token;
-                total_chars := !total_chars + String.length token;
-                incr delta_count;
-                if !delta_count <= delta_max_events then begin
-                  let truncated = String.length token > delta_max_chars in
-                  let delta =
-                    if truncated then String.sub token 0 delta_max_chars else token
-                  in
-                  if truncated then delta_truncated := true;
-                  broadcast_delta (`Assoc [
-                    ("type", `String "llm_delta");
-                    ("stream_id", `String stream_id);
-                    ("index", `Int !delta_count);
-                    ("delta", `String delta);
-                    ("truncated", `Bool truncated);
-                    ("orig_len", `Int (String.length token));
-                  ])
-                end else if not !truncated_notice_sent then begin
-                  truncated_notice_sent := true;
-                  delta_truncated := true;
-                  broadcast_delta (`Assoc [
-                    ("type", `String "llm_delta_truncated");
-                    ("stream_id", `String stream_id);
-                    ("max_events", `Int delta_max_events);
-                  ])
-                end;
-                on_token token
-            | Error _ -> ()
-        in
-        let result = run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd cmd_args in
-        match result with
-        | Ok _ ->
-            let extra = extra_base @ [("streamed", "true")] in
-            let extra = if !accumulated_tool_calls <> [] then
-              extra @ [("tool_calls", Tool_parsers.tool_calls_to_json !accumulated_tool_calls)]
-            else extra in
-            let extra = extra @ [("stream_id", stream_id)] in
-            emit_end ~success:true ();
-            { model = model_name;
-              returncode = 0;
-              response = Buffer.contents full_response;
-              extra; }
-        | Error (Timeout t) ->
-            let response = Printf.sprintf "Timeout after %ds" t in
-            emit_end ~success:false ~error:response ();
-            { model = model_name;
-              returncode = -1;
-              response;
-              extra = extra_base; }
-        | Error (ProcessError msg) ->
-            let response = sprintf "Error: %s" msg in
-            emit_end ~success:false ~error:response ();
-            { model = model_name;
-              returncode = -1;
-              response;
-              extra = extra_base; }
-      end
-
-(** {1 Generic CLI Streaming} *)
-
-(** Execute a plain-text CLI tool with line-by-line streaming.
-    Used for Claude CLI, Codex CLI, and Gemini CLI which output text lines. *)
-let execute_cli_streaming ~sw ~proc_mgr ~clock ~timeout ~model_name ~extra_base cmd cmd_args =
-  let stream_id = generate_stream_id model_name in
-  let delta_enabled = stream_delta_enabled () in
-  let delta_max_events = stream_delta_max_events () in
-  let delta_max_chars = stream_delta_max_chars () in
-  let delta_count = ref 0 in
-  let delta_truncated = ref false in
-  let total_chars = ref 0 in
-  let broadcast_delta json =
-    if delta_enabled then
-      try Notification_sse.broadcast json
-      with exn ->
-        (* Log broadcast failures but don't interrupt streaming *)
-        eprintf "[cli_streaming] SSE broadcast failed: %s\n%!" (Printexc.to_string exn)
-    else
-      ()
-  in
-  let emit_start () =
-    broadcast_delta (`Assoc [
-      ("type", `String "llm_stream_start");
-      ("stream_id", `String stream_id);
-      ("model", `String model_name);
-      ("has_tools", `Bool false);
-    ])
-  in
-  let emit_end ~success ?error () =
-    let base = [
-      ("type", `String "llm_stream_end");
-      ("stream_id", `String stream_id);
-      ("model", `String model_name);
-      ("success", `Bool success);
-      ("chunks", `Int !delta_count);
-      ("total_chars", `Int !total_chars);
-      ("truncated", `Bool !delta_truncated);
-    ] in
-    let fields = match error with
-      | Some msg -> base @ [("error", `String msg)]
-      | None -> base
-    in
-    broadcast_delta (`Assoc fields)
-  in
-  emit_start ();
-  let full_response = Buffer.create 4096 in
-  let truncated_notice_sent = ref false in
-  let on_line line =
-    (* Each line is a text chunk - add newline back for proper formatting *)
-    (* Preserve empty lines for markdown/code formatting *)
-    let chunk = line ^ "\n" in
-    Buffer.add_string full_response chunk;
-    total_chars := !total_chars + String.length chunk;
-    incr delta_count;
-    if !delta_count <= delta_max_events then begin
-      let truncated = String.length chunk > delta_max_chars in
-      let delta =
-        if truncated then String.sub chunk 0 delta_max_chars else chunk
-      in
-      if truncated then delta_truncated := true;
-      broadcast_delta (`Assoc [
-        ("type", `String "llm_delta");
-        ("stream_id", `String stream_id);
-        ("index", `Int !delta_count);
-        ("delta", `String delta);
-        ("truncated", `Bool truncated);
-        ("orig_len", `Int (String.length chunk));
-      ])
-    end else if not !truncated_notice_sent then begin
-      truncated_notice_sent := true;
-      delta_truncated := true;
-      broadcast_delta (`Assoc [
-        ("type", `String "llm_delta_truncated");
-        ("stream_id", `String stream_id);
-        ("max_events", `Int delta_max_events);
-      ])
-    end
-  in
-  let result = run_streaming_command ~sw ~proc_mgr ~clock ~timeout ~on_line cmd cmd_args in
-  let partial_response = Buffer.contents full_response in
-  let extra_with_stream = extra_base @ [("streamed", "true"); ("stream_id", stream_id)] in
-  match result with
-  | Ok exit_code ->
-      let success = (exit_code = 0) in
-      emit_end ~success ();
-      { model = model_name;
-        returncode = exit_code;
-        response = partial_response;
-        extra = extra_with_stream; }
-  | Error (Timeout t) ->
-      (* Preserve partial response on timeout - don't lose streamed content *)
-      let error_msg = sprintf "Timeout after %ds" t in
-      emit_end ~success:false ~error:error_msg ();
-      let response = if String.length partial_response > 0
-        then partial_response ^ "\n\n[TIMEOUT: " ^ error_msg ^ "]"
-        else error_msg in
-      { model = model_name;
-        returncode = -1;
-        response;
-        extra = extra_with_stream @ [("timeout", "true")]; }
-  | Error (ProcessError msg) ->
-      (* Preserve partial response on error - don't lose streamed content *)
-      emit_end ~success:false ~error:msg ();
-      let response = if String.length partial_response > 0
-        then partial_response ^ "\n\n[ERROR: " ^ msg ^ "]"
-        else sprintf "Error: %s" msg in
-      { model = model_name;
-        returncode = -1;
-        response;
-        extra = extra_with_stream @ [("process_error", "true")]; }
+let execute_ollama_streaming = Tools_streaming_eio.execute_ollama_streaming
+let execute_cli_streaming = Tools_streaming_eio.execute_cli_streaming
 
 (** {1 Gemini with Resilience} *)
 
@@ -1416,13 +1009,13 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         let call_id = try
                           let id = tc |> member "id" |> to_string in
                           if String.length id > 0 then id else call_id
-                        with Yojson.Safe.Util.Type_error (_, _) -> call_id in
+                        with _ -> call_id in
                         (* Update function name if present *)
                         let func_name = try
                           let func = tc |> member "function" in
                           let name = func |> member "name" |> to_string in
                           if String.length name > 0 then name else func_name
-                        with Yojson.Safe.Util.Type_error (_, _) -> func_name in
+                        with _ -> func_name in
                         (* Accumulate arguments *)
                         (try
                           let func = tc |> member "function" in
@@ -1599,7 +1192,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   returncode = -1;
                   response = sprintf "API Error: %s" error_msg;
                   extra = [("error", "api_error")]; }
-              with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ ->
+              with _ ->
                 { model = sprintf "glm (%s)" model;
                   returncode = -1;
                   response = sprintf "Error parsing response: %s. Raw: %s" (Printexc.to_string e) r.stdout;
@@ -2232,7 +1825,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                                 description = item |> member "description" |> to_string;
                                 input_schema = item |> member "input_schema";
                               }
-                            with Yojson.Safe.Util.Type_error (_, _) -> None
+                            with _ -> None
                           ) items in
                           if schemas = [] then None else Some schemas
                       | _ -> None
@@ -2396,7 +1989,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "echo" ->
                           (* Simple echo tool for testing *)
                           let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
-                                      with Yojson.Safe.Util.Type_error (_, _) -> Yojson.Safe.to_string args in
+                                      with _ -> Yojson.Safe.to_string args in
                           { Types.model = "echo"; returncode = 0; response = input; extra = [] }
                       | "identity" ->
                           (* Identity tool: returns args unchanged *)
@@ -2404,7 +1997,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "fetch" ->
                           (* URL fetch with Accept: text/markdown for Cloudflare optimization *)
                           let url = try args |> Yojson.Safe.Util.member "url" |> Yojson.Safe.Util.to_string
-                                    with Yojson.Safe.Util.Type_error (_, _) -> "" in
+                                    with _ -> "" in
                           if url = "" then
                             { Types.model = "fetch"; returncode = -1; response = "Error: fetch requires 'url' argument"; extra = [] }
                           else
@@ -2702,7 +2295,7 @@ This chain will execute the goal using a stub model.|}
         match split_tool_name name with
         | Some (server_name, tool_name) ->
             let output = call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments:tool_args ~timeout:node_timeout in
-            (try Yojson.Safe.from_string output with Yojson.Json_error _ -> `String output)
+            (try Yojson.Safe.from_string output with _ -> `String output)
         | None ->
             (* Direct tool execution *)
             let result = match name with
@@ -2721,7 +2314,7 @@ This chain will execute the goal using a stub model.|}
               | "echo" ->
                   (* Simple echo tool for testing: returns the input args as a string *)
                   let input = try tool_args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
-                              with Yojson.Safe.Util.Type_error (_, _) -> Yojson.Safe.to_string tool_args in
+                              with _ -> Yojson.Safe.to_string tool_args in
                   { model = "echo"; returncode = 0; response = input; extra = [] }
               | "identity" ->
                   (* Identity tool: returns args unchanged *)
@@ -2729,7 +2322,7 @@ This chain will execute the goal using a stub model.|}
               | "fetch" ->
                   (* URL fetch with Accept: text/markdown for Cloudflare optimization *)
                   let url = try tool_args |> Yojson.Safe.Util.member "url" |> Yojson.Safe.Util.to_string
-                            with Yojson.Safe.Util.Type_error (_, _) -> "" in
+                            with _ -> "" in
                   if url = "" then
                     { model = "fetch"; returncode = 1; response = "Error: fetch requires 'url' argument"; extra = [] }
                   else
@@ -2747,7 +2340,7 @@ This chain will execute the goal using a stub model.|}
                   { model = name; returncode = 1; response = Printf.sprintf "Unknown tool: %s" name; extra = [] }
             in
             if result.returncode = 0 then
-              (try Yojson.Safe.from_string result.response with Yojson.Json_error _ -> `String result.response)
+              (try Yojson.Safe.from_string result.response with _ -> `String result.response)
             else
               `Assoc [("error", `String result.response)]
       in
@@ -2830,7 +2423,7 @@ This chain will execute the goal using a stub model.|}
                   metadata = [];
                 }
               ) nodes
-            with Yojson.Safe.Util.Type_error (_, _) -> [])
+            with _ -> [])
         | None -> []
       in
       let tasks = if tasks_from_input <> [] then tasks_from_input else tasks_from_chain in
@@ -3003,7 +2596,7 @@ This chain will execute the goal using a stub model.|}
                                       description = (match item |> member "description" |> to_string_option with Some s -> s | None -> "");
                                       input_schema = item |> member "parameters";
                                      }
-                                   with Yojson.Safe.Util.Type_error (_, _) -> None
+                                   with _ -> None
                                  ) items in
                                  if List.length schemas > 0 then Some schemas else None
                              | _ -> None
@@ -3261,7 +2854,7 @@ Show your reasoning process and provide the final translation.|} source_lang tar
                   (List.hd choices) |> member "message" |> member "content" |> to_string
                 else
                   r.stdout
-              with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ -> r.stdout
+              with _ -> r.stdout
             in
             { model = sprintf "glm.translate:%s:%s" model strategy_name;
               returncode = r.exit_code;
@@ -3357,241 +2950,30 @@ let call_mcp_with_env ~sw ~env ~server_name ~tool_name ~arguments ~timeout =
 
 (** {1 Ollama Agentic Execution} - Re-exports from Tools_ollama_agentic *)
 
-let ollama_base_url = Tools_ollama_agentic.base_url
-type agent_message = Tools_ollama_agentic.agent_message = {
-  role : string;
-  content : string;
-  tool_calls : Ollama_parser.tool_call list option;
-  name : string option;
-}
-let agent_message_to_json = Tools_ollama_agentic.agent_message_to_json
-let build_agentic_request = Tools_ollama_agentic.build_chat_request
-
-(** Call Ollama chat API - Eio version using curl subprocess *)
-let call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_json =
-  let body = Yojson.Safe.to_string request_json in
-  let url = ollama_base_url ^ "/api/chat" in
-  let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
-    "-s"; "-X"; "POST"; url;
-    "-H"; "Content-Type: application/json";
-    "-d"; body
-  ] in
-  match result with
-  | Error (Timeout t) -> Error (sprintf "Timeout after %ds" t)
-  | Error (ProcessError msg) -> Error (sprintf "Connection error: %s" msg)
-  | Ok r ->
-      if r.exit_code <> 0 then
-        Error (sprintf "curl failed with exit code %d: %s" r.exit_code r.stderr)
-      else
-        Ok r.stdout
-
-(** Execute a single tool call - calls external MCP if configured *)
-let execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url (tc : Ollama_parser.tool_call) =
-  let args = try Yojson.Safe.from_string tc.arguments with Yojson.Json_error _ -> `Null in
-  match external_mcp_url with
-  | Some url ->
-      (* Call external MCP server *)
-      let request_body = `Assoc [
-        ("jsonrpc", `String "2.0");
-        ("id", `Int 1);
-        ("method", `String "tools/call");
-        ("params", `Assoc [
-          ("name", `String tc.name);
-          ("arguments", args);
-        ]);
-      ] |> Yojson.Safe.to_string in
-      let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
-        "-s"; "-X"; "POST"; url;
-        "-H"; "Content-Type: application/json";
-        "-d"; request_body
-      ] in
-      (match result with
-      | Error _ -> (tc.name, sprintf "Error: MCP call to %s failed" tc.name)
-      | Ok r ->
-          try
-            let json = Yojson.Safe.from_string r.stdout in
-            let open Yojson.Safe.Util in
-            let result = json |> member "result" in
-            let error = json |> member "error" in
-            if error <> `Null then
-              let msg = Safe_parse.json_string ~context:"mcp:error" ~default:"Unknown error" error "message" in
-              (tc.name, sprintf "Error: %s" msg)
-            else
-              let content = result |> member "content" in
-              match content with
-              | `List items ->
-                  let texts = List.filter_map (fun item ->
-                    match item |> member "type" |> to_string_option with
-                    | Some "text" -> item |> member "text" |> to_string_option
-                    | _ -> None
-                  ) items in
-                  (tc.name, String.concat "\n" texts)
-              | _ -> (tc.name, r.stdout)
-          with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ -> (tc.name, r.stdout))
-  | None ->
-      (tc.name, sprintf "Error: Unknown tool '%s' and no external MCP configured" tc.name)
-
-(** Single agent turn result *)
-type turn_result =
+let ollama_base_url = Tools_agentic_eio.ollama_base_url
+type agent_message = Tools_agentic_eio.agent_message
+let agent_message_to_json = Tools_agentic_eio.agent_message_to_json
+let build_agentic_request = Tools_agentic_eio.build_agentic_request
+let call_ollama_chat_eio = Tools_agentic_eio.call_ollama_chat_eio
+let execute_tool_call_eio = Tools_agentic_eio.execute_tool_call_eio
+type turn_result = Tools_agentic_eio.turn_result =
   | TurnDone of string
   | TurnContinue of Ollama_parser.tool_call list
   | TurnError of string
+let execute_agentic_turn = Tools_agentic_eio.execute_agentic_turn
 
-(** Execute single agent turn *)
-let execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request_body =
-  let result = call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_body in
-  match result with
-  | Error err -> TurnError err
-  | Ok body_str ->
-      match Ollama_parser.parse_chat_result body_str with
-      | Error e -> TurnError e
-      | Ok (Ollama_parser.TextResponse (text, thinking)) ->
-          let response = match thinking with
-            | Some t -> sprintf "[Thinking]\n%s\n\n[Response]\n%s" t text
-            | None -> text
-          in
-          TurnDone response
-      | Ok (Ollama_parser.ToolCalls (calls, _thinking)) -> TurnContinue calls
-      | Ok (Ollama_parser.TextWithTools (text, calls, thinking)) ->
-          if calls = [] then
-            let response = match thinking with
-              | Some t -> sprintf "[Thinking]\n%s\n\n[Response]\n%s" t text
-              | None -> text
-            in
-            TurnDone response
-          else TurnContinue calls
-
-(** Execute Ollama with agentic tool calling loop.
-
-    When tools are provided, this:
-    1. Sends prompt to Ollama with tool definitions
-    2. Executes any tool_calls from Ollama's response
-    3. Sends tool results back to Ollama
-    4. Repeats until no more tool_calls or max_turns reached
-
-    This enables tool-capable models (devstral, qwen3, llama3.3)
-    to use MCP tools natively through llm-mcp.
-
-    @param sw Eio switch for structured concurrency
-    @param proc_mgr Eio process manager
-    @param clock Eio clock
-    @param tools MCP tool schemas for function calling
-    @param external_mcp_url URL of external MCP server for tool execution
-    @param on_turn Callback for each turn (turn number, prompt)
-*)
 let execute_ollama_agentic
     ~sw ~proc_mgr ~clock
     ~(tools : Types.tool_schema list)
     ?(external_mcp_url : string option = None)
-    ?(on_turn : int -> string -> unit = fun _ _ -> ()) 
+    ?(on_turn : int -> string -> unit = fun _ _ -> ())
     args : tool_result =
   match args with
   | Ollama { model; prompt; system_prompt; temperature; timeout; stream = _; tools = _ } ->
-      let max_turns = 10 in
-
-      (* Convert tools to Ollama format *)
-      let ollama_tools = List.map (fun (t : Types.tool_schema) ->
-        `Assoc [
-          ("type", `String "function");
-          ("function", `Assoc [
-            ("name", `String t.name);
-            ("description", `String t.description);
-            ("parameters", t.input_schema);
-          ]);
-        ]
-      ) tools in
-
-      let system = match system_prompt with
-        | Some s -> s
-        | None -> "You are a helpful assistant with access to tools."
-      in
-
-      let initial_messages = [
-        { role = "system"; content = system; tool_calls = None; name = None }
-      ] in
-
-      (* Process tool calls recursively *)
-      let rec process_tool_calls messages turn tool_calls =
-        if turn >= max_turns then
-          Error (sprintf "Max turns (%d) reached" max_turns)
-        else begin
-          (* Execute tool calls *)
-          let tool_results = List.map (fun tc ->
-            execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url tc
-          ) tool_calls in
-
-          (* Build assistant message with tool calls *)
-          let assistant_msg = {
-            role = "assistant";
-            content = "";
-            tool_calls = Some tool_calls;
-            name = None;
-          } in
-
-          (* Build tool result messages *)
-          let tool_msgs = List.map (fun (name, result) ->
-            { role = "tool"; content = result; tool_calls = None; name = Some name }
-          ) tool_results in
-
-          let new_messages = messages @ [assistant_msg] @ tool_msgs in
-
-          (* Send continuation request *)
-          let request = build_agentic_request ~model ~temperature ~tools:ollama_tools new_messages in
-          let next_result = execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request in
-
-          match next_result with
-          | TurnDone text -> Ok text
-          | TurnError err -> Error err
-          | TurnContinue more_calls ->
-              process_tool_calls new_messages (turn + 1) more_calls
-        end
-      in
-
-      (* Main loop *)
-      let run_loop () =
-        on_turn 0 prompt;
-
-        let user_msg = { role = "user"; content = prompt; tool_calls = None; name = None } in
-        let messages = initial_messages @ [user_msg] in
-
-        let request = build_agentic_request ~model ~temperature ~tools:ollama_tools messages in
-        let result = execute_agentic_turn ~sw ~proc_mgr ~clock ~timeout request in
-
-        match result with
-        | TurnDone text -> Ok text
-        | TurnError err -> Error err
-        | TurnContinue tool_calls ->
-            process_tool_calls messages 1 tool_calls
-      in
-
-      (match run_loop () with
-      | Ok response ->
-          {
-            model = sprintf "ollama (%s) [agentic]" model;
-            returncode = 0;
-            response;
-            extra = [
-              ("temperature", sprintf "%.1f" temperature);
-              ("local", "true");
-              ("agentic", "true");
-              ("tools_count", string_of_int (List.length tools));
-            ];
-          }
-      | Error err ->
-          {
-            model = sprintf "ollama (%s) [agentic]" model;
-            returncode = -1;
-            response = sprintf "Agent loop error: %s" err;
-            extra = [
-              ("temperature", sprintf "%.1f" temperature);
-              ("local", "true");
-              ("agentic", "true");
-              ("error", "true");
-            ];
-          })
-
+      Tools_agentic_eio.execute_ollama_agentic
+        ~sw ~proc_mgr ~clock ~model ~prompt ~system_prompt ~temperature ~timeout
+        ~tools ?external_mcp_url ~on_turn ()
   | _ ->
-      (* Non-Ollama args: fall back to regular execute *)
       execute ~sw ~proc_mgr ~clock args
 
 (** Execute Ollama agentic with Eio env *)
@@ -3658,7 +3040,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                             description = item |> member "description" |> to_string;
                             input_schema = item |> member "input_schema";
                           }
-                        with Yojson.Safe.Util.Type_error (_, _) -> None
+                        with _ -> None
                       ) items in
                       if schemas = [] then None else Some schemas
                   | _ -> None
@@ -3781,7 +3163,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   | "echo" ->
                       (* Simple echo tool for testing *)
                       let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
-                                  with Yojson.Safe.Util.Type_error (_, _) -> Yojson.Safe.to_string args in
+                                  with _ -> Yojson.Safe.to_string args in
                       { Types.model = "echo"; returncode = 0; response = input; extra = [] }
                   | "identity" ->
                       (* Identity tool: returns args unchanged *)

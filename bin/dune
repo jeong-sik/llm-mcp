@@ -436,7 +436,7 @@
  (public_name transcript-search)
  (package llm_mcp)
  (modules transcript_search)
- (libraries yojson re cmdliner unix))
+ (libraries llm_mcp.common yojson re cmdliner unix))
 
 (executable
  (name vision_gate)
