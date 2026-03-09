@@ -468,6 +468,14 @@ let test_debug_enabled_from_env () =
    | Some value -> Unix.putenv "LANGFUSE_DEBUG" value
    | None -> Unix.putenv "LANGFUSE_DEBUG" "")
 
+let test_debug_disabled_without_truthy_env () =
+  let prev = Sys.getenv_opt "LANGFUSE_DEBUG" in
+  Unix.putenv "LANGFUSE_DEBUG" "0";
+  check bool "debug disabled" false (debug_enabled ());
+  (match prev with
+   | Some value -> Unix.putenv "LANGFUSE_DEBUG" value
+   | None -> Unix.putenv "LANGFUSE_DEBUG" "")
+
 let test_status () =
   let st = status () in
   check bool "contains Langfuse" true (Common.contains ~substring:"Langfuse" st);
@@ -524,6 +532,7 @@ let () =
     ("config", [
       test_case "is_enabled" `Quick test_is_enabled_without_env;
       test_case "debug enabled from env" `Quick test_debug_enabled_from_env;
+      test_case "debug disabled from falsy env" `Quick test_debug_disabled_without_truthy_env;
       test_case "status" `Quick test_status;
       test_case "status disabled" `Quick test_status_disabled;
     ]);

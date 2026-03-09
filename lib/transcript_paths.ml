@@ -14,11 +14,12 @@ let normalize_override = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let select_search_root ?cwd ?home ?env_override ?(exists = Sys.file_exists) () =
+let select_search_root ?cwd ?home ?env_override ?(exists = Sys.file_exists)
+    ?(env_lookup = Sys.getenv_opt) () =
   match normalize_override env_override with
   | Some path -> path
   | None -> (
-      match normalize_override (Sys.getenv_opt "CLAUDE_TRANSCRIPTS_DIR") with
+      match normalize_override (env_lookup "CLAUDE_TRANSCRIPTS_DIR") with
       | Some path -> path
       | None ->
           let root = claude_projects_root ?home () in
