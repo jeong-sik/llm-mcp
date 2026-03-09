@@ -3,10 +3,8 @@
 
 open Cmdliner
 
-let home_dir = try Unix.getenv "HOME" with Not_found -> "/tmp"
-
 let transcripts_dir =
-  Filename.concat home_dir ".claude/projects/-Users-dancer-me"
+  Transcript_paths.select_search_root ()
 
 let find_recent_files base_dir days =
   let cutoff = Unix.time () -. (float_of_int days *. 86400.) in

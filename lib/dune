@@ -16,6 +16,8 @@
    log
    ; Telemetry (JSONL append-only)
    telemetry_jsonl
+   ; Claude transcript root resolution
+   transcript_paths
    ; Metrics (Prometheus compatible)
    metrics
    ; Rate limiting
@@ -119,6 +121,9 @@
    http_server_eio
    mcp_server_eio
    tools_eio
+   tools_mcp_bridge_eio
+   tools_streaming_eio
+   tools_agentic_eio
    mcp_client_eio
    cli_runner_eio
    ; Handler modules (Phase 2 extraction)
@@ -128,6 +133,8 @@
    handler_utils
    ; Chain Engine (Phase 3-4)
    chain_adapter_eio
+   chain_exec_context_eio
+   chain_exec_inputs_eio
    chain_executor_eio
    chain_orchestrator_eio
    chain_run_store

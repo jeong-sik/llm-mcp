@@ -44,10 +44,23 @@ let load_config () =
 (** Global config - loaded lazily *)
 let config = lazy (load_config ())
 
+(** Debug logging is opt-in because Langfuse payloads may contain prompts/outputs. *)
+let debug_enabled () =
+  match Sys.getenv_opt "LANGFUSE_DEBUG" with
+  | Some ("1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON") -> true
+  | _ -> false
+
+let debug_log fmt =
+  Printf.ksprintf
+    (fun msg ->
+      if debug_enabled () then
+        Printf.eprintf "[Langfuse] %s\n%!" msg)
+    fmt
+
 (** Check if Langfuse is enabled *)
 let is_enabled () =
   let cfg = Lazy.force config in
-  Printf.eprintf "[Langfuse] is_enabled check: enabled=%b, host=%s\n%!" cfg.enabled cfg.host;
+  debug_log "enabled=%b host=%s" cfg.enabled cfg.host;
   cfg.enabled
 
 (** {1 ID Generation} *)
@@ -205,8 +218,8 @@ let send_to_langfuse ~endpoint ~body () =
       let uri = Uri.of_string url in
       let host = Uri.host uri |> Option.value ~default:"localhost" in
       let port = Uri.port uri |> Option.value ~default:3100 in
-      Printf.eprintf "[Langfuse] Sending to %s:%d, endpoint=%s\n%!" host port endpoint;
-      Printf.eprintf "[Langfuse] Body: %s\n%!" (String.sub body_str 0 (min 500 (String.length body_str)));
+      debug_log "sending to %s:%d endpoint=%s bytes=%d"
+        host port endpoint (String.length body_str);
       let sockaddr = Unix.ADDR_INET (Unix.inet_addr_of_string
         (try (Unix.gethostbyname host).Unix.h_addr_list.(0)
               |> Unix.string_of_inet_addr
@@ -216,7 +229,7 @@ let send_to_langfuse ~endpoint ~body () =
       Unix.setsockopt_float sock Unix.SO_SNDTIMEO 2.0;  (* 2 second timeout *)
       Unix.setsockopt_float sock Unix.SO_RCVTIMEO 2.0;
       Unix.connect sock sockaddr;
-      Printf.eprintf "[Langfuse] Connected to socket\n%!";
+      debug_log "socket connected";
 
       let path = Uri.path uri in
       let request = Printf.sprintf
@@ -230,10 +243,10 @@ let send_to_langfuse ~endpoint ~body () =
       (* Read response to ensure request is processed *)
       let buf = Bytes.create 256 in
       let n = try Unix.read sock buf 0 256 with _ -> 0 in
-      Printf.eprintf "[Langfuse] Response (%d bytes): %s\n%!" n (Bytes.sub_string buf 0 (min n 100));
+      debug_log "response bytes=%d" n;
       Unix.close sock
     with exn ->
-      Printf.eprintf "[Langfuse] Error: %s\n%!" (Printexc.to_string exn)
+      debug_log "error=%s" (Printexc.to_string exn)
   end
 
 (** {1 API Functions} *)
