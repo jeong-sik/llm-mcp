@@ -2423,7 +2423,7 @@ This chain will execute the goal using a stub model.|}
                   metadata = [];
                 }
               ) nodes
-            with (Yojson.Safe.Util.Type_error _ | Yojson.Json_error _) -> [])
+            with Yojson.Safe.Util.Type_error _ -> [])
         | None -> []
       in
       let tasks = if tasks_from_input <> [] then tasks_from_input else tasks_from_chain in
