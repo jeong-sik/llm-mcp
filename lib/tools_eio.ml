@@ -267,7 +267,7 @@ let call_stdio_mcp ~sw ~proc_mgr ~clock ~server_name ~command ~args ~tool_name ~
             | _ ->
                 let result_str = result |> to_string_option in
                 Option.value result_str ~default:r.stdout
-        with _ -> r.stdout
+        with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ -> r.stdout
 
 (** Unified MCP call dispatcher *)
 let call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments ~timeout =
@@ -1416,13 +1416,13 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                         let call_id = try
                           let id = tc |> member "id" |> to_string in
                           if String.length id > 0 then id else call_id
-                        with _ -> call_id in
+                        with Yojson.Safe.Util.Type_error (_, _) -> call_id in
                         (* Update function name if present *)
                         let func_name = try
                           let func = tc |> member "function" in
                           let name = func |> member "name" |> to_string in
                           if String.length name > 0 then name else func_name
-                        with _ -> func_name in
+                        with Yojson.Safe.Util.Type_error (_, _) -> func_name in
                         (* Accumulate arguments *)
                         (try
                           let func = tc |> member "function" in
@@ -1599,7 +1599,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                   returncode = -1;
                   response = sprintf "API Error: %s" error_msg;
                   extra = [("error", "api_error")]; }
-              with _ ->
+              with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ ->
                 { model = sprintf "glm (%s)" model;
                   returncode = -1;
                   response = sprintf "Error parsing response: %s. Raw: %s" (Printexc.to_string e) r.stdout;
@@ -2232,7 +2232,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                                 description = item |> member "description" |> to_string;
                                 input_schema = item |> member "input_schema";
                               }
-                            with _ -> None
+                            with Yojson.Safe.Util.Type_error (_, _) -> None
                           ) items in
                           if schemas = [] then None else Some schemas
                       | _ -> None
@@ -2396,7 +2396,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "echo" ->
                           (* Simple echo tool for testing *)
                           let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
-                                      with _ -> Yojson.Safe.to_string args in
+                                      with Yojson.Safe.Util.Type_error (_, _) -> Yojson.Safe.to_string args in
                           { Types.model = "echo"; returncode = 0; response = input; extra = [] }
                       | "identity" ->
                           (* Identity tool: returns args unchanged *)
@@ -2404,7 +2404,7 @@ let rec execute ~sw ~proc_mgr ~clock args : tool_result =
                       | "fetch" ->
                           (* URL fetch with Accept: text/markdown for Cloudflare optimization *)
                           let url = try args |> Yojson.Safe.Util.member "url" |> Yojson.Safe.Util.to_string
-                                    with _ -> "" in
+                                    with Yojson.Safe.Util.Type_error (_, _) -> "" in
                           if url = "" then
                             { Types.model = "fetch"; returncode = -1; response = "Error: fetch requires 'url' argument"; extra = [] }
                           else
@@ -2702,7 +2702,7 @@ This chain will execute the goal using a stub model.|}
         match split_tool_name name with
         | Some (server_name, tool_name) ->
             let output = call_mcp ~sw ~proc_mgr ~clock ~server_name ~tool_name ~arguments:tool_args ~timeout:node_timeout in
-            (try Yojson.Safe.from_string output with _ -> `String output)
+            (try Yojson.Safe.from_string output with Yojson.Json_error _ -> `String output)
         | None ->
             (* Direct tool execution *)
             let result = match name with
@@ -2721,7 +2721,7 @@ This chain will execute the goal using a stub model.|}
               | "echo" ->
                   (* Simple echo tool for testing: returns the input args as a string *)
                   let input = try tool_args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
-                              with _ -> Yojson.Safe.to_string tool_args in
+                              with Yojson.Safe.Util.Type_error (_, _) -> Yojson.Safe.to_string tool_args in
                   { model = "echo"; returncode = 0; response = input; extra = [] }
               | "identity" ->
                   (* Identity tool: returns args unchanged *)
@@ -2729,7 +2729,7 @@ This chain will execute the goal using a stub model.|}
               | "fetch" ->
                   (* URL fetch with Accept: text/markdown for Cloudflare optimization *)
                   let url = try tool_args |> Yojson.Safe.Util.member "url" |> Yojson.Safe.Util.to_string
-                            with _ -> "" in
+                            with Yojson.Safe.Util.Type_error (_, _) -> "" in
                   if url = "" then
                     { model = "fetch"; returncode = 1; response = "Error: fetch requires 'url' argument"; extra = [] }
                   else
@@ -2747,7 +2747,7 @@ This chain will execute the goal using a stub model.|}
                   { model = name; returncode = 1; response = Printf.sprintf "Unknown tool: %s" name; extra = [] }
             in
             if result.returncode = 0 then
-              (try Yojson.Safe.from_string result.response with _ -> `String result.response)
+              (try Yojson.Safe.from_string result.response with Yojson.Json_error _ -> `String result.response)
             else
               `Assoc [("error", `String result.response)]
       in
@@ -2830,7 +2830,7 @@ This chain will execute the goal using a stub model.|}
                   metadata = [];
                 }
               ) nodes
-            with _ -> [])
+            with Yojson.Safe.Util.Type_error (_, _) -> [])
         | None -> []
       in
       let tasks = if tasks_from_input <> [] then tasks_from_input else tasks_from_chain in
@@ -3003,7 +3003,7 @@ This chain will execute the goal using a stub model.|}
                                       description = (match item |> member "description" |> to_string_option with Some s -> s | None -> "");
                                       input_schema = item |> member "parameters";
                                      }
-                                   with _ -> None
+                                   with Yojson.Safe.Util.Type_error (_, _) -> None
                                  ) items in
                                  if List.length schemas > 0 then Some schemas else None
                              | _ -> None
@@ -3261,7 +3261,7 @@ Show your reasoning process and provide the final translation.|} source_lang tar
                   (List.hd choices) |> member "message" |> member "content" |> to_string
                 else
                   r.stdout
-              with _ -> r.stdout
+              with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ -> r.stdout
             in
             { model = sprintf "glm.translate:%s:%s" model strategy_name;
               returncode = r.exit_code;
@@ -3387,7 +3387,7 @@ let call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_json =
 
 (** Execute a single tool call - calls external MCP if configured *)
 let execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url (tc : Ollama_parser.tool_call) =
-  let args = try Yojson.Safe.from_string tc.arguments with _ -> `Null in
+  let args = try Yojson.Safe.from_string tc.arguments with Yojson.Json_error _ -> `Null in
   match external_mcp_url with
   | Some url ->
       (* Call external MCP server *)
@@ -3427,7 +3427,7 @@ let execute_tool_call_eio ~sw ~proc_mgr ~clock ~timeout ~external_mcp_url (tc : 
                   ) items in
                   (tc.name, String.concat "\n" texts)
               | _ -> (tc.name, r.stdout)
-          with _ -> (tc.name, r.stdout))
+          with Yojson.Safe.Util.Type_error (_, _) | Yojson.Json_error _ -> (tc.name, r.stdout))
   | None ->
       (tc.name, sprintf "Error: Unknown tool '%s' and no external MCP configured" tc.name)
 
@@ -3658,7 +3658,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                             description = item |> member "description" |> to_string;
                             input_schema = item |> member "input_schema";
                           }
-                        with _ -> None
+                        with Yojson.Safe.Util.Type_error (_, _) -> None
                       ) items in
                       if schemas = [] then None else Some schemas
                   | _ -> None
@@ -3781,7 +3781,7 @@ let execute_chain ~sw ~proc_mgr ~clock ~(chain_json : Yojson.Safe.t) ~trace ~tim
                   | "echo" ->
                       (* Simple echo tool for testing *)
                       let input = try args |> Yojson.Safe.Util.member "input" |> Yojson.Safe.Util.to_string
-                                  with _ -> Yojson.Safe.to_string args in
+                                  with Yojson.Safe.Util.Type_error (_, _) -> Yojson.Safe.to_string args in
                       { Types.model = "echo"; returncode = 0; response = input; extra = [] }
                   | "identity" ->
                       (* Identity tool: returns args unchanged *)
