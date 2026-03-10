@@ -165,10 +165,11 @@ let test_protect_preserves_exception () =
 
 (** {1 New Coverage Tests} *)
 
-(** Test me_root defaults to ~/me *)
 let test_me_root () =
-  let root = Common.me_root in
-  check bool "me_root is non-empty" true (String.length root > 0)
+  with_env "LLM_MCP_REPO_ROOT" (Some "/tmp/llm-mcp-root") (fun () ->
+    let root = Common.me_root in
+    check string "me_root from env" "/tmp/llm-mcp-root" root
+  )
 
 (** Test ensure_dir creates nested directories *)
 let test_ensure_dir () =

@@ -359,8 +359,9 @@ let execute_llm_node ctx ~(exec_fn : exec_fn) ~(node : node) (llm : node_type) :
 
 (** MASC MCP endpoint - configurable via MASC_MCP_URL env var *)
 let _masc_mcp_url () =
-  try Sys.getenv "MASC_MCP_URL"
-  with Not_found -> "http://localhost:7432/mcp"
+  match Sys.getenv_opt "MASC_MCP_URL" with
+  | Some value when String.trim value <> "" -> value
+  | _ -> failwith "MASC_MCP_URL is required"
 
 (** Get MASC agent name from env or default *)
 let masc_agent_name () =

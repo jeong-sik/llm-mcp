@@ -18,7 +18,10 @@ open Ollama_parser
 let default_max_turns = 10
 
 (** Ollama API endpoint *)
-let ollama_base_url = "http://127.0.0.1:11434"
+let ollama_base_url () =
+  match Sys.getenv_opt "OLLAMA_BASE_URL" with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> failwith "OLLAMA_BASE_URL is required"
 
 (** Conversation message type *)
 type message = {
@@ -81,7 +84,7 @@ let build_continuation_request state tool_results =
 
 (** Call Ollama chat API using Eio HTTP client *)
 let call_ollama_chat ~sw ~net request =
-  let uri = Uri.of_string (ollama_base_url ^ "/api/chat") in
+  let uri = Uri.of_string (ollama_base_url () ^ "/api/chat") in
   let body = Yojson.Safe.to_string request in
   let headers = Cohttp.Header.init_with "Content-Type" "application/json" in
   let body_source = Eio.Flow.string_source body in

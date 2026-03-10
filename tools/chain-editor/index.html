@@ -2189,12 +2189,23 @@
       document.querySelector('[data-tab="output"]').click();
     }
 
+    function mcpBaseUrl() {
+      const override = window.localStorage.getItem('llmMcpUrl');
+      if (override && override.trim()) return override.trim().replace(/\/$/, '');
+      return '';
+    }
+
+    function mcpToolUrl() {
+      const base = mcpBaseUrl();
+      return base ? `${base}/mcp` : '/mcp';
+    }
+
     async function validateChain() {
       const mermaid = generateMermaidRaw();
       const hasChain = !!state.chainFull;
       setStatus('Validating (strict)...');
       try {
-        const res = await fetch('http://localhost:8932/mcp', {
+        const res = await fetch(mcpToolUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2241,7 +2252,7 @@
       setStatus('Running...');
 
       try {
-        const res = await fetch('http://localhost:8932/mcp', {
+        const res = await fetch(mcpToolUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

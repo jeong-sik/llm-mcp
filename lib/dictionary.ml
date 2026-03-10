@@ -424,48 +424,28 @@ let decompress_with_dict (dict : t) (data : string) : (string, string) result =
 
 (** Directory for pre-trained dictionaries *)
 let dict_dir () : string =
-  let default_me_root () =
-    let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
-    Filename.concat home "me"
-  in
-  let find_repo_root me_root =
+  let repo_root_opt () =
     match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
-    | Some path -> Some path
-    | None ->
-        let candidates =
-          [Filename.concat me_root "llm-mcp"; Filename.concat me_root "workspace/llm-mcp"]
-        in
-        let rec find_in_workspace workspace entries =
-          match entries with
-          | [] -> None
-          | dir :: rest ->
-              let candidate = Filename.concat (Filename.concat workspace dir) "llm-mcp" in
-              if Sys.file_exists candidate then Some candidate
-              else find_in_workspace workspace rest
-        in
-        (match List.find_opt Sys.file_exists candidates with
-        | Some path -> Some path
-        | None ->
-            let workspace = Filename.concat me_root "workspace" in
-            (match Sys.readdir workspace with
-            | entries -> find_in_workspace workspace (Array.to_list entries)
-            | exception _ -> None))
+    | Some path when String.trim path <> "" -> Some (String.trim path)
+    | _ -> None
   in
   match Sys.getenv_opt "LLM_MCP_DICTS_DIR" with
   | Some dir -> dir
   | None ->
-      let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
-      (match find_repo_root me_root with
+      (match repo_root_opt () with
       | Some root -> Filename.concat root "data/dicts"
-      | None -> Filename.concat (Sys.getcwd ()) "data/dicts")
+      | None -> failwith "LLM_MCP_DICTS_DIR or LLM_MCP_REPO_ROOT is required")
 
 (** Load pre-trained dictionary for content type *)
 let load_for_type (content_type : content_type) : t option =
   let name = string_of_content_type content_type in
-  let path = Filename.concat (dict_dir ()) (name ^ ".zdict") in
-  match load path with
-  | Ok d -> Some d
-  | Error _ -> None
+  try
+    let path = Filename.concat (dict_dir ()) (name ^ ".zdict") in
+    match load path with
+    | Ok d -> Some d
+    | Error _ -> None
+  with Failure _ ->
+    None
 
 (** Load default (mixed) dictionary *)
 let load_default () : t option =
@@ -479,18 +459,18 @@ let is_dict_compressed (data : string) : bool =
 
 (** Compress with auto-detected dictionary *)
 let compress_auto ?(level = 3) (data : string) : string =
+  let len = String.length data in
+  if len < min_payload_size then data
+  else
   let content_type = detect_content_type data in
   match load_for_type content_type with
   | Some dict -> compress_with_dict dict ~level data
   | None ->
       (* Fall back to generic zstd *)
-      let len = String.length data in
-      if len < min_payload_size then data
-      else
-        try
-          let compressed = Zstd.compress ~level data in
-          if String.length compressed < len then compressed else data
-        with _ -> data
+      try
+        let compressed = Zstd.compress ~level data in
+        if String.length compressed < len then compressed else data
+      with _ -> data
 
 (** Decompress with auto-detected dictionary *)
 let decompress_auto (data : string) : string =

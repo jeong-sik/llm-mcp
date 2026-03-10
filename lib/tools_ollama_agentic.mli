@@ -1,7 +1,7 @@
 (** Tools Ollama Agentic - Pure helpers for Ollama agentic execution *)
 
 (** Ollama API endpoint *)
-val base_url : string
+val base_url : unit -> string
 
 (** Conversation message type for agentic loop *)
 type agent_message = {

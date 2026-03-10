@@ -5,7 +5,10 @@
 *)
 
 (** Ollama API endpoint *)
-let base_url = "http://127.0.0.1:11434"
+let base_url () =
+  match Sys.getenv_opt "OLLAMA_BASE_URL" with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> failwith "OLLAMA_BASE_URL is required"
 
 (** Conversation message type for agentic loop *)
 type agent_message = {

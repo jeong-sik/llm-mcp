@@ -25,7 +25,7 @@ import urllib.request
 from typing import Any
 
 
-DEFAULT_MCP_URL = os.getenv("LLM_MCP_URL", "http://localhost:8932/mcp")
+DEFAULT_MCP_URL = os.getenv("LLM_MCP_URL", "")
 DEFAULT_MCP_API_KEY = os.getenv("LLM_MCP_API_KEY", "") or os.getenv("MCP_API_KEY", "")
 DEFAULT_INTERVAL_S = int(os.getenv("LLM_MCP_CHAIN_HEARTBEAT_INTERVAL_S", "300"))
 DEFAULT_LOCK = os.getenv("LLM_MCP_CHAIN_HEARTBEAT_LOCK", "/tmp/llm-mcp-chain-heartbeat.lock")
@@ -346,6 +346,9 @@ def main() -> int:
     ap.add_argument("--stale-lock-after-s", type=int, default=3600)
     args = ap.parse_args()
 
+    if not args.mcp_url or not args.mcp_url.strip():
+        raise RuntimeError("LLM_MCP_URL or --mcp-url is required")
+
     cfg = load_config(args.config)
     jobs = validate_jobs(cfg)
 
@@ -386,4 +389,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

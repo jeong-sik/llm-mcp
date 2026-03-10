@@ -2,7 +2,7 @@ open Printf
 open Types
 open Cli_runner_eio
 
-let ollama_base_url = Tools_ollama_agentic.base_url
+let ollama_base_url () = Tools_ollama_agentic.base_url ()
 
 type agent_message = Tools_ollama_agentic.agent_message = {
   role : string;
@@ -16,7 +16,7 @@ let build_agentic_request = Tools_ollama_agentic.build_chat_request
 
 let call_ollama_chat_eio ~sw ~proc_mgr ~clock ~timeout request_json =
   let body = Yojson.Safe.to_string request_json in
-  let url = ollama_base_url ^ "/api/chat" in
+  let url = ollama_base_url () ^ "/api/chat" in
   let result = run_command ~sw ~proc_mgr ~clock ~timeout "curl" [
     "-s"; "-X"; "POST"; url;
     "-H"; "Content-Type: application/json";

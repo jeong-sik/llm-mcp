@@ -24,7 +24,10 @@ let next_id () =
   Atomic.fetch_and_add request_id 1
 
 (** Default MASC-MCP endpoint *)
-let masc_mcp_url = "http://127.0.0.1:8935"
+let masc_mcp_url () =
+  match Sys.getenv_opt "MASC_MCP_URL" with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> failwith "MASC_MCP_URL is required"
 
 (** {1 JSON-RPC Helpers} *)
 
@@ -171,7 +174,7 @@ let list_tools t ~url =
 
 (** Call MASC tool *)
 let call_masc t ~tool_name ~arguments =
-  call_tool t ~url:masc_mcp_url ~tool_name ~arguments
+  call_tool t ~url:(masc_mcp_url ()) ~tool_name ~arguments
 
 (** {1 Result Formatting} *)
 

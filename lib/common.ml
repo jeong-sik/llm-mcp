@@ -8,10 +8,24 @@
     - File I/O helpers (with proper resource cleanup)
 *)
 
-(** Get ME_ROOT environment variable, defaulting to ~/me *)
+(** Resolve repo root from explicit runtime config only. *)
+let trim_opt = function
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+let repo_root_opt () =
+  match Sys.getenv_opt "LLM_MCP_REPO_ROOT" |> trim_opt with
+  | Some root -> Some root
+  | None -> Sys.getenv_opt "DUNE_SOURCEROOT" |> trim_opt
+
 let me_root =
-  try Sys.getenv "ME_ROOT"
-  with Not_found -> Filename.concat (Sys.getenv "HOME") "me"
+  match repo_root_opt () with
+  | Some root -> root
+  | None ->
+      failwith
+        "LLM_MCP_REPO_ROOT is required (tests may use DUNE_SOURCEROOT)"
 
 (** Ensure directory exists, creating parent directories as needed *)
 let rec ensure_dir path =
@@ -76,7 +90,7 @@ let date_str () =
   Printf.sprintf "%04d-%02d-%02d"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
 
-(** Build path relative to ME_ROOT *)
+(** Build path relative to the configured workspace root. *)
 let me_path parts =
   List.fold_left Filename.concat me_root parts
 
