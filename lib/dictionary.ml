@@ -439,10 +439,13 @@ let dict_dir () : string =
 (** Load pre-trained dictionary for content type *)
 let load_for_type (content_type : content_type) : t option =
   let name = string_of_content_type content_type in
-  let path = Filename.concat (dict_dir ()) (name ^ ".zdict") in
-  match load path with
-  | Ok d -> Some d
-  | Error _ -> None
+  try
+    let path = Filename.concat (dict_dir ()) (name ^ ".zdict") in
+    match load path with
+    | Ok d -> Some d
+    | Error _ -> None
+  with Failure _ ->
+    None
 
 (** Load default (mixed) dictionary *)
 let load_default () : t option =
@@ -456,18 +459,18 @@ let is_dict_compressed (data : string) : bool =
 
 (** Compress with auto-detected dictionary *)
 let compress_auto ?(level = 3) (data : string) : string =
+  let len = String.length data in
+  if len < min_payload_size then data
+  else
   let content_type = detect_content_type data in
   match load_for_type content_type with
   | Some dict -> compress_with_dict dict ~level data
   | None ->
       (* Fall back to generic zstd *)
-      let len = String.length data in
-      if len < min_payload_size then data
-      else
-        try
-          let compressed = Zstd.compress ~level data in
-          if String.length compressed < len then compressed else data
-        with _ -> data
+      try
+        let compressed = Zstd.compress ~level data in
+        if String.length compressed < len then compressed else data
+      with _ -> data
 
 (** Decompress with auto-detected dictionary *)
 let decompress_auto (data : string) : string =

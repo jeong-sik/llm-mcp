@@ -167,7 +167,7 @@ let test_protect_preserves_exception () =
 
 let test_me_root () =
   with_env "LLM_MCP_REPO_ROOT" (Some "/tmp/llm-mcp-root") (fun () ->
-    let root = Common.me_root () in
+    let root = Common.me_root in
     check string "me_root from env" "/tmp/llm-mcp-root" root
   )
 

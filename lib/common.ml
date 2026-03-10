@@ -20,7 +20,7 @@ let repo_root_opt () =
   | Some root -> Some root
   | None -> Sys.getenv_opt "DUNE_SOURCEROOT" |> trim_opt
 
-let me_root () =
+let me_root =
   match repo_root_opt () with
   | Some root -> root
   | None ->
@@ -92,7 +92,7 @@ let date_str () =
 
 (** Build path relative to the configured workspace root. *)
 let me_path parts =
-  List.fold_left Filename.concat (me_root ()) parts
+  List.fold_left Filename.concat me_root parts
 
 (** Safe file read - returns None on error.
     Uses In_channel.with_open_text for automatic resource cleanup. *)
