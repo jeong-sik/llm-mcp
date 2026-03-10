@@ -41,7 +41,10 @@ let default_base_url () =
   | _ -> failwith "OLLAMA_BASE_URL is required"
 
 let default_config = {
-  base_url = default_base_url ();
+  base_url =
+    (match Sys.getenv_opt "OLLAMA_BASE_URL" with
+     | Some value when String.trim value <> "" -> String.trim value
+     | _ -> "");
   model = "llama3";
   temperature = 0.7;
   stream = false;
