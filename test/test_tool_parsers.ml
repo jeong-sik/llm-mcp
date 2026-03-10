@@ -410,24 +410,24 @@ let test_build_codex_cmd () =
   | Error e -> fail ("build_codex_cmd failed: " ^ e)
 
 let test_build_ollama_curl_cmd () =
-  let args = Ollama {
-    prompt = "Hello";
-    model = "devstral";
-    system_prompt = None;
-    temperature = 0.7;
-    timeout = 60;
-    stream = false;
-    tools = None;
-  } in
-  match Tool_parsers.build_ollama_curl_cmd args with
-  | Ok cmd_list ->
-      check bool "cmd starts with curl" true (List.hd cmd_list = "curl");
-      check bool "has silent flag" true (List.mem "-s" cmd_list);
-      check bool "has data flag" true (List.mem "-d" cmd_list);
-      check bool "has localhost url" true
-        (List.exists (fun s -> String.length s >= 21 &&
-          String.sub s 0 21 = "http://localhost:1143") cmd_list)
-  | Error e -> fail ("build_ollama_curl_cmd failed: " ^ e)
+  with_env "OLLAMA_BASE_URL" "https://ollama.example.test" (fun () ->
+    let args = Ollama {
+      prompt = "Hello";
+      model = "devstral";
+      system_prompt = None;
+      temperature = 0.7;
+      timeout = 60;
+      stream = false;
+      tools = None;
+    } in
+    match Tool_parsers.build_ollama_curl_cmd args with
+    | Ok cmd_list ->
+        check bool "cmd starts with curl" true (List.hd cmd_list = "curl");
+        check bool "has silent flag" true (List.mem "-s" cmd_list);
+        check bool "has data flag" true (List.mem "-d" cmd_list);
+        check bool "has configured url" true
+          (List.exists (fun s -> String.starts_with ~prefix:"https://ollama.example.test/api/generate" s) cmd_list)
+    | Error e -> fail ("build_ollama_curl_cmd failed: " ^ e))
 
 (* {1Thinking Prompt Prefix Test} *)
 
@@ -1189,58 +1189,61 @@ let () =
 
     "build_ollama_curl_cmd_tools", [
       test_case "with tools" `Quick (fun () ->
-        let tool : Types.tool_schema = {
-          name = "get_weather"; description = "Get weather";
-          input_schema = `Assoc [("type", `String "object")];
-        } in
-        let args = Ollama {
-          prompt = "What is the weather?";
-          model = "devstral";
-          system_prompt = Some "You are helpful";
-          temperature = 0.7;
-          timeout = 60;
-          stream = false;
-          tools = Some [tool];
-        } in
-        match Tool_parsers.build_ollama_curl_cmd args with
-        | Ok cmd_list ->
-          check bool "cmd starts with curl" true (List.hd cmd_list = "curl");
-          (* tools branch uses /api/chat endpoint *)
-          let url = List.find (fun s -> String.length s > 4 && String.sub s 0 4 = "http") cmd_list in
-          check bool "chat endpoint" true (String.length url > 0 &&
-            let suffix = "/api/chat" in
-            let slen = String.length suffix in
-            String.length url >= slen &&
-            String.sub url (String.length url - slen) slen = suffix)
-        | Error e -> fail ("build failed: " ^ e));
+        with_env "OLLAMA_BASE_URL" "https://ollama.example.test" (fun () ->
+          let tool : Types.tool_schema = {
+            name = "get_weather"; description = "Get weather";
+            input_schema = `Assoc [("type", `String "object")];
+          } in
+          let args = Ollama {
+            prompt = "What is the weather?";
+            model = "devstral";
+            system_prompt = Some "You are helpful";
+            temperature = 0.7;
+            timeout = 60;
+            stream = false;
+            tools = Some [tool];
+          } in
+          match Tool_parsers.build_ollama_curl_cmd args with
+          | Ok cmd_list ->
+            check bool "cmd starts with curl" true (List.hd cmd_list = "curl");
+            (* tools branch uses /api/chat endpoint *)
+            let url = List.find (fun s -> String.length s > 4 && String.sub s 0 4 = "http") cmd_list in
+            check bool "chat endpoint" true (String.length url > 0 &&
+              let suffix = "/api/chat" in
+              let slen = String.length suffix in
+              String.length url >= slen &&
+              String.sub url (String.length url - slen) slen = suffix)
+          | Error e -> fail ("build failed: " ^ e)));
       test_case "streaming" `Quick (fun () ->
-        let args = Ollama {
-          prompt = "Hi"; model = "devstral"; system_prompt = None;
-          temperature = 0.7; timeout = 60; stream = true; tools = None;
-        } in
-        match Tool_parsers.build_ollama_curl_cmd args with
-        | Ok cmd_list ->
-          check bool "has -sN flag" true (List.mem "-sN" cmd_list)
-        | Error e -> fail ("build failed: " ^ e));
+        with_env "OLLAMA_BASE_URL" "https://ollama.example.test" (fun () ->
+          let args = Ollama {
+            prompt = "Hi"; model = "devstral"; system_prompt = None;
+            temperature = 0.7; timeout = 60; stream = true; tools = None;
+          } in
+          match Tool_parsers.build_ollama_curl_cmd args with
+          | Ok cmd_list ->
+            check bool "has -sN flag" true (List.mem "-sN" cmd_list)
+          | Error e -> fail ("build failed: " ^ e)));
       test_case "with system_prompt no tools" `Quick (fun () ->
-        let args = Ollama {
-          prompt = "Hi"; model = "devstral";
-          system_prompt = Some "Be helpful";
-          temperature = 0.5; timeout = 60; stream = false; tools = None;
-        } in
-        match Tool_parsers.build_ollama_curl_cmd args with
-        | Ok cmd_list ->
-          (* No tools = /api/generate endpoint with system in JSON *)
-          let data = List.nth cmd_list (List.length cmd_list - 1) in
-          check bool "has system field" true
-            (let n = "\"system\"" in
-             let nlen = String.length n in
-             let dlen = String.length data in
-             if nlen > dlen then false
-             else let rec c i = if i > dlen - nlen then false
-               else if String.sub data i nlen = n then true else c (i+1)
-             in c 0)
-        | Error e -> fail ("build failed: " ^ e));
+        with_env "OLLAMA_BASE_URL" "https://ollama.example.test" (fun () ->
+          let args = Ollama {
+            prompt = "Hi"; model = "devstral";
+            system_prompt = Some "Be helpful";
+            temperature = 0.5; timeout = 60; stream = false; tools = None;
+          } in
+          match Tool_parsers.build_ollama_curl_cmd args with
+          | Ok cmd_list ->
+            (* No tools = /api/generate endpoint with system in JSON *)
+            let data = List.nth cmd_list (List.length cmd_list - 1) in
+            check bool "has system field" true
+              (let n = "\"system\"" in
+               let nlen = String.length n in
+               let dlen = String.length data in
+               if nlen > dlen then false
+               else let rec c i = if i > dlen - nlen then false
+                 else if String.sub data i nlen = n then true else c (i+1)
+               in c 0)
+          | Error e -> fail ("build failed: " ^ e)));
     ];
 
     (* {1Tool calls to JSON} *)
@@ -1332,15 +1335,27 @@ let () =
 
     "default_env_funcs", [
       test_case "default_me_root" `Quick (fun () ->
-        let root = Tool_parsers.default_me_root () in
-        check bool "ends with me" true
-          (let suf = "me" in
-           let slen = String.length suf in
-           String.length root >= slen &&
-           String.sub root (String.length root - slen) slen = suf));
+        let old = Sys.getenv_opt "LLM_MCP_REPO_ROOT" in
+        Unix.putenv "LLM_MCP_REPO_ROOT" "/tmp/llm-mcp-root";
+        Fun.protect
+          ~finally:(fun () ->
+            match old with
+            | Some v -> Unix.putenv "LLM_MCP_REPO_ROOT" v
+            | None -> Unix.putenv "LLM_MCP_REPO_ROOT" "")
+          (fun () ->
+            let root = Tool_parsers.default_me_root () in
+            check string "explicit repo root" "/tmp/llm-mcp-root" root));
       test_case "find_repo_root" `Quick (fun () ->
-        let root = Tool_parsers.find_repo_root "/nonexistent/path" in
-        check bool "returns string" true (String.length root > 0));
+        let old = Sys.getenv_opt "LLM_MCP_REPO_ROOT" in
+        Unix.putenv "LLM_MCP_REPO_ROOT" "/tmp/llm-mcp-root";
+        Fun.protect
+          ~finally:(fun () ->
+            match old with
+            | Some v -> Unix.putenv "LLM_MCP_REPO_ROOT" v
+            | None -> Unix.putenv "LLM_MCP_REPO_ROOT" "")
+          (fun () ->
+            let root = Tool_parsers.find_repo_root "/nonexistent/path" in
+            check string "returns configured root" "/tmp/llm-mcp-root" root));
     ];
 
     (* {1Chain run with different input formats} *)

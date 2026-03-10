@@ -27,39 +27,39 @@ type mcp_server_config = {
   server_type: string;  (* "http" or "stdio" *)
 }
 
-(* Parse ~/.mcp.json to get external MCP server configs *)
+let config_path_opt () =
+  match Sys.getenv_opt "LLM_MCP_CONFIG_PATH" with
+  | Some path when String.trim path <> "" -> Some (String.trim path)
+  | _ ->
+      (match Sys.getenv_opt "MCP_CONFIG_PATH" with
+       | Some path when String.trim path <> "" -> Some (String.trim path)
+       | _ -> None)
+
+(* Parse external MCP config from an explicit config path only. *)
 let parse_mcp_config () : mcp_server_config list =
-  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
-  let config_paths = [
-    Filename.concat home "me/.mcp.json";
-    Filename.concat home ".mcp.json";
-  ] in
-  let rec try_paths = function
-    | [] -> []
-    | path :: rest ->
-        try
-          let content = In_channel.with_open_text path In_channel.input_all in
-          let json = Yojson.Safe.from_string content in
-          let open Yojson.Safe.Util in
-          let servers = json |> member "mcpServers" |> to_assoc in
-          List.filter_map (fun (name, config) ->
-            let url = config |> member "url" |> to_string_option in
-            let command = config |> member "command" |> to_string_option in
-            let args = match config |> member "args" with
-              | `List l -> List.filter_map to_string_option l
-              | _ -> []
-            in
-            let server_type = config |> member "type" |> to_string_option |> Option.value ~default:"stdio" in
-            (* Include both HTTP and stdio servers *)
-            match server_type, url, command with
-            | "http", Some u, _ -> Some { name; url = Some u; command = None; args = []; server_type }
-            | "stdio", _, Some cmd -> Some { name; url = None; command = Some cmd; args; server_type }
-            | _, _, Some cmd -> Some { name; url = None; command = Some cmd; args; server_type = "stdio" }
-            | _ -> None
-          ) servers
-        with _ -> try_paths rest
-  in
-  try_paths config_paths
+  match config_path_opt () with
+  | None -> []
+  | Some path ->
+      try
+        let content = In_channel.with_open_text path In_channel.input_all in
+        let json = Yojson.Safe.from_string content in
+        let open Yojson.Safe.Util in
+        let servers = json |> member "mcpServers" |> to_assoc in
+        List.filter_map (fun (name, config) ->
+          let url = config |> member "url" |> to_string_option in
+          let command = config |> member "command" |> to_string_option in
+          let args = match config |> member "args" with
+            | `List l -> List.filter_map to_string_option l
+            | _ -> []
+          in
+          let server_type = config |> member "type" |> to_string_option |> Option.value ~default:"stdio" in
+          match server_type, url, command with
+          | "http", Some u, _ -> Some { name; url = Some u; command = None; args = []; server_type }
+          | "stdio", _, Some cmd -> Some { name; url = None; command = Some cmd; args; server_type }
+          | _, _, Some cmd -> Some { name; url = None; command = Some cmd; args; server_type = "stdio" }
+          | _ -> None
+        ) servers
+      with _ -> []
 
 (* Cached MCP server configs *)
 let mcp_servers = lazy (parse_mcp_config ())

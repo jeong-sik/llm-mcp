@@ -10,7 +10,7 @@
     환경변수:
     - LANGFUSE_SECRET_KEY: API 시크릿 키
     - LANGFUSE_PUBLIC_KEY: API 퍼블릭 키
-    - LANGFUSE_HOST: Langfuse 서버 URL (기본값: http://localhost:3100)
+    - LANGFUSE_HOST: Langfuse 서버 URL (명시 필요)
 
     @author llm-mcp
     @since 2026-01
@@ -33,10 +33,9 @@ type config = {
 let load_config () =
   let secret = Sys.getenv_opt "LANGFUSE_SECRET_KEY" in
   let public = Sys.getenv_opt "LANGFUSE_PUBLIC_KEY" in
-  let host = Sys.getenv_opt "LANGFUSE_HOST"
-    |> Option.value ~default:"http://localhost:3100" in
-  match secret, public with
-  | Some sk, Some pk ->
+  let host = Sys.getenv_opt "LANGFUSE_HOST" |> Option.value ~default:"" in
+  match secret, public, host with
+  | Some sk, Some pk, host when String.trim host <> "" ->
       { secret_key = sk; public_key = pk; host; enabled = true }
   | _ ->
       { secret_key = ""; public_key = ""; host; enabled = false }

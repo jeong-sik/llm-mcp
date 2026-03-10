@@ -10,7 +10,7 @@
       Eio.Switch.run @@ fun sw ->
         let net = Eio.Stdenv.net env in
         let config = Ollama_backend_eio.{
-          base_url = "http://127.0.0.1:11434";
+          base_url = Sys.getenv "OLLAMA_BASE_URL";
           model = "llama3";
           temperature = 0.7;
           stream = false;
@@ -35,8 +35,13 @@ type config = {
   timeout_ms : int option; (** Request timeout in ms (None = no timeout) *)
 }
 
+let default_base_url () =
+  match Sys.getenv_opt "OLLAMA_BASE_URL" with
+  | Some value when String.trim value <> "" -> String.trim value
+  | _ -> failwith "OLLAMA_BASE_URL is required"
+
 let default_config = {
-  base_url = "http://127.0.0.1:11434";
+  base_url = default_base_url ();
   model = "llama3";
   temperature = 0.7;
   stream = false;
@@ -221,7 +226,7 @@ let is_final resp =
 (** {1 Utility Functions} *)
 
 (** Check if Ollama server is reachable *)
-let health_check ~sw ~net ?(base_url = "http://127.0.0.1:11434") () =
+let health_check ~sw ~net ?(base_url = default_base_url ()) () =
   let uri = Uri.of_string (base_url ^ "/api/tags") in
   try
     let client = Cohttp_eio.Client.make ~https:None net in
@@ -232,7 +237,7 @@ let health_check ~sw ~net ?(base_url = "http://127.0.0.1:11434") () =
     false
 
 (** List available models from Ollama *)
-let list_models ~sw ~net ?(base_url = "http://127.0.0.1:11434") () =
+let list_models ~sw ~net ?(base_url = default_base_url ()) () =
   let uri = Uri.of_string (base_url ^ "/api/tags") in
   try
     let client = Cohttp_eio.Client.make ~https:None net in

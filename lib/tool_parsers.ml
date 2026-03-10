@@ -567,40 +567,26 @@ let build_gemini_cmd args =
   | _ -> Error "Invalid args for Gemini"
 
 let default_me_root () =
-  let home = Sys.getenv_opt "HOME" |> Option.value ~default:"/tmp" in
-  Filename.concat home "me"
-
-let find_repo_root me_root =
   match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
-  | Some path -> path
-  | None ->
-      let candidates =
-        [Filename.concat me_root "llm-mcp"; Filename.concat me_root "workspace/llm-mcp"]
-      in
-      match List.find_opt Sys.file_exists candidates with
-      | Some path -> path
-      | None ->
-          let workspace = Filename.concat me_root "workspace" in
-          let rec find_in_workspace entries =
-            match entries with
-            | [] -> None
-            | dir :: rest ->
-                let candidate = Filename.concat (Filename.concat workspace dir) "llm-mcp" in
-                if Sys.file_exists candidate then Some candidate else find_in_workspace rest
-          in
-          (match Sys.readdir workspace with
-          | entries -> (
-              match find_in_workspace (Array.to_list entries) with
-              | Some path -> path
-              | None -> Filename.concat me_root "workspace/llm-mcp")
-          | exception _ -> Filename.concat me_root "workspace/llm-mcp")
+  | Some path when String.trim path <> "" -> String.trim path
+  | _ -> (
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some path when String.trim path <> "" -> String.trim path
+      | _ -> failwith "LLM_MCP_REPO_ROOT is required (tests may use DUNE_SOURCEROOT)")
+
+let find_repo_root _me_root =
+  match Sys.getenv_opt "LLM_MCP_REPO_ROOT" with
+  | Some path when String.trim path <> "" -> String.trim path
+  | _ -> (
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some path when String.trim path <> "" -> String.trim path
+      | _ -> failwith "LLM_MCP_REPO_ROOT is required (tests may use DUNE_SOURCEROOT)")
 
 (** Build Claude CLI command *)
 let build_claude_cmd args =
   match args with
   | Claude { prompt; model; long_context; system_prompt; output_format; allowed_tools; _ } ->
-      let me_root = Sys.getenv_opt "ME_ROOT" |> Option.value ~default:(default_me_root ()) in
-      let repo_root = find_repo_root me_root in
+      let repo_root = find_repo_root "" in
       let wrapper = Filename.concat repo_root "scripts/claude-wrapper.sh" in
       let cmd = [wrapper; "-p"; "--model"; model] in
       (* --betas context-1m enables 1M context but requires API key (charges apply)
@@ -700,11 +686,23 @@ let build_ollama_curl_cmd ?(force_stream=None) args =
             in
             ("/api/generate", payload)
       in
-      let url = "http://localhost:11434" ^ endpoint in
-      if stream_val then
-        Ok ["curl"; "-sN"; url; "-d"; json_payload]
+      let base_url =
+        match Sys.getenv_opt "OLLAMA_BASE_URL" with
+        | Some value when String.trim value <> "" -> String.trim value
+        | _ -> ""
+      in
+      if base_url = "" then Error "OLLAMA_BASE_URL is required for Ollama requests"
       else
-        Ok ["curl"; "-s"; url; "-d"; json_payload]
+        let trimmed =
+          if String.ends_with ~suffix:"/" base_url
+          then String.sub base_url 0 (String.length base_url - 1)
+          else base_url
+        in
+        let url = trimmed ^ endpoint in
+        if stream_val then
+          Ok ["curl"; "-sN"; url; "-d"; json_payload]
+        else
+          Ok ["curl"; "-s"; url; "-d"; json_payload]
   | _ -> Error "Invalid args for Ollama"
 
 (** {1 Response Parsers} *)
